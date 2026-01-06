@@ -1,0 +1,268 @@
+this is a classic over-aggressive match bug. Here’s a clean, production-safe fix that enforces the exact rules you want and prevents “Zahid-only” false positives.
+
+What should suppress
+
+A contact is suppressed only if ANY of these are true:
+
+Email match (exact, case-insensitive)
+
+CAV ID match (contact.cav_id = suppression.cav_id)
+
+CAV User ID match (contact.cav_user_id = suppression.cav_user_id)
+
+Full Name + Company match (both match after normalization), i.e. “Full Name AND Company” must match together
+
+Explicitly NOT allowed: first-name-only, last-name-only, or full-name-only matches without company.
+
+Normalization (do this on both sides)
+
+email_norm: lower(trim(email))
+
+full_name_norm: lower(trim(regexp_replace(full_name, '\s+', ' ', 'g')))
+
+company_norm: lower(trim(regexp_replace(company_name, '\s+', ' ', 'g')))
+
+name_company_hash: sha256(full_name_norm || '|' || company_norm) — protects against locale/collation edge cases and speeds joins
+
+PostgreSQL schema tweaks (safe migration)
+-- 1) Add normalized columns if missing
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS email_norm text,
+  ADD COLUMN IF NOT EXISTS full_name_norm text,
+  ADD COLUMN IF NOT EXISTS company_norm text,
+  ADD COLUMN IF NOT EXISTS name_company_hash bytea,
+  ADD COLUMN IF NOT EXISTS cav_id text,
+  ADD COLUMN IF NOT EXISTS cav_user_id text;
+
+ALTER TABLE suppression_list
+  ADD COLUMN IF NOT EXISTS email_norm text,
+  ADD COLUMN IF NOT EXISTS full_name_norm text,
+  ADD COLUMN IF NOT EXISTS company_norm text,
+  ADD COLUMN IF NOT EXISTS name_company_hash bytea,
+  ADD COLUMN IF NOT EXISTS cav_id text,
+  ADD COLUMN IF NOT EXISTS cav_user_id text;
+
+-- 2) Backfill normalization
+UPDATE contacts
+SET
+  email_norm = lower(trim(email)),
+  full_name_norm = lower(trim(regexp_replace(coalesce(first_name,'')||' '||coalesce(last_name,''), '\s+', ' ', 'g'))),
+  company_norm = lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g'))),
+  name_company_hash = digest(
+      lower(trim(regexp_replace(coalesce(first_name,'')||' '||coalesce(last_name,''), '\s+', ' ', 'g')))
+      || '|' ||
+      lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g')))
+    , 'sha256');
+
+UPDATE suppression_list
+SET
+  email_norm = lower(trim(email)),
+  full_name_norm = lower(trim(regexp_replace(coalesce(full_name,''), '\s+', ' ', 'g'))),
+  company_norm = lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g'))),
+  name_company_hash = digest(
+      lower(trim(regexp_replace(coalesce(full_name,''), '\s+', ' ', 'g')))
+      || '|' ||
+      lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g')))
+    , 'sha256');
+
+-- 3) Indexes (fast & deterministic)
+CREATE INDEX IF NOT EXISTS idx_supp_email_norm ON suppression_list (email_norm);
+CREATE INDEX IF NOT EXISTS idx_supp_cav_id ON suppression_list (cav_id);
+CREATE INDEX IF NOT EXISTS idx_supp_cav_user_id ON suppression_list (cav_user_id);
+CREATE INDEX IF NOT EXISTS idx_supp_name_company ON suppression_list (full_name_norm, company_norm);
+CREATE INDEX IF NOT EXISTS idx_supp_name_company_hash ON suppression_list (name_company_hash);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_email_norm ON contacts (email_norm);
+CREATE INDEX IF NOT EXISTS idx_contacts_cav_id ON contacts (cav_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_cav_user_id ON contacts (cav_user_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_name_company ON contacts (full_name_norm, company_norm);
+CREATE INDEX IF NOT EXISTS idx_contacts_name_company_hash ON contacts (name_company_hash);
+
+One-query suppression check (no first/last-only matches)
+-- Returns contacts that SHOULD be suppressed, with a reason.
+SELECT c.id,
+       CASE
+         WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.email_norm = c.email_norm AND c.email_norm IS NOT NULL AND c.email_norm <> '') 
+              THEN 'email'
+         WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_id = c.cav_id AND c.cav_id IS NOT NULL AND c.cav_id <> '')
+              THEN 'cav_id'
+         WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_user_id = c.cav_user_id AND c.cav_user_id IS NOT NULL AND c.cav_user_id <> '')
+              THEN 'cav_user_id'
+         WHEN (
+             (c.full_name_norm IS NOT NULL AND c.full_name_norm <> '')
+             AND (c.company_norm IS NOT NULL AND c.company_norm <> '')
+             AND EXISTS (
+                 SELECT 1 FROM suppression_list s
+                 WHERE (s.full_name_norm = c.full_name_norm AND s.company_norm = c.company_norm)
+                    OR (s.name_company_hash = c.name_company_hash)
+             )
+           ) THEN 'full_name+company'
+         ELSE NULL
+       END AS suppression_reason
+FROM contacts c
+WHERE
+  -- at least one valid suppression condition is met
+  (
+    EXISTS (SELECT 1 FROM suppression_list s WHERE s.email_norm = c.email_norm AND c.email_norm <> '')
+    OR EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_id = c.cav_id AND c.cav_id <> '')
+    OR EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_user_id = c.cav_user_id AND c.cav_user_id <> '')
+    OR (
+        (c.full_name_norm IS NOT NULL AND c.full_name_norm <> '')
+        AND (c.company_norm IS NOT NULL AND c.company_norm <> '')
+        AND EXISTS (
+          SELECT 1 FROM suppression_list s
+          WHERE (s.full_name_norm = c.full_name_norm AND s.company_norm = c.company_norm)
+             OR (s.name_company_hash = c.name_company_hash)
+        )
+      )
+  );
+
+
+Note the ANDs on full_name_norm + company_norm and the absence of any first/last-only paths.
+
+Drizzle ORM (Node/TypeScript) suppression function
+type SuppressionReason = 'email' | 'cav_id' | 'cav_user_id' | 'full_name+company' | null;
+
+export async function getSuppressionReason(db, contactId: string): Promise<SuppressionReason> {
+  // fetch normalized fields for contact
+  const [c] = await db.select({
+      id: contacts.id,
+      emailNorm: contacts.emailNorm,
+      cavId: contacts.cavId,
+      cavUserId: contacts.cavUserId,
+      fullNameNorm: contacts.fullNameNorm,
+      companyNorm: contacts.companyNorm,
+      nameCompanyHash: contacts.nameCompanyHash
+    })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+
+  if (!c) return null;
+
+  // Priority order: email > cav_id > cav_user_id > full_name+company
+  if (c.emailNorm) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list s WHERE s.email_norm = ${c.emailNorm}) AS exists
+    `);
+    if (exists) return 'email';
+  }
+
+  if (c.cavId) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list s WHERE s.cav_id = ${c.cavId}) AS exists
+    `);
+    if (exists) return 'cav_id';
+  }
+
+  if (c.cavUserId) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list s WHERE s.cav_user_id = ${c.cavUserId}) AS exists
+    `);
+    if (exists) return 'cav_user_id';
+  }
+
+  if (c.fullNameNorm && c.companyNorm) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(
+        SELECT 1 FROM suppression_list s
+        WHERE (s.full_name_norm = ${c.fullNameNorm} AND s.company_norm = ${c.companyNorm})
+           OR (s.name_company_hash = ${c.nameCompanyHash})
+      ) AS exists
+    `);
+    if (exists) return 'full_name+company';
+  }
+
+  return null;
+}
+
+Import pipeline: enforce normalization on insert
+
+Ensure every ingestion path computes these fields before insert/update:
+
+function normalizeEmail(email?: string) {
+  return email ? email.trim().toLowerCase() : null;
+}
+function normalizeText(s?: string) {
+  if (!s) return null;
+  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+function fullName(first?: string, last?: string) {
+  return [first ?? '', last ?? ''].join(' ').trim().replace(/\s+/g, ' ');
+}
+function nameCompanyHash(fullNameNorm?: string | null, companyNorm?: string | null) {
+  if (!fullNameNorm || !companyNorm) return null;
+  // compute sha256 hex -> store as bytea or hex per your schema choice
+  const data = `${fullNameNorm}|${companyNorm}`;
+  return crypto.createHash('sha256').update(data).digest(); // Buffer for bytea
+}
+
+Guardrails & edge cases
+
+Do not suppress on full_name if company is empty on either side. Require both.
+
+Strip punctuation/extra spaces; do not remove letters (prevents “Zahid/Zahir” collisions).
+
+If multiple reasons match, record the highest priority (email > cav_id > cav_user_id > full_name+company) for auditability.
+
+Log the exact “suppression_reason” so QA can trace why a record was dropped.
+
+Unit tests (minimal set)
+
+Email match → suppressed (reason=email)
+
+CAV ID match only → suppressed (reason=cav_id)
+
+CAV User ID match only → suppressed (reason=cav_user_id)
+
+Full name + company match → suppressed (reason=full_name+company)
+
+Full name match but company different → NOT suppressed
+
+First name match only → NOT suppressed
+
+Last name match only → NOT suppressed
+
+Company match only → NOT suppressed
+
+Mixed case/extra spaces in inputs → behaves same (normalization works)
+
+Quick sanity SQL to find current false positives
+-- Contacts currently being suppressed ONLY due to first/last name logic (should NOT be suppressed)
+-- Adjust the WHERE to reflect your current suppression flag column.
+WITH currently_suppressed AS (
+  SELECT c.*
+  FROM contacts c
+  WHERE c.is_suppressed = true
+),
+valid_suppression AS (
+  SELECT c.id
+  FROM currently_suppressed c
+  WHERE
+    EXISTS (SELECT 1 FROM suppression_list s WHERE s.email_norm = c.email_norm AND c.email_norm <> '')
+    OR EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_id = c.cav_id AND c.cav_id <> '')
+    OR EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_user_id = c.cav_user_id AND c.cav_user_id <> '')
+    OR (
+      c.full_name_norm <> '' AND c.company_norm <> '' AND EXISTS (
+        SELECT 1 FROM suppression_list s
+        WHERE (s.full_name_norm = c.full_name_norm AND s.company_norm = c.company_norm)
+           OR (s.name_company_hash = c.name_company_hash)
+      )
+    )
+)
+SELECT c.*
+FROM currently_suppressed c
+LEFT JOIN valid_suppression v ON v.id = c.id
+WHERE v.id IS NULL;
+
+Rollout plan (no downtime)
+
+Run migrations & backfill (safe, additive).
+
+Deploy the new suppression function (query or service).
+
+Recompute suppression flags for active campaigns using the new logic.
+
+Add unit tests to CI to prevent regressions.
+
+Monitor suppression_reason distribution for a day to confirm expected behavior.

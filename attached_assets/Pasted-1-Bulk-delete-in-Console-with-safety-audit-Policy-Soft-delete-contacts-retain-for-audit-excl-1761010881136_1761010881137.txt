@@ -1,0 +1,286 @@
+1) Bulk delete in Console (with safety + audit)
+Policy
+
+Soft delete contacts (retain for audit, exclude from queues/exports).
+
+Only admin or lead roles.
+
+Prevent deletion of buffered/submitted rows.
+
+Never allow bulk delete of Client_Provided rows with CAV unless allowClientProvidedDelete=true feature flag.
+
+DB
+
+Add soft-delete flag + index:
+
+ALTER TABLE verification_contacts ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS verification_contacts_deleted_idx ON verification_contacts(deleted);
+
+API
+
+POST /api/verification-campaigns/:campaignId/contacts/bulk-delete
+
+// body: { contactIds: string[], reason: string }
+const ids = z.array(z.string().uuid()).nonempty().parse(req.body.contactIds);
+
+await db.execute(sql`
+  UPDATE verification_contacts c
+  SET deleted = TRUE, suppressed = TRUE   -- hard exclude from all flows
+  WHERE c.id = ANY(${ids}::varchar[])
+    AND c.campaign_id = ${campaignId}
+    AND c.source_type <> 'Client_Provided' OR ${process.env.ALLOW_CLIENT_PROVIDED_DELETE==='true'}
+    AND c.id NOT IN (
+      SELECT contact_id FROM verification_lead_submissions s WHERE s.campaign_id=${campaignId}
+    )
+  RETURNING c.id;
+`);
+
+await db.insert(auditLog).values({
+  actorId: req.user.id, entityType: 'contact', action: 'bulk_delete',
+  before: null, after: { ids, reason: req.body.reason }, at: new Date()
+});
+
+UI
+
+Add row-selection checkboxes in the queue/table.
+
+“Bulk actions → Delete” button:
+
+Confirmation modal: count, exceptions (buffered/submitted/client-provided), reason textarea (required).
+
+On success: toast “Deleted N contacts”, refetch table.
+
+Hide deleted contacts by default in all views.
+
+2) Suppression match “not working” — harden matching & visibility
+Likely causes to verify
+
+email_lower not populated on upload/update.
+
+Name+Company hash built with raw company (not normalized).
+
+Queue endpoint using dynamic suppression filter allowed suppressed to appear.
+
+Missing global vs. campaign scope in suppression table.
+
+Fixes
+Normalize on write
+
+On upload and on PUT /verification-contacts/:id:
+
+contact.emailLower = contact.email?.toLowerCase().trim() ?? null;
+contact.firstNameNorm = normalize.name(contact.firstName ?? '');
+contact.lastNameNorm  = normalize.name(contact.lastName ?? '');
+contact.companyKey    = normalize.companyKey(companyNameFromUIOrLookup);
+contact.contactCountryKey = normalize.countryKey(contact.contactCountry ?? '');
+const nameCompanyHash = computeNameCompanyHash(contact.firstName, contact.lastName, contact.companyKey);
+
+Apply suppression at three points (and mark deleted=false to keep visibility distinct)
+
+Import (right after normalization)
+
+Save/Update (after any change affecting keys)
+
+Pre-queue (CTE used by queue endpoint)
+
+UPDATE verification_contacts c
+SET suppressed = TRUE
+WHERE c.campaign_id=$1 AND c.deleted=FALSE AND (
+  c.email_lower IN (SELECT email_lower FROM verification_suppression_list WHERE campaign_id=$1 OR campaign_id IS NULL)
+  OR c.cav_id IN (SELECT cav_id FROM verification_suppression_list WHERE campaign_id=$1 OR campaign_id IS NULL)
+  OR c.cav_user_id IN (SELECT cav_user_id FROM verification_suppression_list WHERE campaign_id=$1 OR campaign_id IS NULL)
+  OR md5(lower(coalesce(c.first_name,''))||lower(coalesce(c.last_name,''))||lower(coalesce(c.company_key,'')))
+     IN (SELECT name_company_hash FROM verification_suppression_list WHERE campaign_id=$1 OR campaign_id IS NULL)
+);
+
+Queue endpoint (agent)
+
+Always enforce:
+
+AND c.suppressed = FALSE
+AND c.deleted = FALSE
+
+Diagnostics (admin)
+
+GET /api/verification-campaigns/:campaignId/suppression/diagnostics?contactId=...
+
+Returns all computed keys and which rule (email / cav / cav_user / hash) tripped.
+
+Use this to quickly prove the match path.
+
+3) Associated contacts for company not showing
+Root checks
+
+Endpoint may be filtering suppressed/deleted incorrectly.
+
+Missing campaignId filter or wrong accountId.
+
+FE is not passing campaignId, or not rendering on empty → strict truthy checks.
+
+API (harden)
+
+GET /api/verification-contacts/account/:accountId?campaignId=CAT62542&includeSuppressed=false
+
+SELECT id, full_name, title, email, phone, mobile, verification_status, suppressed, deleted
+FROM verification_contacts
+WHERE campaign_id = $1
+  AND account_id = $2
+  AND deleted = FALSE
+  AND ($3::bool = TRUE OR suppressed = FALSE)  -- default includeSuppressed=false
+ORDER BY (verification_status='Validated') DESC, updated_at DESC
+LIMIT 200;
+
+FE
+
+Ensure enabled: !!currentContactId && !!accountId && !!campaignId.
+
+Render message: “No other contacts” only after request resolves and length===0.
+
+Add small badge for suppressed/validated.
+
+4) Company name matching: “Singapore Airlines” vs “Singapore Airlines Ltd”
+Approach (layered, deterministic before fuzzy)
+
+Canonicalization (deterministic): strip legal suffixes, punctuation, case, whitespace.
+
+Domain-first join (when email/domain present): group by apex domain (e.g., singaporeair.com).
+
+Alias table for manual overrides (e.g., SIA → Singapore Airlines).
+
+Fuzzy fallback only when (1–3) absent: Jaro-Winkler ≥ 0.93.
+
+Canonicalizer
+const LEGAL_SUFFIX = /(\b(inc|inc\.|ltd|ltd\.|limited|co|company|corp|corporation|pte|pte\.|plc|gmbh|s\.a\.|s\.p\.a\.|ag|oy|ab|bv|nv|kk|saog|saoc)\b)/gi;
+
+export function canonCompany(name: string) {
+  return name
+    .toLowerCase()
+    .replace(LEGAL_SUFFIX, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+Schema additions
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS canonical_name TEXT;
+CREATE INDEX IF NOT EXISTS accounts_canonical_name_idx ON accounts(canonical_name);
+
+CREATE TABLE IF NOT EXISTS company_aliases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  canonical_name text NOT NULL,
+  alias text NOT NULL,
+  UNIQUE (canonical_name, alias)
+);
+CREATE INDEX IF NOT EXISTS company_aliases_alias_idx ON company_aliases(alias);
+
+Match algorithm (server util)
+export async function resolveAccountIdForContact(input: {
+  companyName: string, emailDomain?: string
+}) {
+  // 1) domain match
+  if (input.emailDomain) {
+    const byDomain = await db.query.accounts.findFirst({ where: eq(accounts.domain, input.emailDomain) });
+    if (byDomain) return byDomain.id;
+  }
+  // 2) canonical exact / alias
+  const canon = canonCompany(input.companyName);
+  const byCanon = await db.query.accounts.findFirst({ where: eq(accounts.canonicalName, canon) });
+  if (byCanon) return byCanon.id;
+
+  const aliasHit = await db.execute(sql`
+    SELECT a.id FROM accounts a
+    JOIN company_aliases ca ON ca.canonical_name = a.canonical_name
+    WHERE ca.alias = ${canon} LIMIT 1
+  `);
+  if (aliasHit.rowCount) return aliasHit.rows[0].id;
+
+  // 3) fuzzy fallback (e.g., jaro-winkler)
+  const candidates = await db.execute(sql`
+    SELECT id, name FROM accounts WHERE deleted IS FALSE LIMIT 2000
+  `);
+  const target = canon;
+  let best = { id: null as string|null, score: 0 };
+  for (const r of candidates.rows) {
+    const s = jaroWinkler(canonCompany(r.name), target);
+    if (s > best.score) best = { id: r.id, score: s };
+  }
+  return best.score >= 0.93 ? best.id : null;
+}
+
+
+On upload, set accounts.canonical_name = canonCompany(accounts.name) and for contacts set company_key=canonical_name.
+Add an alias row ('singapore airlines', 'singapore airlines ltd').
+Prefer domain when available; otherwise canonical/alias beats fuzzy.
+
+5) Enable a “Validated records” page
+Purpose
+
+Ops & client QA can review all validated + OK (or validated regardless) by filters.
+
+Export-ready preview.
+
+API
+
+GET /api/verification-campaigns/:campaignId/validated
+Query: okOnly=true|false (default true), accountId?, country?, title?, q?, limit?, cursor?
+
+SELECT c.id, c.full_name, c.title, c.email, c.email_status, c.contact_country,
+       c.cav_id, c.cav_user_id, a.name AS account_name
+FROM verification_contacts c
+LEFT JOIN accounts a ON a.id=c.account_id
+WHERE c.campaign_id=$1
+  AND c.verification_status='Validated'
+  AND c.deleted=FALSE
+  AND ($2::bool = FALSE OR c.email_status='ok')  -- okOnly
+  AND ($3::varchar IS NULL OR c.account_id=$3)
+  AND ($4::varchar IS NULL OR c.contact_country ILIKE $4)
+  AND ($5::varchar IS NULL OR c.title ILIKE '%'||$5||'%')
+  AND ($6::varchar IS NULL OR (c.full_name ILIKE '%'||$6||'%' OR c.email ILIKE '%'||$6||'%'))
+ORDER BY c.updated_at DESC
+LIMIT $7 OFFSET $8;
+
+UI
+
+New left-nav item: Validated (CAT62542).
+
+Filters: OK only toggle, Account, Country, Title, Search.
+
+Table columns: Name, Title, Company, Country, Email (chip: OK/Risky/Invalid), CAV badge.
+
+Bulk Export Selected button (admin only) → calls existing export prep.
+
+6) Small but important hardening
+
+Always add AND deleted=FALSE to queue, associated-contacts, exports.
+
+In upload pipeline, after mapping + normalized keys → run suppression immediately; skip enqueueing suppressed or deleted.
+
+ELV button: disabled and tooltip explains missing prerequisites; after success, show chip OK with timestamp.
+
+Add server metric: suppression_hits_last_24h, associated_fetch_latency_ms, company_resolve_hit_rate to your stats endpoint.
+
+Quick Acceptance Tests (DoD)
+
+Bulk delete
+
+Select 5 New_Sourced contacts, delete → deleted=true & suppressed=true, not in queue/validated page.
+
+Selecting a Client_Provided row should fail unless feature flag enabled.
+
+Suppression
+
+Upload a CSV with a suppressed email → record marked suppressed=true, never appears in queue.
+
+Name+Company hash hit marks suppressed even without email.
+
+Associated contacts
+
+Open a contact with 3 others at same account → “Associated” lists all 3 (excluding deleted; includeSuppressed=false by default).
+
+Company match
+
+Upload “Singapore Airlines Ltd” and have account “Singapore Airlines” seeded → resolves to same account via canonical/alias.
+
+Validated page
+
+Shows only verification_status='Validated' and, with OK filter on, only email_status='ok'.

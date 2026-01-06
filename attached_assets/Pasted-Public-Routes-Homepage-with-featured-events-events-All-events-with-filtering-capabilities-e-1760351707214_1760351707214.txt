@@ -1,0 +1,72 @@
+Public Routes:
+/ - Homepage with featured events
+/events - All events with filtering capabilities
+/events?show_past=true - Past events listing
+/event/<slug> - Event detail page
+/event/<int:event_id>/register - Event registration page
+/resource/<slug> - Resource detail page
+/resource/<slug>/confirmation/<int:download_id> - Resource download confirmation
+/news - News listing page
+/news/<slug> - News detail page
+/privacy-policy - Privacy Policy page
+/terms-of-use - Terms of Use page
+/gdpr - GDPR Information page
+/do-not-sell - Do Not Sell My Contact Information page
+Admin Routes (Authentication Required):
+/admin/login - Admin login
+/admin/logout - Admin logout
+/admin - Admin dashboard
+Events Management:
+
+/admin/events - List all events
+/admin/events/new - Create new event
+/admin/events/<int:event_id>/edit - Edit event
+/admin/events/<int:event_id>/delete - Delete event
+Speakers Management:
+
+/admin/speakers - List speakers
+/admin/speakers/new - Create new speaker
+/admin/speakers/<int:speaker_id>/edit - Edit speaker
+/admin/speakers/<int:speaker_id>/delete - Delete speaker
+Sponsors Management:
+
+/admin/sponsors - List sponsors
+/admin/sponsors/new - Create new sponsor
+/admin/sponsors/<int:sponsor_id>/edit - Edit sponsor
+/admin/sponsors/<int:sponsor_id>/delete - Delete sponsor
+Organizers Management:
+
+/admin/organizers - List organizers
+/admin/organizers/new - Create new organizer
+/admin/organizers/<int:organizer_id>/edit - Edit organizer
+/admin/organizers/<int:organizer_id>/delete - Delete organizer
+Registrations Management:
+
+/admin/registrations - List registrations
+/admin/registrations/export - Export registrations to CSV
+Resources Management:
+
+/admin/resources - List resources
+/admin/resources/new - Create new resource
+/admin/resources/<int:resource_id>/edit - Edit resource
+/admin/resources/<int:resource_id>/delete - Delete resource
+/admin/resources/<int:resource_id>/downloads - View resource downloads
+/admin/downloads - List all downloads
+/admin/downloads/export - Export downloads as CSV
+Email Templates:
+
+/admin/email-templates - List email templates
+/admin/email-templates/new - Create new template
+/admin/email-templates/<int:template_id>/edit - Edit template
+/admin/email-templates/<int:template_id>/delete - Delete template
+/admin/email-templates/<int:template_id>/preview - Preview template
+/admin/email-templates/create-defaults - Create default templates
+Users Management:
+
+/admin/users - Manage admin users
+/admin/users/new - Create new admin user
+/admin/users/<int:user_id>/delete - Delete admin user
+/admin/users/<int:user_id>/change-password - Change user password
+AI Features:
+
+/admin/generate-metadata - AJAX endpoint to generate AI metadata

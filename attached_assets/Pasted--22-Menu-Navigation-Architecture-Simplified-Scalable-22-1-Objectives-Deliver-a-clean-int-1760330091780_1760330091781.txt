@@ -1,0 +1,170 @@
+
+22) Menu & Navigation Architecture (Simplified & Scalable)
+
+22.1 Objectives
+	•	Deliver a clean, intuitive, and role-based navigation experience.
+	•	Reduce menu clutter by nesting specialized utilities (Segments, Lists, Domain Sets, Bulk Imports) within their parent contexts.
+	•	Standardize a collapsible left sidebar with logical grouping, consistent icons, and adaptive visibility by user role (Admin, Manager, Agent, QA, Client).
+	•	Maintain easy expansion for future modules like Content Hub or Integrations.
+
+⸻
+
+22.2 Primary Sidebar (Top-Level Items)
+
+Order	Label	Icon	Description
+1	Dashboard	layout-dashboard	Unified overview of KPIs (campaigns, leads, QA, engagement).
+2	Accounts	building-2	Master company database with segmentation, domain sets, and ABM tools.
+3	Contacts	users	Contact database with filters, lists, imports, and segmentation tools.
+4	Campaigns	megaphone	Central campaign hub for both email and telemarketing.
+5	QA & Leads Delivery	check-circle	Lead review, approval, and delivery tracking.
+6	Reports	bar-chart	Analytics and performance dashboards (email, telemarketing, QA, order).
+7	Projects Management (Client Orders)	briefcase	Client-side campaign order management and reporting.
+8	Organization Settings	settings	All platform configurations (suppression, users, compliance, integrations).
+
+
+⸻
+
+22.3 Nested (Dropdown) Structure
+
+A. Accounts
+
+Dropdown under Accounts includes:
+	•	All Accounts (primary list view)
+	•	Segments & Lists
+	•	Domain Sets
+
+In-Page Utilities (within Account Listing view):
+	•	Segmentation builder (dynamic filter panel)
+	•	Create List / Add to List / Convert to Segment
+	•	Bulk Import (Accounts)
+	•	Domain Set management drawer (upload, view, expand)
+
+⸻
+
+B. Contacts
+
+Dropdown under Contacts includes:
+	•	All Contacts (primary list view)
+	•	Segments & Lists
+	•	Bulk Import (Contacts)
+
+In-Page Utilities (within Contact Listing view):
+	•	Advanced Filters (including Account, Campaign, QA fields)
+	•	Create List or Segment inline
+	•	Bulk actions (Add to List, Update Fields, Delete)
+	•	Bulk Upload (CSV/XLSX)
+	•	Add to Campaign shortcut
+
+⸻
+
+C. Campaigns
+
+Dropdown under Campaigns includes:
+	•	All Campaigns
+	•	Email Campaigns
+	•	Phone Campaigns
+	•	Campaign Configuration
+
+In-Page Tools:
+	•	Pre-flight checklist drawer
+	•	Sender Profile / Telnyx SIP setup
+	•	Campaign summary cards & filter by type/status
+	•	Direct link to QA & Reports per campaign
+
+⸻
+
+D. QA & Leads Delivery
+	•	Lead QA Portal
+	•	Approved Leads
+	•	Rejected / Returned Leads
+	•	Delivered Leads (per client/order)
+	•	Filters by Campaign / Order / Client
+
+⸻
+
+E. Reports
+
+Dropdown under Reports includes:
+	•	Campaign Reports (email + telemarketing combined)
+	•	Agent Performance
+	•	ABM / Account Engagement
+	•	QA Metrics
+	•	Client Orders Dashboard
+
+Custom Reports Builder (Phase 2) — role-based view creation with AI summary assist.
+
+⸻
+
+F. Projects Management (Client Orders)
+
+Dropdown under Projects Management includes:
+	•	All Orders (main)
+	•	Create Order
+	•	Order Reports
+	•	Order Assets
+	•	Order–Campaign Links
+
+Each order card links directly to campaign and lead metrics dashboards.
+
+⸻
+
+G. Organization Settings
+
+Dropdown under Organization Settings includes:
+	•	User & Role Management
+	•	Suppression Management
+	•	Global DNC
+	•	Global Email Unsubscribe
+	•	Consent Settings
+	•	Compliance Center (timezones, quiet hours, consent rules)
+	•	Integrations & APIs
+	•	Automation Rules
+	•	Custom Fields & Schema Management
+	•	Brand Profiles / Sender Domains
+
+⸻
+
+22.4 Role-Based Visibility Matrix
+
+Module	Admin	Campaign Manager	QA Analyst	Agent	Client
+Dashboard	✅	✅	✅	✅	✅
+Accounts	✅	✅	🔒 View-only	🔒	🔒
+Contacts	✅	✅	🔒 View-only	🔒	🔒
+Campaigns	✅	✅	🔒	✅ (Assigned)	🔒
+QA & Leads	✅	🔒	✅	🔒	🔒
+Reports	✅	✅	✅	🔒	✅ (Scoped)
+Projects (Orders)	✅	✅	🔒	🔒	✅ (Scoped)
+Organization Settings	✅	🔒	🔒	🔒	🔒
+
+✅ Full Access | 🔒 Restricted / Scoped Access
+
+⸻
+
+22.5 Design Behavior
+	•	Collapsible Sidebar with hover-to-expand and tooltip hints.
+	•	Top Navigation Bar with:
+	•	Global search (AI-powered)
+	•	Notifications (task updates, campaign status)
+	•	User menu (Profile, Preferences, Logout)
+	•	Breadcrumbs on all views for quick back navigation.
+	•	Dynamic Quick Actions per module (e.g., “+ New Campaign” button changes contextually).
+
+⸻
+
+22.6 UX Rationale
+	1.	Decluttered Navigation: Reduces top-level items from 12+ to 7.
+	2.	Contextual Utilities: Segments, Lists, Imports live where users need them.
+	3.	Better Cognitive Flow: “Accounts → Domain Sets → Campaigns” aligns with ABM logic.
+	4.	Role Adaptability: Client users and Agents see only relevant tools.
+	5.	Future-Proof: Supports Content Hub, AI Modules, or Integrations via one expandable “Organization Settings” category.
+
+⸻
+
+22.7 Acceptance Criteria
+
+✅ All nested modules accessible via dropdown and in-context drawers.
+✅ Sidebar collapses smoothly with responsive labels/icons.
+✅ Role-based visibility respected (verified via test accounts).
+✅ Segments, Lists, Imports, and Domain Sets removed from top-level menu.
+✅ Suppression Management successfully relocated under Organization Settings.
+✅ Campaign-related items consolidated under the Campaigns dropdown.

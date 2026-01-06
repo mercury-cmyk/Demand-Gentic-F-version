@@ -1,0 +1,53 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+deploymentTarget = "cloudrun"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start"]
+
+[env]
+PORT = "5000"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[agent]
+integrations = ["javascript_database:1.0.0", "javascript_openai_ai_integrations:1.0.0", "javascript_gemini_ai_integrations:1.0.0"]
+
+[[ports]]
+localPort = 5000
+externalPort = 5000
+
+[userenv]
+
+[userenv.shared]
+REDIS_URL = "redis://default:ttVaOhNjFsLxPOheFUkbFgyad1DLlhdt@redis-11546.fcrce171.ap-south-1-1.ec2.redns.redis-cloud.com:11546"
+TELNYX_FROM_NUMBER = "+13023601514"
+TELNYX_WEBHOOK_URL = "https://pivotal-bridge-wh5q8xynmq.replit.app"
+TELNYX_CONNECTION_ID = "${TELNYX_SIP_CONNECTION_ID}"
+ELEVENLABS_WEBHOOK_SECRET = "wsec_0a68e99ccaf53cbf3511251aea2af30b31c363bbd6acd8dc361113605d64c621"
+ELEVENLABS_AGENT_ID = "agent_4701kctbjseeeefakcshzhks3whw"
+ELEVENLABS_PHONE_NUMBER_ID = "phnum_3601kd38f5gjejyantqszzvsqcvh"

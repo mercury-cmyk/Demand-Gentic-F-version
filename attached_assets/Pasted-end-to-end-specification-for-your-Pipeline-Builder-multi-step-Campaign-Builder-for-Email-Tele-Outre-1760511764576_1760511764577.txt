@@ -1,0 +1,385 @@
+end-to-end specification for your Pipeline Builder (multi-step Campaign Builder for Email/Tele Outreach/Webinar/Content) including the Account Lead Cap. It’s organized so engineering can implement directly and design can mirror the UX without ambiguity.
+
+1) Product Scope & Objectives
+
+Goal: Plan, configure, and launch B2B campaigns (Email Outreach, Tele Outreach / Pipeline Dialer, Webinar Promotion, Content Syndication) in a guided flow; enforce fair account coverage via Account Lead Cap to prevent over-contacting a single account.
+
+Outcomes: Higher deliverability and connect rates, cleaner queues, measurable compliance to dialing policies, and consistent setup across teams.
+
+2) Information Architecture
+
+Pipeline Builder (Wizard):
+
+Details → 2) Audience → 3) Messaging & Qualification → 4) Team & Scheduling → 5) Review & Launch
+
+Shared Libraries: Segments, Scripts, Questions, Assets
+
+Operational Surfaces: Campaign Dashboard, Dialer Queue, Activity Log, Audit
+
+3) Step-by-Step UX & Functional Spec
+Step 1 — Details
+
+Fields
+
+Campaign Name (inline editable; shown in header)
+
+Campaign Type (enum): Webinar Promotion / Content Distribution / Lead Qualification / Event Registration / BANT-HQL Outreach / Email Outreach / Tele Outreach (Pipeline Dialer)
+
+Objective (optional, short)
+
+Tags (multi-select; client/geo/vertical)
+
+UX
+
+Left: form; Right: live summary card (name, type, objective, tags)
+
+Autosave on blur; validation for required fields
+
+Step 2 — Audience
+
+Selection Sources
+
+Account Lists (choose existing)
+
+Segments & Lists (choose/import predefined)
+
+Advanced Filters (Equals, Not equal, Contains, Does not contain, Begins with, Ends with, Has value, Is empty) across person/account fields
+
+Engagement Filters
+
+Email: opened/clicked/replied/bounced, recency windows
+
+Phone: connected calls, positive dispositions, callbacks, last call recency
+
+Smart Feedback
+
+Real-time counts: “3,420 contacts • 1,120 accounts”
+
+Overlap detection: dedupe across chosen lists
+
+Preview Audience (modal): top 25 rows, export sample
+
+If Campaign Type = Tele Outreach + Cap enabled (see Step 4):
+
+Show pre-cap warnings per account: “Acme plc: 27 matched → capped at 10 (17 excluded)”
+
+Step 3 — Messaging & Qualification
+
+Messaging
+
+Assign Script (Email / Call / LinkedIn) from library
+
+Variables: [FirstName], [Company], [EventTitle], etc. (validated)
+
+Side-by-side live preview (render template with sample record)
+
+Versioning (save draft, clone, restore)
+
+Qualification (Optional)
+
+Choose predefined question sets (BANT/HQL) or add custom
+
+Response types: single-select, multi-select, free text, numeric, date
+
+Validation (required/optional, hint text)
+
+Assets
+
+Attach files/links: landing page, deck, eBook, webinar invite
+
+File validation (type/size), link validation
+
+Step 4 — Team & Scheduling
+
+Assign
+
+Agents/Reps (multi-select; capacity hints like “available hours today”)
+
+Team rules (round-robin / skills-based optional)
+
+Business Hours
+
+Per timezone windows (e.g., UK 09:00–18:00; US 10:00–17:00)
+
+Quiet hours policy
+
+Dialer Settings (visible when Campaign Type = Tele Outreach / Pipeline Dialer)
+
+Max attempts per contact
+
+Minimum gap between attempts
+
+Mandatory disposition required toggle
+
+Account Lead Cap (Core)
+
+Enable Account Lead Cap (toggle)
+
+Leads per Account (integer; default 10; min 1)
+
+Enforcement Mode (radio):
+
+Queue Size (default): cap = max queued contacts per account in this campaign
+
+Connected Calls: cap = unique contacts with a successful connection
+
+Positive Dispositions: cap = unique contacts with positive outcomes
+
+Helper note: “When the cap is reached for an account, additional contacts from that account are removed from the queue for this campaign.”
+
+Inline validation; warning if mode changes after launch
+
+Email Send Settings (when Email Outreach)
+
+Batch size, region send windows, domain/IP choice, tracking toggles
+
+Step 5 — Review & Launch
+
+Summary
+
+Name/Type/Objective, Audience summary, Script, Questions, Agents, Hours
+
+Account Lead Cap status, value, mode
+
+Controls
+
+Save as Draft
+
+Test Launch (pilot 50)
+
+Launch Campaign
+
+After Launch
+
+Auto-redirect to Campaign Dashboard (performance, queue health, cap utilization)
+
+4) Queuing, Cap & Enforcement Logic
+4.1 Business Rules
+
+Scope: Cap is per campaign; not global
+
+Default Mode: Queue Size (fastest, simplest)
+
+Enforcement: At audience build, on imports/segment refresh, on manual adds, and periodically via worker
+
+Trim policy: keep highest intent & most recent; remove lowest-score → oldest → duplicate personas
+
+Audit: every prune/re-queue logged with reason
+
+4.2 Data Model (minimal)
+-- Campaign config
+ALTER TABLE campaigns
+  ADD COLUMN account_cap_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN account_cap_value INT,
+  ADD COLUMN account_cap_mode VARCHAR(32) CHECK (account_cap_mode IN ('QUEUE_SIZE','CONNECTED_CALLS','POSITIVE_DISP'));
+
+-- Queue
+CREATE TABLE campaign_queue (
+  id BIGSERIAL PRIMARY KEY,
+  campaign_id BIGINT NOT NULL,
+  contact_id BIGINT NOT NULL,
+  account_id BIGINT NOT NULL,
+  priority INT NOT NULL DEFAULT 0,
+  status VARCHAR(16) NOT NULL DEFAULT 'QUEUED', -- QUEUED | IN_PROGRESS | DONE | REMOVED
+  removed_reason VARCHAR(32),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_queue_camp_acct ON campaign_queue (campaign_id, account_id);
+CREATE INDEX idx_queue_camp_status ON campaign_queue (campaign_id, status);
+
+-- Optional counters for O(1) reads
+CREATE TABLE campaign_account_stats (
+  campaign_id BIGINT NOT NULL,
+  account_id BIGINT NOT NULL,
+  queued_count INT NOT NULL DEFAULT 0,
+  connected_count INT NOT NULL DEFAULT 0,
+  positive_disp_count INT NOT NULL DEFAULT 0,
+  last_enforced_at TIMESTAMPTZ,
+  PRIMARY KEY (campaign_id, account_id)
+);
+
+4.3 Enqueue Guard (pseudocode)
+function enqueueContact(campaignId, contact) {
+  if (!capEnabled(campaignId)) return addToQueue(contact);
+
+  const { value, mode } = getCapConfig(campaignId);
+  const count = getCount(campaignId, contact.accountId, mode); // from stats or query
+
+  if (count >= value) {
+    logRemoval(campaignId, contact.contactId, contact.accountId, 'ACCOUNT_CAP_TRIM');
+    return; // excluded
+  }
+  addToQueue(contact); // also increment stats atomically
+}
+
+4.4 Periodic Enforcement Worker
+
+Runs every N minutes or on change events
+
+For each (campaign, account): if queued_count > cap, remove overflow by trim policy; update stats; log
+
+4.5 Mode Semantics
+
+QUEUE_SIZE: count status IN ('QUEUED','IN_PROGRESS')
+
+CONNECTED_CALLS: count distinct contact_id with successful connection result
+
+POSITIVE_DISP: count distinct contact_id with positive outcomes
+
+4.6 Cap Changes
+
+Increase: re-queue removed contacts (FIFO by priority)
+
+Decrease: immediate trim to new cap
+
+4.7 Edge Handling
+
+Duplicates across lists count once (dedupe by contact_id)
+
+Account merge/rename triggers recount
+
+Manual add blocked with toast if over cap
+
+Pause campaign: worker may pause; re-enforce on resume
+
+5) APIs (example contracts)
+PATCH /api/campaigns/{id}
+{
+  "name": "Q4 Pipeline — UK HR",
+  "type": "TELE_OUTREACH",
+  "objective": "Book 25 discovery calls",
+  "tags": ["UK","HR","ABM"]
+}
+
+PATCH /api/campaigns/{id}/dialer-cap
+{
+  "enabled": true,
+  "value": 10,
+  "mode": "QUEUE_SIZE" // or CONNECTED_CALLS | POSITIVE_DISP
+}
+
+POST /api/campaigns/{id}/audience/build
+{ "sources": [...], "filters": [...], "engagement": {...} }
+
+POST /api/campaigns/{id}/queue/rebuild
+POST /api/campaigns/{id}/launch   // perform validations, lock config, build queue
+GET  /api/campaigns/{id}/stats    // includes cap utilization metrics
+
+
+Responses should include: audience counts, unique accounts, excluded due to cap, per-account cap chips: { accountId, used, cap, capped }.
+
+6) Frontend Components (React + Tailwind)
+6.1 Stepper & Panels
+
+Stepper at top (active/completed/pending colors)
+
+Each step a Card with Save & Continue
+
+Floating Next/Back (Framer Motion) bottom-right
+
+6.2 Cap UI (Step 4 → Dialer Settings)
+
+Toggle + number input + mode radios
+
+Inline validation + helper text
+
+In Audience Step & Queue View: cap badges like 7/10, tooltip “Capped”
+
+6.3 Queue Screen
+
+Columns: Contact, Account, Priority, Status, Cap Chip, Last Activity, Actions
+
+Banner after trims: “12 contacts removed to enforce Account Lead Cap.”
+
+7) Validation & Errors
+
+Required: Campaign Name, Type; if Tele Outreach: Team, Hours; if Cap enabled: Cap value ≥ 1
+
+Prevent launch if: no audience, invalid script variables, missing team/hours
+
+Graceful messaging for over-cap rejections on manual add/import
+
+8) Security, Roles, Audit
+
+Permissions: Create/Launch (Manager/Admin), Edit (Owner/Manager), Cap config (Manager/Admin)
+
+Audit trail:
+
+ACCOUNT_CAP_APPLIED, ACCOUNT_CAP_TRIM, ACCOUNT_CAP_REQUEUE
+
+Capture user, timestamp, old→new values
+
+9) Observability & KPIs
+
+Per campaign:
+
+cap_enabled, cap_value, mode
+
+accounts_capped_count
+
+contacts_removed_due_to_cap_total
+
+avg_cap_utilization (mean used/cap across accounts)
+
+Alerts when: removals spike; >80% accounts at full cap
+
+10) Performance & Concurrency
+
+Use campaign_account_stats for O(1) checks; update in the same transaction as enqueue (SELECT FOR UPDATE on stats row)
+
+Batch imports with per-account grouping
+
+Worker idempotency: ensure repeated enforcement is safe
+
+11) QA Test Plan (must-pass)
+
+Build queue with cap → extra contacts excluded
+
+Import new contacts while near cap → enforce correctly
+
+Increase cap → re-queue previously excluded by priority
+
+Decrease cap → immediate trim
+
+Switch modes mid-flight → counts/behavior update
+
+Concurrency: parallel enqueues stay within cap
+
+UI: badges, tooltips, banners display accurate counts
+
+Audit: logs with correct reasons and IDs
+
+12) Rollout
+
+Feature flag; dark launch in staging
+
+Pilot with 1–2 customers; monitor KPIs & logs
+
+General availability; default on for Tele Outreach templates
+
+13) Optional Extensions
+
+Tier-based caps (A/B/C accounts)
+
+GEO-based caps
+
+Soft-cap (warnings only)
+
+Auto-recommend cap from historical saturation curves
+
+Quick Implementation Checklist
+
+ DB migrations for cap fields & stats
+
+ Enqueue guard + counter updates (transactional)
+
+ Worker for periodic enforcement
+
+ Step 4 UI (toggle/value/mode) + validation
+
+ Audience warnings & Queue chips/banners
+
+ APIs & audit logging
+
+ Tests + monitoring + rollout plan

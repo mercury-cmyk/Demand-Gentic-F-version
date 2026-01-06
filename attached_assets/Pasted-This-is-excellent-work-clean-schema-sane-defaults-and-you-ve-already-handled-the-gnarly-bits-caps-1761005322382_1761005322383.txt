@@ -1,0 +1,349 @@
+This is excellent work—clean schema, sane defaults, and you’ve already handled the gnarly bits (caps, SKIP LOCKED queues, flexible CSV headers, suppression, and cached email validation). I went through it line-by-line and pulled together a punch-list of critical fixes, polish, and ready-to-ship additions (endpoints, UI contracts, QA flow, SQL/indexes, and a Replit build prompt).
+
+---
+
+# What to fix right now (high-impact, low effort)
+
+1. **Field name mismatches (will 500 at runtime)**
+
+* `GET /api/verification-campaigns/:campaignId/accounts/:accountName/cap` uses `verificationContacts.account_name` but that column doesn’t exist in `verification_contacts`.
+  **Fix:** join `accounts a ON a.id = c.account_id` and filter by `LOWER(a.name) = LOWER($accountName)`.
+* In multiple places we pass/expect `account_name` in payloads while schema’s canonical key is `accountId` and the normalized `companyKey`.
+  **Fix:** Treat `accountName` as **presentation-only** and consistently persist `accountId` + `companyKey`.
+
+2. **Undefined variables in CSV upload**
+
+* `rows` and `campaign` are referenced but never defined in the upload handler.
+  **Fix:** capture `parseResult.data` into `rows`, and fetch `campaign` up front:
+
+  ```ts
+  const rows = parseResult.data;
+  const [campaign] = await db.select().from(verificationCampaigns).where(eq(verificationCampaigns.id, campaignId));
+  ```
+
+3. **Lowercase email handling**
+
+* Suppression relies on `emailLower` in `verification_suppression_list` but `verification_contacts` only stores `email`.
+  **Fix:** add `emailLower` to `verification_contacts` with a trigger (or always set on write). Adds faster exact lookups + consistent suppression.
+
+4. **Eligibility + suppression timing**
+
+* In upload you **insert contact → then evaluate eligibility & suppression → then update**. During races, rows can be queued briefly “unscreened.”
+  **Fix:** evaluate eligibility/suppression **before insert** where possible, or insert with initial `eligibility_status`/`suppressed` derived in the same transaction.
+
+5. **Rate fields safety**
+
+* `numeric(5,2)` on rates like `0.95` is fine, but enforce `[0,1]`.
+  **Fix:** DB CHECK constraints so bad configs can’t sneak in.
+
+6. **Queue isolation guarantees**
+
+* You’ve used `FOR UPDATE SKIP LOCKED` correctly; ensure the **transaction isolation** is read committed and that you wrap the queue select + assignment in **one transaction**.
+
+---
+
+# Schema hardening (DDL patches)
+
+```sql
+-- 1) Add emailLower to verification_contacts
+ALTER TABLE verification_contacts ADD COLUMN email_lower TEXT;
+CREATE INDEX verification_contacts_email_lower_idx ON verification_contacts (email_lower);
+
+-- 2) Keep email_lower in sync
+CREATE OR REPLACE FUNCTION set_email_lower_vc() RETURNS trigger AS $$
+BEGIN
+  NEW.email_lower := CASE WHEN NEW.email IS NULL THEN NULL ELSE lower(NEW.email) END;
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_email_lower_vc ON verification_contacts;
+CREATE TRIGGER trg_set_email_lower_vc
+BEFORE INSERT OR UPDATE OF email ON verification_contacts
+FOR EACH ROW EXECUTE FUNCTION set_email_lower_vc();
+
+-- 3) Guard rate fields (0..1)
+ALTER TABLE verification_campaigns
+  ADD CONSTRAINT chk_ok_rate_target_range CHECK (ok_rate_target::numeric >= 0 AND ok_rate_target::numeric <= 1),
+  ADD CONSTRAINT chk_deliverability_target_range CHECK (deliverability_target::numeric >= 0 AND deliverability_target::numeric <= 1),
+  ADD CONSTRAINT chk_suppression_hit_rate_max_range CHECK (suppression_hit_rate_max::numeric >= 0 AND suppression_hit_rate_max::numeric <= 1),
+  ADD CONSTRAINT chk_qa_pass_rate_min_range CHECK (qa_pass_rate_min::numeric >= 0 AND qa_pass_rate_min::numeric <= 1);
+
+-- 4) Prevent dup email per campaign (ignoring suppressed)
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_vc_campaign_email_lower_active
+ON verification_contacts (campaign_id, email_lower)
+WHERE suppressed = FALSE;
+
+-- 5) Speed up cap checks
+CREATE INDEX IF NOT EXISTS verification_submissions_campaign_account_idx
+  ON verification_lead_submissions (campaign_id, account_id);
+
+-- 6) (Optional) partial index to accelerate queue predicate
+CREATE INDEX IF NOT EXISTS verification_contacts_queue_idx
+ON verification_contacts (campaign_id, eligibility_status, verification_status, in_submission_buffer, suppressed, priority_score, updated_at)
+WHERE verification_status = 'Pending' AND eligibility_status = 'Eligible' AND suppressed = FALSE AND in_submission_buffer = FALSE;
+```
+
+---
+
+# Backend patches (copy-paste safe)
+
+## A) Fix: account cap endpoint
+
+```ts
+// GET /api/verification-campaigns/:campaignId/accounts/:accountName/cap
+router.get("/api/verification-campaigns/:campaignId/accounts/:accountName/cap", async (req, res) => {
+  const { campaignId, accountName } = req.params;
+
+  // Resolve accountId by case-insensitive name
+  const [acct] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(sql`LOWER(${accounts.name}) = LOWER(${accountName})`)
+    .limit(1);
+
+  if (!acct) return res.json({ accountName, submitted: 0 });
+
+  const [{ submitted } = { submitted: 0 }] = await db
+    .select({ submitted: sql<number>`count(*)` })
+    .from(verificationLeadSubmissions)
+    .where(and(
+      eq(verificationLeadSubmissions.campaignId, campaignId),
+      eq(verificationLeadSubmissions.accountId, acct.id)
+    ));
+
+  res.json({ accountName, submitted: Number(submitted) });
+});
+```
+
+## B) Fix: CSV upload undefineds + transactional insert
+
+```ts
+router.post("/api/verification-campaigns/:campaignId/upload", async (req, res) => {
+  const { campaignId } = req.params;
+  const { csvData } = req.body;
+
+  const parseResult = Papa.parse<CSVRow>(csvData, { header: true, skipEmptyLines: true, /* ... */ });
+  const rows = parseResult.data;
+
+  const [campaign] = await db.select().from(verificationCampaigns).where(eq(verificationCampaigns.id, campaignId));
+  if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+
+  const results = { total: rows.length, created: 0, skipped: 0, errors: [] as string[] };
+
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        // Resolve/create account (domain > name)
+        const accountNameCsv = row.account_name || row.companyName || null;
+        const domainValue = (row.domain || row.companyDomain || null)?.toLowerCase() || null;
+
+        let accountId: string | null = null;
+        if (domainValue) {
+          const [a] = await tx.select({ id: accounts.id }).from(accounts).where(eq(accounts.domain, domainValue)).limit(1);
+          accountId = a?.id ?? (await tx.insert(accounts).values({
+            name: (accountNameCsv ?? domainValue.replace(/^www\./, '').split('.')[0])!,
+            domain: domainValue,
+            hqCity: row.hqCity ?? null, hqState: row.hqState ?? null, hqCountry: row.hqCountry ?? null,
+          }).returning({ id: accounts.id }))[0].id;
+        } else if (accountNameCsv) {
+          const [a] = await tx.select({ id: accounts.id }).from(accounts)
+            .where(sql`LOWER(${accounts.name}) = LOWER(${accountNameCsv})`).limit(1);
+          accountId = a?.id ?? (await tx.insert(accounts).values({
+            name: accountNameCsv, domain: null,
+            hqCity: row.hqCity ?? null, hqState: row.hqState ?? null, hqCountry: row.hqCountry ?? null,
+          }).returning({ id: accounts.id }))[0].id;
+        }
+
+        // Pre-compute keys & checks
+        const normalizedKeys = computeNormalizedKeys({ firstName: row.firstName, lastName: row.lastName, contactCountry: row.contactCountry, accountName: accountNameCsv ?? undefined });
+        const eligibility = evaluateEligibility(row.title, row.contactCountry, campaign);
+
+        const isSuppressed = await checkSuppression(campaignId, {
+          email: row.email, cavId: row.cavId, cavUserId: row.cavUserId,
+          fullName: row.fullName || row.name, account_name: accountNameCsv,
+        });
+
+        // Insert in one go with derived fields
+        await tx.insert(verificationContacts).values({
+          campaignId,
+          accountId,
+          sourceType: row.sourceType ?? 'Client_Provided',
+          fullName: row.fullName || row.name,
+          firstName: row.firstName, lastName: row.lastName,
+          title: row.title, email: row.email, phone: row.phone, mobile: row.mobile,
+          linkedinUrl: row.linkedinUrl,
+          contactCity: row.contactCity, contactState: row.contactState, contactCountry: row.contactCountry, contactPostal: row.contactPostal,
+          cavId: row.cavId, cavUserId: row.cavUserId,
+          eligibilityStatus: eligibility.status,
+          eligibilityReason: eligibility.reason,
+          suppressed: isSuppressed,
+          firstNameNorm: normalizedKeys.firstNameNorm,
+          lastNameNorm: normalizedKeys.lastNameNorm,
+          companyKey: normalizedKeys.companyKey,
+          contactCountryKey: normalizedKeys.contactCountryKey,
+          // email_lower set by trigger
+        });
+
+        results.created++;
+      } catch (e: any) {
+        results.skipped++;
+        results.errors.push(`Row ${i + 1}: ${e.message ?? String(e)}`);
+      }
+    }
+  });
+
+  res.json(results);
+});
+```
+
+---
+
+# API contracts (concise)
+
+| Endpoint                                                            | Method | Purpose                                        | Request                   | Response                                |                    |                       |
+| ------------------------------------------------------------------- | ------ | ---------------------------------------------- | ------------------------- | --------------------------------------- | ------------------ | --------------------- |
+| `/api/verification-campaigns`                                       | GET    | List campaigns                                 | —                         | `Campaign[]`                            |                    |                       |
+| `/api/verification-campaigns/:id`                                   | GET    | Campaign detail                                | —                         | `Campaign`                              |                    |                       |
+| `/api/verification-campaigns`                                       | POST   | Create campaign                                | `InsertCampaign`          | `Campaign`                              |                    |                       |
+| `/api/verification-campaigns/:id`                                   | PUT    | Update campaign                                | `Partial<InsertCampaign>` | `Campaign`                              |                    |                       |
+| `/api/verification-campaigns/:campaignId/upload`                    | POST   | CSV upload                                     | `{ csvData: string }`     | `{ total, created, skipped, errors[] }` |                    |                       |
+| `/api/verification-campaigns/:campaignId/queue?limit=50`            | GET    | Get next work batch                            | —                         | `{ data: Contact[], total }`            |                    |                       |
+| `/api/verification-contacts`                                        | POST   | Create contact                                 | `InsertContact`           | `Contact`                               |                    |                       |
+| `/api/verification-campaigns/:campaignId/stats`                     | GET    | KPI snapshot                                   | —                         | `{ eligible_count,... }`                |                    |                       |
+| `/api/verification-campaigns/:campaignId/accounts/:accountName/cap` | GET    | Per-account submissions                        | —                         | `{ accountName, submitted }`            |                    |                       |
+| `/api/verification-contacts/:id/validate-email`                     | POST   | Trigger ELV check                              | `{ force?: boolean }`     | `{ status: 'ok'                         | 'invalid'          | 'risky', checkedAt }` |
+| `/api/verification-contacts/:id/verify`                             | POST   | Agent marks verified                           | `{ notes?, fields? }`     | `Contact`                               |                    |                       |
+| `/api/verification-contacts/:id/qa`                                 | POST   | QA action                                      | `{ action: 'approve'      | 'reject'                                | 'flag', reason? }` | `Contact`             |
+| `/api/verification-contacts/:id/submit`                             | POST   | Move to submission buffer                      | `{}`                      | `{ inSubmissionBuffer: true }`          |                    |                       |
+| `/api/verification-submissions/flush`                               | POST   | Commit buffer to submissions (enforces 10-cap) | `{ campaignId }`          | `{ committed, skippedByCap }`           |                    |                       |
+
+> The last five are **new**—needed for the agent console and QA flow below.
+
+---
+
+# Agent Console: minimal spec (props/state/handlers)
+
+* **Props:** `campaignId`, `batchSize=25`.
+* **State:** `batch: Contact[]`, `selected: Set<string>`, `mode: 'verify'|'qa'`, `loading`, `filters`.
+* **Handlers:**
+
+  * `fetchBatch()` → GET queue
+  * `validateEmail(contactId)` → POST validate-email
+  * `markVerified(contactId, patch)` → POST verify
+  * `sendToQA(contactId)` → POST qa `{ action:'flag' }`
+  * `approveQA(contactId)` / `rejectQA(contactId, reason)`
+  * `submit(contactId)` → POST submit (toggles `inSubmissionBuffer`)
+  * `flushBuffer()` → POST submissions/flush
+
+**UI actions (per row card):**
+
+* Email status chip (Unknown → Validate → Ok/Invalid/Risky)
+* Quick-edit fields (title, phone, city)
+* Verify → QA → Submit buttons (guard rails: cannot Submit unless `email_status='ok'` and `eligibility='Eligible'` and `suppressed=false`)
+* Cap indicator (if account at 9/10 show warning; at 10/10 disable Submit)
+
+---
+
+# QA workflow (concise & safe)
+
+1. Agent marks **Verify** → sets `verification_status='Validated'`, captures deltas in `raw_changes` (audit).
+2. QA panel lists `qa_status='Unreviewed'` validated contacts.
+3. QA actions:
+
+   * **Approve** → `qa_status='Approved'`
+   * **Reject** → `qa_status='Rejected'`, revert `verification_status='Pending'`, append `qa_notes`
+   * **Flag** → `qa_status='Flagged'`, stays `Validated`, requires review comment
+4. **Submission buffer**: only `qa_status='Approved'` + `email_status='ok'` + not suppressed can be added.
+5. **Flush** (commit): transactional insert into `verification_lead_submissions`, **respect per-account cap**; return counts for dashboard.
+
+**QA checklist card (shown in panel)**
+
+* EmailListVerify status is **ok** (or Accept-All allowed).
+* Title matches **titleKeywords** or **seniorDmFallback** if configured.
+* Country in `geoAllow` (if configured).
+* No suppression match.
+* Phone/linkedin present if campaign requires it (optional flag).
+* Notes filled for manual edits.
+
+---
+
+# Metrics & jobs
+
+* **Nightly rollups** (node-cron):
+
+  * Recompute OK rate, deliverability (from bounces if integrated later), suppression hit rate, QA pass rate.
+  * Expire `verification_email_validations` older than **60 days**.
+* **Real-time counters** (`/stats` already good). Consider a **materialized view** if the dataset grows.
+
+---
+
+# Replit build prompt (drop-in)
+
+> Paste the block below into Replit “Tasks / AI Prompt” to implement/extend this module exactly as specified.
+
+```
+You are implementing the “Verification Campaigns” module inside our existing Pivotal CRM monorepo (React + Node + Postgres with Drizzle). Goals:
+
+1) Apply schema patches:
+- Add email_lower to verification_contacts + trigger to maintain it.
+- Add rate CHECK constraints [0..1].
+- Add unique index (campaign_id, email_lower) where suppressed=false.
+- Add queue and submissions indexes (see DDL).
+
+2) Fix backend:
+- Correct account cap endpoint to resolve accountId by LOWER(name) and count submissions by (campaignId, accountId).
+- Refactor CSV upload to define rows/campaign, resolve/create accounts (domain > name), precompute eligibility/suppression and insert in a single transaction; capture errors per row.
+- Wrap queue selection + assignment transactionally with FOR UPDATE SKIP LOCKED (keep current SQL).
+
+3) Add new endpoints:
+POST /api/verification-contacts/:id/validate-email
+POST /api/verification-contacts/:id/verify
+POST /api/verification-contacts/:id/qa
+POST /api/verification-contacts/:id/submit
+POST /api/verification-submissions/flush
+(All with zod validation & proper 4xx/5xx errors)
+
+4) Frontend:
+- Add Agent Console view for a campaign with batch queue, per-row actions (Validate Email, Verify, QA Approve/Reject/Flag, Submit), caps indicator, and a “Flush Buffer” button.
+- Enforce guard rails in UI (cannot Submit unless email_status='ok', eligibility='Eligible', not suppressed, qa_status='Approved').
+- Add QA panel with checklist, bulk Approve/Reject.
+
+5) QA & tests:
+- Unit tests for eligibility and suppression utils.
+- Integration test for cap enforcement on flush.
+- Regression test for CSV upload mapping + account creation (domain then name).
+- Basic e2e happy-path: upload → validate email → verify → QA approve → submit → flush.
+
+Tech details:
+- Keep code style consistent (TypeScript, Drizzle). 
+- Prefer small composable services in server/lib.
+- Ensure all DB writes are parameterized and in transactions when modifying multiple rows.
+- Return machine-friendly errors with codes and human messages.
+
+Deliverables: 
+- Updated migrations
+- Server route implementations with zod schemas
+- Frontend pages/components (Agent Console + QA)
+- Tests green on CI
+```
+
+---
+
+# Small but valuable improvements
+
+* **Address precedence**: when both contact and HQ present, store chosen address in a **computed `delivery_address_*`** set of fields to simplify lead exports.
+* **Audit logging**: append a `verification_contact_audit` table capturing `user_id`, `action`, `before/after`, `at`.
+* **RBAC**: ensure only campaign owners or assigned agents can modify contacts; only QA role can set `qa_status`.
+* **Backpressure**: add per-minute limit on `validate-email` to avoid ELV bursts (e.g., 60/min).
+* **Accept-All policy**: you already default `okEmailStates=['valid','accept_all']`; expose as a toggle per campaign in UI.
+
+---
+
+# Final quick check
+
+* ✅ Optional eligibility rules → default “all eligible” is implemented correctly.
+* ✅ 10-lead cap enforced via `verification_lead_submissions` grouping—good.
+* ✅ Concurrency in queue handled via SKIP LOCKED—good (wrap in transaction).
+* ✅ Suppression supports global + campaign level—good (make sure to add lowercased email in contacts).
+

@@ -1,0 +1,93 @@
+2025-11-04 17:32:10.85
+4ad4facc
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 17:32:10.85
+4ad4facc
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 17:32:10.92
+4ad4facc
+User
+[LEAD CREATION] ❌ Failed to create lead: error: column "telnyx_call_id" of relation "leads" does not exist
+2025-11-04 17:38:00.07
+247ac0d0
+User
+[LEAD CREATION] Qualified disposition detected for contact: d6e04fbb-b7dd-49cd-9f98-06c5baf294f8
+2025-11-04 17:38:00.11
+247ac0d0
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 17:38:00.11
+247ac0d0
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 17:38:00.18
+247ac0d0
+User
+[LEAD CREATION] ❌ Failed to create lead: error: column "telnyx_call_id" of relation "leads" does not exist
+2025-11-04 17:47:24.36
+247ac0d0
+User
+[LEAD CREATION] Qualified disposition detected for contact: c7bba49b-c1ec-4f08-a42c-2a89d3a8619c
+
+2025-11-04 17:47:24.43
+247ac0d0
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 17:47:24.43
+247ac0d0
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 17:47:24.49
+247ac0d0
+User
+[LEAD CREATION] ✅ Lead created successfully: {
+2025-11-04 17:55:09.78
+247ac0d0
+User
+[LEAD CREATION] Qualified disposition detected for contact: fe8a4a2f-8516-4f63-b0e6-ab6ab6a46c86
+2025-11-04 17:55:09.81
+247ac0d0
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 17:55:09.81
+247ac0d0
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 17:55:09.88
+247ac0d0
+User
+[LEAD CREATION] ✅ Lead created successfully: {
+2025-11-04 18:08:01.29
+247ac0d0
+User
+[LEAD CREATION] Qualified disposition detected for contact: 4350742f-5761-4b2c-934d-7d5901b7dabf
+2025-11-04 18:08:01.35
+247ac0d0
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 18:08:01.35
+247ac0d0
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 18:08:01.41
+247ac0d0
+User
+[LEAD CREATION] ✅ Lead created successfully: {
+2025-11-04 18:21:05.49
+90ac4cdf
+User
+[LEAD CREATION] Qualified disposition detected for contact: 15118e74-bd11-4dd6-99a5-4000e7713774
+2025-11-04 18:21:05.53
+90ac4cdf
+User
+[LEAD CREATION] Contact found: {
+2025-11-04 18:21:05.53
+90ac4cdf
+User
+[LEAD CREATION] Creating lead with: {
+2025-11-04 18:21:05.60
+90ac4cdf
+User
+[LEAD CREATION] ✅ Lead created successfully: {

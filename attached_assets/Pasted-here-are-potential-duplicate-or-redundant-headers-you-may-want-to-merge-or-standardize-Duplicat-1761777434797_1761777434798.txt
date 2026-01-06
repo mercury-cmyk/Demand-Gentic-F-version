@@ -1,0 +1,142 @@
+here are potential duplicate or redundant headers you may want to merge or standardize:
+
+⚠️ Duplicate or Overlapping Header Groups
+1. Contact Address Fields
+
+Contact Address 1
+
+Contact Address 2
+
+Contact Address 3
+
+Contact City
+
+Contact State
+
+Contact Country
+
+Contact Postal Code
+
+➡️ These overlap with:
+
+Contact Custom: custom_cav_addr1
+
+Contact Custom: custom_cav_addr2
+
+Contact Custom: custom_cav_addr3
+
+Contact Custom: custom_cav_town
+
+Contact Custom: custom_cav_state
+
+Contact Custom: custom_cav_postcode
+
+Contact Custom: custom_cav_tel
+
+✅ Suggestion: Keep one standardized set (preferably the non-custom “Contact …” version) and map the custom fields to it.
+
+2. HQ / Account Address Fields
+
+HQ Address 1
+
+HQ Address 2
+
+HQ Address 3
+
+HQ City
+
+HQ State
+
+HQ Country
+
+HQ Postal Code
+
+Account HQ Street 1
+
+Account HQ Street 2
+
+Account City
+
+Account State
+
+Account Country
+
+Account Postal Code
+
+➡️ These clearly duplicate each other.
+
+✅ Suggestion: Keep only one complete set — preferably the Account … version since it aligns with your CRM account object.
+
+3. Phone Numbers
+
+Phone
+
+Mobile
+
+Account Phone
+
+HQ Phone
+
+Contact Custom: custom_cav_tel
+
+➡️ All refer to different but possibly overlapping contact vs account numbers.
+
+✅ Suggestion: Consolidate into:
+
+Contact Phone
+Contact Mobile
+Account Phone
+
+4. Company Information
+
+Account Name
+
+Account Domain
+
+Account Industry
+
+Account Size
+
+Account Revenue
+
+Contact Custom: custom_company_annual_revenue
+
+Contact Custom: custom_company_industry
+
+Contact Custom: custom_company_revenue_range
+
+Contact Custom: custom_company_staff_count_range
+
+Contact Custom: custom_company_location
+
+Contact Custom: custom_company_description
+
+➡️ The “Contact Custom: custom_company_…” fields mirror account-level attributes.
+
+✅ Suggestion: Merge them into unified account attributes.
+
+5. Position / Tenure Fields
+
+Time in Current Position
+
+Time in Current Position (Months)
+
+Time in Current Company
+
+Time in Current Company (Months)
+
+Contact Custom: custom_time_in_current_company
+
+Contact Custom: custom_time_in_current_position
+
+✅ Suggestion: Keep numeric month-based versions and map the custom ones into them.
+
+6. Email Fields
+
+Email
+
+Email Lower
+
+Contact Custom: custom_email_1_validation
+
+✅ Suggestion: Keep Email and add Email Validation Status if needed — Email Lower can be auto-generated.

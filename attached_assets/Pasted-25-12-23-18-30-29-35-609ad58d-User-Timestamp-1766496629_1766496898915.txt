@@ -1,0 +1,144 @@
+25-12-23 18:30:29.35
+609ad58d
+User
+- Timestamp: 1766496629
+2025-12-23 18:30:29.35
+609ad58d
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 18:30:29.35
+609ad58d
+User
+- Expected: v0=da88fea26f24cdc44...
+2025-12-23 18:30:29.35
+609ad58d
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 18:30:29.35
+609ad58d
+User
+[ElevenLabs Webhook] Call initiation failed: SIP 1011 - request timed out
+2025-12-23 18:30:29.35
+609ad58d
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_7201kd5pce3gexjbj1715xwjkwxd
+2025-12-23 18:30:29.41
+609ad58d
+User
+[ElevenLabs Webhook] Could not find queue item for failed call to +447419285953
+2025-12-23 18:30:29.41
+609ad58d
+User
+1:30:29 PM [express] POST /api/webhooks/elevenlabs 200 in 68ms :: {"status":"ok","message":"Call fai…
+2025-12-23 18:30:34.36
+cfb987c5
+User
+[DB Pool] Client connected | Total: 2, Idle: 0, Waiting: 0
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_transcription", "event_timestamp": 1766496637, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_9901kd5pdx5gecwrkkvvcks149xe", "status": "done", "user_id": null, "branch_id": "agtbrch_9101kctbjtbmertbvztpgn75bn47", "transcript": [{"role": "agent", "agent_metadata": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "branch_id": "agtbrch_9101kctbjtbmertbvztpgn75bn47", "workflow_node_id": "node_01kctd99szfk2ss7srygkz3zvh"}, "message": "Good Da
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Event type: post_call_transcription, conversation: conv_9901kd5pdx5gecwrkkvvcks149xe
+2025-12-23 18:30:37.67
+609ad58d
+User
+- Expected: v0=4b3a3763d248db949...
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Mapped disposition: Qualified Lead
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 18:30:37.67
+609ad58d
+User
+- Timestamp: 1766496637
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=4187fb46-c634-42d1-aeb1-d3833f325856, queue=a057d91f-4776-41e0-ac78-1a015bd8019e, phone=447783160351
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Positive intent detected - creating Qualified Lead
+2025-12-23 18:30:37.67
+609ad58d
+User
+- Received: v0=4b3a3763d248db949...
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 18:30:37.67
+609ad58d
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 18:30:37.74
+609ad58d
+User
+[UnifiedDisposition] Applying disposition: Qualified Lead for ai agent, session 02c01f44-1272-4e6e-be7e-f68d41fbcefe
+2025-12-23 18:30:37.74
+609ad58d
+User
+[ElevenLabs Webhook] Created call_session: 02c01f44-1272-4e6e-be7e-f68d41fbcefe (AI agent)
+2025-12-23 18:30:37.77
+609ad58d
+User
+[UnifiedDisposition] System action: converted_qualified
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766496637, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "user_id": null, "conversation_id": "conv_9901kd5pdx5gecwrkkvvcks149xe", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAAFJB7FhW3gAtNHmSrPaAAOMjjjow4JsNICDKXE63bP3/z78U4UzC5iZqQjQejYWULIFtEHFBBDxCw1YasQ8TcesuariPFYhisVjynpmGxs7+Pe7x48ePHjx5Efv379+/jh4AAAAA6OHh7/k/oYAYAAAHh4eHhgAAO//////8A/8EYeHh4eAAAAAAYeHh4eAAAAAAYeHh48AAAAARh4eHjwAAAABGHh4f6AA
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 18:30:37.78
+609ad58d
+User
+- Timestamp: 1766496637
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Event type: post_call_audio, conversation: conv_9901kd5pdx5gecwrkkvvcks149xe
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=undefined, queue=null, phone=undefined
+2025-12-23 18:30:37.78
+609ad58d
+User
+- Received: v0=7d0471c15ac313277...
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Looking up from call_sessions for conversation: conv_9901kd5pdx5gecwrkkvvcks149xe
+2025-12-23 18:30:37.78
+609ad58d
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 18:30:37.78
+609ad58d
+User
+- Expected: v0=7d0471c15ac313277...
+2025-12-23 18:30:37.82
+609ad58d
+User
+[ElevenLabs Webhook] Contact not found

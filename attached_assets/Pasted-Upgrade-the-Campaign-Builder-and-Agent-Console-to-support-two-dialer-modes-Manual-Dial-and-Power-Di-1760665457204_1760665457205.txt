@@ -1,0 +1,177 @@
+Upgrade the Campaign Builder and Agent Console to support two dialer modes: Manual Dial and Power Dial, and add first-class Voicemail Detection (AMD) handling to Power Dial.
+
+🎯 OVERALL OBJECTIVE
+When launching a Phone Campaign, the user must first select the Dial Mode:
+1) Manual Dial
+2) Power Dial
+Persist selection: campaigns.dial_mode ∈ {manual, power}.
+
+----------------------------------------------------------------
+1️⃣ MANUAL DIAL MODE  (UNCHANGED BEHAVIORAL SCOPE)
+- Agents can filter assigned audience and pull into “My Queue”.
+- Mandatory dispositions after each call.
+- Retry rules respect quiet hours, per-account caps, Global DNC, etc.
+
+DB:
+- agent_queue(agent_id, campaign_id, contact_id, queue_state, locked_by, locked_at)
+
+APIs:
+- POST /campaigns/:id/manual/queue/add {filters, limit}
+----------------------------------------------------------------
+
+2️⃣ POWER DIAL MODE (AUTO-DIAL & AUTO-DISTRIBUTION) + VOICEMAIL DETECTION
+Purpose: System auto-dials eligible contacts and routes human connects to available agents. If voicemail/answering machine is detected, follow configurable voicemail logic.
+
+✅ Campaign Settings → “Power Dialer”
+- Pacing Ratio: 1.0–3.0 calls / available agent
+- Max Concurrent Channels per Agent: 1–3
+- Ring Timeout (sec)
+- **Voicemail / AMD Settings**:
+  - AMD Enabled: boolean
+  - AMD Sensitivity / Confidence Threshold: 0.0–1.0 (default 0.75)
+  - AMD Decision Timeout (ms): e.g., 1500–3500
+  - On Machine Detected (branch policy):
+    - `action ∈ {leave_voicemail, schedule_callback, drop_silent}`
+    - If leave_voicemail:
+      - Message Type ∈ {TTS, Audio File}
+      - TTS Voice Id (string) OR Audio Asset Id (UUID)
+      - Message Template Id (for token merge: {{contact.first_name}}, {{company.name}}, {{callback.number}})
+      - Message Max Length (sec)
+      - Max Voicemails Per Contact (int; default 1)
+      - Min Cooldown Between Voicemails (hours; default 72)
+      - Daily Max Voicemail Messages (per campaign) (int)
+      - Local Time Window for Voicemail (hh:mm–hh:mm)
+      - Compliance Guard: “Disable voicemail for restricted regions” (toggle)
+    - If schedule_callback:
+      - Callback Window: next business hours by contact TZ
+      - Priority: high/normal
+  - **Mixed/Uncertain Outcome Handling**:
+    - If AMD Confidence < threshold → treat as human (route) OR follow fallback action (configurable).
+  - Abandon Rate Target (%); auto-throttle pacing to remain ≤ target.
+- Call Distribution: round_robin | least_recently_served | skill_based
+- Retry Rules & Quiet Hours by TZ
+- Max Daily Attempts per Contact
+
+✅ Agent Console (Power Mode)
+- Agent Status: Available / Wrap-up / Break
+- Human connect → auto-pop Script + Questions
+- Mandatory disposition to exit Wrap-up; optional wrap-up countdown
+
+✅ Dialer Logic
+- Eligible Pool selection respects: Global DNC, account caps, retry windows, quiet hours, not-locked
+- Required dials = ceil(available_agents * pacing) - active_ringing
+- Place outbound legs; when **AMD=human** → route to available agent
+- When **AMD=machine** → follow voicemail branch policy (leave message / schedule callback / drop)
+- Auto-throttle to keep measured abandon rate ≤ target
+
+✅ Voicemail Leave Flow (if configured)
+- On machine detected:
+  1) Merge tokens in TTS/Script (contact/company variables)
+  2) Play message up to configured max length
+  3) Log outcome = DISPOSITION: “Voicemail Left” (map to your existing codes)
+  4) Respect per-contact max voicemail attempts and cooldown
+  5) Schedule next retry only if policy says so (e.g., VM does NOT count toward retry if message left = true? Configurable)
+
+✅ Compliance & Safeguards
+- Respect quiet hours and region-level recording/voicemail rules
+- If “Disable voicemail for restricted regions” is on, skip leaving messages and either schedule callback or drop_silent per policy
+- Hard cap: do not exceed “Daily Max Voicemail Messages” at campaign level
+- Full audit log: AMD outcome, confidence, action taken, asset/message id used, timestamps
+
+----------------------------------------------------------------
+3️⃣ COMMON FUNCTIONALITIES
+- Scripts & Questions: per campaign; must pop on connect
+- Dispositions (use existing set; map these behaviors):
+  - DNC → add to Global DNC; remove from all queues
+  - Not Interested (campaign) → remove from this campaign
+  - Invalid Data → mark invalid; remove from all campaigns/queues
+  - Voicemail Left → record VM meta (asset_id or tts_id), set retry as per policy
+  - No Answer → schedule retry by policy
+  - Appointment/Qualified → stop further dialing, create follow-up/meeting
+- Per-Account Lead Cap: once hit, exclude all contacts for that account in this campaign
+- Collision Prevention: a contact cannot be in >1 agent queue or active ringing simultaneously
+- Reporting: segment by dial_mode; add AMD metrics (machine rate, human rate, confidence avg), VM rate, messages left, daily VM cap utilization, abandon %, occupancy, wrap-up, attempts/lead, outcomes
+
+----------------------------------------------------------------
+4️⃣ DATABASE UPDATES
+- campaigns.dial_mode enum(manual|power)
+- campaigns.power_settings JSON now includes:
+  {
+    pacing_ratio,
+    max_concurrent_per_agent,
+    ring_timeout_sec,
+    abandon_rate_target_pct,
+    distribution_strategy,
+    retry_rules,
+    quiet_hours,
+    max_daily_attempts_per_contact,
+    amd: {
+      enabled,
+      confidence_threshold,
+      decision_timeout_ms,
+      uncertain_fallback: "route_as_human" | "voicemail_policy",
+      machine_policy: {
+        action: "leave_voicemail" | "schedule_callback" | "drop_silent",
+        message_type: "tts" | "audio_file",
+        tts_voice_id,
+        audio_asset_id,
+        template_id,
+        message_max_sec,
+        max_vm_per_contact,
+        vm_cooldown_hours,
+        campaign_daily_vm_cap,
+        vm_local_time_window: {start_hhmm, end_hhmm},
+        restricted_region_block: boolean
+      }
+    }
+  }
+- dialer_pool(contact_id, state, attempt_count, next_eligible_at, last_outcome, amd_last_result, amd_confidence, vm_count, last_vm_at)
+- Optional: voicemail_assets(asset_id, name, duration_sec, locale, created_by)
+
+----------------------------------------------------------------
+5️⃣ API ENDPOINTS
+- POST /campaigns/:id/dial-mode           { dial_mode }
+- POST /campaigns/:id/power/start|stop
+- POST /campaigns/:id/power/settings       { power_settings }   // includes amd.*
+- POST /agents/:id/status                  { status }
+- POST /calls/:id/disposition              { code, notes, next_action, metadata? } 
+  // metadata to include amd_confidence, vm_asset_id/tts_voice_id, template_id when applicable
+
+Webhook (tel events):
+- POST /telephony/events
+  payload includes: call_id, event_type, amd_result(human|machine|unknown), amd_confidence, connect_ms, recording_url?, reason
+  Server must:
+    - On amd_result=human → route to agent
+    - On amd_result=machine → apply machine_policy and log
+    - On unknown → follow amd.uncertain_fallback
+
+----------------------------------------------------------------
+6️⃣ ACCEPTANCE CRITERIA
+1. Power mode places calls and correctly routes only human answers to available agents.
+2. When AMD detects machine:
+   - If leave_voicemail: message plays (TTS or audio file), logged with asset/template and duration; VM attempt caps/cooldowns enforced.
+   - If schedule_callback: callback task created in contact TZ within policy window.
+   - If drop_silent: call ends without message; logged.
+3. AMD confidence and decision timeout configurable per campaign; uncertain cases follow configured fallback.
+4. Campaign-level daily VM cap is enforced; once reached, subsequent machine outcomes follow the fallback (schedule or drop).
+5. Per-contact max voicemail and cooldown enforced; no duplicate VM within cooldown.
+6. Compliance toggles respected for restricted regions and quiet hours.
+7. Reports show AMD machine rate, VM rate, messages left, average AMD confidence, abandon %, and throttle activity.
+8. Full audit trail for each call: AMD result, confidence, action taken, disposition, timestamps, and agent (if human).
+
+----------------------------------------------------------------
+7️⃣ IMPLEMENTATION NOTES
+- AMD should be evaluated server-side via telephony provider event (e.g., webhook) before bridging agent audio.
+- For TTS messages: pre-render or stream; support {{tokens}} substitution and max length enforcement.
+- Ensure non-blocking playback (no agent occupation) when leaving VM.
+- Throttle controller must consider AMD machine rates to avoid unnecessary pacing increases that inflate abandon risk.
+
+----------------------------------------------------------------
+8️⃣ QA CHECKLIST
+- Human vs Machine test numbers; vary greeting lengths to validate decision_timeout_ms
+- Confidence threshold boundary tests (just below/above threshold)
+- VM cap and cooldown tests (per-contact & per-campaign)
+- Restricted region switch test
+- Daily VM cap rollover at midnight in campaign’s timezone
+- Uncertain fallback path test
+- Reporting counters and audit logs accuracy

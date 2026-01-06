@@ -1,0 +1,145 @@
+﻿
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [2025-12-09T10:17:20.265Z] Connection State changed: new -> connecting
+injected.js:37 [AUDIO] ✅ Audio playback started successfully
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-MONITOR] AudioContext analyzer created
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [PEER] Peer object keys: 
+(21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+injected.js:37 [PEER] Peer type: rt
+injected.js:37 [PEER] Connection state: connecting
+injected.js:37 [PEER] ICE state: checking
+injected.js:37 [PEER] Receivers count: 1
+injected.js:37 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+injected.js:37 [SDP] Remote audio section (truncated):  19212 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.187
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:6174621081 1 udp 2130706431 185.246.41.187 19212 typ host generation 0
+a=ice-ufrag:VI9ubOOnorqgePvW
+a=ice-pwd:1SBgydyZh6OckeVKirdEv1XD
+a=fingerprint:sha-256 25:B7:84:E2:6D:36:D5:64:E1:7F:5F:60:30:9A:2B:EA:3A:16:97:EC:2A:92:7B:F0:51:D9:F5:4A:1A:0B:B1:4E
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+injected.js:37 [SDP] ✅ Audio direction: sendrecv
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [PEER] Peer object keys: 
+(21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+injected.js:37 [PEER] Peer type: rt
+injected.js:37 [PEER] Connection state: connecting
+injected.js:37 [PEER] ICE state: checking
+injected.js:37 [PEER] Receivers count: 1
+injected.js:37 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+injected.js:37 [SDP] Remote audio section (truncated):  19212 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.187
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:6174621081 1 udp 2130706431 185.246.41.187 19212 typ host generation 0
+a=ice-ufrag:VI9ubOOnorqgePvW
+a=ice-pwd:1SBgydyZh6OckeVKirdEv1XD
+a=fingerprint:sha-256 25:B7:84:E2:6D:36:D5:64:E1:7F:5F:60:30:9A:2B:EA:3A:16:97:EC:2A:92:7B:F0:51:D9:F5:4A:1A:0B:B1:4E
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+injected.js:37 [SDP] ✅ Audio direction: sendrecv
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [PEER] Peer object keys: 
+(21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+injected.js:37 [PEER] Peer type: rt
+injected.js:37 [PEER] Connection state: connecting
+injected.js:37 [PEER] ICE state: checking
+injected.js:37 [PEER] Receivers count: 1
+injected.js:37 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+injected.js:37 [SDP] Remote audio section (truncated):  19212 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.187
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:6174621081 1 udp 2130706431 185.246.41.187 19212 typ host generation 0
+a=ice-ufrag:VI9ubOOnorqgePvW
+a=ice-pwd:1SBgydyZh6OckeVKirdEv1XD
+a=fingerprint:sha-256 25:B7:84:E2:6D:36:D5:64:E1:7F:5F:60:30:9A:2B:EA:3A:16:97:EC:2A:92:7B:F0:51:D9:F5:4A:1A:0B:B1:4E
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+injected.js:37 [SDP] ✅ Audio direction: sendrecv
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [PEER] Peer object keys: 
+(21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+injected.js:37 [PEER] Peer type: rt
+injected.js:37 [PEER] Connection state: connecting
+injected.js:37 [PEER] ICE state: checking
+injected.js:37 [PEER] Receivers count: 1
+injected.js:37 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+injected.js:37 [SDP] Remote audio section (truncated):  19212 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.187
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:6174621081 1 udp 2130706431 185.246.41.187 19212 typ host generation 0
+a=ice-ufrag:VI9ubOOnorqgePvW
+a=ice-pwd:1SBgydyZh6OckeVKirdEv1XD
+a=fingerprint:sha-256 25:B7:84:E2:6D:36:D5:64:E1:7F:5F:60:30:9A:2B:EA:3A:16:97:EC:2A:92:7B:F0:51:D9:F5:4A:1A:0B:B1:4E
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+injected.js:37 [SDP] ✅ Audio direction: sendrecv
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [PEER] Peer object keys: 
+(21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+injected.js:37 [PEER] Peer type: rt
+injected.js:37 [PEER] Connection state: connecting
+injected.js:37 [PEER] ICE state: checking
+injected.js:37 [PEER] Receivers count: 1
+injected.js:37 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+injected.js:37 [SDP] Remote audio section (truncated):  19212 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.187
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:6174621081 1 udp 2130706431 185.246.41.187 19212 typ host generation 0
+a=ice-ufrag:VI9ubOOnorqgePvW
+a=ice-pwd:1SBgydyZh6OckeVKirdEv1XD
+a=fingerprint:sha-256 25:B7:84:E2:6D:36:D5:64:E1:7F:5F:60:30:9A:2B:EA:3A:16:97:EC:2A:92:7B:F0:51:D9:F5:4A:1A:0B:B1:4E
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+injected.js:37 [SDP] ✅ Audio direction: sendrecv
+injected.js:37 [2025-12-09T10:17:35.310Z] ICE Connection State disconnected
+injected.js:37 [2025-12-09T10:17:35.311Z] Connection State changed: connecting -> failed
+injected.js:37 [2025-12-09T10:17:35.316Z] ICE Gathering State gathering
+injected.js:37 [2025-12-09T10:17:35.318Z] ICE Connection State checking
+injected.js:37 [2025-12-09T10:17:35.319Z] Connection State changed: failed -> connecting
+injected.js:37 [2025-12-09T10:17:36.913Z] ICE Gathering State complete
+﻿

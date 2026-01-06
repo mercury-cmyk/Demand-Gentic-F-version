@@ -1,0 +1,164 @@
+26) Email Infrastructure Settings — Senders, Domains, IPs, STO & Deliverability
+
+26.1 Goals
+
+Provide enterprise‑grade controls to configure Sender Identities, Domain Authentication, Dedicated IPs & Warmup, Send‑Time Optimization (STO), Batching/Throttling, and Domain Health Monitoring. Ensure high deliverability, compliance, and observability across all email traffic.
+
+26.2 Navigation
+
+Organization Settings → Email Infrastructure
+	•	Sender Profiles
+	•	Domain Authentication
+	•	IP Pools & Warmup
+	•	Send Policies (STO, Batching/Throttling)
+	•	Domain Health & Reputation
+	•	Feedback Loops & Bounce Handling
+
+⸻
+
+26.3 Sender Profiles
+
+Purpose: Centralize From name/email, brand identity, tracking domain, and defaults per brand/tenant.
+
+Fields
+	•	id, name (e.g., “Pivotal — Marketing”)
+	•	from_name, from_email
+	•	reply_to (optional)
+	•	brand_id (logo, address block)
+	•	tracking_domain_id (link wrapping/CNAME)
+	•	esp_adapter (SES/SendGrid/Mailgun)
+	•	ip_pool_id (optional; else shared)
+	•	default_throttle_tps, daily_cap
+	•	signature_html (optional)
+	•	status (active/suspended)
+
+UX
+	•	Create/Edit modal with validation (MX on domain of from_email).
+	•	Preview of footer/address & unsubscribe block.
+	•	Assign as default for Email Campaigns; override per campaign.
+
+⸻
+
+26.4 Domain Authentication
+
+Purpose: Authenticate and brand email to pass DMARC, reduce spoofing, and enable click/open tracking.
+
+Checklist
+	1.	SPF: include provider (e.g., include:sendgrid.net / amazonses.com).
+	2.	DKIM: 2–3 CNAME keys per provider; auto‑rotate support.
+	3.	DMARC: enforce policy (p=none/quarantine/reject), RUA/RUF report mailboxes.
+	4.	Tracking Domain: CNAME click.brand.com → provider; TLS checked.
+	5.	BIMI (optional): SVG logo + VMC record.
+
+Data Model
+	•	DomainAuth(id, domain, spf_status, dkim_status, dmarc_status, tracking_domain_status, bimi_status, last_checked_at)
+	•	DkimKey(id, domain_auth_id, selector, public_key, rotation_due_at, status)
+	•	TrackingDomain(id, cname, target, tls_status)
+
+UX
+	•	Domain setup wizard → generates DNS records; Copy buttons; Verify button.
+	•	Auto re‑check every 6 hours; show record‑by‑record status with error hints (e.g., SPF too long, multiple DMARC records, permerror).
+
+⸻
+
+26.5 Dedicated IPs & Warmup
+
+Purpose: Isolate reputation with IP Pools and ramp safely.
+
+Concepts
+	•	IP Pool: group of IPs used by a Sender Profile or brand.
+	•	Warmup Plan: daily caps, domain mix control, and ramp curves.
+
+Data Model
+	•	IpPool(id, name, provider, ip_addresses[], warmup_status)
+	•	WarmupPlan(id, ip_pool_id, day, daily_cap, domain_split_json, status)
+
+UX
+	•	Assign pool to Sender Profile.
+	•	Warmup planner with presets (7/14/28‑day) and editable ramp.
+	•	Guardrails: block attaching a cold IP to high‑volume send without plan.
+
+Automation
+	•	Auto‑adjust send rate to respect warmup plan.
+	•	Pause on anomaly (e.g., complaints >0.2% or hard bounces >3%).
+
+⸻
+
+26.6 Send Policies — STO, Batching & Throttling
+
+A. Send‑Time Optimization (STO)
+	•	Policy Modes: off | global model | per‑contact learned window.
+	•	Windows: 24h window shifted per timezone.
+	•	Inputs: historic opens/clicks per contact + domain heuristics.
+	•	Storage: StoPolicy(id, scope=tenant|campaign, mode, status) + contact_best_window cache.
+
+B. Batching
+	•	Configure batch size (e.g., 5k) and gap (e.g., 10–30 min) to spread load and avoid spikes.
+	•	Per‑domain capping (e.g., max 500 to @gmail.com per 15 min).
+	•	Optional seed test batch #0 before full run.
+
+C. Throttling
+	•	TPS caps: global, per campaign, per Sender Profile.
+	•	Frequency caps: per contact (e.g., ≤2 emails/week).
+
+UX
+	•	In Campaign Step 3 (Scheduling) show Advanced Send Policy panel: STO toggle, batch sliders, per‑domain caps, preview timeline.
+
+⸻
+
+26.7 Domain Health & Reputation Monitoring
+
+Purpose: Detect issues early and guide remediation.
+
+Signals Monitored
+	•	Delivery KPIs: delivered%, hard/soft bounce%, complaint%.
+	•	Engagement: opens, clicks, replies; by domain (Gmail, Outlook, Yahoo).
+	•	Authentication: SPF/DKIM pass rates; DMARC alignment rate.
+	•	Blocklists: known RBL checks (provider‑exposed), IP/domain status.
+	•	DNS: TTL sanity, SPF length & includes, DMARC policy strength.
+	•	TLS: version/cipher checks on tracking domain.
+
+Data Model
+	•	DomainReputationSnapshot(id, domain, ts, metrics_json)
+	•	PerDomainStats(domain, provider, day, delivered, bounces_hard, bounces_soft, complaints, opens, clicks)
+
+UX
+	•	Health Score (0–100) with color banding + trend arrows.
+	•	Drill‑down by sending domain, IP pool, and recipient domain.
+	•	Recommendations Panel: “Tighten DMARC to p=quarantine”, “Reduce Gmail volume 30% for 48h”, “Rotate DKIM selector”.
+	•	Alerts: thresholds to Slack/Email when KPIs exceed limits.
+
+Remediation Playbooks
+	•	Bounce spike: pause non‑engaged segment → send re‑engagement test → resume if metrics improve.
+	•	Complaint spike: suppress last campaign cohort; audit content & list source.
+	•	Blocklist hit: route around affected IP, open delisting ticket, warm alternative pool.
+
+⸻
+
+26.8 Feedback Loops, Bounces & Compliance
+	•	ARF/Feedback Loops: register with mailbox providers via ESP; complaints → auto‑suppress contact and reduce future sends.
+	•	Bounce Processing: classify hard vs soft; auto‑suppress hard; soft retry rules.
+	•	List Hygiene: periodic verification for unknown/accept_all.
+	•	Unsubscribe Enforcement: mandatory in templates; one‑click global endpoint.
+
+⸻
+
+26.9 APIs (Illustrative)
+	•	POST /senders · PATCH /senders/:id · GET /senders
+	•	POST /domains (provision auth) · POST /domains/:id/verify
+	•	POST /ip-pools · POST /ip-pools/:id/warmup
+	•	POST /send-policies (STO/batching/throttling)
+	•	GET /reputation/:domain · GET /reputation/:domain/trend
+
+⸻
+
+26.10 Acceptance Criteria
+
+✅ Create Sender Profile; verify tracking domain; attach IP pool.
+✅ Domain wizard produces SPF/DKIM/DMARC/BIMI records and verifies each; errors clearly explained.
+✅ Configure STO (global or per campaign) and see scheduled send distribution.
+✅ Define batch size and gap; campaign sends in multiple batches with correct delays and per‑domain caps.
+✅ Domain Health dashboard shows authentication, delivery, engagement, and blocklist checks with actionable recommendations.
+✅ Complaints auto‑suppress; hard bounces auto‑suppress; alerts fire on thresholds.
+
+Outcome: A governed, observable, and performant email infrastructure that maximizes deliverability through authenticated domains, sane pacing policies, reputation‑aware throttling, and proactive health monitoring.

@@ -1,0 +1,107 @@
+27) Telephony — Softphone UI, Device Controls, Compliance & QA
+
+27.1 Objectives
+
+Deliver a browser-based softphone for Telemarketing campaigns with professional controls (hang up, mute, speaker), audio device testing/config, mandatory call disposition gating, and recording capture with QA‑only playback/download. Integrate via Telnyx SIP trunk/WebRTC with compliance, DNC enforcement, and robust logging.
+
+27.2 Softphone UI & Layout
+
+Primary layout: Three-pane agent console
+	1.	Left: Queue & Contact Drawer — next/previous, search, filters, campaign switcher.
+	2.	Center: Softphone Panel — call controls, timer, keypad, status toasts.
+	3.	Right: Script & Qualification — rich script viewer + qualification form, notes, tasks.
+
+Softphone Controls (Center Panel)
+	•	Call status banner: Idle → Dialing → Ringing → Connected → Wrap‑up.
+	•	Large Controls Row:
+	•	Dial/Answer (primary)
+	•	Hang Up (end call)
+	•	Mute/Unmute
+	•	Speaker (toggle output device)
+	•	Keypad (DTMF) for IVR/extensions
+	•	Hold/Resume (optional, if supported)
+	•	Record (indicator only) — recording controlled by policy; shows active state
+	•	Secondary: Transfer (future), Volume slider, Network quality indicator, Call timer.
+	•	Wrap‑up Timer: Starts on hang‑up; blocks auto‑advance until disposition saved.
+
+Keyboard Shortcuts
+	•	Dial/Answer: Enter
+	•	Hang Up: Esc
+	•	Mute: M
+	•	Disposition Drawer: D
+	•	Save & Next: Shift+Enter
+
+27.3 Audio Devices — Test & Configuration
+	•	Device Settings Modal: Microphone, Speaker, (optional) Camera selection with persistent profile.
+	•	Pre‑call Test: mic level meter, loopback test, test tone for speakers, latency/Jitter MOS indicator.
+	•	Permissions: graceful prompts for mic access; troubleshooting tips.
+	•	Per‑Agent Profile: store preferred device IDs; fallbacks if device missing.
+
+27.4 Telnyx SIP/WebRTC Integration
+	•	Auth: short‑lived tokens per session; tenant/campaign scoping.
+	•	Call Setup: WebRTC (Opus), ICE/STUN/TURN configuration; E.164 normalization.
+	•	Events: ringing/answered/bridged/ended; packet loss/quality stats.
+	•	Webhooks: /webhooks/telnyx-events → write CallEvent & update Activity Timeline.
+	•	DNC Enforcement: pre‑dial lookup; block with reason; one‑click Add to Global DNC disposition.
+
+27.5 Mandatory Disposition Gating
+	•	Rule: Agent cannot advance to next contact or re‑queue until a disposition is submitted.
+	•	Disposition Set (configurable): No Answer, Left Voicemail, Not Interested, Callback (date/time), Qualified/Success, DNC Request, Wrong Number, Invalid.
+	•	Auto‑Actions:
+	•	DNC Request → add number to Global DNC, remove from all queues.
+	•	Qualified/Success → create Lead + attach Qualification Answers.
+	•	Callback → auto‑create task at selected date/time.
+
+27.6 Recording, Logging & QA Access
+	•	Policy: recording on/off per campaign; per‑jurisdiction consent prompts.
+	•	Storage: encrypted at rest (S3) with limited retention; signed URLs for playback.
+	•	Metadata: stored on CallAttempt (recording_url, started_at, ended_at, duration, script_version_id).
+	•	Access Control:
+	•	QA Analyst & Admin: playback + download.
+	•	Agents: no download; optional playback if enabled.
+	•	Player UI: waveform, playback speed, timestamps; link to disposition & notes.
+
+27.7 Script & Qualification Panel
+	•	Script Viewer: read‑only, versioned; merge tags render with current contact/account.
+	•	Qualification Form: dropdown/radio/checkbox/text/number/date; required validation.
+	•	Autosave: answers stored incrementally; submitted on disposition.
+
+27.8 Compliance & Privacy
+	•	Consent Prompts: pre‑connect audio prompt where required; banner shows consent status.
+	•	Quiet Hours: per‑timezone windows; block dialing outside.
+	•	PII Controls: mask digits in UI when screen‑shared (demo mode).
+	•	Audit Log: every call event, recording access, download, and disposition saved.
+
+27.9 Data Model Additions
+	•	SoftphoneProfile(id, user_id, mic_device_id, speaker_device_id, last_test_at)
+	•	CallAttempt (extend): recording_url, wrapup_seconds, script_version_id, qa_locked(bool)
+	•	CallRecordingAccessLog(id, user_id, call_attempt_id, action(play|download), ts)
+
+27.10 APIs (Illustrative)
+	•	POST /telephony/session — create Telnyx token/session
+	•	POST /telephony/call — dial E.164
+	•	POST /telephony/call/:id/hangup | mute | hold | dtmf
+	•	POST /telephony/call/:id/disposition — required before next
+	•	POST /telephony/devices/test — loopback & quality stats
+	•	GET /calls/:id/recording — scoped, QA/Admin only
+	•	Webhooks: /webhooks/telnyx-events
+
+27.11 Agent UX States
+	•	Idle: device ok? quick test CTA.
+	•	Dialing/Ringing: show contact name/number; allow cancel.
+	•	Connected: timer, controls enabled; network MOS indicator.
+	•	Wrap‑up: disposition required; Save & Next gated.
+	•	Blocked: DNC/quiet hours/compliance errors with reason + link to policy.
+
+27.12 Acceptance Criteria
+
+✅ Softphone shows Dial/Hangup/Mute/Speaker/Keypad with keyboard shortcuts.
+✅ Audio device selection + loopback test works and persists per agent.
+✅ Browser‑based calling via Telnyx succeeds; events logged to Activity Timeline.
+✅ Disposition is mandatory before advancing; auto‑actions fire (Lead, DNC, Callback).
+✅ Recordings are captured, attached per call, and accessible only to QA/Admin for download.
+✅ Consent prompts and quiet hours enforced; DNC checked pre‑dial.
+✅ Script & Qualification side panel renders and autosaves.
+✅ All accesses to recordings are audit‑logged.
+
+Outcome: A production‑ready, compliant, and agent‑friendly calling workstation that maximizes productivity and safeguards privacy and reputation.

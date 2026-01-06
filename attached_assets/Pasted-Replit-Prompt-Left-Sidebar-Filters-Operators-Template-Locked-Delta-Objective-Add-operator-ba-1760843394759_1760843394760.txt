@@ -1,0 +1,188 @@
+Replit Prompt — Left Sidebar Filters (Operators + Template-Locked)
+
+Delta Objective:
+Add operator-based filtering for taxonomy fields:
+
+Industries: Contains, Doesn’t contain, Exclude (and standard include modes)
+
+Company Size: Include, Exclude
+
+Revenue: Include, Exclude
+
+(Extendable to Job Titles, Seniority similarly)
+
+Keep: Left-side, Sales Navigator–style, enterprise UI; template-only values; new Job Titles and Tenure filters from prior spec.
+
+Operator Model (Field-Type Aware)
+A) Text/Taxonomy (Industries, Job Titles, Seniority)
+
+Supported operators:
+
+INCLUDES_ANY (default) — records having any of the selected values
+
+INCLUDES_ALL — records having all selected values
+
+EXCLUDES_ANY — records not having any of the selected values
+
+CONTAINS — free-text substring match against the field (case-insensitive)
+
+NOT_CONTAINS — free-text substring negative match
+
+Note: CONTAINS/NOT_CONTAINS use a separate “query” input and do not break template enforcement (chip selections still must be template values; text query is applied to the field’s string).
+
+B) Categorical Buckets (Company Size, Revenue Ranges, Tenure Buckets)
+
+Supported operators:
+
+INCLUDES_ANY (default)
+
+INCLUDES_ALL
+
+EXCLUDES_ANY
+
+(“Contains” does not apply to bucketed categorical fields.)
+
+UI/UX Additions
+
+Each field section gets a compact Operator Bar at the top (pill group or select):
+
+Industries: Includes any • Includes all • Exclude • Contains • Doesn’t contain
+
+Company Size / Revenue / Tenure: Includes any • Includes all • Exclude
+
+Chip selectors remain for picking template values (when using include/exclude modes).
+
+Free-text input appears only if operator is CONTAINS or NOT_CONTAINS (Industries/Job Titles/Seniority).
+
+Preserve multi-condition capability via “+ Add rule” within a section (optional but recommended). Example:
+
+Industries — Rule 1: Includes any → [Software, Healthcare]
+
+Industries — Rule 2: Doesn’t contain → “agency”
+
+Rules within a single field combine with AND; different fields also combine with AND (parent may translate to API query).
+
+Visual cues:
+
+Operator pills: rounded-full border px-2.5 py-1 text-xs
+
+Active pill: border-sky-300 bg-sky-50 text-sky-800
+
+Rule cards: rounded-xl border border-slate-200 bg-white p-3 with remove (✕)
+
+Template Enforcement (unchanged + guard)
+
+Render only fields present in TEMPLATE_SCHEMA.fields.
+
+Chip lists must be exact template values.
+
+Free-text operators (CONTAINS/NOT_CONTAINS) do not introduce new values; they apply as string matches.
+
+Data Contract (updated with operators)
+type Operator =
+  | "INCLUDES_ANY"
+  | "INCLUDES_ALL"
+  | "EXCLUDES_ANY"
+  | "CONTAINS"
+  | "NOT_CONTAINS";
+
+type FieldRule = {
+  operator: Operator;
+  values?: string[];   // template-locked chips (required for INCLUDE/EXCLUDE ops)
+  query?: string;      // free-text for CONTAINS/NOT_CONTAINS
+};
+
+type FiltersState = {
+  keyword: string;
+
+  industries: FieldRule[];            // supports include/exclude + contains
+  jobTitles: FieldRule[];             // same operator set as industries
+  seniorities: FieldRule[];           // same operator set as industries
+
+  revenueRanges: FieldRule[];         // categorical: include/exclude only
+  companySizes: FieldRule[];          // categorical: include/exclude only
+  yearsAtCurrentCompany: FieldRule[]; // categorical buckets
+  yearsInCurrentPosition: FieldRule[];// categorical buckets
+};
+
+Example payload
+{
+  "keyword": "workflow automation",
+  "industries": [
+    { "operator": "INCLUDES_ANY", "values": ["Software","Healthcare"] },
+    { "operator": "NOT_CONTAINS", "query": "agency" }
+  ],
+  "jobTitles": [
+    { "operator": "INCLUDES_ALL", "values": ["VP HR","Director IT"] }
+  ],
+  "revenueRanges": [
+    { "operator": "EXCLUDES_ANY", "values": ["< $1M"] }
+  ],
+  "companySizes": [
+    { "operator": "INCLUDES_ANY", "values": ["201–1,000","1,001–10,000"] }
+  ],
+  "yearsAtCurrentCompany": [
+    { "operator": "INCLUDES_ANY", "values": ["2–3","4–6"] }
+  ],
+  "yearsInCurrentPosition": [
+    { "operator": "INCLUDES_ANY", "values": ["2–3"] }
+  ]
+}
+
+Query Translation (pseudo)
+
+For each field, AND together all its rules:
+
+INCLUDES_ANY(values) → field IN values
+
+INCLUDES_ALL(values) → values ⊆ field_set (intersect count == values.length)
+
+EXCLUDES_ANY(values) → NOT (field IN values)
+
+CONTAINS(query) → LOWER(field_text) LIKE %query%
+
+NOT_CONTAINS(query) → NOT (LOWER(field_text) LIKE %query%)
+
+Combine across fields with AND.
+
+API should normalize to your datastore (SQL/Elastic/Mongo) safely.
+
+Acceptance Criteria
+
+ Operator Bar appears for Industries (5 ops) and for Company Size/Revenue/Tenure (3 ops).
+
+ Contains/Doesn’t contain only visible for string fields (Industries/Job Titles/Seniority).
+
+ Multiple rules per field supported; rules serialize as arrays and evaluate with AND.
+
+ Chip selection remains template-locked; text queries do not add values.
+
+ “Exclude” behaves as EXCLUDES_ANY for categorical chips.
+
+ Mobile/desktop behavior, accessibility, and performance remain at previous standards.
+
+ No off-template fields are rendered; extra fields are removed.
+
+Minimal UI Wiring Snippet (per field)
+// Pseudo within <Section title="Industries">
+<OperatorPills
+  options={[
+    { key: "INCLUDES_ANY", label: "Includes any" },
+    { key: "INCLUDES_ALL", label: "Includes all" },
+    { key: "EXCLUDES_ANY", label: "Exclude" },
+    { key: "CONTAINS", label: "Contains" },
+    { key: "NOT_CONTAINS", label: "Doesn’t contain" }
+  ]}
+  active={currentRule.operator}
+  onChange={(op) => setRule({ operator: op, values: [], query: "" })}
+/>
+
+{(currentRule.operator === "CONTAINS" || currentRule.operator === "NOT_CONTAINS") ? (
+  <TextInput value={currentRule.query} onChange={(v) => setRule({ ...currentRule, query: v })} />
+) : (
+  <ChipMultiSelect
+    options={TEMPLATE_SCHEMA.values.industries}
+    value={currentRule.values ?? []}
+    onChange={(vals) => setRule({ ...currentRule, values: vals })}
+  />
+)}

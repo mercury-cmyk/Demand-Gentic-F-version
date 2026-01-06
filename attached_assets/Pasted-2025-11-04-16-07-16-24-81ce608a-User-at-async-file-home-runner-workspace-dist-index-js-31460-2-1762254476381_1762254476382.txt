@@ -1,0 +1,134 @@
+2025-11-04 16:07:16.24
+81ce608a
+User
+at async file:///home/runner/workspace/dist/index.js:31460:20 {
+2025-11-04 16:07:16.24
+81ce608a
+User
+length: 132,
+2025-11-04 16:07:16.24
+81ce608a
+User
+severity: 'ERROR',
+2025-11-04 16:07:16.24
+81ce608a
+User
+code: '42703',
+2025-11-04 16:07:16.24
+81ce608a
+User
+detail: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+hint: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+position: '143',
+2025-11-04 16:07:16.24
+81ce608a
+User
+internalPosition: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+internalQuery: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+where: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+schema: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+table: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+column: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+dataType: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+constraint: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+file: 'parse_target.c',
+2025-11-04 16:07:16.24
+81ce608a
+User
+line: '1065',
+2025-11-04 16:07:16.24
+81ce608a
+User
+routine: 'checkInsertTargets'
+2025-11-04 16:07:16.24
+81ce608a
+User
+}
+
+2025-11-04 16:07:16.24
+81ce608a
+User
+[DISPOSITION ERROR] error: column "dialed_number" of relation "leads" does not exist
+2025-11-04 16:07:16.24
+81ce608a
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 16:07:16.24
+81ce608a
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 16:07:16.24
+81ce608a
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 16:07:16.24
+81ce608a
+User
+at async DatabaseStorage.createCallDisposition (file:///home/runner/workspace/dist/index.js:6216:35)
+2025-11-04 16:07:16.24
+81ce608a
+User
+at async file:///home/runner/workspace/dist/index.js:31460:20 {
+2025-11-04 16:07:16.24
+81ce608a
+User
+length: 132,
+2025-11-04 16:07:16.24
+81ce608a
+User
+severity: 'ERROR',
+2025-11-04 16:07:16.24
+81ce608a
+User
+code: '42703',
+2025-11-04 16:07:16.24
+81ce608a
+User
+detail: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+position: '143',
+2025-11-04 16:07:16.24
+81ce608a
+User
+internalPosition: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+where: undefined,
+2025-11-04 16:07:16.24
+81ce608a
+User
+schema: undefined,
+20

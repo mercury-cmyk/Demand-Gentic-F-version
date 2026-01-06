@@ -1,0 +1,116 @@
+2025-12-19 12:30:22.04
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:30:22.04
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /api/campaigns/ae5b353d-64a9-44d8-92cf-69d4726ca121/queue/stats
+2025-12-19 12:30:22.06
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:30:22.06
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /ae5b353d-64a9-44d8-92cf-69d4726ca121/suppressions/stats
+2025-12-19 12:30:22.07
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:30:22.12
+cdd7303c
+User
+[GET CAMPAIGN AGENTS] Found 1 agents for campaign ae5b353d-64a9-44d8-92cf-69d4726ca121
+2025-12-19 12:30:22.17
+cdd7303c
+User
+7:30:22 AM [express] GET /api/campaigns/ae5b353d-64a9-44d8-92cf-69d4726ca121/queue/stats 200 in 132m…
+2025-12-19 12:30:22.17
+cdd7303c
+User
+[QUEUE STATS] Campaign ae5b353d-64a9-44d8-92cf-69d4726ca121 stats: { total: 66661, queued: 66661, inProgress: 0, completed: 0, agents: 1 }
+2025-12-19 12:30:23.48
+cdd7303c
+User
+[M365SyncJob] Sync complete - Total: 1, Synced: 0, Errors: 0
+2025-12-19 12:30:23.48
+cdd7303c
+User
+[M365Sync] Synced 0 emails for zahid.m@pivotal-b2b.com
+2025-12-19 12:30:23.48
+cdd7303c
+User
+[M365Sync] Sync complete - Total: 1, Synced: 0, Errors: 0
+2025-12-19 12:30:35.41
+cdd7303c
+User
+7:30:35 AM [express] GET /api/campaigns/ae5b353d-64a9-44d8-92cf-69d4726ca121/suppressions/stats 200 …
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queue/stats
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:30:35.76
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /70434f6e-3ab6-49e4-acf7-350b81f60ea2/suppressions/stats
+2025-12-19 12:30:35.83
+cdd7303c
+User
+[GET CAMPAIGN AGENTS] Found 7 agents for campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-19 12:30:35.90
+cdd7303c
+User
+total: 147493,
+2025-12-19 12:30:35.90
+cdd7303c
+User
+inProgress: 0,
+2025-12-19 12:30:35.90
+cdd7303c
+User
+agents: 7
+2025-12-19 12:30:35.90
+cdd7303c
+User
+}
+2025-12-19 12:30:35.90
+cdd7303c
+User
+[QUEUE STATS] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 stats: {
+2025-12-19 12:30:35.90
+cdd7303c
+User
+queued: 147493,
+2025-12-19 12:30:35.90
+cdd7303c
+User
+completed: 0,
+2025-12-19 12:30:35.90
+cdd7303c
+User
+7:30:35 AM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queue/stats 200 in 146m…
+2025-12-19 12:30:35.90
+cdd7303c
+User
+7:30:35 AM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queue/stats 200 in 146m…
+2025-12-19 12:30:35.90
+cdd7303c
+User
+7:30:35 AM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queue/stats 200 in 146m…

@@ -1,0 +1,32 @@
+UTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:20 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:22 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:24 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[EMAIL VALIDATION JOB] Job 9f95284b-7659-40ba-a380-50b42410a3fc: Batch 1 API Progress: 20/498 (shafiur@corefares.com)
+9:17:26 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+[EMAIL VALIDATION JOB] Job fab07255-ab96-4f57-88e2-708456351625: Batch 1 API Progress: 90/498 (madhu.hk@v3techindia.com)
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:26 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:28 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:30 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-vali…
+[EMAIL VALIDATION JOB] Job 9f95284b-7659-40ba-a380-50b42410a3fc: Batch 1 API Progress: 30/498 (vineet.chauhan@newspace.co.in)
+[AUTH] requireAuth called for: GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/email-validation-jobs/9f95284b-7659-40ba-a380-50b42410a3fc
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+9:17:32 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7

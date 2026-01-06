@@ -1,0 +1,133 @@
+🧠 Architect Agent Prompt — Strategic Field Alignment Implementation
+
+Prompt:
+
+You are the Architect Agent responsible for performing a full system-wide field alignment and filter schema cleanup for Pivotal CRM.
+
+Objective:
+Ensure full alignment between CSV field definitions, database schema, and filter configurations for both Account and Contact entities across:
+- csv-utils.ts (CSV definitions)
+- schema.ts (Database schema)
+- filterConfig.ts (Filter definitions)
+- filter-builder.ts (Filter-to-DB mappings)
+
+Perform the following steps carefully and systematically:
+
+--------------------------------------------------
+🧩 STEP 1 — Field Discovery & Mapping
+--------------------------------------------------
+1. Parse CSV field definitions for:
+   - Accounts from csv-utils.ts
+   - Contacts from csv-utils.ts
+2. Parse database schema for:
+   - Accounts from schema.ts
+   - Contacts from schema.ts
+3. Parse all defined filter fields from:
+   - filterConfig.ts
+   - filter-builder.ts
+
+4. Create a combined mapping reference:
+   - CSV Field Name
+   - Database Column
+   - Filter Field Name
+   - Data Type
+   - Entity (Account/Contact)
+   - Relationship (if applicable, e.g., Contact → Account via accountId)
+
+--------------------------------------------------
+🧠 STEP 2 — Identify Misalignments
+--------------------------------------------------
+1. Identify fields that exist in CSV or schema but are **missing in filters**.
+2. Identify **redundant or duplicate filter fields** (e.g., verificationStatus vs emailStatus).
+3. Identify **invalid filters** that have no corresponding column in the schema.
+4. Identify **naming inconsistencies** (case, plural/singular, underscores, aliases, etc.).
+5. Identify any **filter fields referencing wrong entities** (e.g., account fields under contact filters).
+
+--------------------------------------------------
+🧹 STEP 3 — Clean Up Filters
+--------------------------------------------------
+1. Remove invalid and redundant filter fields.
+2. Merge duplicates — retain only canonical filter names.
+3. Add missing high-value fields:
+   - For Contacts: jobTitle, directPhone, mobilePhone, tags, consentBasis, consentSource, linkedinUrl, list, accountName, accountDomain
+   - For Accounts: domain, mainPhone, linkedinUrl, description, tags, yearFounded, sicCode, naicsCode
+4. Ensure data types are correct and compatible with UI filter components:
+   - Text → text search
+   - Enum → dropdown
+   - Boolean → checkbox
+   - Number → range selector
+   - Date → date picker
+
+--------------------------------------------------
+🧱 STEP 4 — Standardize Naming Conventions
+--------------------------------------------------
+1. Establish one canonical naming convention for each field across:
+   - CSV headers
+   - Database columns
+   - Filter configuration keys
+   - API request/response keys
+2. Update all mismatched keys accordingly.
+3. Generate a central mapping reference file: `/shared/field-mapping.ts`
+   - Include: fieldName, csvKey, dbColumn, filterKey, entity, type, description.
+
+--------------------------------------------------
+🔄 STEP 5 — Update Mappings
+--------------------------------------------------
+1. Update `FILTER_TO_DB_MAPPING` inside `filterConfig.ts` to match new standard names.
+2. Update `filter-builder.ts` logic to point to updated columns and JOINs.
+3. Ensure cross-entity filters (Contacts → Accounts) resolve via `accountId` relationships.
+
+--------------------------------------------------
+🧪 STEP 6 — Testing & Validation
+--------------------------------------------------
+1. Run a schema synchronization check to confirm all field references exist.
+2. Rebuild and deploy filters in all dependent modules:
+   - Campaign Builder (Audience Selection)
+   - Agent Console (Queue Filters)
+   - QA Dashboard
+   - Data Verification Module
+3. Validate:
+   - Filters are visible and functional in UI.
+   - Filter results match expected record counts.
+   - “Number of Results” correctly updates after filtering.
+4. Log all updates to `audit-report.json` with actions: Added / Removed / Renamed / Fixed.
+
+--------------------------------------------------
+📋 STEP 7 — Deliverables
+--------------------------------------------------
+Output:
+1. `field-mapping.ts` — final unified mapping file
+2. `filter-update-summary.md` — list of all actions taken
+3. Updated `filterConfig.ts` and `filter-builder.ts`
+4. `audit-report.json` — structured record of corrections
+
+--------------------------------------------------
+⚠️ SAFETY NOTES
+--------------------------------------------------
+- Do not delete any DB column unless confirmed unused.
+- Backup current filterConfig.ts and filter-builder.ts before modification.
+- Maintain compatibility with all existing API endpoints and UI components.
+
+--------------------------------------------------
+🎯 GOAL
+--------------------------------------------------
+After execution, all Account and Contact fields should:
+- Be fully aligned across CSV, schema, filters, and API.
+- Use standardized names and types.
+- Provide consistent, accurate filtering across all modules.
+- Improve campaign segmentation, QA validation, and compliance filtering.
+
+✅ Usage Notes
+
+Paste this directly into your Replit Architect Agent command panel or internal AI automation task runner.
+Once executed, it will:
+
+Audit field consistency,
+
+Clean up invalid filters,
+
+Add missing high-value filters,
+
+Generate a standardized field-mapping.ts file,
+
+And update your entire filter configuration automatically.

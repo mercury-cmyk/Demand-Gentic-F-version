@@ -1,0 +1,144 @@
+-12-19 19:13:30.22
+3227d645
+User
+telnyxCallId: null,
+2025-12-19 19:13:30.22
+3227d645
+User
+[DISPOSITION ERROR] Stack: error: column "virtual_agent_id" does not exist
+2025-12-19 19:13:30.22
+3227d645
+User
+column: undefined,
+2025-12-19 19:13:30.22
+3227d645
+User
+dataType: undefined,
+2025-12-19 19:13:30.22
+3227d645
+User
+routine: 'errorMissingColumn'
+2025-12-19 19:13:30.22
+3227d645
+User
+at async file:///home/runner/workspace/dist/index.js:52876:20
+2025-12-19 19:13:30.22
+3227d645
+User
+table: undefined,
+2025-12-19 19:13:30.22
+3227d645
+User
+code: '42703',
+2025-12-19 19:13:30.22
+3227d645
+User
+}
+2025-12-19 19:13:30.22
+3227d645
+User
+length: 116,
+2025-12-19 19:13:30.22
+3227d645
+User
+callbackRequested: false,
+2025-12-19 19:13:30.22
+3227d645
+User
+position: '69',
+2025-12-19 19:13:30.22
+3227d645
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:13:30.22
+3227d645
+User
+file: 'parse_relation.c',
+2025-12-19 19:13:30.22
+3227d645
+User
+constraint: undefined,
+2025-12-19 19:13:30.22
+3227d645
+User
+wrongPersonAnswered: false
+2025-12-19 19:13:30.22
+3227d645
+User
+severity: 'ERROR',
+2025-12-19 19:13:30.22
+3227d645
+User
+at async file:///home/runner/workspace/dist/index.js:52876:20 {
+2025-12-19 19:13:30.22
+3227d645
+User
+queueItemId: 'e9c9f666-040c-4500-9bfe-5f52427d7236',
+2025-12-19 19:13:30.22
+3227d645
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:13:30.22
+3227d645
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-12-19 19:13:30.22
+3227d645
+User
+[DISPOSITION ERROR] error: column "virtual_agent_id" does not exist
+2025-12-19 19:13:30.22
+3227d645
+User
+qualificationData: null,
+2025-12-19 19:13:30.22
+3227d645
+User
+qualificationData: null,
+2025-12-19 19:13:30.22
+3227d645
+User
+[DISPOSITION ERROR] error: column "virtual_agent_id" does not exist
+2025-12-19 19:13:30.22
+3227d645
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-12-19 19:13:30.22
+3227d645
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:13:30.22
+3227d645
+User
+queueItemId: 'e9c9f666-040c-4500-9bfe-5f52427d7236',
+2025-12-19 19:13:30.22
+3227d645
+User
+at async file:///home/runner/workspace/dist/index.js:52876:20 {
+2025-12-19 19:13:30.22
+3227d645
+User
+severity: 'ERROR',
+2025-12-19 19:13:30.22
+3227d645
+User
+wrongPersonAnswered: false
+2025-12-19 19:13:30.22
+3227d645
+User
+constraint: undefined,
+2025-12-19 19:13:30.22
+3227d645
+User
+file: 'parse_relation.c',
+2025-12-19 19:13:30.22
+3227d645
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:13:30.22
+3227d645
+User
+position: '69',
+2025-12-19 19:13:30.22
+3227d645
+User
+callbackRequested: false,

@@ -1,0 +1,190 @@
+🎨 Replit Prompt — Left Sidebar Filter Redesign (Beautiful + Operator Model)
+
+Objective:
+Redesign all filters across the app into a left sidebar filter panel that’s elegant, fast, and consistent. Use the simplified operator model (Equals, Not equals, Contains, Does not contain, Begins with, Ends with, Is empty, Has any value) and multi-value chips input. Remove bulky dropdowns; use type-ahead chips only where controlled vocab is required.
+
+1) Layout & Placement
+
+Left Sidebar (fixed, 300–360px):
+
+Stacks filter conditions vertically.
+
+Header: “Filters” + result count badge (e.g., 1,284 results after Apply).
+
+Footer actions: Clear (ghost) · Apply (primary) — sticky at bottom.
+
+Main Content (right): results table/cards.
+
+Responsive:
+
+≥1280px: persistent left panel.
+
+<1280px: collapsed icon opens a slide-in drawer from the left.
+
+2) Visual Design (Beautiful, Enterprise-grade)
+
+Colors: brand navy #0a2540, accent #2f6feb, backgrounds #f8fafc / white.
+
+Cards: rounded 14px, soft shadow, 16–20px padding.
+
+Typography: Inter/Manrope 15px base, 600 for labels.
+
+Dividers: subtle #e6edf5.
+
+Focus states: visible ring (accessibility).
+
+Micro-animations:
+
+Panel slide with Framer Motion.
+
+Chips add/remove with a 120ms scale/fade.
+
+Apply button shows a brief success pulse.
+
+3) Interaction Model (Unified & Simple)
+
+Each Condition Row:
+[ Field ▾ ] [ Operator ▾ ] [ Value chips input … ] ( + )
+
+Operators (all applicable): Equals, Not equals, Contains, Does not contain, Begins with, Ends with, Is empty, Has any value.
+
+Multi-value: Add multiple values as chips (OR within a field; AND across fields).
+
+Remove dropdown lists:
+
+Use free-text or type-ahead chips (for Countries, States, Cities, Seniority, Industry if you want strict taxonomy).
+
+Per-field caps (for precision/perf):
+
+States/Provinces: max 5, Cities: max 5, others: max 10 (configurable).
+
+Apply is explicit: Debounced query on Apply; show spinner + disable while running.
+
+Result Count: After query, update header badge (e.g., “Filters • 1,284 results”).
+
+4) Content & Defaults
+
+Common fields: Job Title, Seniority, Department, Industry, Company Size, Company Revenue, Country/State/City, Tech stack, Account Owner, Created Date, Last Activity.
+
+Value sources:
+
+Free-text for open fields (Title, Domain, Email, City if you don’t enforce taxonomy).
+
+Type-ahead chips (async) for controlled lists: Country, State, City (scoped), Seniority bands (CXO, Director, Vice President, Manager, Non-Manager), Employee size bands, Revenue bands, Industry taxonomy.
+
+5) UX Niceties
+
+Chips input: shows count (e.g., Industries (3/10)).
+
+Helper text on cap: “Max 5 values for States to keep results precise.”
+
+Saved Segments: Save Segment & Load Segment in panel header menu.
+
+Keyboard: Arrow to navigate menus, Enter to select, Backspace removes last chip.
+
+Empty states: “No matches. Try a broader term.”
+
+Errors: Non-blocking toast “Couldn’t fetch suggestions — Retry.”
+
+6) Example Component Skeleton (React + Tailwind)
+// SidebarFilters.tsx
+export default function SidebarFilters() {
+  return (
+    <aside className="w-[340px] shrink-0 border-r border-slate-200 bg-white h-screen sticky top-0 flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b border-slate-200">
+        <h2 className="text-base font-semibold text-slate-900">Filters</h2>
+        <p className="text-sm text-slate-500">Showing <span id="resultCount">—</span> results</p>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {/* Condition Row (repeatable) */}
+        <FilterCondition
+          field="jobTitle"
+          operators={["equals","not_equals","contains","not_contains","begins_with","ends_with","is_empty","has_any_value"]}
+          inputType="chips" // free-text chips
+          maxValues={10}
+        />
+
+        <FilterCondition
+          field="country"
+          operators={["equals","not_equals","is_empty","has_any_value"]}
+          inputType="typeahead-chips" // async suggestions
+          fetchOptions={fetchCountries}
+          maxValues={10}
+        />
+
+        <FilterCondition
+          field="state"
+          operators={["equals","not_equals","is_empty","has_any_value"]}
+          inputType="typeahead-chips"
+          fetchOptions={(q, parents) => fetchStates(q, { countries: parents.country })}
+          parents={["country"]}
+          maxValues={5}
+        />
+
+        <FilterCondition
+          field="city"
+          operators={["equals","not_equals","contains","not_contains","is_empty","has_any_value"]}
+          inputType="typeahead-chips"
+          fetchOptions={(q, parents) => fetchCities(q, { countries: parents.country, states: parents.state })}
+          parents={["country","state"]}
+          maxValues={5}
+        />
+
+        {/* (+) Add Condition button */}
+        <AddConditionButton />
+      </div>
+
+      {/* Footer actions */}
+      <div className="p-4 border-t border-slate-200 flex items-center justify-between">
+        <button className="px-3 py-2 text-slate-700 hover:text-slate-900" onClick={clearAll}>Clear</button>
+        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" onClick={applyFilters}>
+          Apply
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+
+Implement FilterCondition as a reusable row with: Field Select, Operator Select, and Chips Input (free-text or async type-ahead). Use virtualization for long suggestion lists.
+
+7) API & Performance
+
+Type-ahead endpoints (paged):
+
+/filters/countries?query=pak&page=1
+
+/filters/states?countries=US,CA&query=tex&page=1
+
+/filters/cities?countries=US&states=TX,CA&query=aus&page=1
+
+Server validation:
+
+Enforce caps (States/Cities ≤5; others ≤10).
+
+Accept only valid IDs for controlled lists.
+
+Indexes: country_id, state_id, city_id, industry_id, seniority_id, company_size_id, revenue_band_id.
+
+Query model: OR within field, AND across fields.
+
+Caching: 5–15 min for static lists; client uses React Query stale-while-revalidate.
+
+8) Acceptance Criteria
+
+ Filters live in the left sidebar (desktop persistent, mobile drawer).
+
+ Operator model + multi-value chips work for all applicable fields.
+
+ Type-ahead chips used for controlled vocabularies; dropdowns removed elsewhere.
+
+ Result count updates after Apply.
+
+ Per-field caps enforced with friendly helper text.
+
+ Panel is beautiful (consistent shadows, spacing, typography) and fully responsive.
+
+ Saved Segments supported; Clear resets state; errors non-blocking.

@@ -1,0 +1,462 @@
+}
+[DB Pool] Client connected | Total: 2, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 2, Idle: 0, Waiting: 0
+11:22:29 AM [express] GET /api/verification-campaigns/0e956879-e99c-4d10-83b7-e2b31ea57689/email-vali…
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact fbebea0c-33ba-42c3-b1d0-039faca264c0 (remy.lambertin@sodern.fr): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 529177ae-74f7-4d59-88b0-790d7daa081a (mgordnier@proteq.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact ac9e0df2-4979-46ec-8575-40803b0aedeb (tuomas.hauvala@mpk.fi): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact d945407c-5907-43d3-a60c-e048ada1b5f0 (mac@eneconhr.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact eaca3f66-9060-41d5-a3db-8f5409648e18 (dick.williams@truviagroup.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 92c3193b-4653-422c-ae69-9cb072296009 (mhumbek@dn-defence.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 87aac28a-aeaf-447a-b4dd-dbddccf53c1d (elisabeth@aot.global): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact f9f06cb6-0269-4f2d-b2a8-1fd8ca4a23f7 (gerhard@agfranz.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 9d428489-459c-42ff-895a-957f956bf8cc (lmichael@bellflight.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 2c3c9c0a-1801-4109-b06e-b6979313482f (elane@bellflight.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 182ea74c-fa34-4d83-b0d4-9028dfcf3ffb (swetha@spacetug.tech): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact c8c145c1-8975-46ea-9fb7-62b12474ab7c (kirk.harvey@rigfab.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact db004f86-83b9-4bc4-aea5-70a7016b3adb (asporn@defenstech.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 0fb510de-8412-48bb-921a-81e5d1b66fa5 (dave.grattan@vidiwave.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 1678266a-76df-4a4c-a1e2-8d17ec226478 (andrew.hsu@aero.org): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 548c4788-afe7-4e57-a94f-151f72712c0b (byron.hogoboom@aero.org): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 73ec45bc-e7a2-4d11-a1dd-64d4c8de5b39 (steven.lau@aero.org): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 942e34ae-cdb4-4cd8-a4f1-18058962b72e (gordon.mcdonald@smithsdetection.com): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '286',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_target.c',
+  line: '1065',
+  routine: 'checkInsertTargets'
+}
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[EMAIL VALIDATION JOB] Job 93b30177-8a30-4319-9df9-40aecb78a504: Error updating contact 132adc86-870a-470e-91e6-b16ebca5723a (omer@knife.co.il): error: column "kickbox_result" of relation "verification_email_validations" does not exist
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processEmailValidationJob (/home/runner/workspace/server/routes/verification-contacts.ts:1816:11)
+    at async Immediate.<anonymous> (/home/runner/workspace/server/routes/verification-contacts.ts:2158:9) {
+  length: 158,
+  severity: 'ERROR',
+  code: '42703',

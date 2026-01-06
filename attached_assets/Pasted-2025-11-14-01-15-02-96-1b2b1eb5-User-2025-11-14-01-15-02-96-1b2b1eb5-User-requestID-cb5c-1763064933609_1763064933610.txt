@@ -1,0 +1,148 @@
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+},
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+requestID: 'cb5c3c01-f484-4ea1-8395-31d0da65ea86',
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+error: undefined,
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+code: undefined,
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+param: undefined,
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+type: undefined
+2025-11-14 01:15:02.96
+1b2b1eb5
+User
+}
+2025-11-14 01:15:10.76
+1b2b1eb5
+User
+[WebSearch] Error: Google Custom Search API error: Requests from referer are blocked.
+2025-11-14 01:15:10.76
+1b2b1eb5
+User
+[EnrichmentQueue] Failed to enrich contact 7de74d17-eead-4b26-8ba9-e09579ae5116: Google Custom Search API error: Requests from referer are blocked.
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+[CompanyEnrichment] AI extraction error: AuthenticationError: 401 status code (no body)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at APIError.generate (file:///home/runner/workspace/node_modules/openai/core/error.mjs:44:20)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at OpenAI.makeStatusError (file:///home/runner/workspace/node_modules/openai/client.mjs:162:32)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at OpenAI.makeRequest (file:///home/runner/workspace/node_modules/openai/client.mjs:330:30)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at async CompanyEnrichmentService.tryAIInternalKnowledge (file:///home/runner/workspace/dist/index.js:13019:30)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at async CompanyEnrichmentService.extractCompanyDataWithAI (file:///home/runner/workspace/dist/index.js:12954:28)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at async CompanyEnrichmentService.enrichCompanyData (file:///home/runner/workspace/dist/index.js:12930:34)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at async Worker.processEnrichmentJob [as processFn] (file:///home/runner/workspace/dist/index.js:19007:26)
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+at async /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:528:32 {
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+status: 401,
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+headers: Headers {
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+'content-length': '99',
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+'content-type': 'application/json',
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+date: 'Thu, 13 Nov 2025 20:15:15 GMT',
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+via: '1.1 google',
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+'x-request-id': '0e27ab03-1343-47a1-ab72-d87a31c1838c'
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+},
+
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+requestID: '0e27ab03-1343-47a1-ab72-d87a31c1838c',
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+error: undefined,
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+code: undefined,
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+param: undefined,
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+type: undefined
+2025-11-14 01:15:15.56
+1b2b1eb5
+User
+}
+2025-11-14 01:15:17.56
+1b2b1eb5
+User
+[WebSearch] Error: Google Custom Search API error: Requests from referer are blocked.
+2025-11-14 01:15:17.56
+1b2b1eb5
+User
+[EnrichmentQueue] Failed to enrich contact f8df7333-2c8c-4411-a0e1-c615fc4c890c: Google Custom Search API error: Requests from referer are blocked.
+
+Collapse
+
+Wrap
+
+Colors
+

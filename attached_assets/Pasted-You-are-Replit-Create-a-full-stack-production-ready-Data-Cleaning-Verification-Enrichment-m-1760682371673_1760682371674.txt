@@ -1,0 +1,662 @@
+You are Replit. Create a full‑stack, production‑ready **Data Cleaning, Verification & Enrichment** module inside a Next.js + Prisma + PostgreSQL app, aligned with the specs below. Stand up API routes, DB schema, background jobs, and a polished React UI (Tailwind + shadcn/ui) for:
+
+* Project creation (rules, acceptable values, caps, exclusions, assignments)
+* Smart file ingestion & auto‑field mapping
+* Verification queue + Agent Console (dispositions)
+* Email/phone validation (Tier‑1 built‑in; Tier‑2 provider stubs)
+* Enrichment adapters (pluggable)
+* Exports (overall verification data, verified only, deliverable only)
+* RBAC (manager/verifier/qa/viewer) and QA sampling
+* Reporting widgets (rates, exclusions, cap utilization)
+
+## 0) Project Setup
+
+* Stack: **Next.js 14+ (App Router)**, **TypeScript**, **Prisma**, **PostgreSQL**, **Zod**, **TailwindCSS**, **shadcn/ui**, **UploadThing** (or basic upload), **Day.js**, **PapaParse**, **node‑csv**, **fast‑csv**, **dns/promises** for MX lookup. Include lightweight job runner via **next‑cron** (or node‑cron) for background tasks (idempotent by record+stage).
+* Create `.env` with placeholders:
+
+```
+DATABASE_URL="postgresql://user:password@localhost:5432/pivotalcrm"
+ENCRYPTION_KEY="generate-32-bytes"
+SMTP_VALIDATE_TIMEOUT_MS="5500"
+FILE_STORAGE_DIR="./storage"
+ENRICHMENT_PROVIDER_KEYS="{}"  # JSON string map, e.g., {"clearbit":"sk_live_..."}
+```
+
+* Script targets in `package.json`:
+
+```
+"dev": "next dev",
+"build": "next build",
+"start": "next start",
+"prisma:migrate": "prisma migrate dev --name init-dv",
+"seed": "ts-node prisma/seed.ts"
+```
+
+## 1) Directory Structure (create all files)
+
+```
+/prisma/schema.prisma
+/prisma/migrations/** (auto)
+/src/lib/db.ts
+/src/lib/crypto.ts
+/src/lib/emailValidation.ts
+/src/lib/phone.ts
+/src/lib/dedupe.ts
+/src/lib/exclusion.ts
+/src/lib/enrichment.ts
+/src/lib/export.ts
+/src/lib/constraints.ts
+/src/lib/queue.ts (simple job runner)
+/src/app/(dv)/dv/projects/page.tsx
+/src/app/(dv)/dv/projects/new/page.tsx
+/src/app/(dv)/dv/projects/[id]/page.tsx
+/src/app/(dv)/dv/projects/[id]/export/page.tsx
+/src/app/(dv)/dv/console/[projectId]/page.tsx
+/src/app/api/dv/projects/route.ts
+/src/app/api/dv/projects/[id]/route.ts
+/src/app/api/dv/projects/[id]/upload/route.ts
+/src/app/api/dv/projects/[id]/mappings/route.ts
+/src/app/api/dv/projects/[id]/queue/start/route.ts
+/src/app/api/dv/projects/[id]/export/route.ts
+/src/app/api/dv/queue/[projectId]/route.ts
+/src/app/api/dv/runs/route.ts
+/src/app/api/dv/exclusions/route.ts
+/src/app/api/dv/deliveries/[deliveryId]/route.ts (download)
+/src/components/dv/ProjectBuilder.tsx
+/src/components/dv/AcceptableValuesEditor.tsx
+/src/components/dv/ExclusionAttach.tsx
+/src/components/dv/MappingTable.tsx
+/src/components/dv/VerificationChecklist.tsx
+/src/components/dv/DispositionBar.tsx
+/src/components/ui/** (shadcn auto‑gen)
+/storage/.gitkeep
+```
+
+## 2) Prisma Schema (create exactly)
+
+```prisma
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model DVProject {
+  id              String           @id @default(uuid())
+  clientId        String
+  name            String
+  description     String?
+  templateId      String?
+  rulepackId      String?
+  status          DVProjectStatus  @default(draft)
+  capPerCompany   Int              @default(0)
+  dedupeScope     DedupeScope      @default(client)
+  createdBy       String
+  createdAt       DateTime         @default(now())
+  recordsRaw      DVRecordRaw[]
+  records         DVRecord[]
+  fieldConstraints DVFieldConstraint[]
+  fieldMappings   DVFieldMapping[]
+  projectAgents   DVProjectAgent[]
+  exclusions      DVProjectExclusion[]
+  deliveries      DVDelivery[]
+}
+
+enum DVProjectStatus { draft active paused closed }
+
+enum DedupeScope { project client global }
+
+enum DVRecordStatus { new in_queue in_progress needs_fix excluded invalid verified delivered }
+
+enum DVRole { verifier qa manager viewer }
+
+enum DVDisposition { Verified PartiallyVerified InvalidEmail NoPhone Duplicate DoNotUse ExcludedByRule NeedsManualReview }
+
+model DVExclusionList {
+  id        String   @id @default(uuid())
+  name      String
+  scope     ExclusionScope
+  clientId  String?
+  fields    Json
+  createdBy String
+  createdAt DateTime @default(now())
+  projects  DVProjectExclusion[]
+}
+
+enum ExclusionScope { global client project }
+
+model DVProjectExclusion {
+  project   DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  list      DVExclusionList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  listId    String
+  @@id([projectId, listId])
+}
+
+model DVFieldConstraint {
+  id         String   @id @default(uuid())
+  project    DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+  fieldName  String
+  ruleType   String
+  ruleValue  Json
+}
+
+model DVFieldMapping {
+  id          String   @id @default(uuid())
+  project     DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+  clientHeader String
+  crmField    String
+  confidence  Float    @default(0)
+  required    Boolean  @default(false)
+}
+
+model DVRecordRaw {
+  id           String   @id @default(uuid())
+  project      DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  payload      Json
+  importedAt   DateTime @default(now())
+  sourceFile   String?
+  rowNum       Int?
+}
+
+model DVRecord {
+  id           String   @id @default(uuid())
+  project      DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  accountName  String?
+  accountDomain String?
+  contactFullName String?
+  email        String?
+  phoneRaw     String?
+  phoneE164    String?
+  jobTitle     String?
+  country      String?
+  state        String?
+  city         String?
+  zip          String?
+  website      String?
+  extras       Json      @default("{}")
+  status       DVRecordStatus @default(new)
+  dedupeHash   String?
+  exclusionReason String?
+  invalidReason   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  runs         DVRun[]
+}
+
+model DVRun {
+  id           String   @id @default(uuid())
+  record       DVRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  recordId     String
+  project      DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  agentId      String?
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  disposition  DVDisposition?
+  notes        String?
+  checks       Json?
+  enrichment   Json?
+  resultStatus DVRecordStatus?
+}
+
+model DVProjectAgent {
+  project   DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  userId    String
+  role      DVRole @default(verifier)
+  @@id([projectId, userId])
+}
+
+model DVCompanyCap {
+  project   DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  accountDomain String
+  verifiedCount Int @default(0)
+  @@id([projectId, accountDomain])
+}
+
+model DVDelivery {
+  id         String   @id @default(uuid())
+  project    DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+  type       String
+  filter     Json?
+  rowCount   Int?
+  filePath   String?
+  createdBy  String?
+  createdAt  DateTime @default(now())
+}
+```
+
+## 3) Core Libraries (create implementations)
+
+* `src/lib/db.ts`: Prisma client singleton.
+* `src/lib/crypto.ts`: AES‑GCM helpers (future use).
+* `src/lib/dedupe.ts`: `dedupeHash(email, domain, name, phone)` → sha256.
+* `src/lib/phone.ts`: E.164 parse using `libphonenumber-js` (add dependency) with country inference.
+* `src/lib/emailValidation.ts`:
+
+  * Tier‑1: RFC5322 syntax (simple regex), disposable domain list (static), MX lookup via `dns.promises.resolveMx`, timeout handling.
+  * Returns `{ syntax:boolean, mx:boolean, smtp:"valid|invalid|catch_all|unknown" }` (SMTP mocked/stubbed, pluggable).
+* `src/lib/exclusion.ts`: merge global+client+project lists; fast set membership checks.
+* `src/lib/constraints.ts`: evaluate rules (in_list, not_in_list, regex, range, required, allowed_values) against a record.
+* `src/lib/enrichment.ts`: provider router: pass‑through stubs; merge strategy (prefer existing unless empty, or provider if confidence > threshold).
+* `src/lib/export.ts`: query + stream CSV to `/storage/exports/{projectId}/{ts}.csv`.
+* `src/lib/queue.ts`: in‑process job runner with idempotency key `(recordId, stage)`; stages: `normalize`, `tier1_email`, `phone_parse`, `apply_exclusions`, `enqueue`.
+
+## 4) API Endpoints (App Router)
+
+Implement the following routes with input validation via Zod and proper error handling:
+
+* `POST /api/dv/projects` → create project (+ attach exclusion lists).
+* `GET /api/dv/projects` → list projects with counts.
+* `GET /api/dv/projects/[id]` → project detail, stats.
+* `PATCH /api/dv/projects/[id]` → update status, caps, rules, assignments.
+* `POST /api/dv/projects/[id]/upload` → accept CSV/XLSX, sample first 500, suggest mappings.
+* `POST /api/dv/projects/[id]/mappings` → confirm mappings & auto‑create custom fields if needed.
+* `POST /api/dv/projects/[id]/queue/start` → kick off normalization + prechecks.
+* `GET /api/dv/queue/[projectId]?agentId=...&limit=50` → fetch agent queue (statuses `in_queue`/`in_progress`).
+* `POST /api/dv/runs` → submit disposition, checks, enrichment, update `DVRecord.status`; enforce cap.
+* `POST /api/dv/projects/[id]/export` → { type: overall|verified_only|deliverable_only } → generate file + return signed path.
+* `POST /api/dv/exclusions` → CRUD exclusion lists.
+* `GET /api/dv/deliveries/[deliveryId]` → stream file download.
+
+**Status Logic in `POST /api/dv/runs`:**
+
+* Map disposition → record status:
+
+  * `Verified` → `verified` (then increment domain cap; if >= cap, auto‑exclude remaining in queue for same domain).
+  * `InvalidEmail` → `invalid` with `invalidReason`.
+  * `ExcludedByRule` → `excluded` with reason.
+  * `NeedsManualReview` → `needs_fix`.
+
+## 5) UI — Pages & Components
+
+* **/dv/projects**: grid/table of projects with KPIs (Total, In Queue, Verified, Invalid, Excluded, Deliverable Rate, Cap Utilization). Filters share centralized parser (equals/contains/begins/ends/is_empty).
+* **/dv/projects/new**: stepper (7 steps): Details → Upload & Mapping → Rules & Acceptable Values → Exclusions → Verification Steps → Assignment → Review & Launch.
+* **/dv/projects/[id]**: dashboard cards + recent activities + cap-by-domain table.
+* **/dv/console/[projectId]** (Agent Console):
+
+  * 3‑column layout: Record form (left), Checklist (center), Context (right).
+  * Footer `DispositionBar` with hotkeys: **V** verify, **X** exclude, **I** invalid, **R** needs review, **N** save+next.
+  * Queue modes: FIFO / Domain‑bucketed / Priority (toggle).
+
+**Components:**
+
+* `ProjectBuilder.tsx` (stepper with state store via Zustand).
+* `AcceptableValuesEditor.tsx` (chips + regex helper).
+* `ExclusionAttach.tsx` (attach global/client/project lists, quick create).
+* `MappingTable.tsx` (AI suggestions + confidence badges; add/remove mapping rows).
+* `VerificationChecklist.tsx` (Email ✓/✗ with reasons; Phone ✓/✗; Domain; Title; Constraints mismatches highlighted).
+* `DispositionBar.tsx` (sticky footer with primary actions + hotkeys).
+
+## 6) Background Jobs
+
+Use `next-cron` (or node‑cron) to run small batches every minute:
+
+* `normalize-imports` → standardize fields, compute dedupe, set `in_queue` or `excluded`.
+* `tier1-email-checks` → syntax + MX; cache domain results; set `invalid` if hard fail.
+* `apply-exclusions` → merge exclusion lists & constraints.
+* `queue-refill` → maintain agent queue watermark.
+  All jobs are idempotent; never change a record that is `verified` or `delivered`.
+
+## 7) Exports & Downloads
+
+* CSV/XLSX generation via streaming; store under `/storage/exports/{projectId}/`.
+* Types: `all_verification_data`, `verified_only`, `deliverable_only`, `custom_filter`.
+* Record an entry in `DVDelivery` with `rowCount`, `filePath`.
+
+## 8) RBAC & QA
+
+* Add a simple `User` model (out of scope for full auth): simulate current user via header `x-user-id` and `x-user-role` (manager/verifier/qa/viewer) for demo.
+* QA sampling: job `qa-sampler` picks 10–20% of `verified` into `needs_fix` for QA review; QA can finalize.
+* All mutations write an audit trail via `DVRun`.
+
+## 9) Validation & Filter Engine
+
+* Central filter parser used in both list views and exports: operators `equals`, `contains`, `begins_with`, `ends_with`, `is_empty`.
+* Provide util to build Prisma where clauses from filter JSON.
+
+## 10) Seed Script (minimal)
+
+Create `prisma/seed.ts` to create:
+
+* 1 test project with `capPerCompany=5`.
+* 2 exclusion lists (global disposable domains; client denied companies).
+* 3 users (manager, verifier, qa) in a simple in‑memory map or `User` model if added.
+
+## 11) Developer UX
+
+* Add Tailwind + shadcn/ui setup; base shell with sidebar `Data Verification` → Projects, Console, Exclusions.
+* Add Toasts for saves; optimistic updates; suspense boundaries.
+* Error boundaries on API failures.
+
+## 12) Acceptance Tests (manual)
+
+* Create project → upload CSV → confirm mappings → start queue.
+* Records normalize; exclusions and constraints apply; duplicates removed by scope.
+* Agent verifies a few; cap triggers auto‑exclusions for same domain.
+* Export `verified_only` and `deliverable_only` → files downloadable.
+
+## 13) Commands to Run
+
+1. Install deps:
+
+```
+npm i next react react-dom typescript prisma @prisma/client zod tailwindcss postcss autoprefixer class-variance-authority clsx lucide-react zustand dayjs papaparse fast-csv libphonenumber-js next-cron
+```
+
+2. Init Tailwind & shadcn (generate Button, Card, Table, Badge, Input, Select, Toast):
+
+```
+npx tailwindcss init -p
+# (assume shadcn generator available)
+```
+
+3. Prisma migrate & seed:
+
+```
+npx prisma init
+npm run prisma:migrate
+npm run seed
+```
+
+4. Start dev:
+
+```
+npm run dev
+```
+
+## 14) Notes & Stubs
+
+* SMTP "Tier‑2" verification is stubbed; expose provider interface and a fake response with `unknown` for catch‑all domains.
+* File uploads: keep to local `/storage` for now; abstract to S3 later.
+* Auth: header‑based role simulation for demo; integrate your real RBAC later.
+* If Redis is available later, replace `queue.ts` with BullMQ; keep function signatures stable.
+
+## 15) What to Show on First Run
+
+* `/dv/projects` with one seeded project and live counters.
+* `/dv/projects/new` wizard working end‑to‑end (save draft).
+* `/dv/console/[projectId]` functional with hotkeys and disposition updates.
+* Export page that can generate and download CSV for "Verified Only".
+
+Build all files, wire routes, and ensure the app runs without TypeScript errors. Provide sensible UI polish (cards, tables, badges) and keep latency low when loading the next record in the Agent Console.
+
+---
+
+## 16) Account‑Based Verification (ABV) — New Option
+
+Add a **toggle at Project level and in the Agent Console** to switch between *Record‑by‑Record* and **Account‑Based Verification** modes. In ABV, verifiers work account‑by‑account (e.g., by **domain/company**), reviewing all associated contacts, validating the **required number of contacts per account**, and then moving to the next account.
+
+### A) Prisma Additions (migration)
+
+Extend the schema with account entities and links. Create these **additional models/fields** (new migration):
+
+```prisma
+model DVAccount {
+  id             String      @id @default(uuid())
+  project        DVProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId      String
+  accountName    String?
+  accountDomain  String
+  website        String?
+  linkedinUrl    String?
+  targetContacts Int         @default(0)  // required # to verify in ABV for this account (0 = no target)
+  verifiedCount  Int         @default(0)
+  status         ABVStatus   @default(new)
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  records        DVRecord[]
+  assignments    DVAccountAssignment[]
+  @@unique([projectId, accountDomain])
+}
+
+enum ABVStatus { new in_progress completed cap_reached paused }
+
+model DVAccountAssignment {
+  account   DVAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId String
+  userId    String
+  role      DVRole    @default(verifier)
+  @@id([accountId, userId])
+}
+```
+
+Link records to accounts (add field to `DVRecord`):
+
+```prisma
+model DVRecord {
+  // ...existing fields
+  accountId    String?
+  account      DVAccount? @relation(fields: [accountId], references: [id])
+}
+```
+
+### B) Data Hydration & Backfill
+
+* During **normalization/import**, automatically upsert a `DVAccount` per unique `accountDomain` (and `accountName` when present) under the project, and set `DVRecord.accountId` accordingly.
+* For existing projects, add a backfill job to create `DVAccount` rows and link existing `DVRecord`s.
+
+### C) Project Settings & Targets
+
+* In **Project Builder → Details**, add **ABV Mode** switch (Off/On). When On, show:
+
+  * **Default Target per Account** (number). Default 0.
+  * **Target Strategy**: `Uniform` (same number for all), `Rules‑Based` (e.g., industry/country), or `Manual`.
+* In **Accounts tab** on the project page, allow editing `targetContacts` per account, bulk set via filters, and upload CSV with `accountDomain,targetContacts` for overrides.
+* **Effective cap** per account is `min(targetContacts if >0, capPerCompany if >0 else ∞)`.
+
+### D) ABV API Endpoints
+
+Create these endpoints in addition to existing ones:
+
+```
+GET    /api/dv/projects/[id]/accounts            // list accounts with progress and counts
+PATCH  /api/dv/projects/[id]/accounts/targets    // bulk update targets by filter or CSV map
+GET    /api/dv/projects/[id]/accounts/[accountId]// account detail + contacts summary
+POST   /api/dv/projects/[id]/accounts/assign     // assign accounts to agents (ABV mode)
+GET    /api/dv/queue/[projectId]?mode=abv&agentId=...  // next account + its pending contacts
+```
+
+**Response shape (list):**
+
+```json
+{
+  "items": [{
+    "accountId":"...",
+    "name":"Acme Inc",
+    "domain":"acme.com",
+    "target": 3,
+    "verified": 2,
+    "pending": 5,
+    "status": "in_progress"
+  }],
+  "total": 120
+}
+```
+
+### E) Agent Console (ABV Mode)
+
+New route: **`/dv/console/[projectId]/accounts`** with three panes:
+
+1. **Account Navigator (left)** — searchable list with progress bars; keyboard nav (↑/↓), shows `verified/target`.
+2. **Account Detail (center)** — company card (name, domain, website, LinkedIn), **Target vs Verified** bar, cap note, and **Contacts to Verify** smart list (only `in_queue`/`in_progress`).
+3. **Contacts (right)** — table/cards of contacts with inline validation widgets (email/phone checks), quick edit of fields, and per‑row **Disposition**. Bulk verify actions allowed when all checks pass.
+
+**Hotkeys:** `Shift+N` next account, `Shift+P` previous account. Within a contact row: `V` verify, `X` exclude, `I` invalid, `R` needs review. `Enter` saves & focuses next contact.
+
+**Completion rule:** When `verifiedCount >= effectiveTarget`, auto‑mark `DVAccount.status = completed` and advance the agent to the next assigned account. If `capPerCompany` is reached first, mark `cap_reached` and move on.
+
+### F) Status & Counters Logic
+
+* On each `POST /api/dv/runs` with disposition `Verified`, if the record has `accountId`:
+
+  * Increment `DVAccount.verifiedCount`.
+  * If `verifiedCount >= effectiveTarget` → set `completed` and enqueue account switch for the agent.
+* If project `capPerCompany > 0` and domain cap triggers, set `DVAccount.status = cap_reached` and **exclude** remaining queued contacts for that account (`ExcludedByRule: cap_reached`).
+
+### G) Manager Views
+
+* **Project → Accounts tab**: table with columns `Account`, `Domain`, `Target`, `Verified`, `Pending`, `Status`, `Assigned Agents`, quick actions (edit target, assign, pause account).
+* **Account Detail page** (`/dv/projects/[id]/accounts/[accountId]`): stats cards, domain cap usage, list of all contacts (with filters), and activity timeline (recent runs).
+
+### H) Reporting
+
+* New widgets on project dashboard: **ABV Progress** (accounts completed vs total), **Avg contacts verified per account**, **Top blocked reasons by account**, **Cap hits by domain**.
+* Export type `abv_summary`: one row per account with `target, verified, pending, status`.
+
+### I) Queueing Strategy (ABV)
+
+* ABV queue prioritizes accounts with: (1) remaining target, (2) enough pending contacts to meet target, (3) not `paused`/`completed`/`cap_reached`.
+* Support **agent account assignment**; if assignments exist, agent only receives those accounts. Otherwise, round‑robin accounts.
+
+### J) UI Polish
+
+* Progress chips: `2/3 Verified` with subtle bar.
+* Warnings: `Target < Cap` or `Cap < Target` badges with tooltips.
+* Sticky footer in account view: `Verified X / Target Y • Next Account` primary button.
+
+### K) Acceptance Criteria (ABV)
+
+* Can enable ABV on a project, set default and per‑account targets.
+* Agent console (ABV) shows accounts and all associated contacts; verifier can reach target and **auto‑advance**.
+* Effective cap respected; when reached, remaining contacts are excluded and account marked `cap_reached`.
+* Manager can assign accounts to agents, edit targets in bulk, and export `abv_summary`.
+
+````
+
+
+---
+
+## 17) Dynamic Agent Queues & Admin Selections (Filters-Driven)
+You must support **admin-selected contact pools** and **agent-side dynamic filters** that shape each agent’s live queue. Defaults: if no filter is applied in the Agent Console, queue **all contacts selected by the admin** for the project/campaign. If the admin didn’t select a subset, default to **all eligible (in_queue/in_progress) contacts**.
+
+### A) Schema Additions
+```prisma
+model DVSelectionSet {
+  id         String   @id @default(uuid())
+  project    DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+  name       String
+  description String?
+  // JSON filter DSL compatible with the centralized parser (equals, contains, begins_with, ends_with, is_empty, in, not_in, regex)
+  filterJson Json
+  // hard pin explicit record IDs if needed (unioned with filter results)
+  recordIds  Json?    // string[] of DVRecord IDs
+  isDefault  Boolean  @default(false) // admin can mark the default selection for this project
+  createdBy  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Persist agent console filter state (per agent per project), optional
+model DVAgentFilterState {
+  id         String   @id @default(uuid())
+  project    DVProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+  agentId    String
+  mode       String   @default("records") // "records" or "abv"
+  filterJson Json?    // agent-applied filters; when null → no filter applied
+  selectionSetId String?
+  updatedAt  DateTime @updatedAt
+  @@unique([projectId, agentId, mode])
+}
+
+// Optional: flag on record for admin selection snapshot (denormalized for speed)
+model DVRecord {
+  // ...existing fields
+  adminSelected Boolean @default(false)
+}
+````
+
+### B) Central Filter DSL (reusable)
+
+* Reuse the existing filter parser to build Prisma `where` clauses from `filterJson`.
+* Supported operators: `equals, contains, begins_with, ends_with, is_empty, in, not_in, regex` on normalized fields and `extras`.
+* ABV mode: filters apply to **contacts within the current account**; root account filtering (e.g., country/industry) happens at the account list level.
+
+### C) Admin Workflow
+
+1. **Create/Save Selection Sets** under Project → **Selections** tab:
+
+   * Build via UI filters (and/or upload explicit record IDs).
+   * Mark one **Default Selection** (`isDefault = true`). Only one default per project.
+2. **Apply Selection Set to Project**: a project can have 0..n sets; the default governs queues when agents have no filters.
+3. **Optional snapshot**: set `adminSelected=true` for records contained in the default selection to speed up default queries.
+
+### D) Agent Console Behavior
+
+* The queue is **the intersection** of:
+
+  1. **Selection scope**: default admin selection set (or all eligible if none), or a specific selection picked by the agent/manager.
+  2. **Agent filters**: additional filters applied live by the agent.
+* If **no agent filter** is applied → queue uses **admin default selection** only.
+* If **admin has no default selection** → queue uses all `in_queue`/`in_progress` per mode (records or ABV account’s contacts).
+* The agent can **save** their filter as “My Default” (stored in `DVAgentFilterState`).
+
+### E) API Extensions
+
+```
+GET   /api/dv/projects/[id]/selections               // list selection sets
+POST  /api/dv/projects/[id]/selections               // create/update selection set (CRUD)
+PATCH /api/dv/projects/[id]/selections/default       // set default selection (one per project)
+
+GET   /api/dv/queue/[projectId]
+      Query:
+        mode=records|abv
+        agentId=...
+        selection=default|all|<selectionSetId>   // default → admin default; all → ignore selection sets
+        filter=BASE64URL(JSON)                   // optional agent filterJson
+        limit=50
+
+POST  /api/dv/agent-filter-state                   // save agent default filter & selection choice
+```
+
+**Queue Resolution (server):**
+
+1. Determine **selection scope**:
+
+   * `selection=default` → use admin default selection; if none → `all`.
+   * `selection=<id>` → load that selection set.
+   * `selection=all` → no selection restriction.
+2. Build base `where` for eligible statuses: `in_queue` or `in_progress` (and **current account** if `mode=abv`).
+3. Apply selection set `filterJson` and explicit `recordIds` (union), then intersect with agent `filterJson` (AND), ensuring dedupe.
+4. Order by queue strategy (FIFO, priority, domain-bucketed); return next `limit` records and allocate a lock token if needed.
+
+### F) UI — Agent Console Controls
+
+* **Selection picker** (dropdown): `Default (Admin)`, `All Eligible`, or any named selection set.
+* **Filter bar** with chips and an “Advanced” JSON editor modal.
+* **Save as My Default** button to persist via `DVAgentFilterState`.
+* **Counts** badge: show (matching / eligible) with live updates.
+
+### G) Background Queue Refill
+
+* The `queue-refill` job uses the **same resolution logic** to maintain a per‑agent queue watermark (e.g., next 200 IDs cached in memory/Redis). If using in-memory, include agentId in the cache key.
+
+### H) ABV Mode Specifics
+
+* The **Account Navigator** list respects selection sets when `selection != all`. Example: an admin selection that narrows to `country=US` will show only US accounts and their contacts.
+* Within an account, the **Contacts to Verify** list respects agent filters (e.g., `job_title contains Director`).
+
+### I) Acceptance Criteria
+
+* Admin can create selection sets, mark one default, and (optionally) snapshot `adminSelected` flags.
+* Agent with **no filters** sees a queue comprised of **only admin-selected contacts** (or all eligible if no default selection exists).
+* Applying filters in the Agent Console **immediately** reshapes the queue.
+* API `/api/dv/queue` returns the correct set for all combinations of `selection` and `filter`.
+* ABV mode correctly limits to the active account and honors both admin selection and agent filters.
+
+```
+```

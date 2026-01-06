@@ -1,0 +1,74 @@
+AI Quality Parameters & Transcript Extraction (Simplified Version)
+1. Overview
+
+When updating or configuring AI Quality Parameters, the system should allow users to define custom qualification criteria using natural language.
+The AI must interpret and process these natural language instructions automatically to update its internal evaluation and scoring rules.
+
+2. Example: AI Qualification Criteria (Natural Language Input)
+
+“Content Interest is Yes (Mandatory).
+Permission to Send Content is Yes (Mandatory).
+Deduct 5 points if Email Confirmation is missing.
+Lead has no objection to future contact.
+Lead confirmed involvement in export-related activities.
+Company must be active in the UK Companies House Database (Required).
+Company must have a valid Companies House Registration Number (Required).
+Contact must be Manager or above.
+Contact Country must be the United Kingdom.”
+
+The AI should convert this natural language input into structured qualification rules and automatically evaluate leads accordingly.
+
+3. AI Transcript Extraction
+
+The AI should automatically read call transcripts and extract key qualification details based on what the lead or agent says.
+These extracted values should be filled into the CRM and Campaign QA fields for accurate and automated lead qualification.
+
+4. Key Functionality
+
+The system must support the creation of campaign-level custom QA fields within the QA module.
+
+These fields allow users to capture and verify campaign-specific parameters, such as:
+
+Company Status in the UK Companies House Database
+
+Database Registration Number
+
+Company’s Full Legal Name (as per Companies House)
+
+The AI should automatically map, extract, and update these custom QA fields using data from both call transcripts and CRM records.
+
+5. Information to Extract
+Parameter	Expected Value	Notes
+Content Interest	Yes / No	Detect if the lead shows interest in receiving or engaging with content.
+Permission to Send Content	Yes / No	Identify if the lead gives consent for follow-ups or marketing messages.
+Marketing Asset Consent	Yes / No	Identify if the lead agreed to receive a marketing asset (e.g., brochure, whitepaper, or content).
+Email Confirmation	Present / Missing	Check if the lead confirms their email address.
+Future Contact Consent	Yes / No	Identify if the lead agrees to be contacted again in the future.
+Export Involvement	Yes / No	Detect if the lead or company is involved in export-related business.
+Company Status	Active (UK Companies House)	Verify if the company is active in the UK Companies House database.
+Company Number	Present	Must include a valid Companies House registration number.
+Contact Seniority	Manager or Above	Confirm that the contact’s role is managerial or higher.
+Contact Country	United Kingdom	Verify that the contact is based in the UK.
+6. Data Sources
+
+Call Transcript: Extracted automatically from recorded conversations.
+
+CRM Contact Data: Includes existing contact fields such as name, email, title, and permissions.
+
+Account Data: Contains company-level information like registration number and company status.
+
+Campaign QA Custom Fields: Custom QA fields created per campaign to store extracted and verified qualification data.
+
+7. Example Output
+{
+  "content_interest": "Yes",
+  "permission_to_send_content": "Yes",
+  "marketing_asset_consent": "Yes",
+  "email_confirmation": "Present",
+  "future_contact_consent": "Yes",
+  "export_involvement": "Yes",
+  "company_status": "Active (UK Companies House)",
+  "company_number": "12345678",
+  "contact_seniority": "Manager",
+  "contact_country": "United Kingdom"
+}

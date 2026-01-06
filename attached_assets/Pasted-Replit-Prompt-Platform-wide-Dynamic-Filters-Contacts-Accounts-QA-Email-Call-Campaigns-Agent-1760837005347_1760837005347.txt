@@ -1,0 +1,309 @@
+Replit Prompt — Platform-wide Dynamic Filters (Contacts, Accounts, QA, Email & Call Campaigns, Agent Console)
+
+Goal: Standardize and upgrade the Filter UI/UX across all pages (Contacts, Accounts, QA, Email Campaigns, Call Campaigns, Agent Console) using a config-driven, dynamic system. Support multi-select with enforced caps, DB-backed dropdowns, async type-ahead geo fields, scoped dependencies (Country → State → City), saved segments, and blazing-fast performance.
+
+Note (include as requirement):
+
+Now lets work on fitlers I see filters are not showing the correct fileds for contacts, Accounts, QA, Email Cmapaign, Call Campaign in a categoriesd way. Lets imprve the filter Look across All pages including agent consosole, make sure it is dynamic with all fields.
+
+1) Scope & Deliverables
+
+Build a reusable Filter Framework that:
+
+Renders context-aware filter sets per module (Contacts, Accounts, QA, Email Campaign, Call Campaign, Agent Console).
+
+Uses a single source-of-truth config to define fields, types, data sources, and selection caps.
+
+Supports:
+
+Multi-select dropdowns (DB-backed lists)
+
+Async type-ahead for Country/State/City (with parent scoping)
+
+Date presets + custom ranges
+
+Selection caps with clear UX warnings
+
+Save / Load named Segments
+
+Apply / Clear with debounced network calls
+
+Enforces RBAC: show only fields the current role is allowed to filter by.
+
+Ships with unit tests + API contracts and an acceptance checklist.
+
+Deliverables:
+
+filterConfig.ts (module categories + field definitions)
+
+FilterShell (controller) + MultiSelect, AsyncTypeaheadMulti, DateRange, ChipsBar
+
+REST endpoints for options + search
+
+Persisted Segments API
+
+Integration on: Contacts, Accounts, QA, Email Campaigns, Call Campaigns, Agent Console queue pane
+
+Documentation: README + Storybook stories
+
+Test suite (components + API)
+
+2) Tech Stack & Conventions
+
+Frontend: React + TypeScript, TailwindCSS, @shadcn/ui, Headless UI (Combobox/Listbox), lucide-react icons.
+
+State: React Query for data fetching/caching; Zod for runtime validation.
+
+Backend: Node/Express (or existing service), PostgreSQL with indexed lookup tables.
+
+Accessibility: aria labels, keyboard nav, focus rings, color contrast AA.
+
+3) Global UX Spec
+
+Filter Bar Layout
+
+Row 1 (always visible): Search | Industries | Company Size | Company Revenue | Seniority Level
+
+Row 2 (“More Filters” collapsible): Country | State/Province | City | Technologies | Job Functions | Departments | Account Owner | Created Date | Last Activity
+
+Footer: Save Segment | Load Segment (left) · Clear | Apply (right)
+
+Behaviors
+
+Selected values appear as chips with quick remove (×).
+
+Field label shows count: e.g., Industries (3/10).
+
+Limits & Warnings: When hitting cap, show subtle helper: “Maximum X selections allowed.”
+
+Dependent filters:
+
+States limited to selected Countries.
+
+Cities limited to selected Countries/States.
+
+Apply is explicit (no auto-run for each pick). Show spinner during query.
+
+Mobile: open filters as full-screen sheet.
+
+Selection Caps (performance-tuned)
+
+Industries / Company Size / Company Revenue / Seniority / Technologies / Job Functions / Departments / Account Owner: max 10
+
+Countries: max 10
+
+States/Provinces: max 5
+
+Cities: max 5
+
+Date ranges: presets (7/30/90 days) + custom.
+
+4) Config-Driven Architecture
+
+filterConfig.ts (single source of truth)
+
+export type FilterField =
+  | "industries" | "companySizes" | "companyRevenue" | "seniorityLevels"
+  | "countries" | "states" | "cities"
+  | "technologies" | "jobFunctions" | "departments"
+  | "accountOwners" | "createdDate" | "lastActivity";
+
+export const BASE_FILTERS = {
+  industries:     { type: "multi",     label: "Industries",       max: 10, source: "industries" },
+  companySizes:   { type: "multi",     label: "Company Size",     max: 10, source: "company-sizes" },
+  companyRevenue: { type: "multi",     label: "Company Revenue",  max: 10, source: "company-revenue" },
+  seniorityLevels:{ type: "multi",     label: "Seniority Level",  max: 10, source: "seniority-levels" },
+  countries:      { type: "typeahead", label: "Country",          max: 10, source: "countries" },
+  states:         { type: "typeahead", label: "State / Province", max: 5,  source: "states", parents: ["countries"] },
+  cities:         { type: "typeahead", label: "City",             max: 5,  source: "cities",  parents: ["countries","states"] },
+  technologies:   { type: "multi",     label: "Technologies",     max: 10, source: "technologies" },
+  jobFunctions:   { type: "multi",     label: "Job Function",     max: 10, source: "job-functions" },
+  departments:    { type: "multi",     label: "Department",       max: 10, source: "departments" },
+  accountOwners:  { type: "multi",     label: "Account Owner",    max: 10, source: "users" },
+  createdDate:    { type: "date-range",label: "Created Date" },
+  lastActivity:   { type: "date-range",label: "Last Activity" }
+} as const;
+
+export const MODULE_FILTERS: Record<string, FilterField[]> = {
+  contacts: [
+    "industries","companySizes","companyRevenue","seniorityLevels",
+    "countries","states","cities","technologies","jobFunctions",
+    "departments","accountOwners","lastActivity","createdDate"
+  ],
+  accounts: [
+    "industries","companySizes","companyRevenue","countries","states","cities",
+    "technologies","departments","accountOwners","lastActivity","createdDate"
+  ],
+  qa: [
+    "accountOwners","countries","states","cities","lastActivity","createdDate"
+  ],
+  emailCampaigns: [
+    "industries","companySizes","seniorityLevels","countries","states","cities","lastActivity","createdDate"
+  ],
+  callCampaigns: [
+    "industries","companySizes","seniorityLevels","countries","states","cities","accountOwners","lastActivity","createdDate"
+  ],
+  agentConsole: [
+    "industries","companySizes","seniorityLevels","countries","states","cities"
+  ]
+};
+
+
+RBAC filter visibility
+
+export const FILTER_RBAC = {
+  Admin:      { allow: "all" },
+  Manager:    { allow: ["industries","companySizes","companyRevenue","seniorityLevels","countries","states","cities","accountOwners","lastActivity","createdDate"] },
+  Agent:      { allow: ["seniorityLevels","countries","states","cities","lastActivity"] }
+} as const;
+
+5) UI Components (React/Tailwind)
+
+FilterShell (controller): reads module and user role, resolves allowed fields from config, enforces caps, manages state, emits normalized payload on Apply.
+
+MultiSelect:
+
+Checkbox list, search-in-dropdown, chips summary, virtualization for >100 options.
+
+AsyncTypeaheadMulti:
+
+Debounced (300ms) request, shows suggestions; respects parents to scope results.
+
+DateRangePicker:
+
+Presets + custom (Zod-validated).
+
+ChipsBar:
+
+Displays all active selections; allow quick clear of individual chips.
+
+UX polish: Skeleton while loading options, toasts for errors, subtle info text when hitting limits.
+
+6) API Contracts
+
+Options (paged)
+
+GET /filters/industries?query=&page=1&limit=50
+
+GET /filters/company-sizes
+
+GET /filters/company-revenue
+
+GET /filters/seniority-levels
+
+GET /filters/countries?query=pak
+
+GET /filters/states?countries=US,CA&query=tex
+
+GET /filters/cities?countries=US&states=TX,CA&query=aus
+
+GET /filters/technologies?query=hub
+
+GET /filters/job-functions
+
+GET /filters/departments
+
+GET /filters/users?role=Account%20Owner
+
+Search (example: Contacts)
+
+POST /search/contacts
+{
+  "q": "hr director",
+  "filters": {
+    "industries": ["Medical Devices","Software"],
+    "companySizes": ["201-500","501-1000"],
+    "companyRevenue": ["$50M-$100M"],
+    "seniorityLevels": ["Director","VP","C-Level"],
+    "countries": ["US","PK"],
+    "states": ["TX","CA"],
+    "cities": ["Austin","San Jose"],
+    "technologies": ["Salesforce","HubSpot"],
+    "accountOwners": ["user_123"]
+  },
+  "page": 1,
+  "pageSize": 50,
+  "sort": {"field": "lastActivityAt", "dir": "desc"}
+}
+
+
+Segments
+
+POST /segments { name, module, payload }
+
+GET /segments?module=contacts
+
+DELETE /segments/:id
+
+7) Backend Rules & Performance
+
+Indexes on all lookup columns: industry_id, company_size_id, revenue_band_id, seniority_id, country_id, state_id, city_id, tech_id, (country_id, state_id, city_id).
+
+IN() caps respected server-side: reject if client sends > cap values; return 400 with message.
+
+AND across groups; IN within group to keep precision:
+
+WHERE industry_id IN (...)
+  AND country_id IN (...)
+  AND (state_id IS NULL OR state_id IN (...))
+
+
+Caching: memory cache 5–15 min for static lists; React Query on client with stale-while-revalidate.
+
+Virtualize large lists and paginate server responses.
+
+Debounce 300ms for type-ahead; cancel stale requests.
+
+8) Security & Compliance
+
+Enforce RBAC on server for allowed fields.
+
+Sanitize inputs; only accept IDs from lookup tables.
+
+Rate-limit option endpoints; paginate.
+
+Log filter usage for audit.
+
+9) Accessibility & Internationalization
+
+All inputs labeled; aria attributes set.
+
+Keyboard: arrows to navigate, Enter to select, Backspace removes last chip.
+
+Right-to-left safe; locale-aware date ranges.
+
+10) QA / Acceptance Criteria
+
+ Each module shows only its configured fields (per MODULE_FILTERS).
+
+ Caps enforced: 10 for most, 5 for States/Cities.
+
+ Country → State → City scoping works across all modules.
+
+ Saved Segments persist, load correctly, and respect RBAC.
+
+ Filters do not trigger search until Apply; Clear resets state.
+
+ Agent Console queue respects filters instantly after Apply.
+
+ Performance: option fetch <300ms cached; search <1.5s for typical caps.
+
+ A11y: tab through, screen-reader labels verified.
+
+11) Rollout Plan
+
+Implement components + config; mount on a Feature Flag.
+
+Replace per-page legacy filters with FilterShell(module="...").
+
+Migrate existing saved filters to Segments (one-time script).
+
+Monitor metrics, remove flag after stable week.
+
+Success looks like:
+
+Consistent, beautiful, dynamic filters everywhere (including Agent Console).
+
+Sharper, more precise results thanks to enforced caps and scoped geo logic.
+
+Faster teams and fewer support questions about “missing” or “wrong” fields.

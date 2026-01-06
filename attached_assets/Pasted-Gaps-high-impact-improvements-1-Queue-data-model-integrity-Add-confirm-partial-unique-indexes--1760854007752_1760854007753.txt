@@ -1,0 +1,229 @@
+Gaps & high-impact improvements
+1) Queue data model & integrity
+
+Add/confirm partial unique indexes (with completed filter) and covering indexes.
+
+-- Manual queue: prevent dupes unless completed
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_queue_active
+ON agent_queue (campaign_id, contact_id)
+WHERE status <> 'completed';
+
+-- Power queue: ensure one active row per (campaign, contact)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_queue_active
+ON campaign_queue (campaign_id, contact_id)
+WHERE status NOT IN ('completed','failed');
+
+-- Pull-path performance (manual)
+CREATE INDEX IF NOT EXISTS ix_agent_queue_pull
+ON agent_queue (campaign_id, status, priority DESC, scheduled_for NULLS FIRST);
+
+-- Dial-path performance (power)
+CREATE INDEX IF NOT EXISTS ix_campaign_queue_pull
+ON campaign_queue (campaign_id, status, next_attempt_at, priority DESC);
+
+
+Add an “immutable provenance” column for auditability.
+
+enqueued_by (system|userId|dv_project_id)
+
+enqueued_reason (campaign_audience|retry|callback|dv_enrollment|manual_add)
+
+Guardrails for lock expiry & retries
+
+Store lock_version (integer) and use … WHERE id = ? AND lock_version = ? updates to enforce optimistic concurrency for webhook races.
+
+2) Transaction & pull semantics (manual dial)
+
+Use a single transaction for select+lock+assign to eliminate rare race windows.
+
+// Pseudocode (Drizzle)
+await db.transaction(async (tx) => {
+  const [row] = await tx.execute(sql`
+    SELECT id
+    FROM agent_queue
+    WHERE campaign_id = ${campaignId}
+      AND status = 'queued'
+      AND (scheduled_for IS NULL OR scheduled_for <= NOW())
+    ORDER BY priority DESC, created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1;
+  `);
+
+  if (!row) return null;
+
+  await tx.update(agent_queue)
+    .set({
+      status: 'locked',
+      agent_id: agentId,
+      locked_at: sql`NOW()`,
+      lock_expires_at: sql`NOW() + INTERVAL '15 minutes'`,
+      lock_version: sql`lock_version + 1`
+    })
+    .where(and(
+      eq(agent_queue.id, row.id),
+      eq(agent_queue.status, 'queued')
+    ));
+});
+
+3) Power dialer pacing & compliance
+
+Add max simultaneous dials per agent and global abandonment cap per campaign. If current abandons (last 15 min) > threshold, force dialRatio = 1.0 until it cools.
+
+Human-connect SLA: if AMD returns “human,” ensure an agent connect timeout (e.g., 2–3s). If no agent is free, immediately play a short compliance-safe message and end (do not leave VM).
+
+Region & time-of-day guard: normalize contact timezone (derive from country/state) and enforce per-contact calling windows. Denormalize contact_local_hour at queueing time for fast filtering.
+
+4) Dispositions → state machine (canonical mapping)
+
+Create a canonical map so any UI disposition deterministically drives queue state:
+
+no_answer, busy, voicemail_detected        → retry (respect caps/cooldowns)
+callback_requested(date)                   → status=queued, scheduled_for=date
+not_interested_this_campaign               → remove only from this campaign
+do_not_call                                → write to global phone DNC, purge all call queues
+invalid_number                             → mark phone_status=invalid, purge all call queues
+converted_to_lead                          → mark completed + create lead
+
+
+Keep this mapping server-side; UI sends only disposition (+ optional metadata).
+
+5) Suppression & consent
+
+Cache suppressions in Redis with Bloom filters for ultra-cheap prechecks before DB hits.
+
+On DNC/unsubscribe, publish a suppression event and have a worker purge affected queue rows (status → failed, reason='suppressed'), plus invalidate Redis.
+
+6) Filters: correctness & UX
+
+Ensure enum→text casts are applied consistently (you noted this—confirm in buildRegularFieldCondition).
+
+Add numeric operator set for integer ranges (between, >, <) for fields like staffCount and annualRevenueMin/Max.
+
+Large IN lists (domains, segments): materialize to temp table and JOIN instead of WHERE col IN (…).
+
+7) Telephony webhooks: idempotency + replay safety
+
+Persist a telephony_events table (dedupe on call_sid, event_type, event_seq).
+
+Every webhook handler must:
+
+Upsert the event (ignore if seen),
+
+Process inside a transaction,
+
+Advance queue state only if lock_version matches (prevents out-of-order AMD vs connect).
+
+8) Observability & ops
+
+Metrics (Prometheus/OpenTelemetry):
+
+Queue: queued_count, locked_count, dialing, connected, completed, failed
+
+Times: time_to_first_lock, lock_hold_seconds, time_in_status_*
+
+AMD: amd_human, amd_machine, amd_unknown, amd_confidence_bucket
+
+Abandon rate, connect rate, voicemail deliveries, retry depth
+
+Filter API: query latency p50/p95, count cache hit rate
+
+Logs (JSON structured): include campaign_id, queue_id, contact_id, agent_id, call_sid, lock_version.
+
+Dashboards: Campaign “Flight Deck” showing pacing, abandon %, agent availability, retry backlog, VM caps.
+
+Runbooks:
+
+“Stuck locks sweeper” (manual trigger),
+
+“Suppression purge,”
+
+“Rollback a campaign launch” (how to revert queued rows safely),
+
+“Replay webhooks.”
+
+9) Security & RBAC
+
+Add scopes to JWT (e.g., queue:pull, queue:write, telephony:webhook) and validate per route.
+
+Encrypt at rest: sensitive fields (phone, email) with pgcrypto or app-layer AES (keys in KMS).
+
+Rate-limit enqueue APIs to prevent audience mistakes from flooding queues.
+
+10) DV → CRM bridge (verification to queue)
+
+When DV reaches enqueuedAt Stage 5, write to a staging table (dv_to_queue) and let a worker apply suppressions/consent and only then upsert into the proper queue, honoring unique partial indexes.
+
+Concrete changes (ready to paste)
+Drizzle schema deltas (sketch)
+// Shared
+export const suppressionEvents = pgTable('suppression_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  kind: text('kind').notNull(), // 'email','phone'
+  value: text('value').notNull(), // email or E.164
+  source: text('source').notNull(), // 'manual','webhook','qa','import'
+  createdAt: timestamp('created_at').defaultNow()
+});
+
+export const telephonyEvents = pgTable('telephony_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  callSid: text('call_sid').notNull(),
+  eventType: text('event_type').notNull(),
+  eventSeq: integer('event_seq').default(0),
+  payload: jsonb('payload'),
+  createdAt: timestamp('created_at').defaultNow(),
+  UNIQUE: sql`UNIQUE (call_sid, event_type, event_seq)`
+});
+
+addColumns(agent_queue, {
+  lockVersion: integer('lock_version').notNull().default(0),
+  enqueuedBy: text('enqueued_by'),
+  enqueuedReason: text('enqueued_reason')
+});
+
+addColumns(campaign_queue, {
+  lockVersion: integer('lock_version').notNull().default(0),
+  enqueuedBy: text('enqueued_by'),
+  enqueuedReason: text('enqueued_reason')
+});
+
+Lock sweeper (cron every 5 min)
+await db.update(agent_queue)
+  .set({ status: 'queued', agentId: null, lockedAt: null, lockExpiresAt: null })
+  .where(and(
+    eq(agent_queue.status, 'locked'),
+    lt(agent_queue.lockExpiresAt, sql`NOW()`)
+  ));
+
+await db.update(campaign_queue)
+  .set({ status: 'queued' })
+  .where(and(
+    inArray(campaign_queue.status, ['dialing','ringing']),
+    lt(campaign_queue.updatedAt, sql`NOW() - INTERVAL '10 minutes'`)
+  ));
+
+Idempotent webhook guard
+// before processing:
+const inserted = await db.insert(telephonyEvents)
+  .values({ callSid, eventType, eventSeq, payload })
+  .onConflictDoNothing()
+  .returning({ id: telephonyEvents.id });
+
+if (!inserted.length) return res.status(200).end(); // already processed
+
+Testing plan (high-value scenarios)
+
+Collision: 50 agents hammer pull simultaneously → zero duplicates, even under network jitter.
+
+Lock expiry: Agent locks and goes offline; entry returns to queued in ≤15 min.
+
+AMD race: AMD says machine after connect fired; lock_version prevents bad state.
+
+Suppression purge: Mark DNC → rows disappear from all queues within seconds.
+
+Retry policy: no_answer loops until maxAttempts; honors vmCooldownHours.
+
+Filters: Enum cast correctness; large IN lists via temp-table join.
+
+Pacing: Abandon rate spike forces dialRatio clamp to 1.0 then recovers.
+
+Timezones: Calling window enforced by contact local time.

@@ -1,0 +1,259 @@
+I went through it line-by-line and tightened it to match our client-specific CAT62542 flow (not the global CRM flow), with the two most critical guarantees:
+
+Suppressed contacts never enter agent queues
+
+Manual ELV only after agent marks Validated & Eligible (OK = Valid or Accept-All)
+
+Below are precise redlines plus ready-to-paste patches. Keep this professional checklist handy for your team.
+
+Executive Summary — What to Adjust
+
+Queue must always exclude suppressed contacts
+
+Your queue endpoint currently allows suppressionStatus filter to include suppressed records. For agent verification queues, keep suppressed=false hard-coded. View suppressed only in a separate Suppression Manager page.
+
+Manual ELV preconditions (server-enforced):
+eligibility_status='Eligible' AND verification_status='Validated' AND suppressed=false AND email is present AND cache > 60d.
+
+“OK email” policy: Only export when email_status='ok' (ELV = valid or accept_all). Do not export risky/unknown/catch_all/disposable.
+
+Consistency in Source Types
+Use Client_Provided (not Existing_Contact) to align with the CAV linkage logic elsewhere.
+
+CAV auto-link trigger
+Add the missing DB trigger to auto-attach CAV-ID & CAV-User ID by tuple (first_name_norm,last_name_norm,company_key,contact_country_key).
+
+Address model
+Reiterate: never overwrite HQ; export precedence = contact address → HQ (already stated—keep it enforced in code).
+
+Cap enforcement
+Enforce 10/account on both queue selection and submission buffer.
+
+Suppression application points
+Apply on import, on save/update, and pre-queue (you have logic—ensure it runs all three places).
+
+Email cache key
+Your verification_email_validation_cache PK is (contactId, emailLower). Good. Add a CHECK that if the contact’s email changes, the old cache row becomes irrelevant. (We’ll solve in code by reading the latest emailLower before check.)
+
+Ready-to-Paste Patches
+1) Enum & Source Type Alignment
+
+Before (excerpt):
+
+export const verificationSourceTypeEnum = pgEnum("verification_source_type", [
+  "New_Sourced",
+  "Existing_Contact",
+  "ZoomInfo",
+  "Upload",
+]);
+
+
+After:
+
+export const verificationSourceTypeEnum = pgEnum("verification_source_type", [
+  "Client_Provided",   // aligns with CAV logic
+  "New_Sourced",
+  "ZoomInfo",
+  "Upload"
+]);
+
+
+Update any seeders/importers to use Client_Provided for client files with CAV IDs.
+
+2) Agent Queue — Suppression Gate (Hard-coded)
+
+Replace your queue SQL filter to always exclude suppression in the agent queue:
+
+-- Agent Verification Queue (strict)
+WITH next_batch AS (
+  SELECT c.id
+  FROM verification_contacts c
+  WHERE c.campaign_id = $1
+    AND c.eligibility_status = 'Eligible'
+    AND c.verification_status = 'Pending'
+    AND c.suppressed = FALSE                 -- hard gate
+    AND c.in_submission_buffer = FALSE
+    AND (
+      SELECT COUNT(*) FROM verification_lead_submissions s
+      WHERE s.account_id = c.account_id AND s.campaign_id = $1
+    ) < (SELECT lead_cap_per_account FROM verification_campaigns WHERE id=$1)
+  ORDER BY c.priority_score DESC NULLS LAST, c.updated_at ASC
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)
+SELECT ...
+
+
+If you still want to let admins inspect suppressed records, expose them only via a separate Suppression Manager endpoint/page, not the agent queue.
+
+3) Manual ELV Preconditions (Server)
+
+Route: POST /api/verification-contacts/:id/email/verify
+
+Add these checks before calling ELV:
+
+if (
+  contact.campaignId !== campaignId ||
+  contact.eligibilityStatus !== 'Eligible' ||
+  contact.verificationStatus !== 'Validated' ||
+  contact.suppressed === true ||
+  !contact.emailLower
+) {
+  return res.status(409).json({ error: "Preconditions not met" });
+}
+
+// Cache window (60 days)
+const since = new Date(Date.now() - 60*24*3600*1000);
+const cached = await db.select().from(verificationEmailValidationCache)
+  .where(
+    and(
+      eq(verificationEmailValidationCache.contactId, contact.id),
+      eq(verificationEmailValidationCache.emailLower, contact.emailLower),
+      gt(verificationEmailValidationCache.checkedAt, since)
+    )
+  );
+
+if (cached.length) {
+  return res.json({
+    contactId: contact.id,
+    cached: true,
+    emailStatus: cached[0].status,
+    checkedAt: cached[0].checkedAt
+  });
+}
+
+
+Mapping ELV → Internal:
+
+valid or accept_all → ok
+
+unknown or catch_all → risky
+
+everything else (including disposable, role, spam_trap) → invalid
+
+Write result to cache and verification_contacts.email_status.
+
+4) Export Filters — OK Only
+
+Ensure both exports apply:
+
+WHERE
+  c.campaign_id = $1
+  AND c.eligibility_status = 'Eligible'
+  AND c.suppressed = FALSE
+  AND c.email_status = 'ok'         -- OK emails only (valid or accept_all)
+
+
+Client CAV Template adds AND c.cav_id IS NOT NULL AND c.cav_user_id IS NOT NULL.
+
+5) CAV Auto-Link Trigger (DB)
+
+Add a PostgreSQL trigger (plpgsql), similar to:
+
+CREATE OR REPLACE FUNCTION relink_cav_by_tuple()
+RETURNS trigger AS $$
+DECLARE
+  v_cav_id text;
+  v_cav_user_id text;
+BEGIN
+  -- Only CAT62542
+  IF NEW.campaign_id <> 'CAT62542' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Compute normalized keys if missing
+  NEW.first_name_norm := COALESCE(NEW.first_name_norm, lower(regexp_replace(COALESCE(NEW.first_name,''), '[^a-z0-9]', '', 'g')));
+  NEW.last_name_norm  := COALESCE(NEW.last_name_norm,  lower(regexp_replace(COALESCE(NEW.last_name ,''), '[^a-z0-9]', '', 'g')));
+  NEW.company_key     := COALESCE(NEW.company_key,     lower(trim(regexp_replace(COALESCE(NEW.company_key,''), '\s+', ' ', 'g'))));
+  NEW.contact_country_key := COALESCE(NEW.contact_country_key, lower(trim(COALESCE(NEW.contact_country,''))));
+
+  SELECT c2.cav_id, c2.cav_user_id
+    INTO v_cav_id, v_cav_user_id
+  FROM verification_contacts c2
+  WHERE c2.campaign_id='CAT62542'
+    AND c2.source_type='Client_Provided'
+    AND c2.cav_id IS NOT NULL AND c2.cav_user_id IS NOT NULL
+    AND c2.first_name_norm = NEW.first_name_norm
+    AND c2.last_name_norm  = NEW.last_name_norm
+    AND c2.company_key     = NEW.company_key
+    AND c2.contact_country_key = NEW.contact_country_key
+  LIMIT 1;
+
+  IF v_cav_id IS NOT NULL THEN
+    NEW.cav_id := v_cav_id;
+    NEW.cav_user_id := v_cav_user_id;
+  END IF;
+
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_relink_cav_by_tuple ON verification_contacts;
+CREATE TRIGGER trg_relink_cav_by_tuple
+BEFORE INSERT OR UPDATE ON verification_contacts
+FOR EACH ROW EXECUTE FUNCTION relink_cav_by_tuple();
+
+6) Address Precedence in Export (Contact → HQ)
+
+Ensure your export mappers use contact address if present:
+
+const city   = c.contactCity   || a.hqCity;
+const state  = c.contactState  || a.hqState;
+const country= c.contactCountry|| a.hqCountry;
+const postal = c.contactPostal || a.hqPostal;
+
+
+Never overwrite HQ in DB; it’s read-only here.
+
+7) Queue + Submission Cap (10/account)
+
+Queue gate already shown above. Submission buffer:
+
+INSERT INTO verification_lead_submissions (campaign_id, contact_id, account_id, submitted_by)
+SELECT $1, c.id, c.account_id, $2
+FROM verification_contacts c
+WHERE c.campaign_id = $1
+  AND c.verification_status='Validated'
+  AND c.eligibility_status='Eligible'
+  AND c.suppressed=FALSE
+  AND c.email_status='ok'
+  AND c.in_submission_buffer=FALSE
+  AND (
+    SELECT COUNT(*) FROM verification_lead_submissions s
+    WHERE s.account_id = c.account_id AND s.campaign_id = $1
+  ) < (SELECT lead_cap_per_account FROM verification_campaigns WHERE id=$1)
+ORDER BY c.priority_score DESC NULLS LAST
+LIMIT $3
+RETURNING contact_id;
+
+
+Then set in_submission_buffer=true for returned contacts.
+
+8) UI Guardrails (minimal, but important)
+
+Agent queue list never shows suppressed.
+
+Verify view:
+
+If eligibility_status!='Eligible' → disable all actions; show reason.
+
+If suppressed=true → show red banner “Suppressed”; no actions.
+
+ELV button: disabled unless Validated && Eligible && !suppressed && email present.
+
+Company panel “Add From New Leads”: greyed out if cap reached.
+
+Final Validation Checklist
+
+ Queue endpoint never lists suppressed (unless you are on Suppression Manager).
+
+ Manual ELV route enforces all preconditions + 60-day cache.
+
+ Export uses email_status='ok' only.
+
+ CAV IDs auto-link via trigger + nightly heal (optional).
+
+ Address precedence correct; HQ immutable.
+
+ Cap enforced at both queue selection and submission buffer.
+
+ Source type standardized to Client_Provided for client file.

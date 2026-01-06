@@ -1,0 +1,31 @@
+AI agents should sit inside the same campaign console and disposition framework as humans, but be managed as a distinct resource class so you can flex routing, reporting, and guardrails without losing shared governance.
+
+Operating Model
+
+Run both AI and humans in a unified queue (same CRM/campaign console, same disposition codes, same QC workflows) so compliance and reporting stay consistent.
+Tag calls by “producer” (AI vs human) and “handoff stage” so you can route leads differently downstream (e.g., AI qualifies → human closes) without duplicating campaign logic.
+Keep a small orchestration layer that can spin up/down AI capacity independently, but always writes outcomes back through the same disposition API the human console uses.
+Disposition + Governance
+
+Use one rules engine for all outcomes, triggered by disposition codes: QC review for qualified/successful leads, auto-suppression for uninterested, DNC updates, recycle timers, and data-quality flags.
+Require the AI stack to log intents/events in near real time; feed the same QC tooling humans use so reviewers can spot-check transcripts/audio.
+Enforce DNC/opt-out at the entrance to the dialer so both AI and humans benefit from the same suppression list; run nightly reconciliation to catch late-arriving requests.
+Workflow Automation
+
+Build post-call automations off the shared disposition queue:
+Qualified/successful → QC work queue, then downstream sales flow.
+Uninterested → remove from campaign, update suppression table.
+DNC → mark global DNC + append to carrier-level blocklists.
+No answer/voicemail → enqueue recycle job with configurable wait window (3–7 days) before redial.
+Invalid data → push to a data-quality remediation queue or purge pipeline.
+Data & Reporting
+
+Maintain KPI dashboards that break down conversion, QC pass rates, contactability, and opt-out rates by producer type; use this to tune when to hand off from AI to human.
+Capture call recordings/transcripts for AI interactions so humans can audit judgment-heavy moments (objection handling, consent capture).
+
+Continuously retrain AI agents from QC feedback and top-performing human calls to tighten qualification accuracy.
+Next Steps
+
+Document the shared disposition schema and APIs your dialer/CRM exposes; ensure the AI platform can write to them directly.
+Stand up a pilot where AI handles first-touch calls in an existing campaign, using the same QC and DNC automation; monitor variance vs human-only runs.
+Build dashboards/alerts that highlight discrepancies in dispositions or QC outcomes between AI and humans to keep governance tight.

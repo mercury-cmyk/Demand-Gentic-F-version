@@ -1,0 +1,549 @@
+let’s wire in your structured schemas for Events, Resources, and News, end-to-end. Below you’ll get:
+
+Updated payload contracts (CRM → Resources Centre)
+
+DB schema (separate tables with typed fields + enums)
+
+Secure /api/sync-content that validates & upserts by type
+
+Public detail routes that render fields, prefill forms, and emit JSON-LD + SEO meta
+
+Minimal changes to your CRM push code (just add the new fields)
+
+0) Shared taxonomies (agree these first)
+// Shared enums
+type EventType = "webinar" | "forum" | "executive_dinner" | "roundtable" | "conference";
+type LocationType = "virtual" | "in_person" | "hybrid";
+type Community = "finance" | "marketing" | "it" | "hr" | "cx_ux" | "data_ai" | "ops";
+type ResourceType = "ebook" | "infographic" | "white_paper" | "guide" | "case_study";
+
+// SEO
+type SEO = {
+  title?: string;
+  description?: string;
+  keywords?: string[];        // optional
+  canonical_url?: string;     // optional
+  og_image?: string;          // optional
+};
+
+1) Payload contracts (CRM → Resources Centre)
+A) Event
+{
+  "api_key": "…",
+  "id": "evt_123",
+  "content_type": "event",
+  "slug": "generative-ai-for-finance-oct-2025",
+  "title": "Generative AI for Finance Leaders",
+  "event_type": "webinar",
+  "location_type": "virtual",
+  "community": "finance",
+  "organizer": "Pivotal B2B",
+  "sponsor": "Acme Cloud",
+  "speakers": [
+    { "name": "Jane Doe", "title": "CFO", "company": "Acme", "photo_url": "…" },
+    { "name": "Ali Raza", "title": "Head of FP&A", "company": "Globex", "photo_url": "…" }
+  ],
+  "start_iso": "2025-11-05T17:00:00Z",
+  "end_iso": "2025-11-05T18:00:00Z",
+  "timezone": "America/New_York",
+  "overview_html": "<p>What’s real…</p>",
+  "learn_bullets": ["How to…", "Where to…", "What to avoid…"],
+  "thumbnail_url": "…",
+  "cta_link": "https://…",
+  "form_id": "frm_109",
+  "seo": {
+    "title": "Generative AI for Finance (Webinar)",
+    "description": "Learn frameworks…",
+    "keywords": ["AI", "Finance"],
+    "canonical_url": "https://resources…/event/generative-ai-for-finance-oct-2025",
+    "og_image": "https://…/og/ai-finance.png"
+  },
+  "status": "published",
+  "synced_at": "2025-10-13T09:00:00Z"
+}
+
+B) Resource
+{
+  "api_key": "…",
+  "id": "res_987",
+  "content_type": "resource",
+  "slug": "ciso-playbook-2025",
+  "title": "CISO Playbook 2025",
+  "resource_type": "guide",
+  "community": "it",
+  "overview_html": "<p>Practical guidance…</p>",
+  "bullets": ["Zero Trust…", "Email auth…", "Data residency…"],
+  "body_html": "<h2>Inside the guide</h2>…",
+  "thumbnail_url": "…",
+  "cta_link": "https://…",
+  "form_id": "frm_221",
+  "seo": {
+    "title": "CISO Playbook 2025 (Guide)",
+    "description": "A field guide…",
+    "keywords": ["security","guide"],
+    "canonical_url": "https://resources…/resource/ciso-playbook-2025",
+    "og_image": "https://…/og/ciso-2025.png"
+  },
+  "status": "published",
+  "synced_at": "2025-10-13T09:10:00Z"
+}
+
+C) News
+{
+  "api_key": "…",
+  "id": "news_456",
+  "content_type": "news",
+  "slug": "pivotal-announces-reachengine-2",
+  "title": "Pivotal launches ReachEngine 2.0",
+  "community": "marketing",
+  "overview_html": "<p>New release…</p>",
+  "body_html": "<p>Details, quotes…</p>",
+  "authors": ["Editorial Team"],
+  "published_iso": "2025-10-01T09:00:00Z",
+  "thumbnail_url": "…",
+  "seo": {
+    "title": "Pivotal launches ReachEngine 2.0",
+    "description": "Expanded ABM features…",
+    "keywords": ["ABM","release"],
+    "canonical_url": "https://resources…/news/pivotal-announces-reachengine-2",
+    "og_image": "https://…/og/reachengine2.png"
+  },
+  "status": "published",
+  "synced_at": "2025-10-13T09:12:00Z"
+}
+
+
+Notes
+• Keep body_html for long-form sections; use smaller overview_html + bullets for the hero/summary.
+• community helps segment navigation and filters.
+• seo is optional; we’ll fall back to title/overview if missing.
+
+2) Resources Centre — DB schema (SQLite)
+db.js (migrations added)
+db.exec(`PRAGMA journal_mode=WAL;`);
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  event_type TEXT NOT NULL,          -- enum
+  location_type TEXT NOT NULL,       -- enum
+  community TEXT NOT NULL,           -- enum
+  organizer TEXT,
+  sponsor TEXT,
+  speakers_json TEXT,                -- JSON array
+  start_iso TEXT NOT NULL,
+  end_iso TEXT,
+  timezone TEXT,
+  overview_html TEXT,
+  learn_bullets_json TEXT,           -- JSON array
+  thumbnail_url TEXT,
+  cta_link TEXT,
+  form_id TEXT,
+  seo_json TEXT,                     -- JSON
+  status TEXT DEFAULT 'published',
+  synced_at TEXT,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS resources (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  resource_type TEXT NOT NULL,       -- enum
+  community TEXT NOT NULL,           -- enum
+  overview_html TEXT,
+  bullets_json TEXT,                 -- JSON array
+  body_html TEXT,
+  thumbnail_url TEXT,
+  cta_link TEXT,
+  form_id TEXT,
+  seo_json TEXT,                     -- JSON
+  status TEXT DEFAULT 'published',
+  synced_at TEXT,
+  updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS news (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  community TEXT NOT NULL,           -- enum
+  overview_html TEXT,
+  body_html TEXT,
+  authors_json TEXT,                 -- JSON array
+  published_iso TEXT,
+  thumbnail_url TEXT,
+  seo_json TEXT,                     -- JSON
+  status TEXT DEFAULT 'published',
+  synced_at TEXT,
+  updated_at TEXT
+);
+`);
+
+3) Receiver endpoint with validation & upsert
+validators.js
+export function assert(cond, msg){ if(!cond) throw new Error(msg); }
+
+export const ENUMS = {
+  event_type: ["webinar","forum","executive_dinner","roundtable","conference"],
+  location_type: ["virtual","in_person","hybrid"],
+  community: ["finance","marketing","it","hr","cx_ux","data_ai","ops"],
+  resource_type: ["ebook","infographic","white_paper","guide","case_study"]
+};
+
+export function validateEvent(p){
+  assert(p.slug && p.title, "Missing slug/title");
+  assert(ENUMS.event_type.includes(p.event_type), "Invalid event_type");
+  assert(ENUMS.location_type.includes(p.location_type), "Invalid location_type");
+  assert(ENUMS.community.includes(p.community), "Invalid community");
+  assert(p.start_iso, "Missing start_iso");
+}
+
+export function validateResource(p){
+  assert(p.slug && p.title, "Missing slug/title");
+  assert(ENUMS.resource_type.includes(p.resource_type), "Invalid resource_type");
+  assert(ENUMS.community.includes(p.community), "Invalid community");
+}
+
+export function validateNews(p){
+  assert(p.slug && p.title, "Missing slug/title");
+  assert(ENUMS.community.includes(p.community), "Invalid community");
+}
+
+app.js (only the changed parts)
+// Upserts
+const upsertEvent = db.prepare(`
+INSERT INTO events (id,slug,title,event_type,location_type,community,organizer,sponsor,
+  speakers_json,start_iso,end_iso,timezone,overview_html,learn_bullets_json,thumbnail_url,
+  cta_link,form_id,seo_json,status,synced_at,updated_at)
+VALUES (@id,@slug,@title,@event_type,@location_type,@community,@organizer,@sponsor,
+  @speakers_json,@start_iso,@end_iso,@timezone,@overview_html,@learn_bullets_json,@thumbnail_url,
+  @cta_link,@form_id,@seo_json,@status,@synced_at,@updated_at)
+ON CONFLICT(id) DO UPDATE SET
+  slug=excluded.slug,title=excluded.title,event_type=excluded.event_type,
+  location_type=excluded.location_type,community=excluded.community,
+  organizer=excluded.organizer,sponsor=excluded.sponsor,
+  speakers_json=excluded.speakers_json,start_iso=excluded.start_iso,end_iso=excluded.end_iso,
+  timezone=excluded.timezone,overview_html=excluded.overview_html,
+  learn_bullets_json=excluded.learn_bullets_json,thumbnail_url=excluded.thumbnail_url,
+  cta_link=excluded.cta_link,form_id=excluded.form_id,seo_json=excluded.seo_json,
+  status=excluded.status,synced_at=excluded.synced_at,updated_at=excluded.updated_at
+`);
+
+const upsertResource = db.prepare(`
+INSERT INTO resources (id,slug,title,resource_type,community,overview_html,bullets_json,body_html,
+  thumbnail_url,cta_link,form_id,seo_json,status,synced_at,updated_at)
+VALUES (@id,@slug,@title,@resource_type,@community,@overview_html,@bullets_json,@body_html,
+  @thumbnail_url,@cta_link,@form_id,@seo_json,@status,@synced_at,@updated_at)
+ON CONFLICT(id) DO UPDATE SET
+  slug=excluded.slug,title=excluded.title,resource_type=excluded.resource_type,
+  community=excluded.community,overview_html=excluded.overview_html,
+  bullets_json=excluded.bullets_json,body_html=excluded.body_html,
+  thumbnail_url=excluded.thumbnail_url,cta_link=excluded.cta_link,form_id=excluded.form_id,
+  seo_json=excluded.seo_json,status=excluded.status,synced_at=excluded.synced_at,
+  updated_at=excluded.updated_at
+`);
+
+const upsertNews = db.prepare(`
+INSERT INTO news (id,slug,title,community,overview_html,body_html,authors_json,published_iso,
+  thumbnail_url,seo_json,status,synced_at,updated_at)
+VALUES (@id,@slug,@title,@community,@overview_html,@body_html,@authors_json,@published_iso,
+  @thumbnail_url,@seo_json,@status,@synced_at,@updated_at)
+ON CONFLICT(id) DO UPDATE SET
+  slug=excluded.slug,title=excluded.title,community=excluded.community,overview_html=excluded.overview_html,
+  body_html=excluded.body_html,authors_json=excluded.authors_json,published_iso=excluded.published_iso,
+  thumbnail_url=excluded.thumbnail_url,seo_json=excluded.seo_json,status=excluded.status,
+  synced_at=excluded.synced_at,updated_at=excluded.updated_at
+`);
+
+/api/sync-content router
+import { validateEvent, validateResource, validateNews } from "./validators.js";
+
+app.post("/api/sync-content", (req, res) => {
+  try {
+    if (!verifyApiKey(req, API_KEY)) return res.status(401).json({ status: "error", message: "Invalid API key" });
+    if (!verifyHmac(req, SHARED_SECRET, Number(SIG_TTL_SECONDS))) return res.status(401).json({ status: "error", message: "Invalid signature" });
+
+    const p = req.body;
+    const now = new Date().toISOString();
+    const base = {
+      id: String(p.id), slug: p.slug?.trim(), title: p.title?.trim(),
+      status: p.status || "published", synced_at: p.synced_at || now, updated_at: now
+    };
+
+    let resourceUrl = "";
+
+    if (p.content_type === "event") {
+      validateEvent(p);
+      upsertEvent.run({
+        ...base,
+        event_type: p.event_type,
+        location_type: p.location_type,
+        community: p.community,
+        organizer: p.organizer || null,
+        sponsor: p.sponsor || null,
+        speakers_json: JSON.stringify(p.speakers || []),
+        start_iso: p.start_iso,
+        end_iso: p.end_iso || null,
+        timezone: p.timezone || null,
+        overview_html: p.overview_html || "",
+        learn_bullets_json: JSON.stringify(p.learn_bullets || []),
+        thumbnail_url: p.thumbnail_url || "",
+        cta_link: p.cta_link || "",
+        form_id: p.form_id || null,
+        seo_json: JSON.stringify(p.seo || {})
+      });
+      resourceUrl = `${PUBLIC_BASE_URL}/event/${base.slug}`;
+
+    } else if (p.content_type === "resource") {
+      validateResource(p);
+      upsertResource.run({
+        ...base,
+        resource_type: p.resource_type,
+        community: p.community,
+        overview_html: p.overview_html || "",
+        bullets_json: JSON.stringify(p.bullets || []),
+        body_html: p.body_html || "",
+        thumbnail_url: p.thumbnail_url || "",
+        cta_link: p.cta_link || "",
+        form_id: p.form_id || null,
+        seo_json: JSON.stringify(p.seo || {})
+      });
+      resourceUrl = `${PUBLIC_BASE_URL}/resource/${base.slug}`;
+
+    } else if (p.content_type === "news") {
+      validateNews(p);
+      upsertNews.run({
+        ...base,
+        community: p.community,
+        overview_html: p.overview_html || "",
+        body_html: p.body_html || "",
+        authors_json: JSON.stringify(p.authors || []),
+        published_iso: p.published_iso || null,
+        thumbnail_url: p.thumbnail_url || "",
+        seo_json: JSON.stringify(p.seo || {})
+      });
+      resourceUrl = `${PUBLIC_BASE_URL}/news/${base.slug}`;
+
+    } else {
+      return res.status(400).json({ status: "error", message: "Unsupported content_type" });
+    }
+
+    return res.json({ status: "success", resource_url: resourceUrl });
+  } catch (e) {
+    return res.status(400).json({ status: "error", message: e.message });
+  }
+});
+
+4) Public detail routes (render + SEO + JSON-LD + prefill)
+
+Keep your existing UI; below is a simple server-render to show how to output structured fields and JSON-LD.
+
+Events
+const getEvent = db.prepare("SELECT * FROM events WHERE slug=? AND status='published' LIMIT 1");
+app.get("/event/:slug", (req, res) => {
+  const row = getEvent.get(req.params.slug);
+  if (!row) return res.status(404).send("Not found");
+
+  const speakers = JSON.parse(row.speakers_json || "[]");
+  const bullets = JSON.parse(row.learn_bullets_json || "[]");
+  const seo = JSON.parse(row.seo_json || "{}");
+
+  const jsonld = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    "name": row.title,
+    "eventAttendanceMode": row.location_type === "virtual"
+      ? "https://schema.org/OnlineEventAttendanceMode"
+      : "https://schema.org/OfflineEventAttendanceMode",
+    "eventStatus": "https://schema.org/EventScheduled",
+    "startDate": row.start_iso,
+    "endDate": row.end_iso || row.start_iso,
+    "location": row.location_type === "virtual"
+      ? { "@type": "VirtualLocation", "url": `${PUBLIC_BASE_URL}/event/${row.slug}` }
+      : { "@type": "Place", "name": row.organizer || "TBA" },
+    "organizer": row.organizer ? { "@type": "Organization", "name": row.organizer } : undefined,
+    "image": row.thumbnail_url || undefined,
+    "description": stripTags(row.overview_html).slice(0, 300)
+  };
+
+  res.send(`<!doctype html><html><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(seo.title || row.title)}</title>
+  <meta name="description" content="${escapeAttr(seo.description || stripTags(row.overview_html).slice(0,160))}">
+  ${seo.canonical_url ? `<link rel="canonical" href="${escapeAttr(seo.canonical_url)}">` : ""}
+  ${seo.og_image ? `<meta property="og:image" content="${escapeAttr(seo.og_image)}">` : ""}
+  <script type="application/ld+json">${escapeHtml(JSON.stringify(jsonld))}</script>
+  </head><body>
+    <article>
+      <h1>${escapeHtml(row.title)}</h1>
+      <p><strong>Type:</strong> ${escapeHtml(row.event_type)} · 
+         <strong>Community:</strong> ${escapeHtml(row.community)} · 
+         <strong>When:</strong> ${escapeHtml(row.start_iso)}</p>
+      ${row.thumbnail_url ? `<img src="${escapeAttr(row.thumbnail_url)}" alt="">` : ""}
+      <section>${row.overview_html || ""}</section>
+
+      ${bullets.length ? `<h2>Why Attend</h2><ul>${bullets.map(b=>`<li>${escapeHtml(b)}</li>`).join("")}</ul>`:""}
+      ${speakers.length ? `<h2>Speakers</h2>${speakers.map(s=>`
+        <div><strong>${escapeHtml(s.name)}</strong>, ${escapeHtml(s.title||"")} @ ${escapeHtml(s.company||"")}</div>`).join("")}`:""}
+
+      ${row.form_id ? `<iframe src="/forms/${encodeURIComponent(row.form_id)}${prefillFromQuery(req)}"
+         style="width:100%;height:900px;border:0;" loading="lazy"></iframe>`:""}
+
+      ${row.cta_link ? `<p><a href="${escapeAttr(row.cta_link)}" target="_blank" rel="noopener">Learn more</a></p>`:""}
+    </article>
+  </body></html>`);
+});
+
+Resources
+const getResource = db.prepare("SELECT * FROM resources WHERE slug=? AND status='published' LIMIT 1");
+app.get("/resource/:slug", (req, res) => {
+  const row = getResource.get(req.params.slug);
+  if (!row) return res.status(404).send("Not found");
+  const bullets = JSON.parse(row.bullets_json || "[]");
+  const seo = JSON.parse(row.seo_json || "{}");
+
+  const jsonld = {
+    "@context": "https://schema.org",
+    "@type": "CreativeWork",
+    "name": row.title,
+    "about": row.community,
+    "description": stripTags(row.overview_html).slice(0,300),
+    "image": row.thumbnail_url || undefined
+  };
+
+  res.send(`<!doctype html><html><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(seo.title || row.title)}</title>
+  <meta name="description" content="${escapeAttr(seo.description || stripTags(row.overview_html).slice(0,160))}">
+  ${seo.canonical_url ? `<link rel="canonical" href="${escapeAttr(seo.canonical_url)}">` : ""}
+  ${seo.og_image ? `<meta property="og:image" content="${escapeAttr(seo.og_image)}">` : ""}
+  <script type="application/ld+json">${escapeHtml(JSON.stringify(jsonld))}</script>
+  </head><body>
+    <article>
+      <h1>${escapeHtml(row.title)}</h1>
+      <p><strong>Type:</strong> ${escapeHtml(row.resource_type)} · 
+         <strong>Community:</strong> ${escapeHtml(row.community)}</p>
+      ${row.thumbnail_url ? `<img src="${escapeAttr(row.thumbnail_url)}" alt="">` : ""}
+      <section>${row.overview_html || ""}</section>
+      ${bullets.length ? `<ul>${bullets.map(b=>`<li>${escapeHtml(b)}</li>`).join("")}</ul>`:""}
+      <section>${row.body_html || ""}</section>
+
+      ${row.form_id ? `<iframe src="/forms/${encodeURIComponent(row.form_id)}${prefillFromQuery(req)}"
+         style="width:100%;height:900px;border:0;" loading="lazy"></iframe>`:""}
+
+      ${row.cta_link ? `<p><a href="${escapeAttr(row.cta_link)}" target="_blank" rel="noopener">Get the asset</a></p>`:""}
+    </article>
+  </body></html>`);
+});
+
+News
+const getNews = db.prepare("SELECT * FROM news WHERE slug=? AND status='published' LIMIT 1");
+app.get("/news/:slug", (req, res) => {
+  const row = getNews.get(req.params.slug);
+  if (!row) return res.status(404).send("Not found");
+  const authors = JSON.parse(row.authors_json || "[]");
+  const seo = JSON.parse(row.seo_json || "{}");
+
+  const jsonld = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    "headline": row.title,
+    "datePublished": row.published_iso || row.updated_at,
+    "author": authors.map(a=>({ "@type":"Person", "name": a })),
+    "description": stripTags(row.overview_html).slice(0,300),
+    "image": row.thumbnail_url || undefined
+  };
+
+  res.send(`<!doctype html><html><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(seo.title || row.title)}</title>
+  <meta name="description" content="${escapeAttr(seo.description || stripTags(row.overview_html).slice(0,160))}">
+  ${seo.canonical_url ? `<link rel="canonical" href="${escapeAttr(seo.canonical_url)}">` : ""}
+  ${seo.og_image ? `<meta property="og:image" content="${escapeAttr(seo.og_image)}">` : ""}
+  <script type="application/ld+json">${escapeHtml(JSON.stringify(jsonld))}</script>
+  </head><body>
+    <article>
+      <h1>${escapeHtml(row.title)}</h1>
+      <p><strong>Community:</strong> ${escapeHtml(row.community)} · 
+         ${row.published_iso ? `<time datetime="${escapeAttr(row.published_iso)}">${escapeHtml(row.published_iso)}</time>`:""}</p>
+      ${row.thumbnail_url ? `<img src="${escapeAttr(row.thumbnail_url)}" alt="">` : ""}
+      <section>${row.overview_html || ""}</section>
+      <section>${row.body_html || ""}</section>
+    </article>
+  </body></html>`);
+});
+
+
+(Helper funcs escapeHtml, escapeAttr, prefillFromQuery, stripTags — same as earlier plus:)
+
+function stripTags(s=""){return s.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();}
+
+5) CRM push: add fields per type
+
+Your CRM sender already signs the payload. Just include the structured fields. Example:
+
+await pushToResourceCentre({
+  id: rec.id,
+  content_type: "event",
+  slug: rec.slug,
+  title: rec.title,
+  event_type: rec.event_type,           // <- enum
+  location_type: rec.location_type,     // <- enum
+  community: rec.community,             // <- enum
+  organizer: rec.organizer,
+  sponsor: rec.sponsor,
+  speakers: rec.speakers,               // [{name,title,company,photo_url}]
+  start_iso: rec.start_iso,
+  end_iso: rec.end_iso,
+  timezone: rec.timezone,
+  overview_html: rec.overview_html,
+  learn_bullets: rec.learn_bullets,     // string[]
+  thumbnail_url: rec.thumbnail_url,
+  cta_link: rec.cta_link,
+  form_id: rec.form_id,
+  seo: rec.seo,                         // {title,description,keywords[],canonical_url,og_image}
+  status: rec.status || "published",
+});
+
+
+Do likewise for resource and news with their respective fields.
+
+6) Lists & filters (optional quick APIs for your UI)
+const listEvents = db.prepare(`
+  SELECT id,slug,title,event_type,location_type,community,start_iso,updated_at
+  FROM events WHERE status='published'
+  ORDER BY datetime(start_iso) DESC
+`);
+app.get("/event", (req,res)=> res.json(listEvents.all()));
+
+const listResources = db.prepare(`
+  SELECT id,slug,title,resource_type,community,updated_at
+  FROM resources WHERE status='published'
+  ORDER BY updated_at DESC
+`);
+app.get("/resource", (req,res)=> res.json(listResources.all()));
+
+const listNews = db.prepare(`
+  SELECT id,slug,title,community,published_iso,updated_at
+  FROM news WHERE status='published'
+  ORDER BY datetime(published_iso) DESC
+`);
+app.get("/news", (req,res)=> res.json(listNews.all()));
+
+
+You can add ?community=marketing etc. and filter server-side as needed.
+
+What this gives you
+
+Typed, structured content for all three entities
+
+SEO meta + JSON-LD per type for rich results
+
+Secure push & upsert with enums validated
+
+CRM can auto-use the returned URL in campaigns, with prefill intact
+
+Easy to extend (fields & enums) without breaking contracts

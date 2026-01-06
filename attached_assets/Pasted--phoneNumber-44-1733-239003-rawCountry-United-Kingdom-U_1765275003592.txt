@@ -1,0 +1,58 @@
+{phoneNumber: '+44 1733 239003', rawCountry: 'United Kingdom Uk', contactCountry: 'United Kingdom Uk', phoneType: 'company', label: 'Company Phone'}
+agent-console.tsx:852 ✅ E164 Result: +441733239003
+useTelnyxWebRTC.ts:508 [AUDIO] Audio element cleaned up
+useTelnyxWebRTC.ts:561 Making call with params: 
+{destinationNumber: '+441733239003', callerNumber: null, hasClient: true, isConnected: true, selectedMicId: null, …}
+useTelnyxWebRTC.ts:372 Telnyx notification - Type: callUpdate Call State: new
+useTelnyxWebRTC.ts:597 Call object created - ID: 8be61bf1-3dc5-4108-90e6-6a438664b505 State: new
+useTelnyxWebRTC.ts:602 Captured Telnyx Call ID: 8be61bf1-3dc5-4108-90e6-6a438664b505
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:09:35.919Z] ICE Gathering State gathering
+useTelnyxWebRTC.ts:372 Telnyx notification - Type: callUpdate Call State: requesting
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:09:37.096Z] ICE Gathering State complete
+useTelnyxWebRTC.ts:372 Telnyx notification - Type: callUpdate Call State: trying
+@telnyx_webrtc.js?v=0ab4603b:1979 Performance Metrics
+@telnyx_webrtc.js?v=0ab4603b:1979 
+(index)
+duration
+Peer Creation	'120.90ms'
+ICE Gathering	'1006.10ms'
+SDP Send	'325.00ms'
+Total Duration	'2322.40ms'
+Object
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:09:38.262Z] ICE Connection State checking
+useTelnyxWebRTC.ts:372 Telnyx notification - Type: callUpdate Call State: active
+useTelnyxWebRTC.ts:379 [AUDIO] Call active - attempting to attach remote stream
+useTelnyxWebRTC.ts:73 [AUDIO] Got remoteStream from call.remoteStream
+useTelnyxWebRTC.ts:110 [AUDIO] Remote stream audio tracks: 1
+useTelnyxWebRTC.ts:119 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+installHook.js:1 [CALL-ATTEMPT] Failed to create call attempt: TypeError: Failed to execute 'fetch' on 'Window': '/api/call-attempts/start' is not a valid HTTP method.
+    at apiRequest (queryClient.ts:38:21)
+    at Object.mutationFn (agent-console.tsx:710:20)
+@telnyx_webrtc.js?v=0ab4603b:1444 [2025-12-09T10:09:38.299Z] Connection State changed: new -> connecting
+useTelnyxWebRTC.ts:132 [AUDIO] ✅ Audio playback started successfully
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:09:38.581Z] ICE Connection State connected
+installHook.js:1 2025-12-09 10:09:39.759 - No ping/pong received, forcing PING ACK to keep alive
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+agent-console.tsx:256 [AGENT CONSOLE] Queue state: 
+{queueDataLength: 53420, queueLoading: false, queueFetching: false, queueError: null, selectedCampaignId: '70434f6e-3ab6-49e4-acf7-350b81f60ea2', …}
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+installHook.js:1 [CALL-ATTEMPT] Failed to create call attempt: TypeError: Failed to execute 'fetch' on 'Window': '/api/call-attempts/start' is not a valid HTTP method.
+    at apiRequest (queryClient.ts:38:21)
+    at Object.mutationFn (agent-console.tsx:710:20)
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+installHook.js:1 [CALL-ATTEMPT] Failed to create call attempt: TypeError: Failed to execute 'fetch' on 'Window': '/api/call-attempts/start' is not a valid HTTP method.
+    at apiRequest (queryClient.ts:38:21)
+    at Object.mutationFn (agent-console.tsx:710:20)
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:171 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+﻿

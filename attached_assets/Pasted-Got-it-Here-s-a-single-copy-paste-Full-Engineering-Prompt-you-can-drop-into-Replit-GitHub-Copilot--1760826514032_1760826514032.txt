@@ -1,0 +1,484 @@
+Got it. Here’s a single, copy-paste Full Engineering Prompt you can drop into Replit/GitHub Copilot/your dev chat to implement safely—zero-downtime, backward-compatible, and guarded behind a feature flag.
+
+⸻
+
+FULL ENGINEERING PROMPT — “Set Queue (Replace)” & Safe Queue Management
+
+Objective
+
+Implement deterministic queue management for the Agent Console so that:
+	•	Set Queue (Replace): clears the requesting agent’s current queue for a campaign, then assigns a precise new queue based on active filters (or all campaign contacts if no filters).
+	•	Clear My Queue: releases the agent’s queued/locked items for that campaign.
+	•	Clear All Queues (Admin): releases all queued/locked items in the campaign.
+
+All of this must not introduce bugs, must be compatible with our current infrastructure, and must not break any existing flows (Email/Tele Outreach, RBAC, campaign builder, agent console, QA dashboards, reports).
+
+⸻
+
+Hard Requirements (do not compromise)
+	1.	Backward compatible & zero-downtime migration
+	•	Use IF NOT EXISTS, additive schema changes only, safe defaults.
+	•	All new behavior must be behind a feature flag: queue_replace_v1. Disabled by default; code paths return current behavior when flag is OFF.
+	2.	No regressions
+	•	Do not change existing endpoints’ return shapes. New endpoints only.
+	•	Maintain collision prevention (no contact can be assigned to two agents in the same campaign in active states).
+	•	Preserve in_progress rows by default on replace; configurable via parameter (default keep).
+	3.	Transactional, idempotent, race-safe
+	•	DB operations must run in a single transaction; rely on unique partial index to prevent dupes.
+	•	All functions must be safe to call multiple times without side effects beyond first success.
+	4.	RBAC enforced
+	•	Agent can manage their own queue; Managers/Admins can set for any agent; Clear All is Admin-only.
+	5.	Per-Account Cap respected
+	•	Enforce per-account caps when building the new queue. Cap applies to the final queue after replacement.
+	6.	Audit & Observability
+	•	Log who did what, counts changed, filters, caps; emit metrics/timers.
+	•	Add dry-run preview mode to show to_release / to_assign / to_skip without changing state.
+	7.	Guard rails
+	•	Always exclude Global DNC, is_opted_out, and invalid contacts.
+	•	in_progress rows are untouched by default; optionally clear only when requested.
+	8.	Rollout with revert
+	•	Provide a step-by-step rollout plan, clear rollback instructions, and QA script.
+
+⸻
+
+Deliverables
+	•	DB migration (PostgreSQL): tables, indexes, functions (all additive, IF NOT EXISTS).
+	•	API endpoints (Node.js/Express + pg):
+	•	POST /campaigns/:campaignId/queues/set (primary)
+	•	POST /campaigns/:campaignId/queues/clear
+	•	POST /campaigns/:campaignId/queues/clear_all (admin only)
+	•	Optional: POST /campaigns/:campaignId/queues/preview (dry-run)
+	•	Frontend controls (React): buttons + confirmation modals + toast results; do not break existing console.
+	•	Feature flag wiring (queue_replace_v1) and unit/integration tests.
+	•	QA checklist + rollback script.
+
+⸻
+
+Database Migration (safe & additive; Postgres)
+
+Note: Keep naming non-breaking. If these objects already exist, the IF NOT EXISTS keeps us safe. Use pgcrypto for UUID if needed; adjust to your current UUID generator.
+
+-- Enable extensions safely
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- Agent queue table (create only if missing). Adjust column names if you already have this.
+CREATE TABLE IF NOT EXISTS agent_queue (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id uuid NOT NULL,
+  agent_id uuid NOT NULL,
+  contact_id uuid NOT NULL,
+  queue_state text NOT NULL CHECK (queue_state IN ('queued','locked','in_progress','released')),
+  queued_at timestamptz,
+  released_at timestamptz,
+  created_by uuid,
+  released_by uuid
+);
+
+-- Lightweight audit log if you don't already have one.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id uuid NOT NULL,
+  action text NOT NULL,
+  target_type text NOT NULL,
+  target_id uuid NOT NULL,
+  meta jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Performance & integrity
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_queue_active
+  ON agent_queue (campaign_id, contact_id)
+  WHERE queue_state IN ('queued','locked','in_progress');
+
+CREATE INDEX IF NOT EXISTS ix_agent_queue_campaign_state
+  ON agent_queue (campaign_id, queue_state);
+
+-- Optional accel for "first_name contains"
+CREATE INDEX IF NOT EXISTS ix_contacts_first_name_trgm
+  ON contacts USING gin (first_name gin_trgm_ops);
+
+-- === SAFE FUNCTIONS (idempotent, transactional) ===
+
+-- Clear MY queue (queued/locked only) for a campaign
+CREATE OR REPLACE FUNCTION clear_my_queue(
+  p_campaign_id uuid,
+  p_agent_id uuid,
+  p_actor_user_id uuid
+) RETURNS integer
+LANGUAGE plpgsql AS $$
+DECLARE v_released int;
+BEGIN
+  WITH upd AS (
+    UPDATE agent_queue
+       SET queue_state = 'released',
+           released_at = now(),
+           released_by = p_actor_user_id
+     WHERE campaign_id = p_campaign_id
+       AND agent_id    = p_agent_id
+       AND queue_state IN ('queued','locked')
+     RETURNING 1
+  )
+  SELECT COUNT(*) INTO v_released FROM upd;
+
+  INSERT INTO audit_log (actor_id, action, target_type, target_id, meta)
+  VALUES (p_actor_user_id, 'queue.clear.mine', 'campaign', p_campaign_id,
+          jsonb_build_object('agent_id', p_agent_id, 'released', v_released));
+
+  RETURN v_released;
+END$$;
+
+-- Clear ALL queues (admin only) for a campaign
+CREATE OR REPLACE FUNCTION clear_all_queues(
+  p_campaign_id uuid,
+  p_actor_user_id uuid
+) RETURNS integer
+LANGUAGE plpgsql AS $$
+DECLARE v_released int;
+BEGIN
+  WITH upd AS (
+    UPDATE agent_queue
+       SET queue_state = 'released',
+           released_at = now(),
+           released_by = p_actor_user_id
+     WHERE campaign_id = p_campaign_id
+       AND queue_state IN ('queued','locked')
+     RETURNING 1
+  )
+  SELECT COUNT(*) INTO v_released FROM upd;
+
+  INSERT INTO audit_log (actor_id, action, target_type, target_id, meta)
+  VALUES (p_actor_user_id, 'queue.clear.all', 'campaign', p_campaign_id,
+          jsonb_build_object('released', v_released));
+
+  RETURN v_released;
+END$$;
+
+-- Replace (primary). Default: keep in_progress.
+CREATE OR REPLACE FUNCTION queue_replace(
+  p_campaign_id uuid,
+  p_agent_id uuid,
+  p_actor_user_id uuid,
+  p_first_name_contains text DEFAULT NULL,
+  p_per_account_cap int DEFAULT NULL,
+  p_max_queue_size int DEFAULT NULL,
+  p_keep_in_progress boolean DEFAULT true
+) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE v_released int := 0; v_assigned int := 0; v_skipped int := 0;
+BEGIN
+  -- 1) Release my queued/locked (optionally also in_progress)
+  WITH upd AS (
+    UPDATE agent_queue
+       SET queue_state = 'released',
+           released_at = now(),
+           released_by = p_actor_user_id
+     WHERE campaign_id = p_campaign_id
+       AND agent_id    = p_agent_id
+       AND (
+         queue_state IN ('queued','locked')
+         OR (queue_state = 'in_progress' AND NOT p_keep_in_progress)
+       )
+     RETURNING 1
+  )
+  SELECT COUNT(*) INTO v_released FROM upd;
+
+  -- 2) Candidate pool (respect DNC/validity + filters)
+  WITH filtered AS (
+    SELECT c.id AS contact_id, c.account_id
+      FROM campaign_contacts cc
+      JOIN contacts c ON c.id = cc.contact_id
+     WHERE cc.campaign_id = p_campaign_id
+       AND c.is_valid IS TRUE
+       AND (c.is_opted_out IS FALSE OR c.is_opted_out IS NULL)
+       -- TODO: also exclude global DNC if stored elsewhere
+       AND (
+         p_first_name_contains IS NULL
+         OR c.first_name ILIKE '%' || p_first_name_contains || '%'
+       )
+  ),
+  ranked AS (
+    SELECT contact_id, account_id,
+           ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY contact_id) AS rn
+      FROM filtered
+  ),
+  capped AS (
+    SELECT contact_id
+      FROM ranked
+     WHERE p_per_account_cap IS NULL OR rn <= p_per_account_cap
+  ),
+  available AS (
+    SELECT cap.contact_id
+      FROM capped cap
+ LEFT JOIN agent_queue aq
+        ON aq.contact_id  = cap.contact_id
+       AND aq.campaign_id = p_campaign_id
+       AND aq.queue_state IN ('queued','locked','in_progress')
+     WHERE aq.contact_id IS NULL
+     LIMIT COALESCE(p_max_queue_size, 2147483647)
+  ),
+  ins AS (
+    INSERT INTO agent_queue (campaign_id, agent_id, contact_id, queue_state, queued_at, created_by)
+    SELECT p_campaign_id, p_agent_id, a.contact_id, 'queued', now(), p_actor_user_id
+      FROM available a
+    ON CONFLICT ON CONSTRAINT uq_agent_queue_active DO NOTHING
+    RETURNING 1
+  )
+  SELECT COUNT(*) INTO v_assigned FROM ins;
+
+  -- 3) Skipped due to collision (for reporting)
+  WITH candidates AS (
+    SELECT c.id AS contact_id
+      FROM campaign_contacts cc
+      JOIN contacts c ON c.id = cc.contact_id
+     WHERE cc.campaign_id = p_campaign_id
+       AND c.is_valid IS TRUE
+       AND (c.is_opted_out IS FALSE OR c.is_opted_out IS NULL)
+       AND (p_first_name_contains IS NULL OR c.first_name ILIKE '%'||p_first_name_contains||'%')
+  )
+  SELECT COUNT(*)
+    INTO v_skipped
+    FROM candidates c
+    JOIN agent_queue aq
+      ON aq.contact_id = c.contact_id
+     AND aq.campaign_id = p_campaign_id
+     AND aq.queue_state IN ('queued','locked','in_progress');
+
+  -- 4) Audit
+  INSERT INTO audit_log (actor_id, action, target_type, target_id, meta)
+  VALUES (
+    p_actor_user_id, 'queue.replace', 'campaign', p_campaign_id,
+    jsonb_build_object(
+      'agent_id', p_agent_id,
+      'first_name_contains', p_first_name_contains,
+      'per_account_cap', p_per_account_cap,
+      'max_queue_size', p_max_queue_size,
+      'keep_in_progress', p_keep_in_progress,
+      'released', v_released,
+      'assigned', v_assigned,
+      'skipped_due_to_collision', v_skipped
+    )
+  );
+
+  RETURN jsonb_build_object(
+    'released', v_released,
+    'assigned', v_assigned,
+    'skipped_due_to_collision', v_skipped
+  );
+END$$;
+
+
+⸻
+
+API (Node.js + Express + pg)
+
+Do not modify existing endpoints. Add these new endpoints. Gate all new behavior under feature flag queue_replace_v1.
+
+// routes/queues.js
+const express = require('express');
+const { Pool } = require('pg');
+const router = express.Router();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Feature flag util (wire to your config store/env)
+const isEnabled = (flag) => process.env.FEATURE_FLAGS?.split(',').includes(flag);
+
+function requireRole(role) {
+  return (req, res, next) => next(); // TODO: enforce with your RBAC
+}
+
+router.post('/campaigns/:campaignId/queues/set', async (req, res) => {
+  if (!isEnabled('queue_replace_v1')) return res.status(404).json({error:'not_found'});
+  const campaignId = req.params.campaignId;
+  const { agent_id, filters = {}, per_account_cap = null, max_queue_size = null, keep_in_progress = true, dry_run = false } = req.body || {};
+  const actor_user_id = req.user?.id; // assume auth middleware
+
+  try {
+    if (dry_run) {
+      // Optional: implement by copying the SQL CTEs into a SELECT-only to compute counts.
+      // For now, call the function in a rolled-back tx (requires a service-level txn wrapper) or omit.
+      return res.json({ preview_only: true, note: 'Implement dry-run preview SELECT here.' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT queue_replace($1,$2,$3,$4,$5,$6,$7) AS result`,
+      [
+        campaignId,
+        agent_id,
+        actor_user_id,
+        filters.first_name_contains || null,
+        per_account_cap,
+        max_queue_size,
+        keep_in_progress
+      ]
+    );
+    return res.json(rows[0].result);
+  } catch (e) {
+    console.error('[queues:set]', e);
+    return res.status(500).json({ error: 'queue_replace_failed', detail: e.message });
+  }
+});
+
+router.post('/campaigns/:campaignId/queues/clear', async (req, res) => {
+  if (!isEnabled('queue_replace_v1')) return res.status(404).json({error:'not_found'});
+  const campaignId = req.params.campaignId;
+  const { agent_id } = req.body || {};
+  const actor_user_id = req.user?.id;
+  try {
+    const { rows } = await pool.query(
+      `SELECT clear_my_queue($1,$2,$3) AS released`,
+      [campaignId, agent_id, actor_user_id]
+    );
+    return res.json({ released: rows[0].released });
+  } catch (e) {
+    console.error('[queues:clear]', e);
+    return res.status(500).json({ error: 'clear_my_queue_failed', detail: e.message });
+  }
+});
+
+router.post('/campaigns/:campaignId/queues/clear_all', requireRole('admin'), async (req, res) => {
+  if (!isEnabled('queue_replace_v1')) return res.status(404).json({error:'not_found'});
+  const campaignId = req.params.campaignId;
+  const actor_user_id = req.user?.id;
+  try {
+    const { rows } = await pool.query(
+      `SELECT clear_all_queues($1,$2) AS released`,
+      [campaignId, actor_user_id]
+    );
+    return res.json({ released: rows[0].released });
+  } catch (e) {
+    console.error('[queues:clear_all]', e);
+    return res.status(500).json({ error: 'clear_all_queues_failed', detail: e.message });
+  }
+});
+
+module.exports = router;
+
+Wiring:
+
+// app.js
+const express = require('express');
+const app = express();
+app.use(express.json());
+// app.use(authMiddleware); // must set req.user.id here
+app.use(require('./routes/queues'));
+
+Environment flag example:
+
+FEATURE_FLAGS=queue_replace_v1
+
+
+⸻
+
+Frontend (React) — Add controls without breaking UI
+	•	Add a small component near existing queue controls.
+	•	Primary CTA: Set Queue (Replace)
+	•	Secondary: Clear My Queue
+	•	Admin menu: Clear All Queues (show only if RBAC allows).
+	•	Confirmation modals with explicit language about clearing and replacing.
+
+// QueueControls.tsx (snippet)
+<button
+  disabled={busy}
+  className="px-3 py-2 rounded bg-blue-600 text-white"
+  onClick={() => setConfirmReplace(true)}
+  title="Clears your current queue and replaces it with contacts matching current filters. If no filter, queues all campaign contacts."
+>
+  Set Queue (Replace)
+</button>
+<button
+  disabled={busy}
+  className="px-3 py-2 rounded bg-gray-200"
+  onClick={() => setConfirmClearMine(true)}
+>
+  Clear My Queue
+</button>
+
+Result toast:
+Assigned X, Skipped Y, Released Z
+
+⸻
+
+Testing & Quality Gates (must pass before enable flag in prod)
+	1.	Unit tests
+	•	queue_replace with/without filters.
+	•	Per-account cap respected.
+	•	Collision prevention (unique partial index works).
+	•	Keep vs clear in_progress behavior.
+	2.	Integration tests
+	•	API flows return correct counts and HTTP codes.
+	•	RBAC: Agent vs Admin permissions.
+	•	Idempotency: running “Set Queue” twice yields same outcome.
+	3.	Performance
+	•	Test at 100k+ contacts campaign; verify query plans use indexes; no timeouts.
+	•	Ensure LIMIT max_queue_size respected.
+	4.	Observability
+	•	Metrics: queue_replace.assigned, queue_replace.released, queue_replace.skipped, latency, error_rate.
+	•	Audit entries created for every action.
+
+⸻
+
+QA Script (run in staging)
+	•	Seed campaign with ~15k contacts, 3 agents, distribute evenly.
+	•	Run Set Queue (Replace) for Agent A with filter first_name contains "B", per_account_cap=3, max_queue_size=5000.
+	•	Expect JSON: {"released":<previous agentA count>,"assigned":<filtered-available-capped>,"skipped_due_to_collision":<count held by others>}
+	•	Run again with the same params → counts unchanged (idempotent).
+	•	Remove filters; run again → Agent A should hold all available contacts (respecting cap).
+	•	Clear My Queue → released count equals previously queued.
+	•	Admin Clear All Queues → verify all agents’ queued/locked released; in_progress untouched by default.
+
+⸻
+
+Rollout Plan
+	1.	Ship migrations (safe & additive) → verify no locks/timeouts.
+	2.	Deploy backend + frontend with FEATURE_FLAGS disabled.
+	3.	Staging QA using script above.
+	4.	Enable flag for internal users only; monitor metrics & logs.
+	5.	Progressive rollout to all users.
+	6.	If any anomaly occurs → disable feature flag (instant revert, no schema rollback needed).
+	7.	Optional cleanup later (only after confidence): consolidate older queue flows.
+
+⸻
+
+Rollback (no downtime)
+	•	Disable feature flag: queue_replace_v1 (immediate).
+	•	No schema drop required. The new tables/indexes/functions are additive and harmless when unused.
+	•	If you must revert functions to previous versions, re-create with prior definitions.
+
+⸻
+
+Example cURL (for smoke tests)
+
+# Replace queue with filters
+curl -X POST "$API/campaigns/6c1f17c9-6f8b-43d8-8af2-fa27ad84379a/queues/set" \
+ -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+ -d '{
+   "agent_id": "478095da-e25f-4ba3-88bc-367db36f41d3",
+   "filters": {"first_name_contains":"B"},
+   "per_account_cap": 3,
+   "max_queue_size": 5000,
+   "keep_in_progress": true
+ }'
+
+# Clear my queue
+curl -X POST "$API/campaigns/6c1f17c9-6f8b-43d8-8af2-fa27ad84379a/queues/clear" \
+ -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+ -d '{"agent_id":"478095da-e25f-4ba3-88bc-367db36f41d3"}'
+
+# Admin: clear all queues
+curl -X POST "$API/campaigns/6c1f17c9-6f8b-43d8-8af2-fa27ad84379a/queues/clear_all" \
+ -H "Authorization: Bearer $TOKEN"
+
+
+⸻
+
+Final Acceptance Criteria
+	•	Deterministic queue replacement tied to current filters; zero collisions.
+	•	No bugs/regressions in existing queueing, dialing, or reporting flows.
+	•	Feature-flagged, reversible, and fully audited.
+	•	Per-account cap holds across the final assigned set.
+	•	Agent Console shows updated counts immediately; UI feels snappy.
+
+⸻
+
+Implement exactly as above. Prioritize safety: feature flag, additive DB changes, transactions, idempotency, RBAC, and comprehensive logging.

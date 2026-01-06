@@ -1,0 +1,81 @@
+[AUDIO] Audio element cleaned up
+useTelnyxWebRTC.ts:701 Making call with params: 
+Object
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: new
+useTelnyxWebRTC.ts:737 Call object created - ID: 3741c761-e5e2-41d6-a222-2f4107024d04 State: new
+useTelnyxWebRTC.ts:742 Captured Telnyx Call ID: 3741c761-e5e2-41d6-a222-2f4107024d04
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:28:59.004Z] ICE Gathering State gathering
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: requesting
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:29:00.338Z] ICE Gathering State complete
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: trying
+@telnyx_webrtc.js?v=0ab4603b:1979 Performance Metrics
+@telnyx_webrtc.js?v=0ab4603b:1979 
+Object
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:29:05.437Z] ICE Connection State checking
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: active
+useTelnyxWebRTC.ts:519 [AUDIO] Call active - attempting to attach remote stream
+useTelnyxWebRTC.ts:73 [AUDIO] Got remoteStream from call.remoteStream
+useTelnyxWebRTC.ts:110 [AUDIO] Remote stream audio tracks: 1
+useTelnyxWebRTC.ts:119 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+@telnyx_webrtc.js?v=0ab4603b:1444 [2025-12-09T10:29:05.473Z] Connection State changed: new -> connecting
+useTelnyxWebRTC.ts:132 [AUDIO] ✅ Audio playback started successfully
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:29:05.759Z] ICE Connection State connected
+agent-console.tsx:714 [CALL-ATTEMPT] Created call attempt: undefined
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+agent-console.tsx:714 [CALL-ATTEMPT] Created call attempt: undefined
+@telnyx_webrtc.js?v=0ab4603b:1444 [2025-12-09T10:29:06.175Z] Connection State changed: connecting -> connected
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: 
+Object
+useTelnyxWebRTC.ts:193 [AUDIO-MONITOR] AudioContext analyzer created
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: 
+Object
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: 
+Array(21)
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connected
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: 
+Object
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: 
+Object
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: 
+Object
+useTelnyxWebRTC.ts:280 [PEER-STATS] ✅ Inbound RTP: 
+Object
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: 
+Object
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: 
+Object
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: 
+Array(11)
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  24606 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:5025842046 1 udp 2130706431 185.246.41.188 24606 typ host generation 0
+a=ice-ufrag:uQ7KqBj7qxaTe4L8
+a=ice-pwd:BfTePuE7fhx3h8jEEF5u353r
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: 
+Object
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: 
+Object
+useTelnyxWebRTC.ts:211 [AUDIO-LEVELS] ✅ Audio data is flowing!
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: 
+Array(21)
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connected
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+﻿

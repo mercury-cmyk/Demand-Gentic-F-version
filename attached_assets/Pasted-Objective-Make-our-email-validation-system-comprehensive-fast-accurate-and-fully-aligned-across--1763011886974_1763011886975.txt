@@ -1,0 +1,122 @@
+Objective
+
+Make our email validation system comprehensive, fast, accurate, and fully aligned across the entire platform (verification campaigns, call campaigns, and email campaigns).
+
+1. Standardize Email Validation Statuses
+
+We will use only four core statuses across the platform:
+
+VALID
+
+INVALID
+
+UNKNOWN
+
+ACCEPTABLE (includes catch-all / accept-all cases)
+
+These four statuses must be the only possible outcomes from any email validation endpoint.
+
+2. Status Logic & Rules
+2.1 VALID
+
+Set status to VALID when:
+
+SMTP check confirms the mailbox is deliverable, and
+
+Domain and syntax are valid, and
+
+The result is not a catch-all / accept-all ambiguity.
+
+In other words: clear, positive confirmation that the email address exists and can receive mail.
+
+2.2 ACCEPTABLE (Catch-All / Accept-All)
+
+Set status to ACCEPTABLE when:
+
+Syntax and domain are valid,
+
+SMTP or provider returns catch-all / accept-all or similar ambiguous but not hard-fail response,
+
+We cannot confirm the exact inbox, but delivery is likely possible.
+
+Catch-all / accept-all responses must not be labeled as VALID. They should be categorized as ACCEPTABLE.
+
+2.3 UNKNOWN
+
+Set status to UNKNOWN when:
+
+We cannot reliably determine if the email is valid or invalid because of technical or policy limitations, for example:
+
+SMTP timeouts
+
+Greylisting
+
+Anti-abuse / security settings on the recipient domain
+
+Temporary connection issues or ambiguous provider responses
+
+There is no clear positive confirmation and no clear hard failure.
+
+UNKNOWN means: we’re not sure, do not assume valid or invalid.
+
+2.4 INVALID
+
+Set status to INVALID when:
+
+Any hard failure is detected, including:
+
+Syntax errors (bad format, invalid characters, etc.)
+
+Domain issues (non-existent domain, invalid MX records, etc.)
+
+SMTP hard fail (mailbox does not exist / user unknown / permanent failure)
+
+INVALID means: do not use this email for campaigns.
+
+3. Platform-Wide Consistency
+
+These rules and statuses must be:
+
+Applied in verification campaigns
+
+Applied in call campaigns (any place where email quality affects lead handling)
+
+Applied in email campaigns
+
+Applied in any other module or feature that calls an email validation endpoint.
+
+Everywhere in the platform, the email validation results must:
+
+Use the same four statuses: VALID, INVALID, UNKNOWN, ACCEPTABLE
+
+Follow the same decision logic and mapping rules
+
+Expose consistent values in:
+
+API responses
+
+Internal services
+
+UI labels / filters / segments
+
+Reporting & analytics
+
+4. Implementation Requirements
+
+Update all email validation endpoints and services to output only the four standard statuses and apply the logic above.
+
+Refactor any legacy or custom status codes to map into: VALID / INVALID / UNKNOWN / ACCEPTABLE.
+
+Update all campaigns and workflows (verification, email, call) to:
+
+Read and interpret these four statuses consistently.
+
+Avoid any hard-coded or legacy interpretations of older statuses.
+
+Perform a full audit of the platform to:
+
+Identify every place where email validation is called, stored, filtered, or displayed.
+
+Align the logic and labels to this spec.
+
+Ensure there are no inconsistent mappings or bugs anywhere once this is deployed.

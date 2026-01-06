@@ -1,0 +1,257 @@
+Got it — here’s a ready-to-paste Replit Autopilot prompt that will scan your entire codebase for routes that “connect nowhere,” flag/remove useless duplicates, and give you a safe, reviewable cleanup PR.
+
+⸻
+
+Replit Autopilot Prompt — Dead & Duplicate Routes Cleanup (Pivotal B2B CRM)
+
+Context
+	•	Monorepo stack: Frontend React 18 + TypeScript + Vite + Wouter (light router) + TanStack Query; Backend Node.js + Express + TypeScript + Drizzle + Postgres (Neon).
+	•	Problem: Route bloat. Some routes aren’t reachable (no inbound links, no nav, no redirects, never fetched) or have duplicates/overlaps causing 404s, hidden pages, and wasted bundle size.
+
+Primary Objectives
+	1.	Identify dead (unreachable/unreferenced) routes across frontend and backend.
+	2.	Detect duplicate or overlapping routes (same path → multiple handlers/components or conflicting param patterns).
+	3.	Propose & implement safe removals, with a quarantine/deprecation step and a single PR.
+	4.	Add guardrails (CI checks, eslint rules, tests) so dead/duplicate routes don’t come back.
+
+⸻
+
+Scope of Work
+
+A) Frontend (React + Wouter)
+	1.	Extract defined routes
+	•	Parse all *.tsx for <Route path="...">, <Link href="...">, <Redirect to="...">, and any useLocation() / custom nav helpers.
+	•	Support dynamic segments like /accounts/:id, optional segments, and wildcards.
+	2.	Find inbound references
+	•	Collect all internal navigations:
+	•	<Link href="/...">, custom navigate('/...'), location.push('/...').
+	•	Programmatic redirects (e.g., auth guards).
+	•	Menu/Sidebar config objects that hold paths.
+	3.	Determine reachability
+	•	Build a graph starting at known entry points (/, auth landing), plus any whitelist (see “Whitelists” below).
+	•	Mark routes as reachable if:
+	•	Directly linked from a reachable node, or
+	•	Referenced by guarded code that is enabled by default feature flags.
+	4.	Detect duplicates/overlaps
+	•	Same path declared multiple times.
+	•	Over-broad wildcards that swallow a more specific child.
+	5.	Runtime validation (optional but preferred)
+	•	Inject a small dev-mode logger to report any route that never gets mounted during a standard smoke e2e run (Cypress/Playwright). Output a coverage-like map.
+
+B) Backend (Express + TypeScript)
+	1.	Extract defined routes
+	•	Use static parsing for app.get/post/put/delete/patch/head/all, router.METHOD, and .use('/prefix', router).
+	•	Resolve route composition to final method+path list (e.g., basePath + childRoute).
+	2.	Find consumers
+	•	Search all *.ts/tsx for fetch, axios, apiClient, TanStack Query queryFns, and service wrappers to get the set of used endpoints.
+	•	Include integration/webhook endpoints referenced in server code (e.g., Telnyx, EmailListVerify) and in infra config.
+	3.	Determine dead endpoints
+	•	Endpoints with no internal or external references (see Whitelists).
+	4.	Detect duplicates/overlaps
+	•	Two handlers registered for the same method+path.
+	•	Ambiguous param patterns (e.g., /accounts/:id and /accounts/:slug both active without disambiguation).
+	5.	Runtime validation
+	•	Add a temporary 404/405 audit middleware in dev/test to log requests to unknown or shadowed routes during e2e runs.
+
+⸻
+
+Implementation Plan
+
+1) Add route scanners
+
+Install tooling
+
+npm i -D ts-morph @babel/parser @babel/traverse globby express-list-endpoints fast-glob chalk
+
+scripts/scan-frontend-routes.ts
+	•	Parse TSX using @babel/parser (tsx syntax).
+	•	Collect:
+	•	definedRoutes[] from <Route path="...">
+	•	links[] from <Link href="..."> and navigate('/...')
+	•	menuPaths[] from sidebars/nav configs
+	•	Build a graph and mark reachable paths starting at ['/'] plus whitelist.
+	•	Write reports/frontend-routes.json with:
+	•	{ defined, linked, reachable, dead, duplicates, overlaps }
+
+scripts/scan-express-routes.ts
+	•	Load source with ts-morph (don’t execute app).
+	•	Static-collect method+path for all routers (resolve prefixes).
+	•	Also run express-list-endpoints in a test boot (non-network) if possible to cross-check.
+	•	Output reports/backend-routes.json with { endpoints, duplicates, overlaps, unreferenced }.
+
+scripts/scan-api-usage.ts
+	•	Search *.ts/tsx for fetch/axios/apiClient.
+	•	Extract URL strings and template literals (best effort).
+	•	Normalize to relative API paths (remove domain/origin).
+	•	Output reports/api-usage.json.
+
+scripts/find-dead-routes.ts
+	•	Compare:
+	•	Backend: endpoints vs api-usage.
+	•	Frontend: definedRoutes vs reachability graph.
+	•	Produce reports/dead-routes.md and reports/duplicates.md with exact file:line references.
+
+package.json scripts
+
+{
+  "scripts": {
+    "scan:routes:fe": "ts-node scripts/scan-frontend-routes.ts",
+    "scan:routes:be": "ts-node scripts/scan-express-routes.ts",
+    "scan:routes:api": "ts-node scripts/scan-api-usage.ts",
+    "scan:routes": "npm run scan:routes:fe && npm run scan:routes:be && npm run scan:routes:api && ts-node scripts/find-dead-routes.ts",
+    "routes:report": "node scripts/print-route-report.js"
+  }
+}
+
+2) Quarantine & Deprecation flow (safe delete)
+	•	Create quarantine/routes/ folder.
+	•	For each dead/duplicate route:
+	1.	Frontend: move the component/page to quarantine/ and add a minimal stub page showing a 410 Gone (with a dev-only banner).
+	2.	Backend: comment out the handler; replace with 410 Gone stub middleware that logs if hit in non-prod.
+	•	Keep a mapping file quarantine/map.json with old → new (or removed) to help QA.
+	•	After a full e2e pass with zero hits, delete quarantined code in a follow-up commit in the same PR.
+
+3) CI guardrails
+
+.github/workflows/routes-scan.yml
+	•	On every PR:
+	•	Run npm run scan:routes.
+	•	If dead.length > 0 or duplicates.length > 0, fail the check and attach the markdown reports as artifacts.
+	•	Add an ESLint rule for duplicates:
+	•	Custom rule no-duplicate-routes that parses JSX <Route path> & Express registrations, fails on duplicate paths.
+	•	Add a small unit test that asserts no dead routes (reads reports/*.json).
+
+4) Runtime logging (temporary)
+	•	Frontend dev: small effect in App.tsx to register mounted route paths to window.__ROUTE_MOUNTED__.
+	•	Backend dev/test: middleware before 404 that logs unknown routes to reports/runtime-unknown.json.
+	•	Remove these when PR is merged.
+
+⸻
+
+Whitelists & Edge Cases (very important)
+	•	Do NOT delete routes that are:
+	•	Feature-flagged (listed in /config/featureFlags.ts).
+	•	Client-facing webhooks/callbacks (Telnyx, EmailListVerify, OAuth) — add them to /config/routeWhitelist.ts.
+	•	Legacy API consumed by external partners (list any known prefixes like /v1/legacy/*).
+	•	SSO/SAML/OAuth dance routes that look “unused” in code (documented in whitelist).
+
+Create /config/routeWhitelist.ts:
+
+export const FRONTEND_WHITELIST = ["/auth/callback", "/oauth/callback", "/health"];
+export const BACKEND_WHITELIST  = ["/webhooks/telnyx", "/webhooks/email-list-verify", "/healthz", "/metrics"];
+
+
+⸻
+
+Acceptance Criteria
+	•	reports/frontend-routes.json, reports/backend-routes.json, reports/api-usage.json generated and human-readable.
+	•	reports/dead-routes.md lists all dead routes with file:line references.
+	•	reports/duplicates.md lists duplicates and overlaps with suggested resolution.
+	•	Quarantine applied; no runtime hits during full e2e.
+	•	One PR with:
+	•	Route scanners + CI checks
+	•	Quarantine stubs
+	•	Actual removals (2nd commit)
+	•	CI fails on newly introduced dead/duplicate routes going forward.
+
+⸻
+
+Code Sketches (brief)
+
+scripts/scan-frontend-routes.ts (sketch)
+
+import { parse } from "@babel/parser";
+import traverse from "@babel/traverse";
+import fg from "fast-glob";
+import fs from "fs";
+
+const files = await fg(["src/**/*.{tsx,ts}"]);
+const defined = new Set<string>();
+const links = new Set<string>();
+
+for (const f of files) {
+  const code = fs.readFileSync(f, "utf8");
+  const ast = parse(code, { sourceType: "module", plugins: ["typescript", "jsx"] });
+  traverse(ast, {
+    JSXOpeningElement(path) {
+      const name = path.node.name;
+      if (name.type === "JSXIdentifier" && name.name === "Route") {
+        for (const attr of path.node.attributes) {
+          if (attr.type === "JSXAttribute" && attr.name.name === "path" && attr.value?.type === "StringLiteral") {
+            defined.add(attr.value.value);
+          }
+        }
+      }
+      if (name.type === "JSXIdentifier" && (name.name === "Link" || name.name === "NavLink")) {
+        for (const attr of path.node.attributes) {
+          if (attr.type === "JSXAttribute" && ["href","to"].includes(String(attr.name.name)) && attr.value?.type === "StringLiteral") {
+            links.add(attr.value.value);
+          }
+        }
+      }
+    },
+    CallExpression(path) {
+      const callee = path.get("callee");
+      if (callee.isIdentifier() && ["navigate","push"].includes(callee.node.name)) {
+        const arg = path.node.arguments[0];
+        if (arg && arg.type === "StringLiteral") links.add(arg.value);
+      }
+    }
+  });
+}
+// TODO: build reachability graph starting from "/" + whitelist; detect duplicates/overlaps
+fs.writeFileSync("reports/frontend-routes.json", JSON.stringify({ defined: [...defined], links: [...links] }, null, 2));
+
+scripts/scan-express-routes.ts (sketch)
+
+import fg from "fast-glob";
+import fs from "fs";
+
+const routes: Array<{method:string; path:string; file:string;}> = [];
+// naive regex + improve via ts-morph if needed
+const METHOD = /(app|router)\.(get|post|put|delete|patch|all)\(\s*['"`]([^'"`]+)['"`]/g;
+
+for (const f of await fg(["server/**/*.{ts,tsx,js}"])) {
+  const code = fs.readFileSync(f, "utf8");
+  let m;
+  while ((m = METHOD.exec(code)) !== null) {
+    routes.push({ method: m[2].toUpperCase(), path: m[3], file: f });
+  }
+}
+fs.writeFileSync("reports/backend-routes.json", JSON.stringify({ routes }, null, 2));
+
+CI Gate (excerpt)
+
+- name: Scan routes
+  run: npm run scan:routes
+- name: Fail on dead/dupes
+  run: node scripts/ci-fail-on-deadroutes.js
+
+scripts/ci-fail-on-deadroutes.js
+
+const fe = require('../reports/frontend-dead.json');
+const be = require('../reports/backend-dead.json');
+if (fe.dead.length || fe.duplicates.length || be.dead.length || be.duplicates.length) {
+  console.error("Dead/duplicate routes detected.");
+  process.exit(1);
+}
+
+
+⸻
+
+Deliverables
+	•	reports/*.json + reports/*.md (final lists).
+	•	scripts/* route scanners and CI gate.
+	•	quarantine/* with stubs and map.
+	•	One PR with two commits (quarantine, then remove).
+
+⸻
+
+Notes
+	•	Treat dynamic and param routes cautiously; only remove if truly unreachable and not whitelisted.
+	•	Keep a short README in reports/ explaining how to regenerate scans:
+	•	npm run scan:routes && open reports/dead-routes.md
+
+⸻
+
+If you’d like, I can also add a Cypress smoke flow checklist that intentionally visits all critical routes (Campaign Builder, Agent Console, QA, Verification, Resources Centre, Settings, etc.) so any accidental deletions get caught automatically.

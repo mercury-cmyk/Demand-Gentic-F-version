@@ -1,0 +1,141 @@
+2025-11-04 16:20:19.10
+daad13b8
+User
+internalQuery: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+where: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+schema: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+table: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+column: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+dataType: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+constraint: undefined,
+2025-11-04 16:20:19.10
+daad13b8
+User
+file: 'parse_relation.c',
+2025-11-04 16:20:19.10
+daad13b8
+User
+line: '3716',
+2025-11-04 16:20:19.10
+daad13b8
+User
+routine: 'errorMissingColumn'
+2025-11-04 16:20:19.10
+daad13b8
+User
+}
+2025-11-04 16:20:25.09
+fb077b5a
+User
+[AssemblyAI] Error processing pending transcriptions: error: column "dialed_number" does not exist
+2025-11-04 16:20:25.09
+fb077b5a
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 16:20:25.09
+fb077b5a
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 16:20:25.09
+fb077b5a
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 16:20:25.09
+fb077b5a
+User
+at async processPendingTranscriptions (file:///home/runner/workspace/dist/index.js:16924:26)
+2025-11-04 16:20:25.09
+fb077b5a
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:18462:9) {
+2025-11-04 16:20:25.09
+fb077b5a
+User
+length: 114,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+severity: 'ERROR',
+2025-11-04 16:20:25.09
+fb077b5a
+User
+code: '42703',
+2025-11-04 16:20:25.09
+fb077b5a
+User
+detail: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+hint: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+position: '129',
+2025-11-04 16:20:25.09
+fb077b5a
+User
+internalPosition: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+internalQuery: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+where: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+schema: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+table: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+column: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+dataType: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+constraint: undefined,
+2025-11-04 16:20:25.09
+fb077b5a
+User
+file: 'parse_relation.c',
+2025-11-04 16:20:25.09
+fb077b5a
+User
+line: '3716',
+2025-11-04 16:20:25.09
+fb077b5a
+User
+routine: 'errorMissingColumn'
+
+2025-11-04 16:20:25.09
+fb077b5a
+User
+}

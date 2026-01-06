@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud config get-value:*)",
+      "Bash(where:*)",
+      "Bash(gcloud.cmd config get-value:*)",
+      "Bash(gcloud.cmd auth print-access-token:*)",
+      "Bash(gcloud.cmd services enable:*)",
+      "Bash(gcloud.cmd secrets describe:*)",
+      "Bash(gcloud.cmd builds submit:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(docker info:*)",
+      "Bash(gcloud.cmd auth configure-docker:*)",
+      "Bash(docker build:*)",
+      "Bash(gcloud.cmd run deploy:*)",
+      "Bash(gcloud.cmd secrets versions list:*)",
+      "Bash(gcloud.cmd logging read:*)",
+      "Bash(gcloud.cmd run services describe:*)",
+      "Bash(gcloud.cmd projects describe:*)",
+      "Bash(gcloud.cmd secrets add-iam-policy-binding:*)",
+      "Bash(gcloud.cmd secrets create:*)",
+      "Bash(gcloud.cmd secrets versions add:*)",
+      "Bash(for secret in PGPASSWORD MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET TELNYX_API_KEY ELEVENLABS_API_KEY MAILGUN_API_KEY AI_INTEGRATIONS_ANTHROPIC_API_KEY GEMINI_API_KEY BRAVE_SEARCH_API_KEY DEEPSEEK_API_KEY ELEVENLABS_WEBHOOK_SECRET COMPANIES_HOUSE_API_KEY EMAIL_LIST_VERIFY_API_KEY PSE_GOOGLE GOOGLE_SEARCH_API_KEY AI_INTEGRATIONS_GEMINI_API_KEY TELNYX_SIP_PASSWORD)",
+      "Bash(do gcloud.cmd secrets add-iam-policy-binding $secret --member=\"serviceAccount:657571555590-compute@developer.gserviceaccount.com\" --role=\"roles/secretmanager.secretAccessor\" --quiet)",
+      "Bash(done)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(ping:*)",
+      "Bash(psql:*)",
+      "Bash(npx ts-node:*)"
+    ]
+  }
+}

@@ -1,0 +1,112 @@
+2025-10-30 21:04:28.64
+6f78cce0
+User
+[ASSIGN AGENTS] ERROR: error: bind message has 1072 parameter formats but 0 parameters
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1345:74
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at async file:///home/runner/workspace/dist/index.js:27710:30 {
+2025-10-30 21:04:28.64
+6f78cce0
+User
+length: 121,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+severity: 'ERROR',
+2025-10-30 21:04:28.64
+6f78cce0
+User
+code: '08P01',
+2025-10-30 21:04:28.64
+6f78cce0
+User
+detail: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+hint: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+position: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+internalPosition: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+internalQuery: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+where: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+schema: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+table: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+column: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+dataType: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+constraint: undefined,
+2025-10-30 21:04:28.64
+6f78cce0
+User
+file: 'postgres.c',
+2025-10-30 21:04:28.64
+6f78cce0
+User
+line: '1729',
+2025-10-30 21:04:28.64
+6f78cce0
+User
+routine: 'exec_bind_message'
+2025-10-30 21:04:28.64
+6f78cce0
+User
+}
+2025-10-30 21:04:28.64
+6f78cce0
+User
+[ASSIGN AGENTS] Error stack: error: bind message has 1072 parameter formats but 0 parameters
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1345:74
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-10-30 21:04:28.64
+6f78cce0
+User
+at async file:///home/runner/workspace/dist/index.js:27710:30

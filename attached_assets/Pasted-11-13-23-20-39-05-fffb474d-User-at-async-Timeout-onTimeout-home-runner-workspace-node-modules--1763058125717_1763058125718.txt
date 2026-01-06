@@ -1,0 +1,133 @@
+11-13 23:20:39.05
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:20:46.85
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:20:46.85
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:20:46.85
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+2025-11-13 23:20:46.85
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:20:46.85
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:20:55.35
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:20:55.35
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:20:55.35
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 23:20:55.35
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:20:55.35
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:21:03.25
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:21:03.25
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:21:03.25
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 23:21:03.25
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:21:03.25
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:21:11.15
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:21:11.15
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:21:11.15
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 23:21:11.15
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:21:11.15
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:21:18.95
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:21:18.95
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:21:18.95
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 23:21:18.95
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:21:18.95
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:21:26.85
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:21:26.85
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36
+2025-11-13 23:21:26.85
+fffb474d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 23:21:26.85
+fffb474d
+User
+at async Worker.extendLocks (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:834:9)
+2025-11-13 23:21:26.85
+fffb474d
+User
+at async Timeout._onTimeout (/home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:765:29)
+2025-11-13 23:21:34.75
+fffb474d
+User
+Error: could not renew lock for job cap-enforcement-9ed0de24-2e46-4881-958c-2d2e7017f60b-1763057189335
+2025-11-13 23:21:34.75
+fffb474d
+User
+at /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:843:36

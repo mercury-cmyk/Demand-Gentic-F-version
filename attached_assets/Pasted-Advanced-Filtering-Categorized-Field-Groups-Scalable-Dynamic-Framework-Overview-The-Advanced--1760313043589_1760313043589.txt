@@ -1,0 +1,279 @@
+Advanced Filtering & Categorized Field Groups (Scalable & Dynamic Framework)
+Overview
+
+The Advanced Filter Builder must serve as a centralized, scalable filtering engine powering all list views, segmentation tools, and campaign audience selectors across the platform — including Contacts, Accounts, Email Campaigns, Telemarketing Campaigns, QA Portal, and Client Order Audience Builders.
+
+The system should automatically detect and expose all available fields (standard and custom) grouped by logical categories — ensuring zero manual configuration when new fields are added to any entity.
+
+Scalability & Dynamic Field Registry
+
+Dynamic Schema Introspection:
+Every entity (Contacts, Accounts, Leads, Campaigns, Calls, QA, etc.) registers its fields to a central Filter Field Registry via metadata (field_definitions table or schema service).
+Each field contains metadata:
+
+{
+  "entity": "contact",
+  "key": "linkedin_url",
+  "label": "LinkedIn Profile URL",
+  "type": "string",
+  "operators": ["equals", "contains", "starts_with", "is_empty"],
+  "category": "Contact Fields",
+  "is_custom": false,
+  "visible_in_filters": true
+}
+
+Auto-Propagation:
+Any newly created field (system or custom) that sets visible_in_filters = true automatically appears:
+
+in Advanced Filter Builder (Contacts & Accounts pages),
+
+in Campaign Audience Selection,
+
+in Segments & Lists,
+
+in Client Portal order audience filters, and
+
+in Bulk Action filters (e.g., “update all filtered records”).
+
+Extensibility Guarantee:
+No hardcoded field definitions — all filterable fields should be dynamically fetched from the schema registry at runtime or cached via API.
+
+Performance Strategy:
+
+Maintain indexed projection tables for frequently queried fields.
+
+Use async reindexing jobs when new fields are added.
+
+Support 1,000+ fields across all modules without query degradation (<3s for <5M records).
+
+Field Categories
+1. Contact Fields
+
+Purpose: Demographic, behavioral, and compliance data about individual contacts.
+Applies To: Contacts Module | Campaign Audience Selection | Segments | QA Portal | Client Portal
+Example Fields:
+
+full_name, first_name, last_name
+
+job_title, department, seniority_level
+
+email, email_verification_status (valid | invalid | risky | bounced)
+
+direct_phone, phone_verified_at
+
+city, state, country
+
+linkedin_url, intent_topics[], tags[]
+
+consent_basis, consent_source, consent_ts
+
+2. Account Fields
+
+Purpose: Firmographic, enrichment, and ABM targeting data for companies.
+Applies To: Accounts | Contacts (via joins) | Campaign Audience Selection | Reports
+Example Fields:
+
+account.name, account.domain
+
+account.industry, account.annual_revenue, account.employees_size_range
+
+account.staff_count, account.hq_city, account.hq_country
+
+account.linkedin_url, account.linkedin_specialties
+
+account.technologies_installed, account.intent_topics[]
+
+account.tier, account.ICP_match, account.owner_id, account.tags[]
+
+3. Suppression Fields
+
+Purpose: Compliance and communication opt-out filters.
+Applies To: Contacts | Campaign Pre-Send Validation | Bulk Exports
+Example Fields:
+
+email_suppressed (true/false)
+
+dnc_flag (true/false)
+
+suppression_reason, suppression_date
+
+consent_withdrawn
+
+4. Email Marketing Campaign Fields
+
+Purpose: Engagement and deliverability metrics from email campaign activity.
+Applies To: Contacts | Campaigns | Segments | Reports
+Example Fields:
+
+campaign_name
+
+email_sent, email_delivered, email_opened, email_clicked
+
+email_not_sent, email_not_opened, email_not_clicked
+
+email_soft_bounced, email_hard_bounced, email_never_soft_bounced
+
+last_email_sent_at, last_opened_at, last_clicked_at
+
+5. Telemarketing Campaign Fields
+
+Purpose: Call activity tracking and qualification metrics.
+Applies To: Contacts | Campaigns | QA Portal | Reports
+Example Fields:
+
+telemarketing_campaign_name
+
+caller_name
+
+call_disposition (Qualified, Not Interested, DNC, Callback, Voicemail)
+
+call_comments
+
+qualifying_question (with selected values)
+
+asset_name
+
+call_date_time, call_duration
+
+recording_available (true/false)
+
+6. QA (Lead Review) Fields
+
+Purpose: Track internal lead review status and quality feedback.
+Applies To: Leads | QA Portal | Client Portal Reports
+Example Fields:
+
+qa_status (In Review | Accepted | Rejected)
+
+qa_comments
+
+qa_rejection_reason
+
+qa_approved_at
+
+qa_reviewer
+
+7. List / Segment Fields
+
+Purpose: Identify membership within lists and segments for campaign targeting and exclusions.
+Applies To: Contacts | Accounts | Campaign Audience Builder
+Example Fields:
+
+included_in_list (List Name/ID)
+
+not_included_in_list
+
+included_in_segment
+
+not_included_in_segment
+
+8. Client Portal Fields (NEW)
+
+Purpose: Track lead delivery outcomes and client-side feedback from the Client Portal.
+Applies To: Leads | QA Reports | Client Portal | Internal Analytics
+Example Fields:
+
+client_delivered (Boolean – Lead delivered to client)
+
+client_accepted (Boolean – Client approved lead)
+
+client_rejected (Boolean – Client rejected lead)
+
+client_comments (Text – Client feedback)
+
+client_name (String – Client organization associated with order)
+
+Integration Notes:
+
+Backed by client_delivery_projection joined to Leads and Orders.
+
+Updated asynchronously whenever client acceptance status changes.
+
+Included automatically in filter registry when visible_in_filters = true.
+
+Appears as its own collapsible panel in the Advanced Filter UI.
+
+Cross-Module Scalability Requirements
+
+Every new field created (standard or custom) with visible_in_filters=true must automatically propagate to:
+
+Advanced Filters in Contacts and Accounts
+
+Campaign Audience Selection
+
+Segments & Lists
+
+QA and Client Portal Filters
+
+Bulk Action Filters
+
+No manual schema updates required; all handled via the central Filter Field Registry.
+
+Support thousands of registered fields with <3 seconds response time on ≤5 million records.
+
+Outcome:
+This expanded, category-driven filtering framework allows complete lifecycle visibility—from contact acquisition to client delivery—and scales dynamically as new entities or fields are introduced anywhere in the platform.---
+
+Filter Engine Architecture
+
+Core Engine: JSON-based DSL allowing nested AND/OR conditions, parenthesis grouping, and multi-entity joins.
+
+Cross-Entity Linking: Contacts ↔ Accounts ↔ Campaign Activities ↔ QA Records.
+
+Time-Based & Relative Filters:
+
+within_last_days
+
+between_dates
+
+not_updated_since
+
+Reusable Logic: Filters stored as reusable definitions (definition_json) that can be applied to:
+
+Contact grid
+
+Account grid
+
+Campaign audience builder
+
+QA portal
+
+Client order submission
+
+Domain Set expansions
+
+UI/UX Requirements
+
+Categorized Panels:
+Collapsible filter panels:
+Contacts | Accounts | Suppression | Email Campaigns | Telemarketing | QA | Lists / Segments
+
+Field Search Bar:
+Type-to-filter any field by name or alias (e.g., “industry”, “opened”).
+
+Dynamic Operator Display:
+Show context-aware operators (e.g., “contains” for text, “greater than” for numeric).
+
+Real-Time Count Preview:
+Display estimated result count instantly upon applying filters.
+
+Save & Share Filters:
+Saved Filters and Segments reusable across modules and visible based on user role.
+
+Consistent Everywhere:
+The same filter UX and engine power Contacts, Accounts, Campaign Builder, QA Portal, Client Portal, and Bulk Actions.
+
+Technical Notes
+
+Backend: Filter evaluation executed via optimized SQL builder or ElasticSearch query generator.
+
+Caching: Frequently used filter definitions cached by tenant.
+
+Schema Registry Service: Monitors new fields and updates filter configuration asynchronously.
+
+UI Integration: Filter schema fetched via API /filters/fields with category metadata.
+
+Permissions: Role-based visibility — e.g., QA fields visible to QA team only.
+
+Outcome:
+A unified, dynamically extensible, and category-driven filtering framework that scales seamlessly as new fields are added to any entity — ensuring every field is instantly available across Contacts, Accounts, Campaign Builders, Lists, Segments, and Client Portals without redevelopment.

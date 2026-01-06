@@ -1,0 +1,126 @@
+2025-11-06 03:17:33.21
+4592ea09
+User
+at WebSocket.onClose (/home/runner/workspace/node_modules/ws/lib/event-target.js:220:9)
+2025-11-06 03:17:33.30
+4592ea09
+System
+main done, exiting
+2025-11-06 03:17:33.15
+4592ea09
+User
+[DB Pool] Client removed | Total: 4, Idle: 2, Waiting: 0
+2025-11-06 03:17:33.15
+4592ea09
+User
+[DB Pool] Client removed | Total: 2, Idle: 0, Waiting: 0
+2025-11-06 03:17:33.15
+4592ea09
+User
+[2025-11-05T22:17:33.155Z] [PID: 38] [NODE-CRON] [WARN] missed execution at Wed Nov 05 2025 22:12:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2025-11-06 03:17:33.16
+4592ea09
+User
+[2025-11-05T22:17:33.163Z] [PID: 38] [NODE-CRON] [WARN] missed execution at Wed Nov 05 2025 22:16:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2025-11-06 03:17:33.21
+4592ea09
+User
+[DB Pool] Client removed | Total: 5, Idle: 0, Waiting: 0
+2025-11-06 03:17:33.21
+4592ea09
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-06 03:17:33.21
+4592ea09
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at async DatabaseStorage.getAllAutoDialerQueues (file:///home/runner/workspace/dist/index.js:8315:18)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at async PowerDialerEngine.processActiveQueues (file:///home/runner/workspace/dist/index.js:16330:26)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:16303:11)
+2025-11-06 03:17:33.21
+4592ea09
+User
+file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:316
+2025-11-06 03:17:33.21
+4592ea09
+User
+0&&(o=t[0]),o instanceof Error)throw o;var u=new Error("Unhandled error."+(o?" ("+o.message+")":""));
+2025-11-06 03:17:33.21
+4592ea09
+User
+2025-11-06 03:17:33.21
+4592ea09
+User
+Error: Connection terminated unexpectedly
+2025-11-06 03:17:33.21
+4592ea09
+User
+at Sn. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1010:76)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at Object.onceWrapper (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:327:95)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at Sn.emit (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:317:79)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at S. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:971:58)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at S.emit (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:317:79)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at callListener (/home/runner/workspace/node_modules/ws/lib/event-target.js:290:14)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at WebSocket.emit (node:events:524:28)
+2025-11-06 03:17:33.21
+4592ea09
+User
+at WebSocket.emitClose (/home/runner/workspace/node_modules/ws/lib/websocket.js:272:10)
+2025-11-06 03:17:33.21
+4592ea09
+User
+2025-11-06 03:17:33.21
+4592ea09
+User
+Node.js v20.19.3
+2025-11-06 03:17:33.29
+4592ea09
+System
+command finished with error [npm run start]: signal: terminated
+2025-11-06 03:17:46.14
+ee893009
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-06 03:18:01.23
+ee893009
+User
+[AutoDialer] Skipping poll - previous execution still in progress
+2025-11-06 03:18:02.44
+ee893009
+User
+[2025-11-05T22:18:02.442Z] [PID: 41] [NODE-CRON] [WARN] missed execution at Wed Nov 05 2025 22:18:00 GMT+0000 (Coordinated Universal Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2025-11-06 03:18:07.93
+ee893009
+User
+[AutoDialer] Skipping poll - previous execution still in progress

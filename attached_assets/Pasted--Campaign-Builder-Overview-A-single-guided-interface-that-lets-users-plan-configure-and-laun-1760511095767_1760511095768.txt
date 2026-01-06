@@ -1,0 +1,160 @@
+🎯 Campaign Builder — Overview
+
+A single, guided interface that lets users plan, configure, and launch any type of B2B campaign — whether it’s Email Outreach, Tele Outreach, Webinar Promotion, or Content Syndication.
+
+Each campaign is structured as a step-by-step builder with visual progress indicators and collapsible panels.
+
+🧭 1. Campaign Details (Step 1)
+Fields:
+
+Campaign Name: Editable at any time.
+E.g., “Q4 Webinar — HR Tech Buyer Roundtable”
+
+Campaign Type (Dropdown):
+
+Webinar Promotion
+
+Content Distribution
+
+Lead Qualification
+
+Event Registration
+
+BANT / HQL Outreach
+
+
+
+Objective (optional): Short description or goal.
+
+Tags: To group campaigns by client, region, or vertical.
+
+UX:
+
+Left: Form fields
+
+Right: Preview card showing campaign summary (auto-updates as you type)
+
+🧩 2. Audience Selection (Step 2)
+
+Users can build or select audiences from multiple sources.
+
+Selection Options:
+
+By Account Lists:
+Select existing Account Lists from CRM (e.g., “UK HR Tech Accounts”)
+
+By Segments or Lists:
+Import or choose predefined Segments (e.g., “CIOs – Manufacturing – DACH”)
+
+By Filters:
+Use Advanced Filters (Equals / Contains / Has Value / etc.) to create dynamic audiences
+
+By Engagement:
+
+Past Email Engagement (Opens, Clicks, Replies, Bounces)
+
+Past Phone Engagement (Connected Calls, Positive Dispositions, Callbacks)
+
+Bonus:
+
+Real-time Audience Size Indicator
+Shows count and overlap dynamically (e.g., “3,420 contacts matched, 1,120 unique accounts”)
+
+Preview Audience Button to view top records before confirming.
+
+🗣️ 3. Message & Script Setup (Step 3)
+Components:
+
+Assign Script:
+Choose from pre-approved outreach templates (Email / Call / LinkedIn)
+
+Qualifying Questions (Optional):
+Add or choose predefined questions for BANT, HQL, or Event Qualification.
+
+Example:
+
+“Are you evaluating HR software within the next 6 months?”
+
+“Do you currently use any SaaS HR system?”
+
+Attachments / Assets:
+Upload or link landing pages, eBooks, webinar invites, etc.
+
+UX Enhancement:
+
+Show live preview side-by-side:
+
+“Hi [First Name], I’d like to invite you to our upcoming HR Tech roundtable…”
+
+👥 4. Team & Scheduling (Step 4)
+Settings:
+
+Assign Agents / Reps:
+Select one or multiple from internal users.
+
+Business Hours:
+Define hours per timezone or team.
+
+Example: UK 9–6, US 10–5
+
+Dialer Settings (Tele Outreach):
+
+Max attempts per contact
+
+Call gap interval
+
+Mandatory disposition toggle
+
+
+🚀 5. Launch & Monitor (Final Step)
+Review Summary:
+
+Campaign Name, Type, Audience, Script, Agents, Schedule
+
+Total contacts, estimated delivery timeline, expected reach.
+
+Controls:
+
+Save as Draft
+
+Test Launch (Pilot 50 records)
+
+Launch Campaign
+
+Post-Launch Monitoring:
+
+Integrate directly with Campaign Dashboard:
+
+Realtime performance: Delivery, Engagement, Conversion
+
+Activity timeline per contact or account
+
+Agent call logs and disposition analytics
+
+🌈 UI / UX Styling Recommendations
+
+Step-by-Step Progress Bar at top (1. Details → 2. Audience → 3. Script → 4. Agents → 5. Launch)
+
+Collapsible Panels for each section with “Save & Continue”
+
+Floating “Next Step” Button bottom-right with animation (Framer Motion)
+
+Color cues:
+
+Blue for active step,
+
+Green for completed,
+
+Gray for pending.
+
+Inline validation & autosave (so no work is lost)
+
+Side summary card that updates dynamically through each step.
+
+⚙️ Tech Stack Suggestion
+
+React + TailwindCSS + Framer Motion
+
+Tabs + Accordion + Stepper Components (shadcn/ui)
+
+Integrations: Pull lists from Accounts, Contacts, and CRM filters.

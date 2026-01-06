@@ -1,0 +1,140 @@
+2025-12-23 20:41:35.00
+22d50856
+User
+- Expected: v0=adc013404459c4c66...
+2025-12-23 20:41:35.00
+22d50856
+User
+- Timestamp: 1766504494
+2025-12-23 20:41:35.00
+22d50856
+User
+- Received: v0=adc013404459c4c66...
+2025-12-23 20:41:35.09
+22d50856
+User
+[UnifiedDisposition] Applying disposition: Voicemail for ai agent, session 7609ee04-bc1d-4b66-aca9-b0ede6917ccb
+2025-12-23 20:41:35.09
+22d50856
+User
+[ElevenLabs Webhook] Created call_session: 7609ee04-bc1d-4b66-aca9-b0ede6917ccb (AI agent)
+2025-12-23 20:41:35.13
+22d50856
+User
+[UnifiedDisposition] System action: retry_after_delay
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766504495, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "user_id": null, "conversation_id": "conv_4901kd5xxkkeej18pc7b9cdkneq3", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAAFQifRDT2AAsSN+ZXPSAAAhgHwBcAAgAIATBwLkQsAgAOAbguBCCcGgaBoAfBuDcSxLEsSxLEsRBIEgmGBgYGBgTzMzMzMzMzs/MDA8WLFixYsXr169evXr16xYsWLFixY4vXr169fcPAAAAAAMPDz/////6Hh4AAAAABh4eHh4AAAAABh4eHh4AAAAABh4eHh4AAAAABh4eHh4AAAAAjDw8PHgAAAACMPD
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 20:41:35.15
+22d50856
+User
+- Timestamp: 1766504495
+2025-12-23 20:41:35.15
+22d50856
+User
+- Received: v0=c3e3c5138e99edcce...
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Event type: post_call_audio, conversation: conv_4901kd5xxkkeej18pc7b9cdkneq3
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Processing post_call_audio for conversation: conv_4901kd5xxkkeej18pc7b9cdkneq3
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Received audio data: 367KB base64
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 20:41:35.15
+22d50856
+User
+- Expected: v0=c3e3c5138e99edcce...
+2025-12-23 20:41:35.15
+22d50856
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 20:41:35.16
+22d50856
+User
+[UnifiedDisposition] Scheduled retry in 10080 minutes, priority 0
+2025-12-23 20:41:35.16
+22d50856
+User
+[ElevenLabs Webhook] ✅ Disposition applied: Voicemail, action: retry_after_delay
+2025-12-23 20:41:35.16
+22d50856
+User
+3:41:35 PM [express] POST /api/webhooks/elevenlabs 200 in 165ms :: {"status":"ok","conversation_id":…
+2025-12-23 20:41:35.40
+22d50856
+User
+[AI Orchestrator] Replenish triggered for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-23 20:41:35.58
+22d50856
+User
+[ElevenLabs Webhook] ✅ Uploaded recording to S3: recordings/ai-calls/4187fb46-c634-42d1-aeb1-d3833f325856/conv_0101kd5xx6r8exg87xyc31nkb2q7_1766504490215.mp3
+2025-12-23 20:41:35.65
+22d50856
+User
+[ElevenLabs Webhook] Updated lead recording URL
+2025-12-23 20:41:35.65
+22d50856
+User
+3:41:35 PM [express] POST /api/webhooks/elevenlabs 200 in 5473ms :: {"status":"ok","message":"Record…
+2025-12-23 20:41:36.43
+22d50856
+User
+[ElevenLabs Webhook] ✅ Uploaded recording to S3: recordings/ai-calls/4187fb46-c634-42d1-aeb1-d3833f325856/conv_4901kd5xxkkeej18pc7b9cdkneq3_1766504495190.mp3
+2025-12-23 20:41:36.50
+22d50856
+User
+[ElevenLabs Webhook] Updated lead recording URL
+2025-12-23 20:41:36.50
+22d50856
+User
+3:41:36 PM [express] POST /api/webhooks/elevenlabs 200 in 1347ms :: {"status":"ok","message":"Record…
+2025-12-23 20:41:40.64
+22d50856
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 20:41:40.64
+22d50856
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=4187fb46-c634-42d1-aeb1-d3833f325856, queue=658d3707-5110-4d5b-aeaf-d4a8200aa165, phone=+447733054839
+2025-12-23 20:41:40.64
+22d50856
+User
+- Received: v0=19fd012c0278ff17a...
+2025-12-23 20:41:40.64
+22d50856
+User
+- Expected: v0=19fd012c0278ff17a...
+2025-12-23 20:41:40.64
+22d50856
+User
+[ElevenLabs Webhook] Mapped disposition: Voicemail
+2025-12-23 20:41:40.64
+22d50856
+User
+[ElevenLabs Webhook] Event type: post_call_transcription, conversation: conv_5901kd5xxgjbe1tr4w13636jytbx
+2025-12-23 20:41:40.64
+22d50856
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 20:41:40.64
+22d50856
+User
+- Timestamp: 1766504500

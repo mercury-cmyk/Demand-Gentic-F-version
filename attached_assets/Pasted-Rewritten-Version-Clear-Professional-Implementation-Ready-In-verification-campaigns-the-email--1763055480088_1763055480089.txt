@@ -1,0 +1,61 @@
+Rewritten Version (Clear, Professional, Implementation-Ready)
+
+In verification campaigns, the email validation process must only validate eligible contacts — not every contact in the campaign. When a user triggers an email validation job, the system should:
+
+Validate only contacts that are eligible, and
+
+Exclude any contacts that have already been analyzed in a previous email validation job.
+
+This process needs to be smart, seamless, optimized, and fast so it does not create bottlenecks or performance issues for the company.
+
+Account Cap Enforcement – Contact Selection Priority
+
+When enforcing account caps within verification campaigns, the system must prioritize contacts using the following hierarchy:
+
+Highest Priority – Contacts with both CAV ID and CAV User ID that also match job title and other standard criteria.
+
+Second Priority – Contacts with a complete address and phone number.
+
+Third Priority – Contacts with a phone number plus at least 2–3 postal address fields.
+
+Fourth Priority – Contacts with only a phone number.
+
+No lead should ever be sent to a client without a phone number.
+
+If phone numbers or address fields are missing, the system must automatically trigger AI enrichment to maximize the completion of phone numbers, postal address fields, and other required data.
+
+AI Enrichment & System Optimization
+
+AI enrichment should automatically run when mandatory data (phone number, address fields) is missing.
+
+All enrichment processes should be optimized for speed, accuracy, and minimal operational load.
+
+The system must continuously improve by learning from previous enrichment results and validation outcomes.
+
+Cleaning Up VerificationCampaign Endpoints & UI
+
+The VerificationCampaign module currently contains duplicate or redundant endpoints for:
+
+Manual email validation triggers
+
+Automated job triggers
+
+AI enrichment functions
+
+Stats and console operations
+
+This creates confusion and results in an unorganized user experience.
+
+We need to:
+
+Consolidate these functions into one clean, unified endpoint for each job type.
+
+Remove duplicate or unnecessary endpoints from all other areas.
+
+Standardize and organize filters, tabs, and job actions so the UI is clean, intuitive, and user-friendly.
+
+Improve the overall structure and flow of the interface.
+
+Final Objective
+
+Work with me to build a comprehensive plan to implement all of the above. The goal is to ensure the system becomes smarter, faster, more accurate, and fully optimized — without unnecessary complexity.

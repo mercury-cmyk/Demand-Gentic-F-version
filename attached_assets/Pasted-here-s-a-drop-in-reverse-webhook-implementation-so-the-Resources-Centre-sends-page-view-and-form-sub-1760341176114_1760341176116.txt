@@ -1,0 +1,401 @@
+here’s a drop-in reverse webhook implementation so the Resources Centre sends page_view and form_submission events back to your CRM & Campaigns app, with HMAC security, retries, and basic dedupe.
+
+A) Resources Centre (sender)
+1) .env
+# existing…
+PUBLIC_BASE_URL=https://your-resources-centre-repl-url
+API_KEY=super-long-random-api-key
+SHARED_SECRET=super-long-random-shared-secret
+
+# new (CRM receiver)
+CRM_WEBHOOK_URL=https://your-crm-repl-url/api/webhooks/resources-centre
+CRM_WEBHOOK_KEY=super-long-random-api-key   # secondary guard
+CRM_SHARED_SECRET=super-long-random-shared-secret
+DEDUP_WINDOW_MINUTES=1440                   # 24h per contact/content
+
+2) db-analytics.js (dedupe & lightweight store)
+import Database from "better-sqlite3";
+const db = new Database("analytics.db");
+db.pragma("journal_mode = WAL");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS page_views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content_type TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  content_id TEXT NOT NULL,
+  contact_id TEXT,
+  anon_fingerprint TEXT,
+  ip_hash TEXT,
+  user_agent_hash TEXT,
+  viewed_at TEXT NOT NULL,
+  uniq_key TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS form_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  form_id TEXT NOT NULL,
+  content_type TEXT,
+  slug TEXT,
+  content_id TEXT,
+  contact_id TEXT,
+  email TEXT,
+  payload_json TEXT NOT NULL,
+  submitted_at TEXT NOT NULL
+);
+`);
+export default db;
+
+3) lib/webhook.js (sign + retry)
+import crypto from "crypto";
+import fetch from "node-fetch";
+
+const { CRM_WEBHOOK_URL, CRM_WEBHOOK_KEY, CRM_SHARED_SECRET } = process.env;
+
+export function signPayload(secret, body, ts) {
+  const msg = `${ts}.${body}`;
+  return crypto.createHmac("sha256", secret).update(msg).digest("base64");
+}
+
+export async function postWebhook(eventName, data) {
+  const body = JSON.stringify({ api_key: CRM_WEBHOOK_KEY, event: eventName, data });
+  const ts = Math.floor(Date.now() / 1000);
+  const sig = signPayload(CRM_SHARED_SECRET, body, ts);
+
+  // minimal retry
+  const tries = [0, 1000, 3000, 7000];
+  let lastErr;
+  for (const delay of tries) {
+    if (delay) await new Promise(r => setTimeout(r, delay));
+    try {
+      const res = await fetch(CRM_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Timestamp": String(ts), "X-Signature": sig },
+        body
+      });
+      if (res.ok) return true;
+      lastErr = new Error(`Webhook ${res.status} ${await res.text().catch(()=> "")}`);
+    } catch (e) { lastErr = e; }
+  }
+  console.error("Webhook failed:", lastErr?.message);
+  return false;
+}
+
+4) lib/fingerprint.js (privacy-safe uniqueness)
+import crypto from "crypto";
+
+export function hash(s=""){ return crypto.createHash("sha256").update(s).digest("base64url"); }
+
+export function buildViewUniqKey({ content_id, contact_id, ip, ua, windowMinutes }) {
+  const bucket = Math.floor(Date.now() / (windowMinutes*60*1000)); // time bucket
+  const parts = [content_id, contact_id || "", hash(ip||""), hash(ua||""), String(bucket)];
+  return parts.join("|");
+}
+
+5) Wire into your detail routes (events/resources/news)
+
+Add at the top of app.js (or the file with your routes):
+
+import analyticsDB from "./db-analytics.js";
+import { postWebhook } from "./lib/webhook.js";
+import { buildViewUniqKey, hash } from "./lib/fingerprint.js";
+
+const DEDUP_WINDOW_MINUTES = Number(process.env.DEDUP_WINDOW_MINUTES || 1440);
+
+const insertView = analyticsDB.prepare(`
+INSERT OR IGNORE INTO page_views
+(content_type, slug, content_id, contact_id, anon_fingerprint, ip_hash, user_agent_hash, viewed_at, uniq_key)
+VALUES (@content_type,@slug,@content_id,@contact_id,@anon_fingerprint,@ip_hash,@user_agent_hash,@viewed_at,@uniq_key)
+`);
+
+
+Inside each detail route after you’ve loaded the row and before res.send(...), add:
+
+// common view tracking snippet
+const contact_id = typeof req.query.contact_id === "string" ? req.query.contact_id : null;
+const ip = req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() || req.socket.remoteAddress || "";
+const ua = req.headers["user-agent"] || "";
+const uniq_key = buildViewUniqKey({
+  content_id: row.id,
+  contact_id,
+  ip,
+  ua,
+  windowMinutes: DEDUP_WINDOW_MINUTES
+});
+
+insertView.run({
+  content_type: "<TYPE>", // "event" | "resource" | "news"
+  slug: row.slug,
+  content_id: row.id,
+  contact_id,
+  anon_fingerprint: contact_id ? null : hash(ip + ua), // anonymous bucket
+  ip_hash: hash(ip),
+  user_agent_hash: hash(ua),
+  viewed_at: new Date().toISOString(),
+  uniq_key
+});
+
+// fire-and-forget webhook (do not block render)
+postWebhook("page_view", {
+  content_type: "<TYPE>",
+  content_id: row.id,
+  slug: row.slug,
+  title: row.title,
+  community: row.community,
+  contact_id,
+  url: `${PUBLIC_BASE_URL}/${"<TYPE>"}\/${row.slug}`,
+  ts: new Date().toISOString()
+});
+
+
+Concrete examples (put the snippet in each):
+
+In /event/:slug set "<TYPE>" to "event"
+
+In /resource/:slug set to "resource"
+
+In /news/:slug set to "news"
+
+6) Form submissions (native or proxy)
+
+If you proxy/embed CRM forms, you can still capture a “shell” submission event by adding a tiny local post endpoint that the form calls (or add a listener if you own the embed). Here’s a flexible local endpoint you can call via AJAX from your form page or use as the receiver for native forms.
+
+// app.js (Resources Centre)
+const insertForm = analyticsDB.prepare(`
+INSERT INTO form_events (form_id, content_type, slug, content_id, contact_id, email, payload_json, submitted_at)
+VALUES (@form_id,@content_type,@slug,@content_id,@contact_id,@email,@payload_json,@submitted_at)
+`);
+
+app.post("/api/form-submission", express.json({ limit: "1mb" }), async (req, res) => {
+  try {
+    const {
+      form_id,
+      content_type,   // "event" | "resource" | "news" | null
+      slug,
+      content_id,
+      contact_id,
+      email,
+      fields          // arbitrary object { first_name, last_name, ... }
+    } = req.body || {};
+
+    if (!form_id) return res.status(400).json({ status: "error", message: "form_id required" });
+
+    insertForm.run({
+      form_id,
+      content_type: content_type || null,
+      slug: slug || null,
+      content_id: content_id || null,
+      contact_id: contact_id || null,
+      email: email || null,
+      payload_json: JSON.stringify(fields || {}),
+      submitted_at: new Date().toISOString()
+    });
+
+    // forward to CRM
+    postWebhook("form_submission", {
+      form_id,
+      content_type,
+      slug,
+      content_id,
+      contact_id,
+      email,
+      fields: fields || {},
+      ts: new Date().toISOString()
+    });
+
+    res.json({ status: "ok" });
+  } catch (e) {
+    res.status(500).json({ status: "error", message: e.message });
+  }
+});
+
+
+If your current embedded form is rendered via /forms/:formId (iframe), add a small script inside that form (or in the parent) to fetch('/api/form-submission', {method:'POST', body:…}) on successful submit. If you fully control the CRM form, you can also send the webhook directly from CRM — duplication is fine; your CRM receiver will dedupe.
+
+B) CRM & Campaigns (receiver)
+1) .env
+WEBHOOK_API_KEY=super-long-random-api-key
+WEBHOOK_SHARED_SECRET=super-long-random-shared-secret
+SIG_TTL_SECONDS=300
+
+2) lib/verify.js
+import crypto from "crypto";
+
+export function verifyApiKey(req, envKey) {
+  return req.body?.api_key && req.body.api_key === envKey;
+}
+export function verifyHmac(req, secret, ttl=300) {
+  const sig = req.get("X-Signature");
+  const tsHeader = req.get("X-Timestamp");
+  if (!sig || !tsHeader) return false;
+  const ts = parseInt(tsHeader, 10);
+  if (!Number.isFinite(ts)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - ts) > ttl) return false;
+
+  const body = JSON.stringify(req.body);
+  const exp = crypto.createHmac("sha256", secret).update(`${ts}.${body}`).digest("base64");
+  try { return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp)); }
+  catch { return false; }
+}
+
+3) Minimal tables (sequelize/knex/whatever you use). For a quick start with SQLite:
+import Database from "better-sqlite3";
+const db = new Database("crm-events.db");
+db.pragma("journal_mode = WAL");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS content_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_name TEXT NOT NULL,           -- page_view | form_submission
+  content_type TEXT,
+  content_id TEXT,
+  slug TEXT,
+  title TEXT,
+  community TEXT,
+  contact_id TEXT,
+  email TEXT,
+  url TEXT,
+  payload_json TEXT,
+  ts TEXT NOT NULL,
+  uniq_key TEXT UNIQUE
+);
+`);
+export default db;
+
+4) Receiver route routes/webhooks.resources.js
+import express from "express";
+import db from "../db/crm-events-db.js"; // the file above
+import { verifyApiKey, verifyHmac } from "../lib/verify.js";
+
+const router = express.Router();
+
+const insertEvt = db.prepare(`
+INSERT OR IGNORE INTO content_events
+(event_name,content_type,content_id,slug,title,community,contact_id,email,url,payload_json,ts,uniq_key)
+VALUES (@event_name,@content_type,@content_id,@slug,@title,@community,@contact_id,@email,@url,@payload_json,@ts,@uniq_key)
+`);
+
+router.post("/resources-centre", (req, res) => {
+  try {
+    const { WEBHOOK_API_KEY, WEBHOOK_SHARED_SECRET, SIG_TTL_SECONDS=300 } = process.env;
+    if (!verifyApiKey(req, WEBHOOK_API_KEY)) return res.status(401).json({ status:"error", message:"Invalid API key" });
+    if (!verifyHmac(req, WEBHOOK_SHARED_SECRET, Number(SIG_TTL_SECONDS))) return res.status(401).json({ status:"error", message:"Invalid signature" });
+
+    const { event, data } = req.body || {};
+    if (!event || !data) return res.status(400).json({ status:"error", message:"Missing event/data" });
+
+    // normalize & build a dedupe key
+    // page_view uniq: event|content_id|contact_id|daybucket
+    // form_submission uniq: event|form_id|contact_id|isoMinute
+    const now = new Date(data.ts || Date.now());
+    const dayBucket = `${now.getUTCFullYear()}-${now.getUTCMonth()+1}-${now.getUTCDate()}`;
+    const minuteBucket = `${dayBucket}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
+
+    let uniq_key = event;
+    if (event === "page_view") {
+      uniq_key += `|${data.content_id || ""}|${data.contact_id || ""}|${dayBucket}`;
+    } else if (event === "form_submission") {
+      uniq_key += `|${data.form_id || ""}|${data.contact_id || data.email || ""}|${minuteBucket}`;
+    } else {
+      uniq_key += `|${minuteBucket}`;
+    }
+
+    insertEvt.run({
+      event_name: event,
+      content_type: data.content_type || null,
+      content_id: data.content_id || null,
+      slug: data.slug || null,
+      title: data.title || null,
+      community: data.community || null,
+      contact_id: data.contact_id || null,
+      email: data.email || null,
+      url: data.url || null,
+      payload_json: JSON.stringify(data),
+      ts: data.ts || new Date().toISOString(),
+      uniq_key
+    });
+
+    // OPTIONAL: update contact engagement score, push to analytics bus, etc.
+    // await EngagementService.apply(event, data)
+
+    return res.json({ status: "ok" });
+  } catch (e) {
+    return res.status(500).json({ status:"error", message: e.message });
+  }
+});
+
+export default router;
+
+5) Mount the route
+// app.js (CRM)
+import express from "express";
+import rcWebhook from "./routes/webhooks.resources.js";
+const app = express();
+app.use(express.json({ limit: "2mb" }));
+app.use("/api/webhooks", rcWebhook);
+
+Event payloads (what the CRM will receive)
+page_view
+{
+  "api_key": "•••",
+  "event": "page_view",
+  "data": {
+    "content_type": "event",
+    "content_id": "evt_123",
+    "slug": "generative-ai-for-finance-oct-2025",
+    "title": "Generative AI for Finance Leaders",
+    "community": "finance",
+    "contact_id": "cnt_001",              // if present in query string; else null
+    "url": "https://resources…/event/generative-ai-for-finance-oct-2025",
+    "ts": "2025-10-13T07:58:00.000Z"
+  }
+}
+
+form_submission
+{
+  "api_key": "•••",
+  "event": "form_submission",
+  "data": {
+    "form_id": "frm_109",
+    "content_type": "event",
+    "content_id": "evt_123",
+    "slug": "generative-ai-for-finance-oct-2025",
+    "contact_id": "cnt_001",
+    "email": "john@acme.com",
+    "fields": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "company": "Acme Ltd",
+      "job_title": "CFO",
+      "country": "US",
+      "utm_source": "crm",
+      "utm_campaign": "AI_FIN_2025_Q4"
+    },
+    "ts": "2025-10-13T08:02:11.000Z"
+  }
+}
+
+How it fits your flow
+
+Visitor lands on /event/:slug (or /resource/:slug / /news/:slug) with your CRM prefill params (e.g., ?contact_id=cnt_001&email=jane@...).
+
+RC dedupes and sends a page_view to CRM (HMAC-signed).
+
+If they submit the form (native or proxied), RC posts a form_submission webhook to CRM.
+
+CRM stores the event and can immediately:
+
+increment engagement score,
+
+mark the campaign touch,
+
+trigger automation (e.g., “Thank you” email, SDR task).
+
+Optional quick wins (say the word if you want them baked in)
+
+Checksum drift detector: include content_checksum (SHA256 of normalized fields) in both push and view events so CRM can assert the live page matches the last synced version.
+
+Health endpoint: /api/health-sync on RC that returns all slugs + checksums so CRM can audit nightly.
+
+GDPR mode: when gdpr=1 query param is present, disable IP/UA hashing entirely and rely only on contact_id.

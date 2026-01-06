@@ -1,0 +1,462 @@
+import React from "react";
+import { motion } from "framer-motion";
+import { 
+  LayoutDashboard, Users, Building2, Rocket, Settings, Link2, Globe, Phone, Mail, ExternalLink, Filter, X, CheckCircle2, AlertCircle, Play, Pause, FileText, BarChart3, PhoneCall, Linkedin, ChevronRight, Search, Sun, Moon, Factory, ShieldCheck, Layers, CalendarClock, Server, Clock3, Network, Database, SlidersHorizontal
+} from "lucide-react";
+import { 
+  Card, CardContent, CardHeader, CardTitle 
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
+// ---------------------------------------------
+// THEME TOKENS (align with Pivotal B2B branding)
+// ---------------------------------------------
+// Primary: #0D6EFD | Secondary: #00BFA5 | Text: #1E293B / #64748B
+const brand = {
+  primary: "#0D6EFD",
+  secondary: "#00BFA5",
+  slate900: "#0F172A",
+  slate800: "#1E293B",
+  slate600: "#475569",
+  slate500: "#64748B",
+  bg: "#F8FAFC",
+  card: "#FFFFFF",
+  amber: "#FFB020",
+  red: "#EF4444",
+};
+
+// ---------------------------------------------
+// UTIL COMPONENTS
+// ---------------------------------------------
+const Stat = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
+  <Card className="rounded-2xl shadow-md">
+    <CardContent className="p-6">
+      <p className="text-sm text-slate-500">{label}</p>
+      <div className="mt-2 flex items-end gap-2">
+        <span className="text-3xl font-semibold text-slate-900">{value}</span>
+        {sub && <span className="text-xs text-slate-500">{sub}</span>}
+      </div>
+    </CardContent>
+  </Card>
+);
+
+const StatusPill = ({ status }: { status: "Draft" | "Running" | "Paused" | "Completed" }) => {
+  const map: Record<string, string> = {
+    Draft: "bg-slate-100 text-slate-700",
+    Running: "bg-blue-100 text-blue-700",
+    Paused: "bg-amber-100 text-amber-700",
+    Completed: "bg-green-100 text-green-700",
+  };
+  return <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${map[status]}`}>{status}</span>;
+};
+
+const Chip = ({ children, onClear }: { children: React.ReactNode; onClear?: () => void }) => (
+  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">
+    <Filter className="size-3" /> {children}
+    {onClear && (
+      <button onClick={onClear} className="ml-1 hover:text-slate-900">
+        <X className="size-3" />
+      </button>
+    )}
+  </span>
+);
+
+const IconLink = ({ href, label, icon: Icon }: { href: string; label: string; icon: any }) => (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center size-9 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+          <Icon className="size-4" />
+        </a>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
+// ---------------------------------------------
+// FILTER BAR
+// ---------------------------------------------
+const FilterBar = () => {
+  return (
+    <div className="w-full rounded-2xl bg-white shadow-md p-4 border border-slate-100">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input placeholder="Search accounts, contacts, domains…" className="pl-9 w-80" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs defaultValue="contains">
+            <TabsList className="grid grid-cols-4 w-[520px]">
+              <TabsTrigger value="equals">Equals</TabsTrigger>
+              <TabsTrigger value="notequals">Not equal</TabsTrigger>
+              <TabsTrigger value="contains">Contains</TabsTrigger>
+              <TabsTrigger value="notcontains">Does not contain</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs defaultValue="begins">
+            <TabsList className="grid grid-cols-4 w-[520px]">
+              <TabsTrigger value="begins">Begins with</TabsTrigger>
+              <TabsTrigger value="ends">Ends with</TabsTrigger>
+              <TabsTrigger value="hasvalue">Has value</TabsTrigger>
+              <TabsTrigger value="isempty">Is empty</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" className="rounded-xl"><SlidersHorizontal className="size-4 mr-2"/>Advanced</Button>
+          <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>Apply Filters</Button>
+          <Button variant="ghost" className="rounded-xl">Clear All</Button>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Chip>Job Title contains "Manager"</Chip>
+        <Chip>Domain ends with ".co.uk"</Chip>
+        <Chip>Status ≠ "Inactive"</Chip>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------
+// HEADER & SHELL
+// ---------------------------------------------
+const AppHeader = () => (
+  <div className="flex items-center justify-between py-4">
+    <div className="flex items-center gap-3">
+      <div className="size-10 rounded-2xl bg-gradient-to-br from-blue-500 to-teal-400" />
+      <div>
+        <h1 className="text-xl font-semibold text-slate-900">Pivotal B2B Dashboard</h1>
+        <p className="text-sm text-slate-500">ABM • Data • Demand Generation</p>
+      </div>
+    </div>
+    <div className="flex items-center gap-2">
+      <Button variant="outline" className="rounded-xl"><Sun className="size-4 mr-2"/>Light</Button>
+      <Button className="rounded-xl" style={{ backgroundColor: brand.secondary }}><Rocket className="size-4 mr-2"/>New Campaign</Button>
+    </div>
+  </div>
+);
+
+const Sidebar = ({ current, onNav }: { current: string; onNav: (k: string) => void }) => {
+  const items = [
+    { k: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { k: "accounts", label: "Accounts", icon: Building2 },
+    { k: "contacts", label: "Contacts", icon: Users },
+    { k: "campaigns", label: "Campaigns", icon: BarChart3 },
+    { k: "settings", label: "Settings", icon: Settings },
+  ];
+  return (
+    <div className="h-full p-3">
+      <div className="rounded-2xl bg-white shadow-md border border-slate-100 p-2">
+        {items.map(({ k, label, icon: Icon }) => (
+          <button
+            key={k}
+            onClick={() => onNav(k)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition ${
+              current === k ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50 text-slate-700"
+            }`}
+          >
+            <Icon className="size-4" />
+            <span className="text-sm font-medium">{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 rounded-2xl bg-gradient-to-br from-blue-500/10 to-teal-400/10 p-4 border border-blue-100">
+        <p className="text-sm text-slate-600">Complete your setup</p>
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-slate-700 text-sm"><CheckCircle2 className="size-4 text-teal-600"/> Verify domain</div>
+          <div className="flex items-center gap-2 text-slate-700 text-sm"><AlertCircle className="size-4 text-amber-500"/> Configure dedicated IP</div>
+          <div className="flex items-center gap-2 text-slate-700 text-sm"><Clock3 className="size-4 text-blue-600"/> Send-time optimization</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------
+// PAGES
+// ---------------------------------------------
+const DashboardPage = () => (
+  <div className="space-y-4">
+    <FilterBar />
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <Stat label="Qualified Leads (30d)" value="1,220" sub="↑ 12%" />
+      <Stat label="MQL → SQL Rate" value="38%" sub="↑ 4%" />
+      <Stat label="Avg. CPL" value="$42.60" sub="↓ 6%" />
+      <Stat label="Deliverability" value="98.7%" sub="↑ 0.5%" />
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card className="rounded-2xl shadow-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><BarChart3 className="size-4"/> Campaign Performance</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-48 grid place-items-center text-slate-400">{/* Chart placeholder */}Chart area</div>
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button variant="outline" className="rounded-xl">Export</Button>
+            <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>View Report</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl shadow-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><PhoneCall className="size-4"/> Calling Queue</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {["Emily Carter — CTO, JRI Ltd", "Michael Shaw — VP IT, Acme Med", "Sara Lee — CIO, Northex"].map((r, i) => (
+            <div key={i} className="flex items-center justify-between rounded-xl border p-3 hover:bg-slate-50">
+              <div>
+                <p className="text-sm font-medium text-slate-800">{r}</p>
+                <p className="text-xs text-slate-500">Last activity: 2h ago • Disposition required</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" className="rounded-xl"><Play className="size-4 mr-2"/>Call</Button>
+                <Button variant="ghost" className="rounded-xl"><Pause className="size-4 mr-2"/>Hold</Button>
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+);
+
+const AccountsPage = () => (
+  <div className="space-y-4">
+    <FilterBar />
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {[1,2,3,4,5,6].map((i) => (
+        <Card key={i} className="rounded-2xl shadow-md hover:shadow-lg transition">
+          <CardContent className="p-5">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-xl bg-gradient-to-br from-blue-500 to-teal-400"/>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">JRI Ltd</p>
+                  <p className="text-xs text-slate-500">Medical Devices • 250–500</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <IconLink href="#" label="Website" icon={Globe} />
+                <IconLink href="#" label="LinkedIn" icon={Linkedin} />
+                <IconLink href="#" label="Send Email" icon={Mail} />
+                <IconLink href="#" label="Call" icon={Phone} />
+              </div>
+            </div>
+            <div className="mt-4 flex items-center gap-2">
+              <Badge variant="secondary" className="bg-teal-50 text-teal-700">ICP: SDM</Badge>
+              <Badge variant="outline">UK</Badge>
+              <Badge variant="outline">High Intent</Badge>
+            </div>
+            <div className="mt-4 text-xs text-slate-600">Last touch: 3d ago • Owner: Zahid • Notes: Interested in webinar co-promo</div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  </div>
+);
+
+const ContactsPage = () => (
+  <div className="space-y-4">
+    <FilterBar />
+    <Card className="rounded-2xl shadow-md">
+      <CardContent className="p-0">
+        <div className="grid grid-cols-12 items-center px-5 py-3 text-xs font-medium text-slate-500">
+          <div className="col-span-4">Name & Title</div>
+          <div className="col-span-3">Company</div>
+          <div className="col-span-3">Email</div>
+          <div className="col-span-2 text-right">Actions</div>
+        </div>
+        {[1,2,3,4,5].map((i) => (
+          <div key={i} className="grid grid-cols-12 items-center px-5 py-4 border-t hover:bg-slate-50">
+            <div className="col-span-4">
+              <p className="text-sm font-semibold text-slate-800">Emily Carter</p>
+              <p className="text-xs text-slate-500">CTO</p>
+            </div>
+            <div className="col-span-3 text-sm">JRI Ltd</div>
+            <div className="col-span-3 text-sm">emily.carter@jri-ltd.co.uk</div>
+            <div className="col-span-2 flex items-center justify-end gap-2">
+              <IconLink href="#" label="LinkedIn" icon={Linkedin} />
+              <IconLink href="#" label="Email" icon={Mail} />
+              <IconLink href="#" label="Call" icon={Phone} />
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  </div>
+);
+
+const CampaignsPage = () => (
+  <div className="space-y-4">
+    <div className="flex items-center justify-between">
+      <FilterBar />
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {[{name:"Q4 UK MedTech Webinar", status:"Running"},{name:"ABM Email + Call Pilot", status:"Draft"},{name:"Syndication: HR eBook", status:"Completed"}].map((c, i) => (
+        <Card key={i} className="rounded-2xl shadow-md hover:shadow-lg transition">
+          <CardContent className="p-5 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{c.name}</p>
+                <p className="text-xs text-slate-500">Target: SDM • GEO: UK/DE/US</p>
+              </div>
+              {/* @ts-ignore */}
+              <StatusPill status={c.status} />
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">Delivered</p>
+                <p className="text-lg font-semibold">24,120</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">Responses</p>
+                <p className="text-lg font-semibold">612</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">CPL</p>
+                <p className="text-lg font-semibold">$41</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <Button variant="outline" className="rounded-xl"><FileText className="size-4 mr-2"/>Summary</Button>
+              <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>Open</Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  </div>
+);
+
+const SettingsPage = () => (
+  <div className="space-y-4">
+    <Card className="rounded-2xl shadow-md">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Settings className="size-4"/> Platform Settings</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="email" className="w-full">
+          <TabsList className="grid grid-cols-4 w-full">
+            <TabsTrigger value="email">Email Setup</TabsTrigger>
+            <TabsTrigger value="domain">Domain Verification</TabsTrigger>
+            <TabsTrigger value="ip">Dedicated IP</TabsTrigger>
+            <TabsTrigger value="sendtime">Send-Time Optimization</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="email" className="mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="col-span-2 rounded-2xl border p-4">
+                <h4 className="font-semibold mb-2">SMTP / OAuth</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input placeholder="From Name"/>
+                  <Input placeholder="From Address"/>
+                  <Input placeholder="Reply-To"/>
+                  <Input placeholder="Bounce Address"/>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Switch id="tracking"/> <label htmlFor="tracking" className="text-sm">Enable open/click tracking</label>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Button variant="outline" className="rounded-xl">Test Connection</Button>
+                  <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>Save</Button>
+                </div>
+              </div>
+              <div className="rounded-2xl border p-4 bg-gradient-to-br from-blue-50 to-teal-50">
+                <h4 className="font-semibold mb-2 flex items-center gap-2"><ShieldCheck className="size-4"/> Compliance</h4>
+                <p className="text-sm text-slate-600">GDPR/CCPA ready. Configure suppression lists and unsubscribe handling.</p>
+                <Button variant="ghost" className="mt-3 rounded-xl">Manage Suppression</Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="domain" className="mt-4">
+            <div className="rounded-2xl border p-4">
+              <h4 className="font-semibold mb-2 flex items-center gap-2"><Globe className="size-4"/> Domain Verification</h4>
+              <p className="text-sm text-slate-600">Add the following DNS records to verify your sending domain.</p>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div className="rounded-xl bg-slate-50 p-3"><span className="font-medium">SPF</span><p className="text-slate-600">v=spf1 include:mail.pivotal-b2b.com ~all</p></div>
+                <div className="rounded-xl bg-slate-50 p-3"><span className="font-medium">DKIM</span><p className="text-slate-600">k=rsa; p=MIIBIjANBgkqh…</p></div>
+                <div className="rounded-xl bg-slate-50 p-3"><span className="font-medium">DMARC</span><p className="text-slate-600">v=DMARC1; p=quarantine; rua=mailto:dmarc@pivotal…</p></div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <Button variant="outline" className="rounded-xl">Check Status</Button>
+                <Badge className="bg-teal-600">Verified</Badge>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="ip" className="mt-4">
+            <div className="rounded-2xl border p-4">
+              <h4 className="font-semibold mb-2 flex items-center gap-2"><Server className="size-4"/> Dedicated IP Configuration</h4>
+              <p className="text-sm text-slate-600">Warm up your IP with automated ramp-up plans to protect deliverability.</p>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">IP</span><p>203.0.113.24</p></div>
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Status</span><p>Pending Warm-up</p></div>
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Reputation</span><p>Good</p></div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <Button variant="outline" className="rounded-xl">Start Warm-up</Button>
+                <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>Save</Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="sendtime" className="mt-4">
+            <div className="rounded-2xl border p-4">
+              <h4 className="font-semibold mb-2 flex items-center gap-2"><Clock3 className="size-4"/> Send-Time Optimization</h4>
+              <p className="text-sm text-slate-600">Batch sending with time gaps to maximize deliverability. Configure windows per region.</p>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Batch Size</span><p>2,000 emails / 15 min</p></div>
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Quiet Hours</span><p>22:00–06:00 (recipient local)</p></div>
+                <div className="rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Region Windows</span><p>UK: 09–12, US: 10–13, DE: 09–11</p></div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <Button variant="outline" className="rounded-xl">Simulate</Button>
+                <Button className="rounded-xl" style={{ backgroundColor: brand.primary }}>Save</Button>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  </div>
+);
+
+// ---------------------------------------------
+// ROOT COMPONENT
+// ---------------------------------------------
+export default function PivotalB2BUIConcept() {
+  const [tab, setTab] = React.useState("dashboard");
+
+  return (
+    <div className="min-h-screen" style={{ background: brand.bg }}>
+      <div className="max-w-[1200px] mx-auto px-4 py-6">
+        <AppHeader />
+        <div className="grid grid-cols-12 gap-4 mt-2">
+          <div className="col-span-12 md:col-span-3 lg:col-span-3">
+            <Sidebar current={tab} onNav={setTab} />
+          </div>
+          <div className="col-span-12 md:col-span-9 lg:col-span-9">
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+              {tab === "dashboard" && <DashboardPage />}
+              {tab === "accounts" && <AccountsPage />}
+              {tab === "contacts" && <ContactsPage />}
+              {tab === "campaigns" && <CampaignsPage />}
+              {tab === "settings" && <SettingsPage />}
+            </motion.div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

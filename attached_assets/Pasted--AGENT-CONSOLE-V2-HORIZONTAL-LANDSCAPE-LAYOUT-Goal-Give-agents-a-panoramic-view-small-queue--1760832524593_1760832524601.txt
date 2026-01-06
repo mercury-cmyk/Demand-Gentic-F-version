@@ -1,0 +1,172 @@
+⚙️ AGENT CONSOLE V2 — HORIZONTAL LANDSCAPE LAYOUT
+
+Goal: Give agents a panoramic view — small queue area, contact info at top, and a large, dual-section work area below (Script ↔ Dispositions).
+
+🧭 TOP FIXED HEADER (Always Visible)
+
+Purpose: Context + call status
+
+Layout:
+
+Left: Pivotal B2B logo, “Agent Console” title, and current campaign name
+
+Center:
+
+🔄 Queue position: Contact 12 of 2688
+
+Progress bar (thin gradient line below header)
+
+Right:
+
+Connection icon (Telnyx WebRTC status)
+
+Call timer ⏱ (active when on call)
+
+Agent avatar dropdown (Profile / Logout)
+
+🧩 MAIN BODY GRID
+
+Grid layout:
+[Queue Sidebar | Main Content (Contact Info + Script + Dispositions)]
+
+Queue Sidebar = 15–20% width
+
+Main Content = 80–85% width
+
+1️⃣ LEFT SIDEBAR — Queue Management (Compact Mode)
+
+Purpose: Minimal but functional
+
+📋 Next Contact Queue — condensed list with name + status dot
+
+⏮ ⏭ Prev / Next contact buttons
+
+🔄 Power Dial toggle
+
+⏸ Pause / 🟢 Ready / 🔴 On Call status
+
+⚙️ Mini device control: mute, speaker, reconnect
+
+Use vertical mini-cards or list rows with hover highlight. Keep background light (#f9fbfd) and icons monochrome.
+
+2️⃣ RIGHT MAIN SECTION — Split in Two Horizontal Zones
+------------------------------------------------------------
+|                 CONTACT INFORMATION (Top Bar)             |
+------------------------------------------------------------
+|                  |                                       |
+|   SCRIPT AREA    |       DISPOSITIONS / NOTES PANEL      |
+|   (Left Wide)    |       (Right Narrow)                  |
+|                  |                                       |
+------------------------------------------------------------
+
+🧍‍♂️ CONTACT INFORMATION (Top Landscape Bar)
+
+Full-width horizontal info card (approx. 100px height)
+Use a band-style card across the screen for quick visibility.
+
+Design:
+
+Left (Profile Block):
+
+👤 Name: Joe Zuzula
+
+Title: Senior Director – Commercial Excellence
+
+Company: Orchid Orthopedic Solutions
+
+Center (Contact & Campaign):
+
+Email: joe.zuzula@orchid-ortho.com (click-to-email)
+
+Campaign: Dialer Campaign 2025-10-15
+
+Priority: 🔵 Priority 0
+
+Right (Actions):
+
+Call button (green gradient) / Hang-Up (red)
+
+Manual dial input
+
+Quick icons: 🌐 Website | 🔗 LinkedIn | 🏢 Account
+
+Style:
+Gradient header (navy → sky), white text overlay, subtle shadow.
+
+📜 LEFT WORK AREA — SCRIPT PANEL (70%)
+
+Purpose: Agent guidance + editable responses
+
+Features:
+
+Scrollable script card with formatted text
+
+Dynamic placeholders auto-filled (Hi {{first_name}}...)
+
+Section tabs (optional):
+
+Script | Product Info | FAQ | Objection Handling
+
+Quick insert buttons: “Personalize Intro,” “Add Custom Note”
+
+Expandable area: allows full vertical scroll
+
+Soft background: #f7fafd for focus contrast
+
+Style: Rounded corners, 16px padding, left-aligned text.
+
+✅ RIGHT WORK AREA — DISPOSITIONS & NOTES PANEL (30%)
+
+Purpose: Compact, efficient logging zone
+
+Stacked form fields:
+
+📝 Call Notes — textarea (auto-save)
+
+🎯 Disposition — dropdown (Connected / VM / DNC / Not Interested / Qualified Lead)
+
+🧾 Qualification Fields — dynamically rendered inputs (Budget, Need, Timeline, etc.)
+
+⏰ Follow-Up Scheduler — date-time picker
+
+💾 Save & Next (primary button)
+
+Auto-queues next contact when clicked
+
+UX Flow:
+
+Disposition mandatory before advancing.
+
+If DNC → instant remove from global queue.
+
+If Follow-up → create new scheduled callback record.
+
+🦾 ADDITIONAL CONTEXT PANEL (Optional Drawer)
+
+On right edge — collapsible drawer (🡨🡪 icon) showing:
+
+Account Snapshot (Industry, Size, Tech Stack)
+
+Engagement History (past calls/emails)
+
+Related Contacts
+
+🎨 VISUAL STYLING
+Element	Style Recommendation
+Colors	Navy #0a2540, Sky #e9f0f7, Accent #2f6feb, Success #16a34a, Error #dc2626
+Typography	“Inter” or “Open Sans”, 14–15 px base
+Cards	Rounded (12 px), soft shadows, 16 px padding
+Gradients	Header (navy→sky), buttons (accent→blue)
+Icons	Lucide/Feather – clean line icons
+Transitions	Framer Motion: smooth panel slide, “Save” pulse animation
+⚡ INTERACTION FLOW
+
+Agent selects or auto-loads contact from compact queue
+
+Contact info slides in top bar
+
+Agent reads script (left) and interacts
+
+After call → fills notes + disposition (right)
+
+Click Save & Next → progress bar increments, next contact loads

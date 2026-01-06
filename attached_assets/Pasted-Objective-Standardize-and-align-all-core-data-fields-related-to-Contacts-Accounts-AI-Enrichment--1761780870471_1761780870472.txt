@@ -1,0 +1,186 @@
+Objective
+
+Standardize and align all core data fields related to Contacts, Accounts, AI Enrichment, and Smart Templates across the entire platform.
+
+Ensure consistency across UI, filters, CSV uploads, exports, field mapping, and data enrichment logic, while maintaining backward compatibility and avoiding any conflict with existing schema or system-generated fields.
+
+🧠 Core Implementation Rules
+
+System-generated fields (id, uuid, system_status, created_at, updated_at, etc.) must remain unchanged.
+
+Replace legacy or duplicate fields with standardized field names listed below.
+
+Maintain backward compatibility using alias mapping (old_field → new_field) in the database schema or data migration layer.
+
+Apply uniform logic and naming conventions across:
+
+Frontend (React UI components + filters)
+
+CSV Imports & Exports
+
+API Endpoints
+
+Verification Campaigns & Call Campaigns
+
+QA Console & Enrichment Jobs
+
+Background Queues and Worker Processes
+
+Database Models (Drizzle ORM)
+
+Ensure all platform modules — including Contacts, Accounts, AI Enrichment, Smart Templates, QA Console, and Verification Campaigns — use unified field definitions.
+
+🧩 1. CONTACT INFORMATION
+Field Name	Description
+CAV_ID	Unique Contact Verification Identifier (links contact record to verification campaign record)
+CAV_User_ID	Agent / Verifier User ID who processed this contact
+full_name	Combined first + last name
+first_name	Contact given name
+Email_Address	Primary business email address
+last_name	Contact surname
+job_title	Contact’s professional title
+linkedin_url	Contact LinkedIn profile
+time_in_current_position_months	Duration in current position (in months)
+time_in_current_company_months	Duration in current company (in months)
+Contact_Phone	Primary office phone
+Contact_Mobile	Direct mobile number
+
+✅ Implementation Notes:
+
+Maintain historical mapping for legacy fields (e.g., email → Email_Address).
+
+Auto-generate full_name by concatenating first_name + last_name at import or display time.
+
+📍 2. CONTACT ADDRESS FIELDS
+Field Name	Description
+contact_street_1	Primary street address
+contact_street_2	Secondary address line
+contact_street_3	Optional line (e.g., suite / floor)
+contact_city	City
+contact_state	Full state or province name
+contact_state_abbr	Shortened state abbreviation (e.g., CA, NY)
+contact_postal_code	Zip or postal code
+contact_country	Country name
+contact_location_snap	Combined full address (AI-generated all-in-one line)
+
+✅ Implementation Notes:
+
+All UI inputs, CSV uploads, and validation rules should apply only to these standardized fields.
+
+Legacy custom_cav_ address fields must map automatically through import mapping.
+
+🏢 3. ACCOUNT / HQ ADDRESS FIELDS
+Field Name	Description
+account_name	Official company name
+account_domain	Verified company website or domain
+account_hq_street_1	HQ address line 1
+account_hq_street_2	HQ address line 2
+account_hq_street_3	HQ address line 3
+account_city	HQ city
+account_state	HQ state (full name)
+account_state_abbr	HQ state abbreviation
+account_postal_code	HQ postal / zip code
+account_country	HQ country
+account_location_snap	Combined HQ address (AI formatted)
+account_hq_phone	Main HQ phone number
+
+✅ Implementation Notes:
+
+All account-level fields must be unified across accounts, verification_accounts, and enrichment_accounts tables.
+
+CSV exports must include contact + HQ address + AI + Best address blocks consistently in the same order.
+
+🏭 4. COMPANY INFORMATION
+Field Name	Description
+account_industry	Primary industry classification
+account_employee_size_range	Employee size range (e.g., “51–200”)
+account_revenue	Annual revenue (numeric)
+account_revenue_range	Revenue bracket (text e.g., “$10M–$50M”)
+account_description	Short company overview or profile
+account_founded_date	Year or date founded
+account_li_profile_url	LinkedIn company profile URL
+naics_code	North American Industry Classification code
+sic_code	Standard Industry Classification code
+account_min_employee_size	Numeric minimum employee count
+account_max_employee_size	Numeric maximum employee count
+
+✅ Implementation Notes:
+
+All company-level data must use snake_case naming in the backend.
+
+Sync account_industry, naics_code, and sic_code across AI enrichment and QA verification systems.
+
+Ensure revenue and employee size ranges are normalized to consistent units.
+
+🤖 5. AI ENRICHMENT FIELDS
+Field Name	Description
+address_enrichment_status	pending / enriched / verified
+phone_enrichment_status	pending / enriched / verified
+ai_address_confidence	Address confidence score (0–100%)
+ai_phone_confidence	Phone confidence score (0–100%)
+ai_enriched_phone	Enriched or corrected phone number
+ai_enriched_street_1	Enriched address line 1
+ai_enriched_street_2	Enriched address line 2
+ai_enriched_street_3	Enriched address line 3
+ai_enriched_city	Enriched city
+ai_enriched_state	Enriched state
+ai_enriched_postal_code	Enriched postal code
+enrichment_source	internal / web / hybrid
+last_enrichment_run	Timestamp of last AI enrichment
+ai_industry_classification_overview	AI-generated company sector summary
+ai_account_keywords	AI-detected key terms from company description or website
+
+✅ Implementation Notes:
+
+Automatically overwrite only if confidence ≥ 70%.
+
+Maintain a change log (enrichment_audit) for traceability.
+
+Original imported data must remain stored as the baseline record.
+
+💡 6. SMART TEMPLATE — BEST ADDRESS & PHONE
+Field Name	Description
+best_address_line_1, best_address_line_2, best_address_line_3	Auto-selected best available address from enriched, verified, or imported sources
+best_city	Most confident or validated city
+best_state	Most confident or validated state
+best_postal_code	Most accurate postal code
+best_phone_number	AI-selected best phone number (priority: enriched > mobile > contact > account, matched to contact country)
+
+✅ Implementation Notes:
+
+Smart Template logic populates these dynamically for exports, campaign previews, or data views.
+
+These are non-editable computed fields refreshed during enrichment or QA processing.
+
+🔁 Strategic Integration Scope
+Applies To
+
+Database Schema (contacts, accounts, verification_contacts, ai_enrichment)
+
+Frontend UI (React + Tailwind + shadcn components)
+
+Filter Builders & Query System
+
+Bulk Imports & CSV Field Mapping
+
+Exports (QA Reports, Deliverables, Campaign Outputs)
+
+Enrichment & Verification Jobs
+
+QA Console, Smart Templates, and Campaign Builders
+
+Testing & QA Checklist
+
+✅ Validate consistent field display names in all UI forms and components.
+
+✅ Verify CSV imports auto-map old → new field names correctly.
+
+✅ Ensure CSV and XLSX exports reflect standardized column names.
+
+✅ Test AI enrichment updates only standardized mapped fields.
+
+✅ Confirm Smart Template dynamically resolves best_* fields.
+
+✅ Validate data integrity in production without loss of historical data.
+
+✅ Ensure verification and QA dashboards reflect updated naming conventions.

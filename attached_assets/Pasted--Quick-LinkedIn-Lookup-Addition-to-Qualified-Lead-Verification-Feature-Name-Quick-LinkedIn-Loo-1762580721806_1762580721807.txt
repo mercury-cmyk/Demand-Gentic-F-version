@@ -1,0 +1,98 @@
+🔎 Quick LinkedIn Lookup — Addition to Qualified Lead Verification
+
+Feature Name: Quick LinkedIn Lookup
+Availability: Shown in the verification modal for both response options:
+
+✅ Yes – Lead is Present
+
+☎️ On-Call Confirmation
+
+What it does
+
+Provides agents a one-click Google search in a new tab/window for:
+
+"Contact Full Name" + "Company Name" + LinkedIn
+
+This helps agents quickly validate identity and current role before uploading screenshots or creating new contacts.
+
+UI Placement
+
+Verification modal header: Right-aligned utility action.
+
+Also repeat the button inline under each path’s section header for convenience.
+
+Label: Quick LinkedIn Lookup
+
+Icon: External-link icon (opens in new tab)
+
+Tooltip: Search Google for “Full Name + Company + LinkedIn”
+
+Behavior
+
+On click, open a new tab with the Google query:
+
+Query pattern (include quotes for exact matching):
+
+"<Contact Full Name>" "<Company Name>" LinkedIn
+
+
+If either value is missing, disable the button and show a helper text:
+Enter Contact Name and Company to use Quick LinkedIn Lookup.
+
+URL Construction (implementation detail)
+
+Base: https://www.google.com/search?q=
+
+Query string (URL-encoded):
+
+const query = `"${contactFullName}" "${companyName}" LinkedIn`;
+const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+window.open(url, '_blank', 'noopener,noreferrer');
+
+
+Security: Use noopener,noreferrer.
+
+Audit & Compliance
+
+Log a lightweight audit event (no PII beyond what’s already in the record):
+
+event_type: quick_linkedin_lookup
+
+lead_id, agent_id, timestamp
+
+query_terms: "<Contact Full Name>" "<Company Name>" LinkedIn
+
+Do not store the Google results or clicked links.
+
+Accessibility
+
+Button is keyboard-focusable, aria-label="Open Google search for Contact and Company on LinkedIn".
+
+Visible focus state.
+
+Error & Edge Cases
+
+Missing name/company: button disabled + helper text.
+
+Extremely long names/companies: still supported via URL encoding.
+
+International names: no transliteration needed; rely on Google relevance.
+
+Context in Each Path (for clarity)
+✅ Yes – Lead is Present
+
+Before “Upload LinkedIn Screenshot”:
+
+Show Quick LinkedIn Lookup button.
+
+Flow continues as previously defined (screenshot upload → AI/QA validation → log metadata).
+
+☎️ On-Call Confirmation
+
+Before “New Contact Creation Form”:
+
+Show Quick LinkedIn Lookup button.
+
+Flow continues as previously defined (form → create contact → link call/recording → optional AI check).
+
+If you want, I can drop these snippets directly into your existing spec and add a tiny component API (props and events) for the button so engineering can wire it up in minutes.

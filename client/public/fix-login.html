@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fix Login - Clear Auth Data</title>
+    <style>
+        body { font-family: Arial; padding: 40px; text-align: center; }
+        .success { color: green; font-size: 20px; font-weight: bold; }
+        button { padding: 15px 30px; font-size: 18px; background: #dc2626; color: white; border: none; border-radius: 6px; cursor: pointer; margin: 20px; }
+        button:hover { background: #b91c1c; }
+        .info { background: #fef3c7; padding: 20px; border-radius: 8px; margin: 20px auto; max-width: 600px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Fix Login Issue</h1>
+    
+    <div class="info">
+        <p><strong>Your browser has corrupted login data.</strong></p>
+        <p>Click the button below to clear it and fix the login.</p>
+    </div>
+    
+    <button onclick="clearAndFix()">Clear Auth Data & Fix Login</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        function clearAndFix() {
+            // Clear all auth-related localStorage
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_user');
+            localStorage.clear();
+            
+            // Clear session storage too
+            sessionStorage.clear();
+            
+            // Show success
+            document.getElementById('result').innerHTML = 
+                '<div class="success">✅ Auth data cleared!</div>' +
+                '<p>Redirecting to login page in 2 seconds...</p>';
+            
+            // Redirect to login
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

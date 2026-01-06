@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login Diagnostic Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
+        .success { color: green; }
+        .error { color: red; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 10px 0; }
+        pre { background: #f4f4f4; padding: 10px; border-radius: 4px; }
+        input { padding: 8px; width: 100%; margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Login Diagnostic Test</h1>
+    
+    <h2>Step 1: Test Server Connection</h2>
+    <button onclick="testServer()">Test Server</button>
+    <pre id="serverResult"></pre>
+    
+    <h2>Step 2: Test Login</h2>
+    <input id="testUsername" placeholder="Username" value="superadmin">
+    <input id="testPassword" type="password" placeholder="Password" value="password123">
+    <button onclick="testLogin()">Test Login</button>
+    <pre id="loginResult"></pre>
+    
+    <h2>Step 3: Current Page Info</h2>
+    <pre id="pageInfo"></pre>
+    
+    <script>
+        // Show page info
+        document.getElementById('pageInfo').textContent = 
+            'URL: ' + window.location.href + '\n' +
+            'Protocol: ' + window.location.protocol + '\n' +
+            'Host: ' + window.location.host + '\n' +
+            'Port: ' + window.location.port;
+        
+        async function testServer() {
+            const result = document.getElementById('serverResult');
+            result.textContent = 'Testing server connection...';
+            
+            try {
+                const response = await fetch('/api/dashboard/stats');
+                const data = await response.json();
+                result.className = 'success';
+                result.textContent = '✅ Server is reachable!\n' + 
+                    'Status: ' + response.status + '\n' +
+                    'Data: ' + JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.className = 'error';
+                result.textContent = '❌ Server unreachable!\n' + error.message;
+            }
+        }
+        
+        async function testLogin() {
+            const result = document.getElementById('loginResult');
+            const username = document.getElementById('testUsername').value;
+            const password = document.getElementById('testPassword').value;
+            
+            result.textContent = 'Testing login...';
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    result.className = 'success';
+                    result.textContent = '✅ LOGIN SUCCESSFUL!\n' + 
+                        'Token: ' + data.token.substring(0, 50) + '...\n' +
+                        'User: ' + JSON.stringify(data.user, null, 2);
+                } else {
+                    result.className = 'error';
+                    result.textContent = '❌ Login failed!\n' + 
+                        'Status: ' + response.status + '\n' +
+                        'Message: ' + (data.message || 'Unknown error');
+                }
+            } catch (error) {
+                result.className = 'error';
+                result.textContent = '❌ Request failed!\n' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+2025-12-19 18:53:06.94
+1165f02b
+User
+- Received sig: 384aa9ffb512b915...
+2025-12-19 18:53:06.94
+1165f02b
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 18:53:06.94
+1165f02b
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 18:53:06.94
+1165f02b
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 18:53:06.94
+1165f02b
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_transcription","event_timestamp":1766152386,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","conversation_id":"conv_7401kcve4effeq5b10pg992ysdwm","status":"done","user_id":null,"branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","transcript":[{"role":"agent","agent_metadata":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","workflow_node_id":"node_01kctd99szfk2ss7srygkz3zvh"},"message":"Hello. I'm looking to speak with
+2025-12-19 18:53:06.94
+1165f02b
+User
+- Expected sig: fba93764cf0528e8...
+2025-12-19 18:53:06.94
+1165f02b
+User
+1:53:06 PM [express] POST /api/webhooks/elevenlabs 401 in 1ms :: {"error":"Invalid signature"}
+2025-12-19 18:53:06.95
+1165f02b
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_audio","event_timestamp":1766152386,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","user_id":null,"conversation_id":"conv_7401kcve4effeq5b10pg992ysdwm","full_audio":"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAADFMTq2Gxh64raHFuBremJAAIgAGkGFpWUzSDOAWZ1GMIOBi9xugPFNdRLZggEcBLwVsQtOaR0h2sEBOeyjZqwEgMFDoIdSc2oCjc5ACcZkxjbcM2CGG4RUCa0p1GIyTAAcCUDnEzSRLFyTtmJ2ha4NBQLsg5logTdLEoJYiRbyXrxODjRBOGU51tSOCndHOhZuC4K0Scf52CHn2SguD050LhBqA62ItiozuGr3NvV7nAZIl
+2025-12-19 18:53:06.95
+1165f02b
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 18:53:06.95
+1165f02b
+User
+- Received sig: 6f546bc82a50bd5a...
+2025-12-19 18:53:06.95
+1165f02b
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 18:53:06.95
+1165f02b
+User
+[ElevenLabs Webhook] Signature mismatch
+2025-12-19 18:53:06.95
+1165f02b
+User
+- Expected sig: 8edba9f8218da373...
+2025-12-19 18:53:06.95
+1165f02b
+User
+- Timestamp: 1766152386
+2025-12-19 18:53:06.95
+1165f02b
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 18:53:06.95
+1165f02b
+User
+1:53:06 PM [express] POST /api/webhooks/elevenlabs 401 in 4ms :: {"error":"Invalid signature"}

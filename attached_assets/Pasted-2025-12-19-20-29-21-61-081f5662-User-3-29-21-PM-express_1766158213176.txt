@@ -1,0 +1,120 @@
+2025-12-19 20:29:21.61
+081f5662
+User
+3:29:21 PM [express] POST /api/webhooks/elevenlabs 200 in 1ms :: {"status":"ok","message":"Contact n…
+2025-12-19 20:29:21.70
+081f5662
+User
+- Timestamp: 1766158161
+2025-12-19 20:29:21.70
+081f5662
+User
+- Received: v0=702dff0149beb6ebb...
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Looking up campaign from queue for conversation: conv_5501kcvkmxmsfd3vgtqase1zpea1
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=undefined, queue=null, phone=undefined
+2025-12-19 20:29:21.70
+081f5662
+User
+- Expected: v0=702dff0149beb6ebb...
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766158161, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "user_id": null, "conversation_id": "conv_5501kcvkmxmsfd3vgtqase1zpea1", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAAFQzBChW3gAsgHyPLPZAAOljTWwkziEO+5D+v4/TcO4ijUgYytROWnjnpA3piNMOjKhwxAEQ0kMbLYLYGoEMIQqGND1G8ViGMkpzlvQtsIOPWXM62ezxWMjO/f3vd+/fsjx48ePHjx4/fv379+/fv3jx48ePHjx4/fv379+/fx3jx48eUAAMPDw8PAAAAAAMPDw8PAAAAAAMPDw8PAAAAAAMPDw8eAAAAAI
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 20:29:21.70
+081f5662
+User
+[ElevenLabs Webhook] Event type: post_call_audio, conversation: conv_5501kcvkmxmsfd3vgtqase1zpea1
+2025-12-19 20:29:21.73
+081f5662
+User
+[ElevenLabs Webhook] Found queue item 107cd710-336b-459b-964e-7e80545d4e73 for campaign ae5b353d-64a9-44d8-92cf-69d4726ca121
+2025-12-19 20:29:21.73
+081f5662
+User
+[ElevenLabs Webhook] Mapped disposition: Completed
+2025-12-19 20:29:21.77
+081f5662
+User
+[ElevenLabs Webhook] Created call_session: f46374b5-cfee-481b-b094-4ce30b6ad3c5 (AI agent)
+2025-12-19 20:29:21.77
+081f5662
+User
+[UnifiedDisposition] Applying disposition: Completed for ai agent, session f46374b5-cfee-481b-b094-4ce30b6ad3c5
+2025-12-19 20:29:21.80
+081f5662
+User
+[UnifiedDisposition] System action: remove_from_campaign_queue
+2025-12-19 20:29:21.83
+081f5662
+User
+[UnifiedDisposition] Added contact b6b33867-9198-4bab-9e8a-ebe5777541e1 to campaign suppression
+2025-12-19 20:29:21.87
+081f5662
+User
+[UnifiedDisposition] Removed from queue: Completed
+2025-12-19 20:29:21.87
+081f5662
+User
+[ElevenLabs Webhook] ✅ Disposition applied: Completed, action: remove_from_campaign_queue
+2025-12-19 20:29:21.87
+081f5662
+User
+3:29:21 PM [express] POST /api/webhooks/elevenlabs 200 in 173ms :: {"status":"ok","conversation_id":…
+2025-12-19 20:29:22.12
+081f5662
+User
+[AI Orchestrator] Replenish triggered for campaign ae5b353d-64a9-44d8-92cf-69d4726ca121
+2025-12-19 20:29:23.82
+081f5662
+User
+[Queue:ai-campaign-orchestrator] Job replenish-ae5b353d-64a9-44d8-92cf-69d4726ca121-1766158161871 started processing
+2025-12-19 20:29:25.15
+081f5662
+User
+[AI Orchestrator] Campaign ae5b353d-64a9-44d8-92cf-69d4726ca121: 19/20 in progress, 1 slots available
+2025-12-19 20:29:25.42
+081f5662
+User
+[AI Orchestrator] Found 2 queued items for campaign ae5b353d-64a9-44d8-92cf-69d4726ca121
+2025-12-19 20:29:26.72
+081f5662
+User
+[AI Orchestrator] UK phone filtering: 0 with valid UK phones, 2 skipped (no UK phone)
+2025-12-19 20:29:26.72
+081f5662
+User
+[AI Orchestrator] After compliance: 0 eligible, 0 skipped
+2025-12-19 20:29:26.72
+081f5662
+User
+[AI Orchestrator] UK breakdown: 0 mobile (+447), 0 landline (+441/2/3)
+2025-12-19 20:29:27.62
+081f5662
+User
+[Queue:ai-campaign-orchestrator] Job replenish-ae5b353d-64a9-44d8-92cf-69d4726ca121-1766158161871 completed
+2025-12-19 20:29:27.62
+081f5662
+User
+[Queue:ai-campaign-orchestrator] Job replenish-ae5b353d-64a9-44d8-92cf-69d4726ca121-1766158161871 completed

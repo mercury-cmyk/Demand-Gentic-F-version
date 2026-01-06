@@ -1,0 +1,140 @@
+page is empty after you “created” users, the issue is almost always one of these: wrong tenant, hidden filters, soft-deletes, RBAC blocking the list call, or the UI reading from an empty search index. Do this in order.
+
+1) Confirm the users actually exist (in the right DB + tenant)
+
+Run on prod DB:
+
+-- 1.1 Do users exist at all?
+SELECT id, email, is_active, tenant_id, deleted_at, created_at
+FROM users
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- 1.2 Do users exist for THIS tenant?
+SELECT id, email
+FROM users
+WHERE tenant_id = :TENANT_ID AND deleted_at IS NULL
+ORDER BY created_at DESC;
+
+-- 1.3 Were they created under tenant_id NULL or the wrong tenant?
+SELECT tenant_id, COUNT(*) 
+FROM users
+GROUP BY tenant_id;
+
+
+If rows are on the wrong tenant or tenant_id is NULL, fix:
+
+UPDATE users
+SET tenant_id = :TENANT_ID
+WHERE tenant_id IS NULL;  -- or WHERE tenant_id = :WRONG_TENANT
+
+2) Check for soft-delete / inactive flags
+UPDATE users
+SET deleted_at = NULL, is_active = TRUE, email_verified = TRUE
+WHERE tenant_id = :TENANT_ID;
+
+3) Verify the API list query isn’t excluding everything
+
+Hit the API directly to bypass the UI:
+
+# replace token and URL
+curl -s -H "Authorization: Bearer <ADMIN_JWT>" \
+"https://api.yourapp.com/users?tenantId=:TENANT_ID&page=1&pageSize=25&includeInactive=true"
+
+
+If this returns users → the backend is fine; the UI filters/pagination are hiding results.
+
+If this returns [] → the backend query/permissions/tenant filter is the culprit.
+
+Common backend culprits to fix
+
+Tenant scope: WHERE u.tenant_id = :tenantId is using the wrong source (e.g., from JWT vs query). Align them.
+
+Default scope/“paranoid” (Sequelize/TypeORM/Laravel): disable or explicitly include soft-deleted = false.
+
+Over-strict filters: is_active = TRUE AND email_verified = TRUE AND role IN (...). Start simple:
+
+SELECT u.id,u.email FROM users u WHERE u.tenant_id=:TENANT_ID AND u.deleted_at IS NULL;
+
+
+RBAC: current user needs users:list (or settings:users:view). Temporarily bypass for admin:
+
+Laravel: Gate::before(fn($user)=>$user->hasRole('admin') ? true : null);
+
+Node: if roles.includes('admin') then allow.
+
+4) UI “gotchas” that make the grid look empty
+
+Sticky filters: Clear “Team”, “Role”, “Active only”, and search text. Many UIs persist a blank search that returns 0.
+
+Default to wrong tab: “Agents” vs “All users” tab selected.
+
+Pagination bug: pageSize=0 or page index out of range after a deploy. Force page=1 and pageSize=25 on mount.
+
+Index-backed lists: If the grid reads from Meilisearch/Elastic:
+
+Make sure the indexer worker is running.
+
+Reindex: enqueue all users for re-sync.
+
+Until indexing is fixed, switch the list to read from DB directly.
+
+5) If you’re using a search index (Meilisearch/ES)
+# sanity: how many docs are in the users index?
+# (run in your search console or via API)
+
+
+If count=0 but DB has users → your sync worker/webhook is down. Quick fix: run a full reindex job.
+
+6) Typical ORM examples (make sure your code looks like this)
+
+Prisma (Node)
+
+// server: GET /users
+const tenantId = req.user.tenant_id;
+const { q, role, page=1, pageSize=25, includeInactive } = req.query;
+
+const where:any = { tenant_id: tenantId, deleted_at: null };
+if (!includeInactive) where.is_active = true;
+if (role) where.roles = { some: { role: { slug: role }}};
+if (q) where.OR = [{ email: { contains:q, mode:'insensitive' } }, { name: { contains:q, mode:'insensitive' }}];
+
+const users = await prisma.user.findMany({
+  where, skip:(page-1)*pageSize, take:Number(pageSize),
+  orderBy:{ created_at:'desc' },
+  include:{ roles:{ include:{ role:true } } }
+});
+res.json(users);
+
+
+Laravel Eloquent
+
+$tenantId = auth()->user()->tenant_id;
+$query = User::where('tenant_id',$tenantId)->whereNull('deleted_at');
+
+if (!request()->boolean('includeInactive', false)) $query->where('is_active', true);
+if ($role = request('role')) $query->whereHas('roles', fn($q)=>$q->where('slug',$role));
+if ($q = request('q')) $query->where(fn($w)=>$w->where('email','ilike',"%$q%")->orWhere('name','ilike',"%$q%"));
+
+return $query->orderByDesc('created_at')->paginate(request('pageSize',25));
+
+7) Quick “make it visible now” patch
+
+If you just need them to show up immediately in the UI, loosen the API temporarily:
+
+-- Remove overly strict “must-have-role” requirement
+-- and ensure tenant + not deleted is enough
+-- (Re-tighten after verification)
+
+
+Or, in code, ignore role filter when role param is missing.
+
+8) Prevent this from happening again
+
+Creation path: when you create a user, always set tenant_id, is_active=true, email_verified=true (if internal).
+
+Post-create hook: enqueue index sync; log a metric “users.indexed”.
+
+List page UX: show a banner if total=db_count > index_count → “Some users aren’t indexed yet.”
+
+Admin safeguard: Admin should always bypass users:list checks in emergencies.

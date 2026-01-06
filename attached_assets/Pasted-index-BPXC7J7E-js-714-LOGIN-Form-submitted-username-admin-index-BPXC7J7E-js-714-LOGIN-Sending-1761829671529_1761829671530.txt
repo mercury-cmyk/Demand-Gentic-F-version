@@ -1,0 +1,56 @@
+index-BPXC7J7E.js:714 [LOGIN] Form submitted, username: admin
+index-BPXC7J7E.js:714 [LOGIN] Sending POST request to /api/auth/login
+api/auth/login:1  Failed to load resource: the server responded with a status of 500 ()
+index-BPXC7J7E.js:714 [LOGIN] Response status: 500
+index-BPXC7J7E.js:714 [LOGIN] Response data: Object
+index-BPXC7J7E.js:714 [LOGIN] Error during login: Error: Login failed
+    at h (index-BPXC7J7E.js:714:26682)
+h @ index-BPXC7J7E.js:714
+index-BPXC7J7E.js:714 [LOGIN] Form submitted, username: admin
+index-BPXC7J7E.js:714 [LOGIN] Sending POST request to /api/auth/login
+api/auth/login:1  Failed to load resource: the server responded with a status of 500 ()
+index-BPXC7J7E.js:714 [LOGIN] Response status: 500
+index-BPXC7J7E.js:714 [LOGIN] Response data: Object
+index-BPXC7J7E.js:714 [LOGIN] Error during login: Error: Login failed
+    at h (index-BPXC7J7E.js:714:26682)
+h @ index-BPXC7J7E.js:714
+index-BPXC7J7E.js:714 [LOGIN] Form submitted, username: admin
+index-BPXC7J7E.js:714 [LOGIN] Sending POST request to /api/auth/login
+api/auth/login:1  Failed to load resource: the server responded with a status of 500 ()
+index-BPXC7J7E.js:714 [LOGIN] Response status: 500
+index-BPXC7J7E.js:714 [LOGIN] Response data: Object
+index-BPXC7J7E.js:714 [LOGIN] Error during login: Error: Login failed
+    at h (index-BPXC7J7E.js:714:26682)
+h @ index-BPXC7J7E.js:714
+index-BPXC7J7E.js:714 [LOGIN] Form submitted, username: admin
+index-BPXC7J7E.js:714 [LOGIN] Sending POST request to /api/auth/login
+index-BPXC7J7E.js:714  POST https://pivotal-bridge-wh5q8xynmq.replit.app/api/auth/login 500 (Internal Server Error)
+h @ index-BPXC7J7E.js:714
+wse @ index-BPXC7J7E.js:37
+Sse @ index-BPXC7J7E.js:37
+_se @ index-BPXC7J7E.js:37
+$E @ index-BPXC7J7E.js:37
+PV @ index-BPXC7J7E.js:37
+(anonymous) @ index-BPXC7J7E.js:37
+z$ @ index-BPXC7J7E.js:40
+J7 @ index-BPXC7J7E.js:37
+gN @ index-BPXC7J7E.js:37
+p$ @ index-BPXC7J7E.js:37
+zse @ index-BPXC7J7E.js:37
+index-BPXC7J7E.js:714 [LOGIN] Response status: 500
+index-BPXC7J7E.js:714 [LOGIN] Response data: {message: 'Login failed'}
+index-BPXC7J7E.js:714 [LOGIN] Error during login: Error: Login failed
+    at h (index-BPXC7J7E.js:714:26682)
+h @ index-BPXC7J7E.js:714
+await in h
+wse @ index-BPXC7J7E.js:37
+Sse @ index-BPXC7J7E.js:37
+_se @ index-BPXC7J7E.js:37
+$E @ index-BPXC7J7E.js:37
+PV @ index-BPXC7J7E.js:37
+(anonymous) @ index-BPXC7J7E.js:37
+z$ @ index-BPXC7J7E.js:40
+J7 @ index-BPXC7J7E.js:37
+gN @ index-BPXC7J7E.js:37
+p$ @ index-BPXC7J7E.js:37
+zse @ index-BPXC7J7E.js:37

@@ -1,0 +1,41 @@
+[Enrichment] Single contact enriched: Zenobia Mehta, address=false, phone=false
+8:14:04 AM [express] POST /api/verification-contacts/e786f869-7f63-4b57-ae71-c7c2122bd9da/enrich 200…
+[Enrichment] Starting single-contact enrichment for 77f42bc6-eac0-4927-908a-3fcf3d89c6f8
+[CompanyEnrichment] Stage 1: Trying AI internal knowledge for "Oman Air" in Oman
+[CompanyEnrichment] Stage 2: Trying web search fallback
+[Tier3Search] Starting enhanced search for "Oman Air" in Oman
+[Tier3Search] Primary query: "Oman Air" Oman office address phone contact
+[WebSearch] Searching: ""Oman Air" Oman office address phone contact"
+[WebSearch] Error: Google Custom Search API error: Requests from referer <empty> are blocked.
+[Tier3Search] Primary query returned no data - early exit
+[CompanyEnrichment] Final result - address: false, phone: false
+[Enrichment] Single contact enriched: Nasra Al Harthy, address=false, phone=false
+8:14:13 AM [express] POST /api/verification-contacts/77f42bc6-eac0-4927-908a-3fcf3d89c6f8/enrich 200…
+[Enrichment] Starting single-contact enrichment for e39cfccb-c316-4faf-8b53-5e77ef8c9994
+[CompanyEnrichment] Stage 1: Trying AI internal knowledge for "Oman Air" in Oman
+[CompanyEnrichment] Stage 2: Trying web search fallback
+[Tier3Search] Starting enhanced search for "Oman Air" in Oman
+[Tier3Search] Primary query: "Oman Air" Oman office address phone contact
+[WebSearch] Searching: ""Oman Air" Oman office address phone contact"
+[WebSearch] Error: Google Custom Search API error: Requests from referer <empty> are blocked.
+[Tier3Search] Primary query returned no data - early exit
+[CompanyEnrichment] Final result - address: false, phone: false
+[Enrichment] Single contact enriched: Abdulaziz Al Darmaki, address=false, phone=false
+8:14:21 AM [express] POST /api/verification-contacts/e39cfccb-c316-4faf-8b53-5e77ef8c9994/enrich 200…
+[BULK ENRICHMENT] Skipping contact e19d12fa-8231-4f99-bef6-32e6e2e48941 - already has address and phone
+[Enrichment] Starting single-contact enrichment for ba654197-b4e3-4055-bca0-979ca772ec32
+[CompanyEnrichment] Stage 1: Trying AI internal knowledge for "South African Airways" in South Africa
+8:14:22 AM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+[CompanyEnrichment] Stage 2: Trying web search fallback
+[Tier3Search] Starting enhanced search for "South African Airways" in South Africa
+[Tier3Search] Primary query: "South African Airways" South Africa office address phone contact
+[WebSearch] Searching: ""South African Airways" South Africa office address phone contact"
+[WebSearch] Error: Google Custom Search API error: Requests from referer <empty> are blocked.
+[Tier3Search] Primary query returned no data - early exit
+[CompanyEnrichment] Final result - address: false, phone: false
+[Enrichment] Single contact enriched: Daniel Mohothi, address=false, phone=false
+8:14:24 AM [express] POST /api/verification-contacts/ba654197-b4e3-4055-bca0-979ca772ec32/enrich 200…
+[BULK ENRICHMENT] Progress: 60/2616 | Address: 0 | Phone: 0 | Skipped: 40 | Failed: 0
+[Enrichment] Starting single-contact enrichment for 84ebf8ac-70b6-4f02-b08d-d6f621d30021
+[CompanyEnrichment] Stage 1: Trying AI internal knowledge for "Indigo Airlines" in India
+[CompanyEnrichment] Stage 2: Trying web search fallback

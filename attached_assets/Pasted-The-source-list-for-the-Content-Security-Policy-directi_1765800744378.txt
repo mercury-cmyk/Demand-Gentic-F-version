@@ -1,0 +1,91 @@
+The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.Understand this error
+The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?Understand this error
+The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.Understand this error
+PivotalMarketingPaltform:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.Understand this error
+PivotalMarketingPaltform:1 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?Understand this error
+PivotalMarketingPaltform:1 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.Understand this error
+js?id=AW-11411994397:140 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:140 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:140 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:140 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:140 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:140 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+Pc @ js?id=AW-11411994397:140Understand this error
+js?id=AW-11411994397:549 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+p @ js?id=AW-11411994397:549Understand this error
+js?id=AW-11411994397:549 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+p @ js?id=AW-11411994397:549Understand this error
+js?id=AW-11411994397:549 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+p @ js?id=AW-11411994397:549Understand this error
+stripe.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+value @ stripe.js:1Understand this error
+stripe.js:1 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+value @ stripe.js:1Understand this error
+stripe.js:1 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+value @ stripe.js:1Understand this error
+recaptcha__en_gb.js:325 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en_gb.js:325Understand this error
+recaptcha__en_gb.js:325 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+(anonymous) @ recaptcha__en_gb.js:325Understand this error
+recaptcha__en_gb.js:325 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+(anonymous) @ recaptcha__en_gb.js:325Understand this error
+recaptcha__en_gb.js:663 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:663 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:663 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:663 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:663 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:663 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+(anonymous) @ recaptcha__en_gb.js:663Understand this error
+recaptcha__en_gb.js:346 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+recaptcha__en_gb.js:346 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+recaptcha__en_gb.js:346 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+recaptcha__en_gb.js:346 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+recaptcha__en_gb.js:346 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+recaptcha__en_gb.js:346 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+(anonymous) @ recaptcha__en_gb.js:346Understand this error
+stripe.js:1 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+value @ stripe.js:1Understand this error
+stripe.js:1 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+value @ stripe.js:1Understand this error
+stripe.js:1 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+value @ stripe.js:1Understand this error
+ed1e693c96a75807.js:2 Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.
+z @ ed1e693c96a75807.js:2Understand this error
+ed1e693c96a75807.js:2 The source list for the Content Security Policy directive 'default-src' contains an invalid source: ''unsafe-dynamic''. It will be ignored.
+e @ ed1e693c96a75807.js:2Understand this error
+ed1e693c96a75807.js:2 The Content-Security-Policy directive 'default-src' contains 'report-uri' as a source expression. Did you want to add it as a directive and forget a semicolon?
+e @ ed1e693c96a75807.js:2Understand this error
+ed1e693c96a75807.js:2 The source list for Content Security Policy directive 'default-src' contains a source with an invalid path: '/api/4509669501698048/security/?sentry_key=7eb3d90eb4660416caf507087367e67e'. The query component, including the '?', will be ignored.
+e @ ed1e693c96a75807.js:2Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev/__replco/workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:32 Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.Understand this error
+workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:32 Error while parsing the 'sandbox' attribute: 'allow-downloads-without-user-activation' is an invalid sandbox flag.Understand this error
+workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142 Loading the script 'https://replit.com/public/js/beacon.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.
+onIframeLoad @ workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142Understand this error
+workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142 Loading the script 'https://replit.com/public/js/beacon.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.
+onIframeLoad @ workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142Understand this error
+workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142 Loading the script 'https://replit.com/public/js/beacon.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.
+onIframeLoad @ workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/leads/5742ba95-eca0-4f87-8e64-d04b079e766c:1 Loading media from  'https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2025-12-15/0d245234-d9ae-11f0-8cfa-02420a1f1070-1765800201.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIASDC5E2MJDPKMH7UW%2F20251215%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20251215T120910Z&X-Amz-Expires=600&X-Amz-SignedHeaders=host&X-Amz-Signature=23fdf5f8265615787a1308b55dd4b50a3bc7930be6f8ab8527c047e24e470350' violates the following Content Security Policy directive: "default-src 'self'". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/leads/5742ba95-eca0-4f87-8e64-d04b079e766c:1 Loading media from  'https://pivasia.s3.ap-south-1.amazonaws.com/recordings/5742ba95-eca0-4f87-8e64-d04b079e766c.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=AKIA6FCMCYWBWJQMWCAR%2F20251215%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Date=20251215T120920Z&X-Amz-Expires=604800&X-Amz-Signature=edd33bcd0ec1e234a1487eaa139bdf40747de8146018a19fec72d8d23db7e63c&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject' violates the following Content Security Policy directive: "default-src 'self'". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/leads/5742ba95-eca0-4f87-8e64-d04b079e766c:1 Loading media from  'https://pivasia.s3.ap-south-1.amazonaws.com/recordings/5742ba95-eca0-4f87-8e64-d04b079e766c.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=AKIA6FCMCYWBWJQMWCAR%2F20251215%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Date=20251215T120921Z&X-Amz-Expires=604800&X-Amz-Signature=d49d2f284181dbade99d2e871f4cb7d842dca8077d87455c37cbceffa8039765&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject' violates the following Content Security Policy directive: "default-src 'self'". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/leads/5742ba95-eca0-4f87-8e64-d04b079e766c:1 Loading media from  'https://pivasia.s3.ap-south-1.amazonaws.com/recordings/5742ba95-eca0-4f87-8e64-d04b079e766c.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=AKIA6FCMCYWBWJQMWCAR%2F20251215%2Fap-south-1%2Fs3%2Faws4_request&X-Amz-Date=20251215T120939Z&X-Amz-Expires=604800&X-Amz-Signature=e2270166183cba4e46947a8f1a1107b6b7aa05fbbe52cc41c2d26736fda535f5&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject' violates the following Content Security Policy directive: "default-src 'self'". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.Understand this error
+workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142 Loading the script 'https://replit.com/public/js/beacon.js' violates the following Content Security Policy directive: "script-src 'self' 'unsafe-inline' 'unsafe-eval'". Note that 'script-src-elem' was not explicitly set, so 'script-src' is used as a fallback. The action has been blocked.
+onIframeLoad @ workspace_iframe.html?initialPath=%2F&id=%3Ar4q%3A:142Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/api/leads/bulk-export:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/api/leads/bulk-export:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)Understand this error
+de53385b-1e83-404b-a4d4-52048ceaf9bb-00-2g2rjk0jdpyy2.janeway.replit.dev:5000/api/leads/bulk-export:1  Failed to load resource: the server responded with a status of 500 (Internal Server Error)

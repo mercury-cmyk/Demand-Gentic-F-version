@@ -1,0 +1,188 @@
+Excellent — you’re describing a **two-Repl architecture** where your internal **Pivotal CRM & Campaigns Dashboard** acts as the *content control and campaign engine*, and the **Pivotal B2B Resources Centre** is the *public-facing content portal*.
+
+Let’s define this **strategic connection** step-by-step so you can implement it securely, efficiently, and with campaign-level intelligence built in.
+
+---
+
+## 🔗 Strategic Connection Overview
+
+| System                                         | Purpose                                                                                 | Key Actions                                       |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **Pivotal CRM & Campaigns (Internal Repl)**    | Create, edit, and manage all assets — landing pages, events, articles, resources, forms | “Push to Resource Centre” → API call → publish    |
+| **Pivotal B2B Resources Centre (Public Repl)** | Public content display (auto-syncs from Dashboard)                                      | Receives data via API → renders pages dynamically |
+
+---
+
+## 🧩 Core Functional Architecture
+
+### 1. **Content Creation in CRM Dashboard**
+
+Each content type (Landing Page, Event, News Article, Resource) should have:
+
+* `title`
+* `slug`
+* `type`
+* `summary`
+* `body_html`
+* `thumbnail_url`
+* `cta_link`
+* `form_id` (optional)
+* `status`: draft / published / synced
+
+Each record includes a **“Push to Resource Centre”** button that:
+
+* Calls a secure API endpoint on the Resource Centre Repl.
+* Sends JSON payload with all content fields.
+
+Example payload:
+
+```json
+{
+  "api_key": "YOUR_SECURE_TOKEN",
+  "content_type": "landing_page",
+  "title": "The Business Owner’s Guide to Simplifying HR",
+  "slug": "simplify-hr-guide",
+  "summary": "Learn how to save 5–10 hours per week with smarter HR.",
+  "body_html": "<h1>...</h1>",
+  "thumbnail_url": "https://pivotal-b2b.com/images/hr-guide.jpg",
+  "cta_link": "https://crm.pivotal-b2b.com/landing/simplify-hr-guide",
+  "form_id": "frm_109",
+  "synced_at": "2025-10-13T09:00:00Z"
+}
+```
+
+---
+
+### 2. **API on Resource Centre (Receiving Side)**
+
+Set up a secure endpoint, e.g.:
+
+`POST /api/sync-content`
+
+It should:
+
+* Validate the `api_key` against an environment variable.
+* Accept JSON data.
+* Store or update the record in a `content` table (SQLite or MongoDB).
+* Automatically mark items as `published` or `updated`.
+* Render content in the public interface under its category (Resources, Events, News, etc.).
+
+---
+
+### 3. **Security Layer**
+
+Use:
+
+* A **shared API key** (stored as environment variable on both Repls).
+* Optional HMAC verification (hash of payload using shared secret).
+* HTTPS-only endpoint (Replit provides this by default).
+
+---
+
+### 4. **Sync Status Feedback**
+
+When content is pushed:
+
+1. Resource Centre responds with:
+
+   ```json
+   { "status": "success", "resource_url": "https://resources.pivotal-b2b.com/resources/simplify-hr-guide" }
+   ```
+2. CRM updates the local record:
+
+   * Marks as “Synced”
+   * Stores the returned public URL for reference in campaigns.
+
+---
+
+### 5. **Form Embedding & Lead Prefill**
+
+Each form in CRM should have:
+
+* A unique `form_id`
+* A dynamic URL pattern such as:
+
+  ```
+  https://resources.pivotal-b2b.com/forms/{form_id}?prefill=contact_id
+  ```
+
+When a campaign in CRM sends a contact to a landing page:
+
+* The link auto-adds query parameters like:
+
+  ```
+  ?first_name=John&email=john@acme.com&company=Acme%20Ltd
+  ```
+* The form component on the Resource Centre parses those parameters and pre-fills input fields accordingly.
+
+**Example:**
+CRM Campaign link →
+`https://resources.pivotal-b2b.com/resources/simplify-hr-guide?first_name=John&email=john@acme.com`
+
+---
+
+### 6. **Automatic Usage in Campaigns**
+
+Once content is pushed and synced:
+
+* The Resource Centre URL is stored in the CRM `Assets` or `Landing Pages` module.
+* When creating a campaign, users can select from synced assets.
+* Prefill tokens (`{{first_name}}`, `{{email}}`, etc.) are auto-mapped to contacts.
+
+---
+
+## ⚙️ Suggested Folder & Module Structure
+
+**In CRM Repl**
+
+```
+/modules
+  /content
+    create.js
+    edit.js
+    pushToResourceCentre.js
+  /campaigns
+    useAsset.js
+```
+
+**In Resource Centre Repl**
+
+```
+/api/sync-content.js
+/models/content.js
+/routes/resources.js
+/routes/events.js
+/routes/news.js
+/utils/validateApiKey.js
+```
+
+---
+
+## 🧠 Bonus: Smart Sync & Analytics
+
+* Add a “Sync Check” cron job in CRM that pings the Resource Centre to confirm all items’ status.
+* Add view/download counters on the Resource Centre and send back engagement metrics to CRM via webhook:
+
+  * `content_viewed`
+  * `form_submitted`
+  * `lead_converted`
+
+---
+
+## ✅ Final Flow Summary
+
+1. **Create** content in CRM.
+2. **Push** → Resource Centre via secure API.
+3. Resource Centre **publishes** content.
+4. CRM **stores** the public URL.
+5. Campaigns **use** that URL with prefill parameters.
+6. Leads **submit** forms (embedded from CRM).
+7. Submissions **sync back** to CRM automatically.
+
+---
+
+Would you like me to **write the exact API endpoint code** (Node.js/Express for both sides) for:
+
+* `pushToResourceCentre` (CRM → send)
+* `sync-content` (Resource Centre → receive)
+  including security + sync response handling?

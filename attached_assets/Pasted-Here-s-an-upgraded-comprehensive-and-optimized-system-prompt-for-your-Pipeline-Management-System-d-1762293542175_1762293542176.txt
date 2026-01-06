@@ -1,0 +1,139 @@
+Here’s an upgraded, comprehensive and optimized system prompt for your Pipeline Management System, designed to enhance clarity, depth, and functionality for developers, AI models, and UX/UI teams — while staying aligned with Pivotal B2B’s ABM, CRM, and revenue operations ecosystem.
+
+🚀 Enhanced Prompt: Pipeline Management System
+
+Category: CRM Core / Sales Enablement
+Purpose: To define and enhance the Pipeline Management System — a central, AI-powered module for managing sales pipelines, opportunities, engagement, and automation within the Pivotal B2B CRM ecosystem.
+
+🔷 System Overview
+
+Pipeline Management is a comprehensive sales automation and engagement platform that empowers B2B marketing and sales teams to efficiently track opportunities, manage relationships, automate outreach, and gain actionable insights from every interaction.
+
+It seamlessly integrates AI, human touchpoints, email, and voice communication — enabling high-performance sales execution and predictable revenue growth.
+
+⚙️ Core Features
+1. Pipelines Dashboard
+
+Visualize all active, closed, and lost deals with customizable stages.
+
+Drag-and-drop pipeline stage management.
+
+Add, rename, or merge stages dynamically.
+
+Multiple pipeline views (Kanban, List, Forecast).
+
+Quick filters for Accounts, Owners, Value, Probability, and Stage.
+
+Smart alerts for stalled deals, overdue follow-ups, or idle accounts.
+
+2. New Opportunity Creation
+
+Quick-create opportunity with Account, Contact, Value, Source, and Owner.
+
+Add AI-suggested next steps or recommended touchpoints.
+
+Automatically link to active Campaigns, Projects, or Client entities.
+
+Custom fields support: region, segment, intent score, lead source, etc.
+
+Instant validation against duplicate records and account mapping.
+
+3. Email Sequences & Automation
+
+Build personalized, multi-step email sequences linked to pipeline stage.
+
+Define triggers (stage entry, inactivity, reply received, etc.).
+
+Use AI-assisted content generation tailored to account, persona, or industry.
+
+Schedule manual or automated follow-ups based on engagement.
+
+Integrated open, click, and reply tracking.
+
+Support for A/B testing and dynamic fields ({{AccountName}}, {{DecisionMaker}}).
+
+4. Unified Inbox
+
+Native integration with Office 365 and Gmail.
+
+Unified view for Sent, Received, and Tracked messages.
+
+Smart email threading by Contact or Opportunity.
+
+AI Email Summarization: Get key insights from long threads.
+
+Smart reply suggestions and tone adjustment (formal, friendly, persuasive).
+
+Sync attachments, notes, and follow-ups directly with opportunity record.
+
+5. AI Insights & Recommendations
+
+Predict deal close probability using engagement data, stage history, and buyer intent.
+
+Identify at-risk deals and recommend re-engagement actions.
+
+Summarize recent communications per opportunity (email + call logs).
+
+Recommend best-performing sequences for similar deal profiles.
+
+Provide sales reps with AI Coaching Tips (“Best time to reach out,” “Top persona pain points,” etc.).
+
+Sentiment analysis for inbound and outbound communication.
+
+6. Engagement Timeline
+
+Centralized log of all touchpoints (emails, calls, notes, meetings, tasks).
+
+Filter by activity type, team member, or time range.
+
+Visual graph for frequency and recency of engagement.
+
+Click-to-call directly from opportunity record with integrated call logging.
+
+7. Reports & Forecasting
+
+Real-time revenue forecasts by pipeline stage, owner, or region.
+
+Win/loss analysis with reasons and AI-generated insights.
+
+Team performance dashboards with conversion and engagement metrics.
+
+Export data to Excel, Google Sheets, or PDF.
+
+💡 Smart System Behaviors
+
+If no pipelines configured:
+
+“No pipelines are currently configured. Create your first pipeline to start managing opportunities, automating outreach, and tracking performance.”
+
+AI Setup Guidance:
+
+“Need help setting up your pipeline? Our AI assistant can recommend stage structures and automation flows based on your sales cycle and campaign objectives.”
+
+Dynamic Stage Prompts:
+
+Automatically suggest next actions when a deal enters a new stage (e.g., “Send follow-up email,” “Schedule demo,” “Share proposal”).
+
+Multi-Entity Integration:
+
+Linked with Clients, Projects, Campaigns, and QA & Leads entities.
+
+Opportunities automatically inherit related account data (industry, region, ABM segment).
+
+Supports cross-client pipeline visibility for internal and client-side tracking.
+
+🧠 Vision Statement
+
+“To transform every opportunity into a measurable, data-driven sales journey — powered by automation, human insight, and AI intelligence.”
+
+🪄 Future Enhancements (Recommended)
+
+Integrate Call Transcription + AI Sentiment Scoring.
+
+Add Deal Room — centralized collaboration hub for complex opportunities.
+
+Enable Custom AI Models per client vertical (e.g., SaaS, Manufacturing, Fintech).
+
+Add Playbooks & Automations Library for sales reps.
+
+Introduce Gamification & Leaderboards for internal sales motivation.

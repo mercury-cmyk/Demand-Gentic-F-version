@@ -1,0 +1,1006 @@
+
+You said:
+And how we can implement a fast email verification system where it verifies email's validity, business email's validity, by detecting whether it's a valid or deliverable email, whether it is a catch-all or accept-all email, whether it's an invalid email or invalid. So how we can implement a solution where it's fast, it's accurate, and it's like removing contacts that are not deliverable. So how we can do that?
+ChatGPT said:
+
+Thought for a couple of seconds
+You’d typically combine smart rules + DNS checks + live mail server checks + a good queueing design. Let’s walk through a practical way you could build this into your system.
+
+1. Decide your verification “levels”
+For B2B/sales use-cases, you usually want these flags on each email:
+
+syntax_valid – is it even a correctly-formed email?
+
+domain_valid – does the domain exist and have MX records?
+
+deliverable_status – deliverable | risky | undeliverable | unknown
+
+catch_all_status – catch_all | not_catch_all | unknown
+
+business_email – true | false | unknown
+
+role_or_generic – like info@, sales@, etc.
+
+disposable_or_free_provider – temp emails, Gmail/Yahoo, etc.
+
+Store these on the Contact or EmailVerification record, and use them in filters (e.g. “only send to deliverable + business emails”).
+
+2. Fast first-pass checks (cheap & synchronous)
+These you can run immediately when user imports/adds contacts, because they’re very fast:
+
+a) Syntax + basic rules
+Use a robust regex / email validator library.
+
+Reject obvious junk:
+
+Missing @
+
+Multiple @
+
+Bad TLD (e.g. user@domain.invalidtld)
+
+Normalize:
+
+Trim spaces
+
+Lowercase the domain
+
+If syntax_invalid → mark as undeliverable and drop from sending pool.
+
+b) Disposable + free email detection
+Maintain local lists:
+
+Free providers: gmail.com, yahoo.com, hotmail.com, etc.
+
+Disposable providers: mailinator.com, tempmail.com, etc.
+
+Then:
+
+If domain in free_providers → business_email = false
+
+If domain in disposable_providers → deliverable_status = undeliverable or risky (depending on your rules)
+
+You can ship these as config JSON files and update them periodically.
+
+c) Business domain detection
+You want to know “company email vs personal email”:
+
+Free domain list (above) → if not in that list, default to business_email = true.
+
+Extra layer (optional): enrich domain (e.g. using Clearbit/FullContact-like services) to confirm it’s a real company website.
+
+You can start simple: “not free provider” = business and improve later.
+
+3. DNS / MX checks (fast network level)
+For emails that pass syntax:
+
+Extract domain: example.com
+
+Perform DNS lookup:
+
+A record or CNAME for the domain (sometimes optional).
+
+MX records – required for mail delivery.
+
+Logic:
+
+No MX and no fallback (A record but mailservers treat differently) → mark as undeliverable.
+
+MX exists → domain_valid = true, continue to SMTP step.
+
+This is still pretty fast, but slower than pure local checks, so you can:
+
+Run DNS checks asynchronously via a worker queue.
+
+Optimise by caching MX results per domain for X hours.
+
+4. SMTP-level verification (the “hard” part)
+To know if it’s deliverable vs invalid vs catch-all, you usually need to:
+
+Open an SMTP connection to the recipient’s mail server (from MX).
+
+Perform simulated send steps:
+
+HELO / EHLO
+
+MAIL FROM: <verify@yourdomain.com>
+
+RCPT TO: <email_to_check@example.com>
+
+(Optionally) stop before DATA and never actually send content.
+
+Interpret server response:
+
+250 for RCPT → likely deliverable.
+
+550 / 5.1.1 etc. → undeliverable.
+
+If the server always returns 250 for any mailbox you test:
+
+That domain is probably catch-all.
+
+BUT:
+
+Many modern providers (Google Workspace, Microsoft 365, etc.) use anti-abuse protections:
+
+Greylisting
+
+Rate limiting
+
+They may not answer truthfully to verification probes.
+
+Too many checks from the same IP can get blocked or blacklisted.
+
+This is why building your own highly reliable SMTP verifier is non-trivial.
+
+5. Catch-all / accept-all logic
+To detect catch-all:
+
+For a given domain, test:
+
+1–2 known valid emails (if you have them).
+
+1–2 random fake emails like sdjfhs98723@example.com.
+
+If both valid-looking and random emails always get 250:
+
+Mark the domain as catch_all = true and mark individual addresses as risky.
+
+You don’t need to run this for every contact – just once per domain and cache the result.
+
+6. Architecture: make it fast for users
+You want the UX to feel instant, while heavy checks happen in the background.
+
+a) Data model (example)
+Contact
+
+email
+
+email_verification_id
+
+is_sendable (derived flag)
+
+EmailVerification
+
+contact_id
+
+email
+
+syntax_valid
+
+domain_valid
+
+deliverable_status (deliverable | risky | undeliverable | unknown)
+
+catch_all_status
+
+business_email
+
+role_or_generic
+
+disposable
+
+last_verified_at
+
+verification_source (internal | third_party)
+
+b) Processing flow
+On contact import / creation
+
+Run instant checks in the API:
+
+Syntax
+
+Free/disposable providers
+
+Business vs personal
+
+If fails syntax → mark as undeliverable and don’t enqueue.
+
+If passes → enqueue for deep verification.
+
+Worker / Queue
+
+A background worker picks up tasks:
+
+DNS/MX lookup (with per-domain cache).
+
+SMTP verification or third-party API call.
+
+Updates EmailVerification record.
+
+Derives is_sendable:
+
+e.g. deliverable_status === "deliverable" && !disposable && business_email
+
+Campaign sending
+
+When building a sending list, filter:
+
+WHERE is_sendable = true
+
+Optional filter out catch_all = true or treat them separately.
+
+This gives you speed (users don’t wait for checks) + safety (you eventually clean lists).
+
+7. Build vs Buy: using third-party verification APIs
+Because SMTP verification is painful and fragile, most systems combine basic in-house checks with specialized external APIs.
+
+Popular email verification API providers (examples):
+
+ZeroBounce
+
+NeverBounce
+
+Kickbox
+
+Emailable
+
+Hunter (has verifier endpoint)
+
+They usually return:
+
+result: valid | invalid | catch-all | unknown | disposable
+
+reason or sub_status
+
+free_email flag
+
+did_you_mean (for typos like gamil.com → gmail.com)
+
+Pros:
+
+High deliverability accuracy.
+
+Handle edge cases & ISP-specific quirks.
+
+Manage IP reputation & rate limits.
+
+You integrate in hours instead of months.
+
+Cons:
+
+Per-email cost.
+
+You depend on external service / network latency.
+
+Typical strategy (and probably best for you):
+
+Implement your own fast local checks (syntax, domain, business vs free, disposable).
+
+For emails that pass those, send them to a third-party verifier batch.
+
+Cache results by email for a certain time (e.g. 30–90 days).
+
+8. Speed & cost optimisation tricks
+Domain-level caching
+
+Cache MX records and catch-all status by domain to avoid repeated checks.
+
+Email-level caching
+
+Store previous verification results.
+
+Only re-verify if:
+
+Never verified
+
+Or last_verified_at > X days old.
+
+Batch calls
+
+Many APIs support batch verification (e.g. 100–1000 emails per request).
+
+Use that to reduce cost and speed up imports.
+
+Tiered strategy
+
+For prospecting: maybe allow valid + catch_all but mark as “risky”.
+
+For important transactional emails: only send to valid and non-catch-all emails.
+
+9. How to integrate in your app (your use case)
+Given your CRM / sales platform context, you could:
+
+Add verification status fields to Contact schema (as above).
+
+Create an Email Verification microservice:
+
+Endpoints:
+
+POST /verify-email (single or batch)
+
+GET /verification-status?email=...
+
+It handles:
+
+Local quick checks
+
+Queueing third-party calls
+
+Storing results
+
+Update your contact ingestion pipeline:
+
+When uploading CSV or syncing from LinkedIn/other sources:
+
+Run verify-email in background.
+
+Show status (e.g. “Verifying…”, then “Valid”, “Catch-all”, “Invalid”).
+
+Add smart filters in contact lists:
+
+“Remove undeliverable”
+
+“Exclude disposable or free emails”
+
+“Only business emails”
+
+“Optional: exclude catch-all / risky”
+
+Automatic list cleaning
+
+Before launching a campaign, run:
+
+WHERE deliverable_status = 'deliverable'
+
+Exclude any flagged as undeliverable or disposable.
+
+10. Summary cheat-sheet
+To implement a fast, accurate email verification system that removes non-deliverable contacts:
+
+✅ Do in-house immediately:
+
+Syntax validation
+
+Free vs business email detection
+
+Disposable domain detection
+
+DNS / MX checks with caching
+
+✅ Use background workers:
+
+Queue deep verification tasks
+
+Don’t block the UI
+
+✅ Use specialized APIs for:
+
+Deliverable vs undeliverable
+
+Catch-all detection
+
+Fine-grained result codes
+
+✅ Store persistent verification state:
+
+deliverable_status, catch_all, business_email, etc.
+
+Compute is_sendable boolean for campaigns.
+
+✅ Apply filters at send time so bad contacts never get into your sending pool.
+
+If you tell me what stack you’re using (Node, Python, Firebase/Firestore, etc.), I can sketch:
+
+A concrete data schema,
+
+Example verification worker code,
+
+And how to plug it into your existing Pipeline / Campaign / Contacts modules.
+
+You said:
+Another issue we have is that we do not want contacts that have no tenuity, like we do not know for how long they have been in the company, in their current position, and for how long they have been in the current company. So we need to analyze years in current position, years in current, let me check, yeah, time in current position, and also we need to check time in current company. If they have any value for that, if they have any value there, it's a qualified because the time is specified. But if these fields are empty, it has no data, like we don't know for how many years the contact has been in this company, so it means that they do not have tenuity level. So we need to remove those contacts that don't have tenuity, like for how long they have been in the company or for how long they have been in the position. this shoud be addded to eligibilty criteria
+ChatGPT said:
+
+Thought for 9s
+Perfect, this fits nicely into your eligibility engine. Here’s how to handle tenure / “tenuity” in a clean and systematic way.
+
+1. Business rule (in simple terms)
+Contact is tenure-qualified if:
+
+We know time in current position or time in current company (at least one has a value).
+
+Contact is tenure-not-qualified if:
+
+Both are empty / null / unknown
+→ We don’t know how long they’ve been in role or at company
+→ Treat as NOT eligible and exclude from campaigns / pipelines.
+
+You don’t have to delete them from the database – just mark them as ineligible based on tenure.
+
+2. Data model (fields to add / normalize)
+On your Contact (or enrichment) object, define:
+
+time_in_current_position_months (integer, nullable)
+
+time_in_current_company_months (integer, nullable)
+
+Optional helper booleans (or calculated on the fly):
+
+position_tenure_known = time_in_current_position_months IS NOT NULL
+
+company_tenure_known = time_in_current_company_months IS NOT NULL
+
+has_tenure_data = position_tenure_known OR company_tenure_known
+
+Later you can derive years for display:
+years_in_position = time_in_current_position_months / 12
+
+3. Eligibility logic (how to plug into your existing criteria)
+You probably already have something like:
+
+is_valid_email
+
+is_business_email
+
+title_matches
+
+industry_matches
+
+geo_matches
+
+etc.
+
+Add a tenure rule:
+
+has_tenure_data =
+  (time_in_current_position_months IS NOT NULL) OR
+  (time_in_current_company_months IS NOT NULL)
+
+is_eligible_tenure = has_tenure_data
+Then your final eligibility flag becomes:
+
+is_eligible_contact =
+  is_valid_email
+  AND is_business_email
+  AND title_matches
+  AND industry_matches
+  AND geo_matches
+  AND is_eligible_tenure       // NEW rule
+If is_eligible_tenure = false → mark contact as “Tenure Unknown – Not Eligible” and exclude from “Eligible Contacts” lists.
+
+4. UI / filtering behavior
+a) Eligibility criteria config
+In your Eligibility Settings screen, add a block:
+
+Tenure (Tenuity)
+
+ Require tenure information
+
+Rule: “Contact must have value for ‘Time in Current Position’ OR ‘Time in Current Company’”
+
+(Optional later): Minimum years:
+
+Min years in current position: [ 0 ]
+
+Min years in current company: [ 0 ]
+
+Initially, set the min values to 0 so only presence of data matters.
+
+b) Contact list filters
+Add filters in Contacts & Audience views:
+
+Tenure data
+
+Has tenure data
+
+No tenure data (tenure unknown)
+
+Default for eligible contacts views: Has tenure data.
+
+c) Contact profile display
+On each contact profile, show a Tenure section:
+
+Time in current position: 3.2 years or Unknown
+
+Time in current company: 5.0 years or Unknown
+
+Eligibility badge:
+
+✅ Tenure: Qualified (has data)
+
+🚫 Tenure: Not Qualified – Missing tenure data
+
+This makes it very clear to your team why a contact is excluded.
+
+5. Import & enrichment handling
+When you pull data from LinkedIn / enrichment APIs, you often get:
+
+position_start_date (e.g. 2020-05-01)
+
+company_start_date (e.g. 2018-01-01)
+
+You can compute tenure automatically:
+
+time_in_current_position_months = months_between(today, position_start_date)
+time_in_current_company_months = months_between(today, company_start_date)
+If those dates are missing → leave the tenure fields null
+→ the contact will fail the tenure rule and be marked as not eligible.
+
+6. Cleaning existing data
+For current contacts:
+
+Backfill tenure where possible from:
+
+Existing “years in role/company” text fields.
+
+Enrichment sources.
+
+After computing, run a job:
+
+UPDATE contacts SET is_eligible_contact = false WHERE has_tenure_data = false;
+
+In the UI, show:
+
+A saved view: “Contacts missing tenure (clean-up needed)”
+
+So your team can decide to enrich those or keep them separate.
+
+7. Final rule in one line
+Only treat a contact as eligible if at least one of these has a numeric value:
+
+Time in current position
+
+Time in current company
+Otherwise: Tenure Unknown → Not Eligible.
+
+If you’d like, I can next:
+
+Write the exact Firestore schema / SQL,
+
+Or give you TypeScript/Node code for computing & enforcing this rule in your pipeline.
+
+You said:
+What is your suggested option for me to go with for my application? I have a B2B sales and marketing CRM. How can I, you know, integrate the solution? Like it's cost-saving, it's fast, and it's accurate. What's your suggestion?
+ChatGPT said:
+Here is the clear, practical, cost-efficient, and fast approach I recommend for your B2B Sales & Marketing CRM, based on everything you’ve described:
+
+✅ Recommended Email Verification Strategy (Best for Your Use Case)
+Hybrid Model = In-House Fast Checks + Third-Party Deep Verification + Smart Caching
+This gives you the best accuracy, lowest cost, and fastest response without building a complex SMTP infrastructure (which is expensive, unreliable, and slow if done internally).
+
+⭐ WHY THIS IS THE BEST APPROACH
+1️⃣ FAST → You run instant validation on thousands of contacts during upload
+2️⃣ ACCURATE → You outsource the hard part (SMTP/catch-all detection) to a specialized API
+3️⃣ COST SAVING → You only send “valid-looking” emails to the API, not every email
+4️⃣ SCALABLE → Works with any volume
+5️⃣ LOW MAINTENANCE → No need to manage IP warmups, SMTP blocks, or ISP throttling
+🚀 THE 3-LAYER SYSTEM (Best Recommended Architecture)
+LAYER 1 — In-House Fast Validation (0.0001s per email)
+Run these instantly inside your API or cloud functions:
+
+✔ Syntax check
+✔ Free email vs business domain
+✔ Disposable email provider
+✔ Role email (info@, sales@)
+✔ DNS Lookup (MX records)
+📌 Result:
+
+If invalid at this stage → immediately reject as undeliverable
+
+If valid at this stage → send to Layer 2
+
+This layer saves 90% of your verification cost by filtering garbage instantly.
+
+LAYER 2 — Third-Party API Deep Verification (Kickbox / Emailable / NeverBounce / ZeroBounce)
+Use a provider ONLY for emails that pass Layer 1.
+
+Third-party APIs solve the expensive parts:
+
+✔ Catch-all detection
+✔ Accept-all domain identification
+✔ Risk score
+✔ SMTP inbox verification
+✔ Bounce detection
+✔ Spam-trap patterns
+✔ Disposable hidden detection
+🌟 Recommended Vendors (Choose 1)
+API	Price	Accuracy	Why Good
+Emailable	low	high	Best for CRM-scale batch jobs
+Kickbox	medium	very high	Strong deliverability + great SDK
+NeverBounce	medium-low	high	Very cost-effective
+ZeroBounce	high	very high	Best for corporate clients
+➡ My recommended vendor for you: Emailable or Kickbox
+They have excellent accuracy + cost balance for CRM platforms.
+
+LAYER 3 — Smart Caching & Re-Verification Rules
+This saves you money long-term.
+
+Cache rules:
+Cache verification result per email for 90 days
+
+Cache MX & catch-all result per domain for 14 days
+
+Re-verify only when:
+A contact is older than 90 days
+
+You prepare to send a fresh campaign
+
+Email has changed
+
+This reduces API costs by 70–80%.
+
+🎯 HOW TO USE THIS IN YOUR CRM LOGIC
+Eligibility Rule for Email
+A contact is email-eligible if:
+
+syntax_valid = true
+AND domain_has_mx = true
+AND deep_verification_result = deliverable
+AND not disposable
+AND business_email = true
+Catch-all emails:
+
+If catch_all = true → Mark as “RISKY” but still optional to include
+Disposable emails:
+
+Always mark as NOT ELIGIBLE
+Invalid emails:
+
+Remove from Audience → Not Eligible
+🔥 ADD TENURE FILTER (From Earlier)
+You already defined:
+
+time_in_current_position_months
+
+time_in_current_company_months
+
+Eligibility rule:
+
+is_tenure_qualified =
+    time_in_current_position_months IS NOT NULL
+ OR time_in_current_company_months IS NOT NULL
+Add to the final eligibility:
+
+final_eligible_contact =
+    email_eligible
+AND title_match
+AND industry_match
+AND geo_match
+AND tenure_qualified
+➡ This gives you clean, verified, high-quality B2B leads only.
+
+🏗 HIGH-LEVEL IMPLEMENTATION DIAGRAM
+CONTACT INPUT →
+    Fast Local Checks (Syntax, MX, Disposable) →
+        If invalid → Reject
+        If valid → Queue for Deep Verify →
+            Third-Party API →
+            Save Result to Firestore →
+            Compute Eligibility →
+            Add to Audience or Reject
+Workers:
+
+Firebase Cloud Functions
+
+Background Jobs
+
+Queue (Cloud Tasks / PubSub)
+
+💰 COST BREAKDOWN (VERY IMPORTANT)
+Average B2B CRM:
+50–200 new contacts/day
+
+By using Layer 1 filtering, only 40–60% reach Layer 2
+
+Example cost:
+Third-party verification = ~ $0.005 to $0.008 per email
+
+If you verify 5,000 emails:
+Cost ≈ $25–40 for 5000 emails
+And with caching → That might last months.
+
+This is extremely cheap for the accuracy you get.
+
+🧠 SUMMARY — My Strong Recommendation for Your CRM
+👍 Do this in-house (free + instant):
+Syntax check
+
+MX record check
+
+Role email detection
+
+Free vs business domain
+
+Disposable detection
+
+Domain cache
+
+⭐ Use a third-party API only for:
+Deliverability verification
+
+Catch-all detection
+
+SMTP-level validation
+
+Risk score
+
+🔁 Add smart caching to reduce cost
+🧹 Add tenure filtering to your eligibility logic
+This will give you:
+
+✅ Fast
+✔ Millions of emails validated in seconds (basic layer)
+
+✅ Accurate
+✔ Nearly perfect deliverability detection
+
+✅ Cost Efficient
+✔ Pay only for deep checks
+✔ Use caching to avoid re-checking emails
+
+If you want, I can now provide:
+
+💠 Actual architecture diagram
+💠 Firestore schema
+💠 TypeScript/Node.js code for verification service
+💠 UI/UX layouts for the Email Verification Module
+💠 API integration with Kickbox or Emailable
+
+Just tell me — what do you want next?
+
+You said:
+will go for Kickbox
+ChatGPT said:
+
+Thought for 23s
+Nice, Kickbox is a solid choice. Let’s plug it into your CRM in a way that’s fast, cheap, and clean for eligibility logic.
+
+1. What Kickbox will give you (and how you should use it)
+From a single API call like:
+
+GET https://api.kickbox.com/v2/verify?email=[email protected]&apikey=YOUR_API_KEY
+you get fields like: result, reason, role, free, disposable, accept_all, sendex, did_you_mean, etc. 
+Kickbox Email Verification
+
+Key ones for you:
+
+result: deliverable | undeliverable | risky | unknown
+
+role: true if info@, sales@, etc.
+
+free: true if Gmail/Yahoo/etc.
+
+disposable: true if temp email.
+
+accept_all: true if catch-all domain.
+
+sendex: 0–1 quality score.
+
+Suggested mapping for your CRM:
+
+deliverable_status ← result
+
+verification_reason ← reason
+
+is_role_email ← role
+
+is_free_email ← free
+
+is_disposable ← disposable
+
+is_catch_all ← accept_all
+
+email_quality_score ← sendex
+
+And then a derived flag:
+
+is_email_eligible =
+  (result == "deliverable")
+  AND !disposable
+  AND !free          // if you want strictly business only
+  AND !role          // optional: skip role emails
+2. Where to use Kickbox in your flow
+A. Real-time (point of capture)
+When a contact is added or email is edited:
+
+Do your local checks (syntax, required fields, etc).
+
+Call Kickbox Single Verification API once per email.
+
+Save the verification result + derived is_email_eligible.
+
+Use that in your Eligibility Engine along with:
+
+Job title match
+
+Industry match
+
+Geography
+
+Tenure (time in current company/position)
+
+B. Bulk cleaning (imports / old data)
+For big lists (CSV imports, existing db):
+
+Either loop through them with the single API,
+
+Or later you can wire their Batch Verification API for big jobs. 
+Kickbox
++1
+
+3. Suggested data model (Firestore-style)
+On contacts:
+
+Contact {
+  id: string
+  email: string
+
+  // Kickbox
+  email_verification: {
+    result: "deliverable" | "undeliverable" | "risky" | "unknown"
+    reason: string | null
+    is_role_email: boolean
+    is_free_email: boolean
+    is_disposable: boolean
+    is_catch_all: boolean
+    email_quality_score: number | null
+    did_you_mean: string | null
+    verified_at: Timestamp
+  }
+
+  // Your business flags
+  is_email_eligible: boolean
+
+  // Tenure
+  time_in_current_position_months: number | null
+  time_in_current_company_months: number | null
+  has_tenure_data: boolean
+
+  // Final combined eligibility
+  is_eligible_contact: boolean
+}
+Then compute:
+
+const hasTenureData =
+  contact.time_in_current_position_months != null ||
+  contact.time_in_current_company_months != null;
+
+const isEmailEligible =
+  verification.result === "deliverable" &&
+  !verification.is_disposable &&
+  !verification.is_free_email &&   // if you want strictly business emails
+  !verification.is_role_email;     // optional
+
+contact.is_eligible_contact =
+  isEmailEligible &&
+  titleMatches &&
+  industryMatches &&
+  geoMatches &&
+  hasTenureData;
+4. Concrete Kickbox integration (Node / Cloud Function style)
+4.1. Backend wrapper for Kickbox
+Using plain fetch/axios style, which works in any Node backend or Firebase Function:
+
+import axios from "axios";
+
+const KICKBOX_API_KEY = process.env.KICKBOX_API_KEY; // store in env / secrets
+
+export async function verifyEmailWithKickbox(email) {
+  const url = "https://api.kickbox.com/v2/verify";
+
+  const res = await axios.get(url, {
+    params: { email, apikey: KICKBOX_API_KEY, timeout: 6000 },
+    timeout: 7000,
+  });
+
+  const body = res.data;
+
+  if (!body.success) {
+    // handle API failure gracefully
+    throw new Error(`Kickbox verification failed: ${body.message || "Unknown"}`);
+  }
+
+  return {
+    raw: body,
+    mapped: {
+      result: body.result,                // deliverable / undeliverable / risky / unknown
+      reason: body.reason,
+      is_role_email: body.role,
+      is_free_email: body.free,
+      is_disposable: body.disposable,
+      is_catch_all: body.accept_all,
+      email_quality_score: body.sendex,
+      did_you_mean: body.did_you_mean,
+    },
+  };
+}
+(If you prefer, you can use the official kickbox-node library; the docs show how to do that. 
+Kickbox Email Verification
++1
+)
+
+4.2. When a contact is created/updated
+Example flow in your API / Firebase Function:
+
+import { verifyEmailWithKickbox } from "./kickbox";
+
+export async function upsertContact(contactInput) {
+  const email = contactInput.email.trim().toLowerCase();
+
+  // 1) Basic syntax check – if obviously invalid, reject early
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new Error("Invalid email syntax");
+  }
+
+  // 2) Call Kickbox
+  const { mapped } = await verifyEmailWithKickbox(email);
+
+  const isEmailEligible =
+    mapped.result === "deliverable" &&
+    !mapped.is_disposable &&
+    !mapped.is_free_email &&     // if you want business only
+    !mapped.is_role_email;       // optional
+
+  const hasTenureData =
+    contactInput.time_in_current_position_months != null ||
+    contactInput.time_in_current_company_months != null;
+
+  const isEligibleContact =
+    isEmailEligible &&
+    titleMatches(contactInput) &&
+    industryMatches(contactInput) &&
+    geoMatches(contactInput) &&
+    hasTenureData;
+
+  const contact = {
+    ...contactInput,
+    email,
+    email_verification: {
+      ...mapped,
+      verified_at: new Date().toISOString(),
+    },
+    is_email_eligible: isEmailEligible,
+    has_tenure_data: hasTenureData,
+    is_eligible_contact: isEligibleContact,
+  };
+
+  // 3) Save to Firestore / DB
+  await saveContactToDb(contact);
+
+  return contact;
+}
+4.3. Using it at campaign time
+When building a sending list, filter like:
+
+WHERE is_eligible_contact = true
+or more explicitly:
+
+WHERE is_email_eligible = true
+  AND has_tenure_data = true
+and never send to:
+
+result = 'undeliverable'
+
+is_disposable = true
+
+email IS NULL
+
+Catch-all (is_catch_all = true) → you can either exclude or put them in a “risky” segment.
+
+5. Cost-saving tips with Kickbox
+Cache per email: Don’t re-verify the same email for at least 60–90 days.
+
+Only verify when needed:
+
+new contact
+
+email changed
+
+or before a big campaign if verified_at is too old.
+
+Kickbox gives free credits and then pay-as-you-go pricing (e.g. 5,000 verifications ≈ $40). 
+Kickbox
++1
+
+If you tell me “I’m on Firebase + Firestore + React” (or whatever stack) I can give you:
+
+The exact Cloud Function code,
+
+Firestore rules for storing verification fields,
+
+And a small React component for showing the Kickbox status badge on each contact.
+
+You said:
+Please explain to me how you are sending the emails to the kickbox and how you are getting the results back. How many emails are being sent in a batch? Is it being sent one by one or is it being sent in a batch? What are the numbers? Just tell me about that. I don't want that we waste the API results, the API credits. Like having bugs, not getting back the reports.

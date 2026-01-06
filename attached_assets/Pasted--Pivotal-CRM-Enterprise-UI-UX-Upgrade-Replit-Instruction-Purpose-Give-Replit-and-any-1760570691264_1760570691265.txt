@@ -1,0 +1,381 @@
+# Pivotal CRM — Enterprise UI/UX Upgrade (Replit Instruction)
+
+> **Purpose:** Give Replit (and any dev working in this repo) a single, actionable instruction to upgrade the entire UI/UX of Pivotal CRM — covering Campaign Builders, Agent Console, Dashboards, Details Pages, Listings, QA, and Global Navigation — to an **enterprise‑grade**, **joyful**, and **cohesive** design system. The result should feel premium, fast, compliant, and *delightful* to use every day.
+
+---
+
+## 1) Objectives & Non‑Negotiables
+
+**Primary Objectives**
+
+* Establish a unified **Design System** with tokens (colors, spacing, radii, typography, elevation, motion) and component library.
+* Standardize **page layouts and UX patterns** for Lists, Details, Forms, Wizards, Dashboards, and Workbenches (Agent Console, QA).
+* Ship **dark + light** modes, **responsive** layouts, and **A11y** (WCAG 2.1 AA) across the app.
+* Make the product **joyful**: subtle motion, micro‑interactions, positive color accents, soft gradients — while staying enterprise‑credible.
+* Improve **information architecture** (navigation, breadcrumbs, command palette, global search, quick actions).
+
+**Non‑Negotiables**
+
+* Performance first: ship code‑split routes, minimal bundle, virtualized lists, skeletons for perceived speed.
+* Consistency: all modules use the same shell, spacing, and component set (no ad‑hoc styles).
+* Accessibility: keyboard navigable, focus states, semantic HTML, color contrast meets AA.
+* Internationalization‑ready: copy strings extracted and ready for i18n.
+
+---
+
+## 2) Technical Baseline
+
+* **Framework:** React + Vite (or Next.js if already used).
+* **Styling:** Tailwind CSS + CSS variables (design tokens).
+* **Components:** `shadcn/ui` for primitives; `lucide-react` for icons.
+* **Charts:** `recharts` with simple, readable defaults.
+* **Motion:** `framer-motion` for tasteful transitions.
+* **Tables/Lists:** Headless table with keyboard nav + virtualization (`@tanstack/react-table` + `react-virtualized` or `@tanstack/react-virtual`).
+
+**Folder Structure (proposed)**
+
+```
+src/
+  app/                 # route pages
+  components/          # shared components
+    ui/                # shadcn-based primitives
+    patterns/          # DataTable, Stepper, PageShell, EmptyState, FilterBar, etc.
+  features/
+    accounts/
+    contacts/
+    campaigns/
+      pipeline-builder/
+      email-builder/
+      tele-outreach/
+    agent-console/
+    qa/
+    dashboards/
+    data-append/
+    settings/
+  lib/                 # utils, hooks, api, auth, rbac
+  styles/
+    tokens.css         # CSS variables for tokens
+    globals.css
+```
+
+---
+
+## 3) Design System (Tokens & Themes)
+
+**3.1 Colors (Joyful + Enterprise)**
+
+* Neutrals: `--zinc-50…900` as base UI surfaces.
+* Brand Primary: `--brand-500` (vibrant yet trustworthy, e.g., blue‑violet).
+* Accents for joy: `--accent-500` (teal/mint), subtle gradients on heroes/empty states.
+* Semantic: `--success`, `--warning`, `--danger`, `--info`.
+* Support both **light** and **dark** via `:root[data-theme="light"|"dark"]`.
+
+**tokens.css (excerpt)**
+
+```css
+:root[data-theme="light"] {
+  --bg: #0b0c0f0a;
+  --panel: #ffffff;
+  --text: #0b0c0f;
+  --muted: #6b7280;
+  --brand-500: #6a5acd;   /* slate violet */
+  --accent-500: #10b981;  /* emerald */
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --ring: var(--brand-500);
+  --radius: 16px;         /* 2xl */
+  --shadow: 0 10px 25px rgba(2, 8, 23, 0.08);
+}
+:root[data-theme="dark"] {
+  --bg: #0b0c0f;
+  --panel: #12131a;
+  --text: #f3f4f6;
+  --muted: #9ca3af;
+  --brand-500: #8b7bff;
+  --accent-500: #34d399;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --ring: var(--brand-500);
+  --radius: 16px;
+  --shadow: 0 10px 25px rgba(0,0,0,0.35);
+}
+```
+
+**3.2 Typography**
+
+* Family: Inter or Plus Jakarta Sans.
+* Scale: `12, 14, 16, 18, 20, 24, 30, 36` with letter‑spacing tuned for readability.
+* Weights: 400/500/600; avoid overusing 700.
+
+**3.3 Spacing & Layout**
+
+* 8‑pt system: `4/8/12/16/20/24/32/40/48/64`.
+* Card radius: `--radius` (global).
+* Grid: responsive 12‑col; use `gap-6` as default between cards.
+
+**3.4 Elevation & Motion**
+
+* Shadows: 3 tiers (`xs`, `md`, `lg`) with low blur for crispness.
+* Motion: 150–250ms ease for hover/press; 300–450ms for page transitions.
+* Always provide **motion‑reduced** fallbacks.
+
+---
+
+## 4) App Shell & Navigation
+
+* **Top Bar:** logo, environment badge (Prod/Stage), global search (⌘K), notifications, user menu.
+* **Left Nav:** collapsible, icons + labels, sectioned (Workspace, Campaigns, Data, QA, Settings).
+* **Breadcrumbs:** visible on all inner pages; last item action menu.
+* **Command Palette (⌘K):** open new campaign, invite user, jump to Account/Contact by search, toggle theme.
+* **Global Search:** typeahead across Accounts, Contacts, Campaigns, Leads; keyboard navigable.
+* **Toasts & Inline Alerts:** consistent placement; never cover primary actions.
+
+---
+
+## 5) Page Patterns (Standards)
+
+**5.1 Listings (Index/Table)**
+
+* Header: Title + Count, primary action (e.g., “New”), secondary (Import, Export) in a `ButtonGroup`.
+* **Filter Bar:** quick filters (chips), advanced filter drawer (boolean logic: equals/contains/begins/ends/is empty), saved views.
+* **Table:** sticky header, resizable columns, inline sort, row selection, bulk actions, infinite scroll or paged.
+* **Row Density:** Comfortable (default), Compact (toggle).
+* **Empty State:** illustration + copy + primary action.
+* **No Results State:** show active filters with one‑click clear.
+
+**5.2 Details Page (Record View)**
+
+* Header card: Name, status badge, owner, key metrics; primary CTAs (Edit, Call, Email, Add to Campaign, More…)
+* Tabs: Overview | Activity | Related (Contacts, Opportunities, Campaigns) | Files | Notes.
+* Right rail: Quick info (Tags, Lifecycle, Health), watchlist toggle.
+* Activity Timeline: calls, emails, notes, QA outcomes; filterable by type.
+
+**5.3 Forms & Wizards**
+
+* Always include field‑level help text.
+* Real‑time validation; show errors inline.
+* Autosave drafts; unsaved changes guard.
+* Multi‑step uses **Stepper** with per‑step summary + progress 0–100%.
+
+**5.4 Dashboards**
+
+* Global date range + quick presets (Today, 7/30/90 days, Custom).
+* Cards: KPI (sparkline), Trend chart, Leaderboard, At‑risk alerts, Recent activity.
+* Export PNG/CSV.
+
+---
+
+## 6) Module Blueprints
+
+### 6.1 Campaign Builder (Email, Tele‑Outreach, Pipeline Dialer)
+
+* **Layout:** Left form + Right live Preview card(s).
+* **Steps:** Details → Audience → Assets/Scripts → Compliance → Scheduling → Review & Launch.
+* **Details:** name, type, objective, tags.
+* **Audience:** filters + saved segments; lead cap (per campaign & **per Account** cap for Pipeline Dialer).
+* **Assets/Scripts:** upload HTML/email, assign script & questions, disposition schema selection (use admin‑defined set).
+* **Compliance:** checkboxes for GDPR/CCPA/TCPA, DNC suppression lists, opt‑out handling.
+* **Scheduling:** timezone, batching windows, send‑time optimization, throttling, retry logic for tele.
+* **Review & Launch:** diff of settings, pre‑flight checks, estimated reach.
+* **Autosave** on every change. **Validation** before step transitions.
+
+### 6.2 Agent Console (Workbench)
+
+* **Header:** Campaign selector, Queue length, Agent status (Available/Busy/Wrap‑up).
+* **Call Panel:** Big dial action, call timer, waveform/levels, device test. Controls: call/hang‑up/mute/hold/transfer/record.
+* **Context Panel:** contact mini‑card, account data, script/questions, quick notes, tags.
+* **Disposition Drawer (mandatory):** appears on call end; options: DNC, Not Interested (remove from this campaign), Invalid Data (remove from **all** queues), Voicemail/No Answer (auto‑requeue after campaign‑configured delay).
+* **Shortcuts:** keyboard for common actions; visual states for wrap‑up.
+
+### 6.3 QA Pages
+
+* **Queue:** list of calls/leads pending QA with filters (campaign, agent, disposition, date).
+* **Review View:** left: recording player + waveform, right: form for criteria (accuracy, compliance, script adherence), notes, pass/fail.
+* **Outcomes:** auto‑log to record; expose to reporting; export.
+
+### 6.4 Data Append / Cleanse / Verification
+
+* **Jobs List:** status chips (Queued/Running/Complete/Failed), progress, owner.
+* **Job Detail:** criteria, sample preview, excluded lists, field mapping, result metrics, download.
+
+### 6.5 User & RBAC
+
+* **Users List:** invite, role, status, last active.
+* **Role Editor:** granular permissions; preview “what this role sees”.
+* **Audit Log:** who did what, when.
+
+---
+
+## 7) Accessibility, Internationalization, Compliance
+
+* Keyboard: Tab order, visible focus ring (`--ring`).
+* Screen readers: ARIA labels, live regions for toasts.
+* Color contrast: Ensure text vs background ≥ 4.5:1.
+* i18n: all strings externalized; RTL‑safe layouts.
+* Compliance banners in builders with links to policies. DNC handling is **explicit** and audited.
+
+---
+
+## 8) Performance & Quality
+
+* Route‑level code splitting; lazy load heavy charts.
+* Virtualize large tables; do not render > 100 rows without virtualization.
+* Optimistic UI for quick actions; rollback on error.
+* Loading skeletons and progressive data hydration.
+* Error boundaries per feature with friendly recovery states.
+
+---
+
+## 9) Tone & Microcopy
+
+* Friendly, concise, action‑oriented (“Start campaign”, “Save & continue”).
+* Joyful hints: subtle confetti on milestone events (first campaign launched), celebratory toast for goals.
+* Always provide guidance: placeholders, examples, empty‑state walkthroughs.
+
+---
+
+## 10) Reusable Components (must‑build)
+
+* `PageShell` (App shell + breadcrumb + actions)
+* `DataTable` (with selection, resize, column pin, density, virtualization)
+* `FilterBar` + `SavedView` chips
+* `Stepper` (animated, with summaries)
+* `FormField` (label, help, error)
+* `EmptyState` (illustration, title, action)
+* `KpiCard`, `TrendChart`, `Leaderboard`
+* `ActivityTimeline`
+* `Drawer` (for Disposition, Quick Edit)
+* `ConfirmDialog` (destructive actions)
+* `Toast` (success/info/warn/error)
+* `ThemeToggle`
+
+**Component Rules**
+
+* No inline styles for layout; rely on Tailwind + tokens.
+* Variants via `class-variance-authority` where helpful.
+* Every interactive component: hover, focus, disabled, loading states.
+
+---
+
+## 11) Example Snippets
+
+**Tailwind + tokens usage (button)**
+
+```jsx
+export function PrimaryButton({ children, ...props }) {
+  return (
+    <button
+      className="inline-flex items-center rounded-[var(--radius)] px-4 py-2 font-medium shadow-[var(--shadow)]
+                 bg-[var(--brand-500)] text-white hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+**Stepper (structure)**
+
+```tsx
+// steps: Details, Audience, Assets, Compliance, Schedule, Review
+<Stepper current={2} steps={["Details","Audience","Assets","Compliance","Schedule","Review"]} />
+```
+
+**DataTable (columns excerpt)**
+
+```tsx
+const columns = [
+  { accessorKey: 'name', header: 'Name', size: 280 },
+  { accessorKey: 'status', header: 'Status', cell: StatusBadge },
+  { accessorKey: 'owner', header: 'Owner' },
+  { accessorKey: 'updatedAt', header: 'Updated', cell: RelativeTime },
+];
+```
+
+---
+
+## 12) Implementation Plan (Milestones)
+
+**M0 — Setup (Day 0)**
+
+* Add `tokens.css`, configure Tailwind, install libs (`shadcn/ui`, `lucide-react`, `framer-motion`, `recharts`, `@tanstack/react-table`, virtualization).
+* Implement `PageShell`, `ThemeToggle`, App Nav, Breadcrumbs, Command Palette.
+
+**M1 — Core Patterns (Week 1)**
+
+* Ship `DataTable`, `FilterBar`, `Stepper`, `FormField`, `EmptyState`, `Toast`.
+* Migrate **Accounts/Contacts** list + detail to new patterns.
+
+**M2 — Campaign Builders (Week 2)**
+
+* Implement unified builder (steps above). Add live preview and autosave. Include **Lead Caps** (global & per‑Account for Pipeline Dialer).
+
+**M3 — Agent Console (Week 3)**
+
+* Build workbench layout, call controls, context panel, **mandatory disposition drawer**, requeue logic.
+
+**M4 — Dashboards & QA (Week 4)**
+
+* Dashboards with date presets + export; QA review UI with player + form.
+
+**M5 — Data Append & Settings (Week 5)**
+
+* Jobs list/detail views; RBAC role editor; audit log.
+
+---
+
+## 13) Acceptance Criteria (Definition of Done)
+
+* **Unified look & feel** across all modules; tokens drive all colors/spacing.
+* **Light/Dark** theme toggle persists; contrast AA verified.
+* **Listings** have filter bar, saved views, bulk actions, virtualization.
+* **Details** have header summary, tabs, activity timeline, right rail.
+* **Builders** follow the 6‑step pattern with validation + autosave.
+* **Agent Console** enforces dispositions and queue rules exactly:
+
+  * DNC ➜ add to Global DNC and never show in any queue.
+  * Not Interested ➜ remove from current campaign queue only.
+  * Invalid Data ➜ remove from *all* queues globally.
+  * Voicemail/No Answer ➜ requeue per campaign delay.
+* **QA** supports pass/fail + notes + export, logs to record.
+* **Performance**: Core pages LCP < 2.5s (p50), interaction < 100ms (p75).
+* **A11y**: Keyboard nav and ARIA checks pass.
+
+---
+
+## 14) Visual Language (Joyful, Bright, Colorful — with Restraint)
+
+* Use **soft gradients** for hero headers and empty states only.
+* Keep content surfaces clean; use accent color for primary actions and progress.
+* Add small celebratory animations on key success events (first launch, achieved goal).
+* Illustrations: geometric, line‑based; avoid heavy, playful cartoons.
+
+---
+
+## 15) QA & Review Checklist
+
+* [ ] Light and Dark themes visually audited across 10 key screens.
+* [ ] Keyboard path validated for builders, tables, dialogs.
+* [ ] Screen reader labels for all form inputs and critical buttons.
+* [ ] Disposition flows tested for all four outcomes.
+* [ ] Lead cap logic verified at campaign and per‑Account level.
+* [ ] Empty states + error states implemented everywhere.
+* [ ] All toasts actionable (include undo where safe).
+* [ ] Page performance budgets met.
+
+---
+
+## 16) Handover Notes
+
+* Keep **tokens** as the single source of truth; any new color/size must be added as a token first.
+* New features must adopt the same **PageShell** and patterns.
+* Add Storybook (optional) for visual regression and component documentation.
+
+---
+
+### End of Instruction
+
+This document is the canonical guide for the UI/UX upgrade. Implement incrementally by milestones, but keep the **Design System** and **App Shell** as the foundation across all work.

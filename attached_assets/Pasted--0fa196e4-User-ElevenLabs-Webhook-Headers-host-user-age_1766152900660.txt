@@ -1,0 +1,84 @@
+
+0fa196e4
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 19:01:22.21
+0fa196e4
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_transcription","event_timestamp":1766152882,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","conversation_id":"conv_1501kcvejvd5fr9tmg4f7cptxn2b","status":"done","user_id":null,"branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","transcript":[{"role":"agent","agent_metadata":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","workflow_node_id":"node_01kctd99szfk2ss7srygkz3zvh"},"message":"Hello. I'm looking to speak with
+2025-12-19 19:01:22.21
+0fa196e4
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 19:01:22.21
+0fa196e4
+User
+[ElevenLabs Webhook] Signature mismatch
+2025-12-19 19:01:22.21
+0fa196e4
+User
+2:01:22 PM [express] POST /api/webhooks/elevenlabs 401 in 1ms :: {"error":"Invalid signature"}
+2025-12-19 19:01:22.21
+0fa196e4
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 19:01:22.21
+0fa196e4
+User
+- Expected: v0=9627005c64d789625...
+2025-12-19 19:01:22.21
+0fa196e4
+User
+- Received: v0=e5a4e8c1000bd1703...
+2025-12-19 19:01:22.21
+0fa196e4
+User
+- Timestamp: 1766152882
+2025-12-19 19:01:22.27
+0fa196e4
+User
+[ElevenLabs Webhook] Signature mismatch
+2025-12-19 19:01:22.27
+0fa196e4
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 19:01:22.27
+0fa196e4
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_audio","event_timestamp":1766152882,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","user_id":null,"conversation_id":"conv_1501kcvejvd5fr9tmg4f7cptxn2b","full_audio":"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAD1Tjc2g1l9krrnFzBvL7ZAQQAAjDBjCFDXOjPCTk2TjpyIevIOCJ1mMZG2NAQcb68dRYZpIBsRzKgKggYcayEb5UJIAaDSGM+pAz8CBiEybN2cOObkaYI0ZYYZcqbb5wwm++cdZ2tkjBvAOOgHjax1gGKJVoA1jqBl2C8eQvhkIs60PEIEwOhDFYMAJAeG0+7VkQ3BwJlHlsH+uFg5zTVcEGGEHlZCfjjV5fy5s7UTtC8a3
+2025-12-19 19:01:22.27
+0fa196e4
+User
+- Expected: v0=d0004d044329512d5...
+2025-12-19 19:01:22.27
+0fa196e4
+User
+- Received: v0=1c2846f9b87d2161f...
+2025-12-19 19:01:22.27
+0fa196e4
+User
+- Timestamp: 1766152882
+2025-12-19 19:01:22.27
+0fa196e4
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 19:01:22.27
+0fa196e4
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 19:01:22.27
+0fa196e4
+User
+2:01:22 PM [express] POST /api/webhooks/elevenlabs 401 in 4ms :: {"error":"Invalid signature"}
+2025-12-19 19:01:22.27
+0fa196e4
+User
+2:01:22 PM [express] POST /api/webhooks/elevenlabs 401 in 4ms :: {"error":"Invalid signature"}
+2025-12-19 19:01:29.91
+0fa196e4
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766152871335-ec9zp6ah2, conversation: conv_4401kcvem7f1f4g99anzfz8sav59
+2025-12-19 19:01:29.94
+0fa196e4
+User
+[AI Batch] Call 4/10 initiated for queue item f4aa6680-5eb5-460c-83da-7b44a60f309d

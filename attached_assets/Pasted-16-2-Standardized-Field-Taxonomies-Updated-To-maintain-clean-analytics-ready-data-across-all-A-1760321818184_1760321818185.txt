@@ -1,0 +1,321 @@
+16.2 Standardized Field Taxonomies (Updated)
+
+To maintain clean, analytics-ready data across all Accounts, the system enforces standardized field taxonomies aligned with LinkedIn, NAICS, and global B2B norms.
+All values are normalized on ingestion and available for AI enrichment, segmentation, and reporting. Standardized Industry Master List (v1.0 – LinkedIn/NAICS Hybrid)
+
+Accounting
+
+Advertising Services
+
+Aerospace & Defense
+
+Agriculture & Forestry
+
+Airlines & Aviation
+
+Alternative Dispute Resolution
+
+Alternative Medicine
+
+Animation
+
+Apparel & Fashion
+
+Architecture & Planning
+
+Arts & Crafts
+
+Automotive
+
+Aviation & Aerospace Components
+
+Banking
+
+Biotechnology Research
+
+Broadcast Media
+
+Building Materials
+
+Business Consulting & Services
+
+Capital Markets
+
+Chemical Manufacturing
+
+Civic & Social Organizations
+
+Civil Engineering
+
+Commercial Real Estate
+
+Computer & Network Security
+
+Computer Games
+
+Computer Hardware Manufacturing
+
+Computer Networking Products
+
+Computer Software
+
+Construction
+
+Consumer Electronics
+
+Consumer Goods
+
+Consumer Services
+
+Corporate Training & Coaching
+
+Cosmetics
+
+Dairy Product Manufacturing
+
+Defense & Space
+
+Design Services
+
+E-Learning Providers
+
+Education Administration Programs
+
+Electrical & Electronic Manufacturing
+
+Entertainment Providers
+
+Environmental Services
+
+Events Services
+
+Executive Offices
+
+Facilities Services
+
+Farming
+
+Financial Services
+
+Fine Art
+
+Fishery
+
+Food & Beverage Services
+
+Food Production
+
+Fundraising.               You said:
+
+<$1M
+
+500 K to 1M, Less than 500k
+Furniture & Home Furnishings Manufacturing
+
+Gambling & Casinos
+
+Glass, Ceramics & Concrete Manufacturing
+
+Government Administration
+
+Government Relations Services
+
+Graphic Design
+
+Health & Fitness Services
+
+Higher Education
+
+Hospital & Health Care
+
+Hospitality
+
+Human Resources & Staffing
+
+Import & Export
+
+Individual & Family Services
+
+Industrial Automation
+
+Information Services
+
+Information Technology & Services
+
+Insurance
+
+International Affairs
+
+International Trade & Development
+
+Investment Banking
+
+Investment Management
+
+Journalism
+
+Judiciary
+
+Law Enforcement
+
+Law Practice
+
+Legal Services
+
+Legislative Offices
+
+Leisure, Travel & Tourism
+
+Libraries
+
+Logistics & Supply Chain
+
+Luxury Goods & Jewelry
+
+Machinery Manufacturing
+
+Management Consulting
+
+Marine Manufacturing
+
+Market Research
+
+Marketing & Advertising
+
+Mechanical or Industrial Engineering
+
+Media & Telecommunications
+
+Medical Devices
+
+Medical Practice
+
+Mental Health Care
+
+Military
+
+Mining & Metals
+
+Motion Pictures & Film
+
+Museums, Historical Sites & Zoos
+
+Music
+
+Nanotechnology
+
+Newspapers & Online News
+
+Nonprofit Organizations
+
+Oil & Gas
+
+Online Audio & Video Media
+
+Outsourcing & Offshoring Consulting
+
+Package & Freight Delivery
+
+Packaging & Containers Manufacturing
+
+Paper & Forest Products Manufacturing
+
+Performing Arts
+
+Pharmaceutical Manufacturing
+
+Philanthropic Fundraising Services
+
+Photography
+
+Plastics Manufacturing
+
+Political Organizations
+
+Primary & Secondary Education
+
+Printing Services
+
+Professional Training & Coaching
+
+Program Development
+
+Public Policy Offices
+
+Public Relations & Communications
+
+Public Safety
+
+Publishing
+
+Real Estate
+
+Recreational Facilities
+
+Religious Institutions
+
+Renewable Energy Semiconductor Manufacturing
+
+Research Services
+
+Restaurants
+
+Retail
+
+Security & Investigations
+
+Semiconductors
+
+Shipbuilding
+
+Sporting Goods Manufacturing
+
+Sports & Recreation
+
+Staffing & Recruiting
+
+Supermarkets
+
+Telecommunications
+
+Textiles Manufacturing
+
+Think Tanks
+
+Tobacco Manufacturing
+
+Translation & Localization
+
+Transportation, Trucking & Railroad
+
+Utilities
+
+Venture Capital & Private Equity
+
+Veterinary Services
+
+Warehousing & Storage
+
+Waste Management
+
+Wholesale Trade
+
+Wireless Services
+
+Writing & Editing
+
+Other / Unclassified
+
+Implementation Notes
+
+Each record in the industry_reference table should contain:
+
+industry_id (UUID)
+
+industry_name
+
+naics_code (optional)
+
+synonyms[] (for fuzzy mapping)
+
+is_active (bool)

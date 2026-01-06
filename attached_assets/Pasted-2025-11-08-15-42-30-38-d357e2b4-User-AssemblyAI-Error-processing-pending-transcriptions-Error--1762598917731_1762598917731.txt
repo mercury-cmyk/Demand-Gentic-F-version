@@ -1,0 +1,116 @@
+2025-11-08 15:42:30.38
+d357e2b4
+User
+[AssemblyAI] Error processing pending transcriptions: Error: Connection terminated due to connection timeout
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at runNextTicks (node:internal/process/task_queues:64:3)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at listOnTimeout (node:internal/timers:545:9)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at process.processTimers (node:internal/timers:519:7)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at async processPendingTranscriptions (file:///home/runner/workspace/dist/index.js:18663:26)
+2025-11-08 15:42:30.38
+d357e2b4
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:20356:9) {
+2025-11-08 15:42:30.38
+d357e2b4
+User
+[cause]: ErrorEvent {
+2025-11-08 15:42:30.38
+d357e2b4
+User
+[Symbol(kTarget)]: WebSocket {
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_events: [Object: null prototype],
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_eventsCount: 4,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_maxListeners: undefined,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_binaryType: 'arraybuffer',
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_closeCode: 1006,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_closeFrameReceived: false,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_closeFrameSent: false,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_closeMessage: ,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_closeTimer: null,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_errorEmitted: true,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_extensions: {},
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_paused: false,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_protocol: '',
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_readyState: 3,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_receiver: null,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_sender: null,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_socket: null,
+2025-11-08 15:42:30.38
+d357e2b4
+User
+_bufferedAmount: 0,

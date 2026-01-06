@@ -1,0 +1,116 @@
+14) Contact & Account Management Upgrade Plan
+14.1 Overview
+
+The Accounts and Contacts modules currently have foundational CRUD capabilities but lack relational depth, enrichment fields, and advanced data management tools.
+This phase focuses on turning the module into a complete ABM-grade data engine, enabling accurate linking, advanced filtering, detailed record navigation, and mass operations.
+
+14.2 Required Field Implementation (Heads-Up)
+
+⚠️ Mandatory fields not yet fully implemented or validated
+
+Accounts (Company):
+
+Field	Purpose	Current Status
+industry	Key for segmentation and ABM tiering	Implemented
+domain	Used for linking to contacts (must be unique, validated)	Partially implemented
+linkedin_url	Company LinkedIn page	Implemented
+linkedin_specialties	Text array; enrich ABM profiling	❌ Missing
+technologies_installed	Array of tech stack identifiers (e.g., HubSpot, AWS, Salesforce)	❌ Missing
+annual_revenue, employees_size_range	Segmentation metrics	Implemented
+hq_city, hq_country, hq_state	Geo segmentation	Implemented
+parent_account_id	Hierarchical relationship	❌ Missing
+tags[], intent_topics[]	Thematic enrichment	Partial
+
+Contacts:
+
+Field	Purpose	Current Status
+account_id	Foreign key linking to company	❌ Missing
+job_title, department, seniority_level	Targeting logic	Implemented
+email_verification_status	Compliance & quality	Implemented
+consent_basis, consent_source, consent_ts	GDPR/CCPA compliance	❌ Missing
+linkedin_url	Contact social link	Implemented
+intent_topics[]	Buyer interest signals	Partial
+direct_phone, phone_verified_at	Telemarketing validation	❌ Missing
+tags[]	Custom labels	❌ Missing
+
+Action: All above fields must be fully integrated into both API and UI layers, with validation (type, uniqueness, format) and migration scripts.
+
+14.3 Data Model Enhancements
+
+Enhance schema to include:
+
+ALTER TABLE accounts
+ADD COLUMN linkedin_specialties TEXT[],
+ADD COLUMN technologies_installed TEXT[],
+ADD COLUMN parent_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL;
+
+
+Both linkedin_specialties and technologies_installed will be indexed using GIN for text-search filters.
+
+14.4 Linking & Relationship Management
+
+Automatic linking between contacts.email_domain ↔ accounts.domain
+
+Manual linking UI in both Account and Contact detail pages
+
+Cascade display of associated Contacts in Account view
+
+Quick navigation: “View Company” button from Contact details
+
+14.5 Advanced Search & Filtering
+
+Multi-field logical queries (AND/OR)
+
+Cross-entity filters (Contacts where Account.industry = 'IT')
+
+Include new fields in filters (technologies_installed, linkedin_specialties)
+
+Saved and shared filter views per user
+
+14.6 Record Detail Views
+
+Account Details:
+
+Tabs: Overview | Contacts | Activity | Notes | Files
+
+Include side panel summary: Industry, Domain, Technologies Installed, LinkedIn Specialties, Revenue, Owner
+
+Quick Actions: Edit, Merge, Add Contact, Export Contacts
+
+Contact Details:
+
+Tabs: Overview | Account Info | Activity | Notes
+
+Include “Linked Account” mini-card with link to parent Account
+
+Navigation: Previous / Next record and breadcrumb trail
+
+14.7 Bulk Operations
+
+Bulk select / bulk update (assign owner, edit fields)
+
+Bulk delete (soft delete with undo period)
+
+Bulk export with selectable columns
+
+Bulk import validation with per-field error queue
+
+14.8 Validation & Compliance
+
+Enforce E.164 for all phone fields
+
+Require email + account_id (or domain match) on Contact creation
+
+Enforce uniqueness of account.domain
+
+Automatic audit logging for all bulk actions
+
+Field-level RBAC: restrict visibility of consent fields to Admin roles only
+
+14.9 Deliverables
+Category	Deliverable	Outcome
+Data Model	Extended schema + migrations	Full relational & enrichment coverage
+UI	Detailed views + linking modals	Navigable, user-friendly record management
+Filters	Multi-field, cross-entity search	Precise segmentation capabilities
+Bulk Ops	Update, delete, assign, export	Operational efficiency
+Compliance	Validation, consent tracking	GDPR-aligned data handling

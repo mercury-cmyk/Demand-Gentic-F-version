@@ -1,0 +1,402 @@
+Production Performance & S3 Hardening” pack tailored to your Replit + Node/Express + React + Drizzle + Neon stack. It focuses on the exact choke points you’ve hit and puts S3 (or S3-compatible like Cloudflare R2/Wasabi/MinIO) at the center for uploads/exports/logs.
+
+✅ Replit Deployment & Perf Hardening (Checklist)
+
+Production build & runtime
+
+NODE_ENV=production
+
+Build SPA once: vite build → serve /dist statically
+
+Disable source maps in prod
+
+Use pm2 to run the server:
+pm2 start dist/server.js --name pivotal-api --max-memory-restart 700M
+
+Replit Dedicated VM + Always-On, region close to Neon
+
+HTTP & CDN
+
+Enable gzip/br compression + HTTP keep-alive
+
+Put Cloudflare in front for static cache of /assets/*
+
+Set cache headers on immutable files (hash in filename)
+
+Database (Neon)
+
+Enable Neon connection pooling
+
+Node pg pool size 10–20 (not higher on small VM)
+
+Add the composite + trigram indexes below (copy-paste)
+
+Queues & backgrounding
+
+BullMQ + Upstash Redis for email checks, enrichment, CSV ingest, and exports
+
+All heavy work off the request/response path
+
+File flows moved to S3
+
+Uploads: direct-to-S3 via presigned URL (browser → S3)
+
+Processing: server streams S3 object → CSV parser → COPY into staging table
+
+Exports: generate CSV server-side → stream to S3 → return a short-lived signed download URL
+
+Never store raw files in Postgres; store metadata + S3 keys only
+
+Caching & pagination
+
+Redis cache for suppression lookups & company normalization
+
+Cursor pagination everywhere; avoid OFFSET
+
+TanStack Query staleTime > 30s for list views
+
+Virtualize large tables on the frontend
+
+Observability
+
+Pino (async) logs
+
+Sentry for exceptions
+
+Track request latency, DB timings, queue durations
+
+🔐 Environment Variables (Replit “Secrets”)
+# App
+NODE_ENV=production
+PORT=3000
+APP_ORIGIN=https://your-domain.tld
+
+# DB (Neon)
+DATABASE_URL=postgres://...
+PG_POOL_MIN=2
+PG_POOL_MAX=15
+
+# Redis (Upstash or compatible)
+REDIS_URL=rediss://:password@host:port
+
+# S3 (AWS or compatible: R2/Wasabi/MinIO — fill region/endpoint accordingly)
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_REGION=auto           # e.g. us-east-1 or 'auto' for R2 with custom endpoint
+S3_ENDPOINT=https://<your-endpoint>   # required for R2/MinIO; omit for pure AWS
+S3_BUCKET=pi-crm-prod
+S3_PUBLIC_BASE=https://cdn.your-domain.tld  # (optional) Cloudflare public host for GETs
+
+# Security
+JWT_SECRET=...
+
+🧱 Postgres Index Pack (copy-paste)
+-- Agent queue lookups / assignments
+CREATE INDEX IF NOT EXISTS idx_agent_queue_campaign_state
+  ON agent_queue (campaign_id, queue_state, agent_id);
+
+-- Contacts filtering in agent console
+CREATE INDEX IF NOT EXISTS idx_contacts_campaign_status
+  ON contacts (campaign_id, status);
+
+-- Verification caps per company
+CREATE INDEX IF NOT EXISTS idx_vc_company_campaign_status
+  ON verification_contacts (company_id, campaign_id, status);
+
+-- Suppression matching (case-insensitive email)
+CREATE INDEX IF NOT EXISTS idx_contacts_email_ci
+  ON contacts (LOWER(email));
+
+-- Name + company hash
+CREATE INDEX IF NOT EXISTS idx_contacts_name_company_hash
+  ON contacts (name_company_hash);
+
+-- Full-text for job-title search
+CREATE INDEX IF NOT EXISTS idx_contacts_title_tsv
+  ON contacts USING GIN (to_tsvector('simple', job_title));
+
+-- Fuzzy company match (e.g., “Ltd”, “Inc”)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_accounts_name_trgm
+  ON accounts USING GIN (company_name gin_trgm_ops);
+
+🧠 “Per-Company Cap” O(1) Enforcement
+
+Table
+
+CREATE TABLE IF NOT EXISTS company_cap_usage (
+  company_id varchar NOT NULL,
+  campaign_id varchar NOT NULL,
+  used_count integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (company_id, campaign_id)
+);
+
+
+Atomic increment
+
+UPDATE company_cap_usage
+   SET used_count = used_count + 1,
+       updated_at = now()
+ WHERE company_id = $1
+   AND campaign_id = $2
+   AND used_count < $3
+RETURNING used_count;
+-- If 0 rows → cap reached; skip assignment.
+
+📦 S3-First File Architecture
+1) Server: S3 client (AWS SDK v3, supports AWS/R2/Wasabi/MinIO)
+// src/lib/s3.ts
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+const isCustom = !!process.env.S3_ENDPOINT;
+export const s3 = new S3Client({
+  region: process.env.S3_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!
+  },
+  ...(isCustom ? { endpoint: process.env.S3_ENDPOINT, forcePathStyle: true } : {})
+});
+
+const BUCKET = process.env.S3_BUCKET!;
+
+export async function getPresignedUploadUrl(key: string, contentType: string, expiresSec = 900) {
+  const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType });
+  return getSignedUrl(s3, cmd, { expiresIn: expiresSec });
+}
+
+export async function getPresignedDownloadUrl(key: string, expiresSec = 900) {
+  const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+  return getSignedUrl(s3, cmd, { expiresIn: expiresSec });
+}
+
+2) API: create presigned URL (browser uploads direct to S3)
+// src/routes/files.create-upload-url.ts
+import { z } from "zod";
+import { getPresignedUploadUrl } from "../lib/s3";
+import express from "express";
+const router = express.Router();
+
+const schema = z.object({
+  filename: z.string(),
+  mime: z.string().default("text/csv")
+});
+
+router.post("/api/files/upload-url", async (req, res) => {
+  const { filename, mime } = schema.parse(req.body);
+  const key = `uploads/${Date.now()}-${filename}`;
+  const url = await getPresignedUploadUrl(key, mime);
+  return res.json({ key, url });
+});
+
+export default router;
+
+3) Client: upload CSV straight to S3 (no server memory)
+// client upload pseudo-code
+const resp = await fetch("/api/files/upload-url", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ filename: file.name, mime: file.type })
+}).then(r => r.json());
+
+await fetch(resp.url, {
+  method: "PUT",
+  headers: { "Content-Type": file.type },
+  body: file
+});
+
+// Save metadata + key in your DB if needed
+
+4) Background job: stream from S3 → CSV parser → Postgres COPY
+// src/queues/csvIngest.worker.ts
+import { Queue, Worker, QueueScheduler, JobsOptions } from "bullmq";
+import { s3 } from "../lib/s3";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { parse } from "csv-parse";
+import { pipeline } from "stream/promises";
+import { Pool } from "pg";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const bucket = process.env.S3_BUCKET!;
+
+export const ingestQueue = new Queue("csv:ingest", { connection: { url: process.env.REDIS_URL! } });
+new QueueScheduler("csv:ingest", { connection: { url: process.env.REDIS_URL! } });
+
+new Worker("csv:ingest", async job => {
+  const { key, campaignId } = job.data as { key: string; campaignId: string };
+
+  const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const s = obj.Body as NodeJS.ReadableStream;
+
+  // Stream parse → batch insert into staging table
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Option 1: COPY from STDIN (fastest) using pg-copy-streams
+    // Option 2: batched INSERTs (simpler). Here’s a batched insert:
+
+    const parser = parse({ columns: true, bom: true, relax_column_count: true });
+    const batch: any[] = [];
+    const BATCH_SIZE = 1000;
+
+    parser.on("data", async row => {
+      batch.push([
+        row.first_name ?? null,
+        row.last_name ?? null,
+        row.email ?? null,
+        row.company ?? null,
+        campaignId
+      ]);
+      if (batch.length >= BATCH_SIZE) {
+        await client.query(
+          `INSERT INTO staging_contacts (first_name, last_name, email, company, campaign_id)
+             SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])`,
+          transpose(batch) // helper: converts rows to column arrays
+        );
+        batch.length = 0;
+      }
+    });
+
+    await pipeline(s, parser);
+
+    if (batch.length) {
+      await client.query(
+        `INSERT INTO staging_contacts (first_name, last_name, email, company, campaign_id)
+           SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])`,
+        transpose(batch)
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}, { connection: { url: process.env.REDIS_URL! }, concurrency: 3 });
+
+// Helper to pivot rows -> columns for UNNEST
+function transpose(rows: any[][]) {
+  const cols = rows[0]?.length ?? 0;
+  const out = Array.from({ length: cols }, () => [] as any[]);
+  for (const r of rows) for (let i = 0; i < cols; i++) out[i].push(r[i]);
+  return out;
+}
+
+5) Exports: stream query → CSV → S3 (+ signed download)
+// src/routes/exports.create.ts
+import express from "express";
+import { Pool } from "pg";
+import { PassThrough } from "stream";
+import { s3 } from "../lib/s3";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { getPresignedDownloadUrl } from "../lib/s3";
+
+const bucket = process.env.S3_BUCKET!;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const router = express.Router();
+
+router.post("/api/exports/leads", async (req, res) => {
+  const { campaignId } = req.body as { campaignId: string };
+  const key = `exports/leads-${campaignId}-${Date.now()}.csv`;
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT first_name, last_name, email, company
+         FROM verified_contacts WHERE campaign_id = $1`,
+      [campaignId]
+    );
+
+    // Build CSV in a stream
+    const csv = new PassThrough();
+    const upload = s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: csv, ContentType: "text/csv" }));
+
+    // Write header + rows
+    csv.write("First Name,Last Name,Email,Company\n");
+    for (const r of rows) {
+      csv.write(
+        `${csvEsc(r.first_name)},${csvEsc(r.last_name)},${csvEsc(r.email)},${csvEsc(r.company)}\n`
+      );
+    }
+    csv.end();
+    await upload;
+
+    const downloadUrl = await getPresignedDownloadUrl(key, 900);
+    return res.json({ key, downloadUrl });
+  } finally {
+    client.release();
+  }
+});
+
+function csvEsc(v?: string | null) {
+  if (!v) return "";
+  const s = String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+export default router;
+
+🎯 Hot Query Patterns (Drizzle/SQL)
+
+Queue pick with no lock fights
+
+SELECT id
+  FROM agent_queue
+ WHERE campaign_id = $1
+   AND queue_state = 'ready'
+ FOR UPDATE SKIP LOCKED
+ LIMIT 100;
+
+
+Case-insensitive email match
+
+SELECT id FROM contacts WHERE LOWER(email) = LOWER($1);
+
+
+Fuzzy company unification example (trgm)
+
+SELECT id, company_name
+  FROM accounts
+ WHERE company_name % $1
+ ORDER BY similarity(company_name, $1) DESC
+ LIMIT 1;
+
+
+Cursor pagination
+
+SELECT id, email, company
+  FROM contacts
+ WHERE campaign_id = $1
+   AND (id > $2)     -- cursor
+ ORDER BY id ASC
+ LIMIT 100;
+
+🧵 BullMQ Job Wiring (enqueue from API)
+// src/routes/imports.enqueue.ts
+import express from "express";
+import { ingestQueue } from "../queues/csvIngest.worker";
+const router = express.Router();
+
+router.post("/api/imports/ingest", async (req, res) => {
+  const { s3Key, campaignId } = req.body;
+  await ingestQueue.add("ingest", { key: s3Key, campaignId }, { attempts: 3, backoff: { type: "exponential", delay: 5000 } });
+  res.json({ queued: true });
+});
+
+export default router;
+
+🧊 Cloudfront/Cloudflare tip (optional)
+
+For public, immutable assets from the app, point a CDN to the bucket (or R2 public bucket) and serve through S3_PUBLIC_BASE.
+
+For PII/CSV, always use private bucket + presigned URLs (short TTL, e.g., 10–15 minutes).

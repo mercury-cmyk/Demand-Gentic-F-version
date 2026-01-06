@@ -1,0 +1,117 @@
+2025-11-08 13:33:56.42
+bc36b134
+User
+[AI-QA] Error processing unanalyzed leads: Error: Connection terminated due to connection timeout
+
+2025-11-08 13:33:56.42
+bc36b134
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-08 13:33:56.42
+bc36b134
+User
+at processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at runNextTicks (node:internal/process/task_queues:64:3)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at listOnTimeout (node:internal/timers:545:9)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at process.processTimers (node:internal/timers:519:7)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at async processUnanalyzedLeads (file:///home/runner/workspace/dist/index.js:19157:29)
+2025-11-08 13:33:56.42
+bc36b134
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:20157:9) {
+2025-11-08 13:33:56.42
+bc36b134
+User
+[cause]: ErrorEvent {
+2025-11-08 13:33:56.42
+bc36b134
+User
+[Symbol(kTarget)]: WebSocket {
+2025-11-08 13:33:56.42
+bc36b134
+User
+_events: [Object: null prototype],
+2025-11-08 13:33:56.42
+bc36b134
+User
+_eventsCount: 4,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_maxListeners: undefined,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_binaryType: 'arraybuffer',
+2025-11-08 13:33:56.42
+bc36b134
+User
+_closeCode: 1006,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_closeFrameReceived: false,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_closeFrameSent: false,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_closeMessage: ,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_closeTimer: null,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_errorEmitted: true,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_extensions: {},
+2025-11-08 13:33:56.42
+bc36b134
+User
+_paused: false,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_protocol: '',
+2025-11-08 13:33:56.42
+bc36b134
+User
+_readyState: 3,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_receiver: null,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_sender: null,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_socket: null,
+2025-11-08 13:33:56.42
+bc36b134
+User
+_bufferedAmount: 0,

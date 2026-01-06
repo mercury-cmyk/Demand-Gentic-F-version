@@ -1,0 +1,112 @@
+2025-12-19 19:39:05.69
+ef84691c
+User
+schema: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+internalPosition: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+length: 138,
+2025-12-19 19:39:05.69
+ef84691c
+User
+dataType: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+constraint: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+table: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-12-19 19:39:05.69
+ef84691c
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-12-19 19:39:05.69
+ef84691c
+User
+line: '1065',
+2025-12-19 19:39:05.69
+ef84691c
+User
+hint: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+severity: 'ERROR',
+2025-12-19 19:39:05.69
+ef84691c
+User
+where: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+}
+2025-12-19 19:39:05.69
+ef84691c
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:39:05.69
+ef84691c
+User
+file: 'parse_target.c',
+2025-12-19 19:39:05.69
+ef84691c
+User
+column: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+[ElevenLabs Webhook] Error: error: column "campaign_id" of relation "call_sessions" does not exist
+2025-12-19 19:39:05.69
+ef84691c
+User
+routine: 'checkInsertTargets'
+2025-12-19 19:39:05.69
+ef84691c
+User
+at async file:///home/runner/workspace/dist/index.js:33990:27 {
+2025-12-19 19:39:05.69
+ef84691c
+User
+detail: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+position: '303',
+2025-12-19 19:39:05.69
+ef84691c
+User
+internalQuery: undefined,
+2025-12-19 19:39:05.69
+ef84691c
+User
+code: '42703',
+2025-12-19 19:39:05.69
+ef84691c
+User
+2:39:05 PM [express] POST /api/webhooks/elevenlabs 200 in 77ms :: {"status":"error","message":"colum…
+2025-12-19 19:39:05.76
+ef84691c
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766155145, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "user_id": null, "conversation_id": "conv_6001kcvgrd1nfys871fnkt03f12z", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAADGRVKnWUgAQ0HyQbPaAAAAIEbO+06YTXLT6MRY5sj48PjI6FjZNMssyyTHDAwZeNMNd7jgYBAEAAAgCAYFBIjRisVisVo0c4QggQQBAEwfB8H3xAGP/D3EAPg+D4Pg4CAIAgGAfP8oGP//93T4zpE/d0gABCAAIAQGEGI0Z4pSBgEhumP0XqYVYaxnnUrGKaRuYHIRhqvhjgACw1WwfjAWAPMIEEQwRQUD
+2025-12-19 19:39:05.76
+ef84691c
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 19:39:05.76
+ef84691c
+User
+- Expected: v0=c3a2d0f434c6c06e2...
+2025-12-19 19:39:05.76
+ef84691c
+User
+- Timestamp: 1766155145

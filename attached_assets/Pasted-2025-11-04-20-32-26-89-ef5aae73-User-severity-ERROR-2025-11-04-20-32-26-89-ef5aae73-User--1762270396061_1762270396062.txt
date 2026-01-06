@@ -1,0 +1,133 @@
+2025-11-04 20:32:26.89
+ef5aae73
+User
+severity: 'ERROR',
+2025-11-04 20:32:26.89
+ef5aae73
+User
+detail: undefined,
+2025-11-04 20:32:26.89
+ef5aae73
+User
+position: '17',
+2025-11-04 20:32:26.89
+ef5aae73
+User
+internalPosition: undefined,
+2025-11-04 20:32:26.89
+ef5aae73
+User
+where: undefined,
+2025-11-04 20:32:28.12
+ef5aae73
+User
+[AGENT QUEUE] Manual queue returned 7992 items
+2025-11-04 20:32:28.33
+ef5aae73
+User
+3:32:28 PM [express] GET /api/agents/me/queue 200 in 1004ms :: [{"id":"3c8ee278-2d13-4a32-8530-b9ecc…
+2025-11-04 20:32:29.03
+ef5aae73
+User
+3:32:29 PM [express] GET /api/contacts/4e9025cc-3918-4c6e-875b-aaecbee4ad92 200 in 43ms :: {"id":"4e…
+2025-11-04 20:32:29.05
+ef5aae73
+User
+3:32:29 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…
+2025-11-04 20:32:33.22
+ef5aae73
+User
+[DB Pool] Client connected | Total: 4, Idle: 2, Waiting: 0
+2025-11-04 20:32:33.22
+ef5aae73
+User
+[DB Pool] Client connected | Total: 4, Idle: 2, Waiting: 0
+2025-11-04 20:32:33.26
+ef5aae73
+User
+3:32:33 PM [express] GET /api/dashboard/stats 200 in 140ms :: {"totalAccounts":46957,"totalContacts"…
+2025-11-04 20:32:33.69
+ef5aae73
+User
+3:32:33 PM [express] GET /api/filters/fields/entity/contact 304 in 34ms :: {"fields":[],"grouped":{}…
+2025-11-04 20:32:33.72
+ef5aae73
+User
+3:32:33 PM [express] GET /api/leads 200 in 67ms :: [{"id":"b393c1d5-6989-4e11-9aad-21ff3e25cf25","co…
+2025-11-04 20:32:39.77
+ef5aae73
+User
+[Telnyx-Sync] Manual recording sync requested for lead b393c1d5-6989-4e11-9aad-21ff3e25cf25 by zahidmohammadi
+2025-11-04 20:32:39.81
+ef5aae73
+User
+[Telnyx-Sync] Trying Strategy 1b: Fetch by call_control_id (from lead) for lead b393c1d5-6989-4e11-9aad-21ff3e25cf25
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx] Call not found or expired (422): af1cc9d4-45a6-4ed4-b561-bf673163788e
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] Strategy 1b failed: No recording found by call_control_id
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] ========================================
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] ❌ NO RECORDING FOUND FOR LEAD: b393c1d5-6989-4e11-9aad-21ff3e25cf25
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] Diagnosis:
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Has call attempt: NO
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Has Telnyx call ID (attempt): NO
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Has Telnyx call ID (lead): YES
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Has dialed number (lead): NO
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Has dialed number (contact): NO
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Contact phones: Direct=none, Mobile=none
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] - Lead created: 2025-11-04T15:32:26.543Z
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] This lead may have been manually submitted without an actual phone call.
+2025-11-04 20:32:39.93
+ef5aae73
+User
+[Telnyx-Sync] ========================================
+2025-11-04 20:32:39.93
+ef5aae73
+User
+3:32:39 PM [express] POST /api/leads/b393c1d5-6989-4e11-9aad-21ff3e25cf25/sync-recording 200 in 157m…
+2025-11-04 20:32:40.30
+ef5aae73
+User
+3:32:40 PM [express] GET /api/leads 304 in 65ms :: [{"id":"b393c1d5-6989-4e11-9aad-21ff3e25cf25","co…
+
+2025-11-04 20:33:03.17
+ef5aae73
+User
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting:

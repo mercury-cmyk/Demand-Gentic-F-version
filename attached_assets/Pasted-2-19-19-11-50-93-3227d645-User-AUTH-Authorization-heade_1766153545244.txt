@@ -1,0 +1,140 @@
+2-19 19:11:50.93
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:11:50.93
+3227d645
+User
+[AUTH] Authentication successful for user: 8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:11:51.00
+3227d645
+User
+2:11:50 PM [express] GET /api/contacts/2f950057-8af9-4d55-bcf2-8a64995e3683 200 in 65ms :: {"id":"2f…
+2025-12-19 19:11:51.00
+3227d645
+User
+2:11:51 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…
+2025-12-19 19:11:52.90
+3227d645
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766153501389-em4izfh00, conversation: conv_8101kcvf7eqzemq9y1nj97hwy9jg
+2025-12-19 19:11:52.94
+3227d645
+User
+[AI Batch] Call 3/10 initiated for queue item d5d0c55b-2b1c-4218-bcb0-e74b0bf5258e
+2025-12-19 19:11:52.94
+3227d645
+User
+[AI Batch] Call 3/10 initiated for queue item d5d0c55b-2b1c-4218-bcb0-e74b0bf5258e
+2025-12-19 19:11:56.04
+3227d645
+User
+- Phone Number ID: phnum_8701kctbg4v4fkw8jq03h8f1kxq9
+2025-12-19 19:11:56.04
+3227d645
+User
+"company_name": "Xanadrome",
+2025-12-19 19:11:56.04
+3227d645
+User
+- To (E.164): +447864284941
+2025-12-19 19:11:56.04
+3227d645
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-19 19:11:56.04
+3227d645
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-19 19:11:56.04
+3227d645
+User
+"contact_firstName": "Sham",
+2025-12-19 19:11:56.04
+3227d645
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-19 19:11:56.04
+3227d645
+User
+"contact_email": "sham@xanadrome.co.uk",
+2025-12-19 19:11:56.04
+3227d645
+User
+- To (raw): 447864284941
+2025-12-19 19:11:56.04
+3227d645
+User
+"contact_fullName": "Sham Singh",
+2025-12-19 19:11:56.04
+3227d645
+User
+"contact_title": "Consulting Partner",
+2025-12-19 19:11:56.04
+3227d645
+User
+"campaign_id": "ae5b353d-64a9-44d8-92cf-69d4726ca121",
+2025-12-19 19:11:56.04
+3227d645
+User
+"agent_fullName": "Sarah"
+2025-12-19 19:11:56.04
+3227d645
+User
+}
+2025-12-19 19:11:56.04
+3227d645
+User
+- Dynamic Variables: {
+2025-12-19 19:11:56.04
+3227d645
+User
+"contact_lastName": "Singh",
+2025-12-19 19:11:59.43
+3227d645
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766153516041-w0t1vo5iv, conversation: conv_2101kcvf7x1jfb5vr4yvpj0dvxnm
+2025-12-19 19:11:59.46
+3227d645
+User
+[AI Batch] Call 4/10 initiated for queue item b1487424-0b89-4e52-b1cd-1e19ef9da99d
+2025-12-19 19:12:01.85
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:12:01.85
+3227d645
+User
+[AUTH] requireAuth called for: POST /api/calls/disposition
+2025-12-19 19:12:01.85
+3227d645
+User
+[AUTH] Authentication successful for user: 8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:12:01.85
+3227d645
+User
+contactId: '5765b04f-56bb-4e43-be03-8ee0e045dd5b',
+2025-12-19 19:12:01.85
+3227d645
+User
+}
+2025-12-19 19:12:01.85
+3227d645
+User
+[DISPOSITION] Received disposition request: {
+2025-12-19 19:12:01.85
+3227d645
+User
+campaignId: '70434f6e-3ab6-49e4-acf7-350b81f60ea2',
+2025-12-19 19:12:01.85
+3227d645
+User
+disposition: 'dnc-request',
+2025-12-19 19:12:01.85
+3227d645
+User
+queueItemId: '41b9e6ed-464e-4f3f-a428-471b455a47a5'
+2025-12-19 19:12:02.10
+3227d645
+User
+[DISPOSITION] Contact: Paolo Di Silvio (paolodisilvio@priceforbes.com)

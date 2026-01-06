@@ -1,0 +1,259 @@
+Below is a complete Domain Sets Upgrade Plan, designed to make this module intelligent, scalable, and seamlessly integrated across Contacts, Accounts, Lists, and Campaigns.
+
+21) Domain Sets (Upgraded for ABM & Campaign Audience Mapping)
+21.1 Objectives
+
+Transform Domain Sets into a central ABM control layer that unifies Account/Contact matching and campaign audience assignment.
+
+Enable bulk uploads (100K+ domains), AI-assisted matching, and real-time filtering.
+
+Support cross-entity actions (export matched contacts, assign to campaigns, QA, or client orders).
+
+Enforce data quality via normalization, deduplication, and linkage logic.
+
+21.2 Core Capabilities
+Category	Capability	Description
+Upload & Normalization	Bulk upload CSV/TXT	Upload domains (1–100K). Fields supported: domain, account_name, notes, tags[].
+	Domain normalization	Strip protocols, subdomains, trailing slashes (mail., www.), deduplicate.
+	Fuzzy detection	AI/regex detects malformed domains (e.g., example,com → example.com).
+Matching Engine	Account Matching	Exact match to account.domain or account.alternate_domains[].
+	Fuzzy/Suggested Match	If no exact match → suggest top 3 based on Levenshtein distance or name similarity.
+	Create Missing Accounts	Option: auto-create “Stub Accounts” with domain/name only (flagged for DataOps review).
+Expansion	Expand to Contacts	Pull all contacts whose email domain = matched account domain.
+	Filter by Title/Seniority	Add rules to select only relevant contacts (e.g., VP+, C-level, or departments).
+Lists Integration	Convert to List	Instantly create Contact or Account List from expanded Domain Set.
+	Merge or Union	Combine multiple Domain Sets into a Master ABM List.
+Campaign Bridge	Assign to Campaign	Assign matched Contacts/Accounts directly to campaigns (email/telemarketing).
+	Client Portal Sync	When a client uploads domain list via order, auto-generate a linked Domain Set.
+Reporting	Match Summary	Display total uploaded, matched accounts, matched contacts, duplicates, unknowns.
+	Match Rate KPI	% Matched Accounts, % Matched Contacts, % Unknown.
+Bulk Actions	Export	Export matched Contacts/Accounts (CSV/XLSX).
+	Add to Campaign/List	Bulk add to campaign audience or existing list.
+	Delete or Archive	Archive completed sets; retain history for audit.
+21.3 Data Model (Revised)
+
+DomainSet
+
+id
+
+name
+
+description
+
+upload_file_uri
+
+total_uploaded
+
+matched_accounts
+
+matched_contacts
+
+duplicates_removed
+
+unknown_domains
+
+status (processing | completed | error)
+
+created_by
+
+created_at
+
+updated_at
+
+tags[]
+
+DomainSetItem
+
+id
+
+domain_set_id
+
+domain
+
+normalized_domain
+
+account_id (nullable)
+
+match_type (exact | fuzzy | none)
+
+match_confidence (0–1)
+
+matched_contacts_count
+
+auto_created_account (bool)
+
+notes
+
+created_at
+
+DomainSetContactLink
+
+domain_set_id
+
+contact_id
+
+account_id
+
+matched_via (domain | email | manual)
+
+included_in_list (bool)
+
+21.4 Matching Logic (Algorithm)
+
+Normalize Domains
+
+Lowercase, remove www., mail., m., ftp. prefixes.
+
+Ensure valid TLD pattern (regex: ^[a-z0-9.-]+\\.[a-z]{2,}$).
+
+Exact Match
+
+If accounts.domain == normalized_domain → assign account_id.
+
+Alternate Match
+
+If accounts.alternate_domains[] includes domain → assign.
+
+Fuzzy Match
+
+Compute Levenshtein distance ≤ 2 OR name similarity ≥ 0.9 between domain parts or company names.
+
+AI Assisted
+
+Use company descriptions & LinkedIn data to suggest potential matches for unknown domains.
+
+Stub Creation
+
+If auto_create_stubs = true, create Account with:
+
+name = Domain Title Case
+
+domain = normalized_domain
+
+status = stub_pending_verification.
+
+21.5 Integration Points
+With Accounts
+
+DomainSet updates trigger re-linking of Accounts (account.domain or alternate_domains[]).
+
+New alternate domains automatically propagate across Contact matching.
+
+With Contacts
+
+Email domain extraction logic syncs with DomainSet to auto-link orphaned contacts.
+
+“Expand to Contacts” feature feeds into campaign audiences or lists.
+
+With Campaigns
+
+From Campaign Builder → “Select Domain Set” as Audience Source.
+
+Real-time count of eligible contacts.
+
+“Excluded Domains” field for suppression logic.
+
+With Client Portal
+
+When clients upload a domain file in their Order:
+
+Auto-create Domain Set.
+
+Tag as origin: client_order.
+
+Display match rate summary on client dashboard.
+
+21.6 AI-Powered Enrichment
+
+AI Domain Intelligence:
+
+Enrich matched accounts with data from external sources (LinkedIn, Crunchbase, Clearbit).
+
+Auto-fill fields: industry, HQ country, company size, revenue, technologies installed.
+
+AI Validation:
+
+Detect parked or inactive domains.
+
+Check MX and WHOIS records for legitimacy.
+
+AI Suggestions:
+
+Suggest “lookalike” domains (subsidiaries, sister brands).
+
+Propose cross-domain expansion for ABM coverage.
+
+21.7 UX / UI Flow
+
+Upload
+
+Drag & drop CSV → Validation preview → Mapping step.
+
+Processing
+
+Progress bar with record count, duplicates removed, matches found.
+
+Results Summary
+
+Pie chart: Matched / Unmatched / Duplicates.
+
+Table view: domain, normalized, matched account, match type, confidence score, contact count.
+
+Expansion
+
+“Expand to Contacts” → choose filters (title/seniority/country) → preview count.
+
+Actions
+
+Add to Campaign → choose campaign type.
+
+Add to List → create new or select existing.
+
+Export matched → choose contact/account export.
+
+History
+
+All uploads stored with versioning and status.
+
+21.8 APIs
+
+POST /domain-sets — upload and create.
+
+GET /domain-sets/:id/status — poll progress.
+
+GET /domain-sets/:id/matches — fetch matched accounts/contacts.
+
+POST /domain-sets/:id/expand — expand to contacts.
+
+POST /domain-sets/:id/add-to-campaign — assign matched contacts.
+
+POST /domain-sets/:id/export — export CSV.
+
+POST /domain-sets/:id/re-run — reprocess with new rules.
+
+DELETE /domain-sets/:id — archive/delete.
+
+21.9 Security & Governance
+
+Upload sanitization (virus scan, MIME-type validation).
+
+Rate limiting per tenant.
+
+Role restrictions:
+
+Admin / Campaign Manager: full access.
+
+Client User: view match summary only.
+
+Audit logs for uploads, match edits, and exports.
+
+Data retention policies: purge inactive sets >180 days.
+
+21.10 Acceptance Criteria
+
+✅ Upload 100K domains → processed under 10 minutes (parallel batch jobs).
+✅ Exact/fuzzy matches recorded with ≥95% accuracy.
+✅ “Expand to Contacts” generates correct audience counts.
+✅ AI enrichment fills missing industries for ≥70% of accounts.
+✅ Export, add-to-campaign, and list creation workflows functional.
+✅ All user actions logged, no duplicate accounts created.

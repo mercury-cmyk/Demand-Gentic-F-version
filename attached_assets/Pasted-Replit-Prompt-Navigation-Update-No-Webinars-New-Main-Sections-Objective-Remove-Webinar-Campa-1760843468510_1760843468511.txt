@@ -1,0 +1,93 @@
+Replit Prompt — Navigation Update (No Webinars, New Main Sections)
+
+Objective:
+
+Remove Webinar Campaigns from the app.
+
+Keep only Email Campaigns and Call Campaigns under Campaigns.
+
+Add new main sections to the left sidebar: Project Management, Data Verification, Client Console, Sales Pipeline.
+
+Keep the right-side Settings drawer as previously designed.
+
+1) Left Sidebar (Primary Navigation — Marketing flow)
+
+Order modules by the operational journey (Find → Engage → Qualify → Deliver → Analyze → Bill):
+
+Dashboard Overview
+
+Accounts
+
+Contacts
+
+Campaigns
+
+Email Campaigns
+
+Call Campaigns
+
+Agent Console
+
+QA & Lead Delivery
+
+Project Management ✅ (new)
+
+Data Verification ✅ (new)
+
+Client Console ✅ (new)
+
+Sales Pipeline ✅ (new)
+
+Analytics & Reports
+
+Resources Centre
+
+Billing & Invoices
+
+Remove any Webinar/Event Campaigns routes, links, and icons from both the sidebar and internal pages.
+
+2) Right Sidebar (Settings Drawer — unchanged skeleton)
+
+System Settings (Company Profile, Users/Roles, Permissions, Notifications)
+
+Email & Domain (Senders, Domain Verification, Dedicated IP, Deliverability, Send Time Optimization)
+
+Telephony & Calls (Telnyx SIP, Device Test, Recording & Storage)
+
+Data & Quality (Cleaning/Enrichment Rules, Verification Workflow, Global Exclusion & DNC)
+
+AI & Automation (AI Assist, Prompt Templates, Automations)
+
+Appearance & Branding (Theme, Brand Assets, Email Header/Footer)
+
+Integrations (API Keys, Webhooks, CRM Connectors)
+
+3) Routing & Visibility
+
+Update route map to remove webinar paths and guards:
+
+Delete/redirect: /campaigns/webinar* → /campaigns/email.
+
+Add routes for new sections:
+
+/projects (Project Management)
+
+/data-verification (Verification projects, rules, queues)
+
+/client-console (client portal/permissions, lead views, exports)
+
+/sales-pipeline (Kanban pipeline, deals, stages)
+
+Persist active module in URL; highlight in sidebar.
+
+4) UI & Style Guidelines (quick spec)
+
+Icons: lucide-react, uniform 20px.
+
+Active item: bold label + left accent bar.
+
+Spacing: 12–16px vertical rhythm, grouped headers (e.g., “Operate”, “Configure”).
+
+Animations: subtle hover, smooth expand/collapse for Campaigns group.
+
+Responsive: collapse to icon rail ≤ 1280px; tooltips show labels on hover.

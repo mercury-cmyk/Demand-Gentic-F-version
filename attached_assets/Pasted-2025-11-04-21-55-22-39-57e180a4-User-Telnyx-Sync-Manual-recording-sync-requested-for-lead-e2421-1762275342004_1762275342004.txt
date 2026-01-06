@@ -1,0 +1,80 @@
+2025-11-04 21:55:22.39
+57e180a4
+User
+[Telnyx-Sync] Manual recording sync requested for lead e2421637-69bf-4e86-b2ee-81291d373714 by zahidmohammadi
+2025-11-04 21:55:22.43
+57e180a4
+User
+[Telnyx-Sync] Trying Strategy 1b: Fetch by call_control_id (from lead) for lead e2421637-69bf-4e86-b2ee-81291d373714
+2025-11-04 21:55:22.59
+57e180a4
+User
+[Telnyx] Call not found or expired (422): 28fc1750-b0f7-4282-91f5-37de23007f9a
+2025-11-04 21:55:22.59
+57e180a4
+User
+[Telnyx-Sync] Strategy 1b failed: No recording found by call_control_id
+2025-11-04 21:55:22.59
+57e180a4
+User
+[Telnyx-Sync] Trying Strategy 2: Search by dialed number for lead e2421637-69bf-4e86-b2ee-81291d373714: +448088009060
+2025-11-04 21:55:22.77
+57e180a4
+User
+[Telnyx-Sync] Found 1 recordings for +448088009060
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx] Recording download URL not found (404): beab7228-ccac-4adb-80be-0739a12fe43d
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] Strategy 2 failed: No recordings found for +448088009060
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] ========================================
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] ❌ NO RECORDING FOUND FOR LEAD: e2421637-69bf-4e86-b2ee-81291d373714
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] Diagnosis:
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Has call attempt: NO
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Has Telnyx call ID (attempt): NO
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Has Telnyx call ID (lead): YES
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Has dialed number (lead): YES
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Has dialed number (contact): YES
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Contact phones: Direct=none, Mobile=none
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] - Lead created: 2025-11-04T16:54:59.377Z
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] This lead may have been manually submitted without an actual phone call.
+2025-11-04 21:55:22.82
+57e180a4
+User
+[Telnyx-Sync] ========================================

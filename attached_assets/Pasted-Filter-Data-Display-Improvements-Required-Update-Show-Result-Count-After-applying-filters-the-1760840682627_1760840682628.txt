@@ -1,0 +1,52 @@
+Filter & Data Display Improvements — Required Update
+
+Show Result Count:
+After applying filters, the number of results (e.g., “Showing 248 Results”) must be clearly displayed at the top of the results section across all modules.
+
+Missing Filter Categories:
+Current filter configuration is incomplete. Please include all relevant field groups dynamically based on entity type:
+
+Account-related fields (Industry, Size, Revenue, Location, etc.)
+
+Campaign-related fields (Campaign Name, Campaign Type, Status, Owner, Date Range, etc.)
+
+List / Segment-related fields (List Name, Segment Owner, Created Date, etc.)
+
+QA-related fields (QA Status, QA Reviewer, QA Outcome, Reviewed Date, etc.)
+
+Any other entity-linked fields related to contacts (e.g., Assigned Agent, Verification Status, Source, Campaign ID).
+
+Standardized Dropdown Values:
+All dropdowns for Contact and Company filters must use standardized values from the global template:
+
+Seniority Levels: CXO, Director, Vice President, Manager, Non-Manager
+
+Employee Size Bands: Must match the standard data template (e.g., 1–10, 11–50, 51–200, 201–500, 501–1,000, 1,001–5,000, 5,001–10,000, 10,000+)
+
+Company Revenue Bands: Use the predefined global revenue ranges from the data standard (e.g., $1M–$10M, $10M–$50M, $50M–$100M, $100M+).
+
+Industries: Use the master industry list defined in our standard data taxonomy.
+
+Responsive UI Fixes:
+The Filter interface must be fully responsive:
+
+Dropdowns and search fields must align and resize gracefully across desktop, tablet, and mobile views.
+
+Multi-select dropdowns should wrap selected chips and maintain consistent spacing.
+
+Scroll and overlay behavior must be smooth and consistent in all screen sizes.
+
+Contact & Account Details Page — Missing Data:
+Many fields on both Contact Details and Account Details pages currently show as empty or hidden.
+
+Fetch and display all available field data (including Industry, Revenue, Employee Size, Seniority, Title, Country, etc.).
+
+Ensure all data bound to the CRM object is visible and formatted consistently with the global field template.
+
+Add null checks and placeholder text (e.g., “—”) only when a value truly doesn’t exist.
+
+Quality Check & Validation:
+
+Cross-check field mappings between filter definitions and data schemas to ensure every field shows correct and complete values.
+
+Validate dropdown value sets against the global data template to maintain consistency across modules.

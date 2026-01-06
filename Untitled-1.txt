@@ -1,0 +1,2 @@
+$env:PUBLIC_WEBSOCKET_URL="wss://steve-unbalking-guessingly.ngrok-free.dev/openai-realtime-dialer"
+npm run dev

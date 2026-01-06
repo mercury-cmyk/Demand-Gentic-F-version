@@ -1,0 +1,186 @@
+🎯 Objective
+
+Enable a connected inbox system where every user (agent, AM, or admin):
+
+Connects their own Microsoft 365 inbox once.
+
+Can send emails directly from any pipeline opportunity record.
+
+Can view inbound and outbound email threads linked to that opportunity.
+
+Has full tracking of communication history (per lead, contact, or project).
+
+🧩 Functional Requirements
+1. Inbox Activation & Authorization
+
+Each signed-in user must connect their own Microsoft 365 mailbox via secure OAuth (Microsoft Graph API).
+
+During first login, show “Connect your inbox” prompt → authenticate → request delegated permissions:
+
+Mail.ReadWrite
+
+Mail.Send
+
+offline_access
+
+User.Read
+
+Store only the OAuth tokens (securely in encrypted storage).
+
+No password storage.
+
+Tokens must auto-refresh silently in background.
+
+2. Inbox Synchronization
+
+Once connected, the system should:
+
+Sync the Inbox, Sent Items, and optionally Custom Folders.
+
+Fetch metadata only (subject, from, to, date, thread ID, message ID) for performance.
+
+Retrieve full message body and attachments on demand when viewing a conversation.
+
+Perform initial sync for the last 90 days, then incremental sync (delta queries via Microsoft Graph).
+
+Sync frequency:
+
+Background job every 5 minutes for new messages.
+
+Outbound send → instant webhook update.
+
+3. Pipeline Integration (Email from Opportunity)
+
+Each pipeline opportunity record should include:
+
+A “Send Email” button (top-right or in communication panel).
+
+On click → opens a lightweight email composer:
+
+Auto-fills To: with the contact(s) linked to that opportunity.
+
+Allows CC, BCC, subject, body, templates, attachments.
+
+“Send via connected inbox” option visible (default: user’s Microsoft 365).
+
+When user hits send:
+
+The CRM sends the email through Microsoft Graph as the authenticated user (not a system mailbox).
+
+The message is copied automatically to Sent Items.
+
+A record is created in CRM: email_activity with metadata + link to opportunity and contact(s).
+
+4. Tracking and Visibility
+
+Inside the Pipeline Opportunity Details Page, add a new Email/Communication tab or activity stream that shows:
+
+Inbound and outbound emails related to that opportunity.
+
+For each email: subject, sender, recipients, date/time, and quick preview.
+
+Ability to open full message in a modal (body, attachments, reply option).
+
+Thread grouping (conversation view).
+
+“Reply” and “Reply All” actions send via the same connected inbox.
+
+Status tracking: delivered, read (if supported), replied.
+
+Each email_activity record should include:
+
+opportunity_id
+
+contact_id(s)
+
+user_id (sender/owner)
+
+direction (inbound/outbound)
+
+subject, thread_id, message_id
+
+sent_at, received_at
+
+body preview (first 200 chars)
+
+sync_status (synced, pending, failed)
+
+5. Multi-User Handling
+
+Each user connects their own mailbox.
+
+Only that user’s messages appear under their credentials.
+
+Shared visibility: messages appear in the opportunity if the recipient contact or thread ID matches that record.
+
+System merges threads from all users who are participants in that opportunity.
+
+6. Security & Compliance
+
+OAuth tokens encrypted at rest.
+
+No access to personal folders outside the permitted scope.
+
+All emails stored with metadata only unless user opens the message.
+
+Respect GDPR/CCPA retention limits; allow “forget contact” purge from email cache.
+
+Logged access (audit trail when a message is viewed or downloaded).
+
+🧠 Technical Strategy (High Level)
+
+Architecture Overview
+
+OAuth Service → handles Microsoft login, token refresh, and token vaulting.
+
+Email Sync Worker → pulls new messages (Graph delta), writes to email_activity table, links to contact/opportunity.
+
+Email Send Service → posts outbound messages to Graph API; on success, logs record to CRM and triggers notification.
+
+Activity Feed API → aggregates emails, notes, tasks for the opportunity detail page.
+
+UI Components → Inbox connection modal, send composer, communication timeline.
+
+Tables Needed
+
+user_mail_accounts: user_id, provider (m365), access_token, refresh_token, expires_at
+
+email_activity: id, user_id, contact_id, opportunity_id, direction, subject, thread_id, message_id, sent_at, received_at, preview, status
+
+email_threads: id, root_message_id, opportunity_id
+
+attachments: id, email_id, filename, size, uri
+
+🚀 Rollout Plan
+
+Enable OAuth connection modal (Microsoft 365).
+
+Verify successful token exchange and mailbox read/write test.
+
+Build send composer → confirm outbound send works and logs correctly.
+
+Implement incremental sync worker (90-day lookback).
+
+Integrate Email tab on Pipeline Opportunity page.
+
+Test thread linking logic (by message_id or contact match).
+
+QA on multi-user sharing, permissions, and data isolation.
+
+Roll out to 1 pilot user → then full team.
+
+✅ Acceptance Checklist
+
+ Users can connect their Microsoft 365 inbox and see confirmation.
+
+ Emails sent from the CRM appear in Microsoft “Sent Items.”
+
+ Emails received from linked contacts appear automatically in the opportunity’s communication history.
+
+ “Send Email” button works directly from the pipeline opportunity.
+
+ Each email activity is visible, filterable, and linked to the correct contact and opportunity.
+
+ Agents only see their own inbox messages unless shared via opportunity context.
+
+ No sync failures or token errors after 24 hours of continuous run.

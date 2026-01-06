@@ -1,0 +1,39 @@
+✅ E164 Result: +447971233535
+useTelnyxWebRTC.ts:453 [AUDIO] Audio element cleaned up
+useTelnyxWebRTC.ts:506 Making call with params: 
+{destinationNumber: '+447971233535', callerNumber: null, hasClient: true, isConnected: true, selectedMicId: null, …}
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: new
+useTelnyxWebRTC.ts:542 Call object created - ID: ad8e8dba-e06e-4c3c-90f4-887d3c624e58 State: new
+useTelnyxWebRTC.ts:547 Captured Telnyx Call ID: ad8e8dba-e06e-4c3c-90f4-887d3c624e58
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:34:17.494Z] ICE Gathering State gathering
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: requesting
+@telnyx_webrtc.js?v=0ab4603b:1454 [2025-12-09T10:34:18.820Z] ICE Gathering State complete
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: trying
+@telnyx_webrtc.js?v=0ab4603b:1979 Performance Metrics
+@telnyx_webrtc.js?v=0ab4603b:1979 
+(index)
+duration
+Peer Creation	'117.30ms'
+ICE Gathering	'1009.90ms'
+SDP Send	'529.10ms'
+Total Duration	'2650.40ms'
+Object
+agent-console.tsx:256 [AGENT CONSOLE] Queue state: 
+{queueDataLength: 53347, queueLoading: false, queueFetching: false, queueError: null, selectedCampaignId: '70434f6e-3ab6-49e4-acf7-350b81f60ea2', …}
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:34:31.198Z] ICE Connection State checking
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: active
+useTelnyxWebRTC.ts:324 [AUDIO] Call active - attempting to attach remote stream
+useTelnyxWebRTC.ts:73 [AUDIO] Got remoteStream from call.remoteStream
+useTelnyxWebRTC.ts:110 [AUDIO] Remote stream audio tracks: 1
+useTelnyxWebRTC.ts:119 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+@telnyx_webrtc.js?v=0ab4603b:1444 [2025-12-09T10:34:31.243Z] Connection State changed: new -> connecting
+useTelnyxWebRTC.ts:132 [AUDIO] ✅ Audio playback started successfully
+@telnyx_webrtc.js?v=0ab4603b:1452 [2025-12-09T10:34:31.465Z] ICE Connection State connected
+agent-console.tsx:714 [CALL-ATTEMPT] Created call attempt: undefined
+agent-console.tsx:755 [CALL-ATTEMPT] Call became active, creating call attempt...
+agent-console.tsx:714 [CALL-ATTEMPT] Created call attempt: undefined
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: hangup
+useTelnyxWebRTC.ts:453 [AUDIO] Audio element cleaned up
+useTelnyxWebRTC.ts:317 Telnyx notification - Type: callUpdate Call State: destroy
+useTelnyxWebRTC.ts:453 [AUDIO] Audio element cleaned up

@@ -1,0 +1,351 @@
+injected.js:27 === TELNYX CONNECTION TIMEOUT ===
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:79
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 Connection failed to establish within 30 seconds
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:80
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 Possible causes:
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:81
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 1. Network firewall blocking WebRTC (UDP ports for STUN/TURN)
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:82
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 2. Invalid SIP credentials
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:83
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 3. Telnyx service unavailable
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:84
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 4. Cloud environment restricting WebRTC protocols
+(anonymous) @ injected.js:27
+(anonymous) @ useTelnyxWebRTC.ts:85
+setTimeout
+(anonymous) @ useTelnyxWebRTC.ts:78
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19416
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18895
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+(anonymous) @ chunk-RPCDYKBN.js?v=8c3a4734:18627
+setTimeout
+scheduleFn @ @tanstack_react-query.js?v=8c3a4734:555
+flush @ @tanstack_react-query.js?v=8c3a4734:569
+batch @ @tanstack_react-query.js?v=8c3a4734:587
+dispatch_fn @ @tanstack_react-query.js?v=8c3a4734:996
+setData @ @tanstack_react-query.js?v=8c3a4734:696
+onSuccess @ @tanstack_react-query.js?v=8c3a4734:897
+resolve @ @tanstack_react-query.js?v=8c3a4734:456
+Promise.then
+run @ @tanstack_react-query.js?v=8c3a4734:498
+start @ @tanstack_react-query.js?v=8c3a4734:536
+fetch @ @tanstack_react-query.js?v=8c3a4734:926
+executeFetch_fn @ @tanstack_react-query.js?v=8c3a4734:2211
+onSubscribe @ @tanstack_react-query.js?v=8c3a4734:1898
+subscribe @ @tanstack_react-query.js?v=8c3a4734:24
+(anonymous) @ @tanstack_react-query.js?v=8c3a4734:3022
+subscribeToStore @ chunk-RPCDYKBN.js?v=8c3a4734:11984
+commitHookEffectListMount @ chunk-RPCDYKBN.js?v=8c3a4734:16915
+commitPassiveMountOnFiber @ chunk-RPCDYKBN.js?v=8c3a4734:18156
+commitPassiveMountEffects_complete @ chunk-RPCDYKBN.js?v=8c3a4734:18129
+commitPassiveMountEffects_begin @ chunk-RPCDYKBN.js?v=8c3a4734:18119
+commitPassiveMountEffects @ chunk-RPCDYKBN.js?v=8c3a4734:18109
+flushPassiveEffectsImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19490
+flushPassiveEffects @ chunk-RPCDYKBN.js?v=8c3a4734:19447
+performSyncWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18868
+flushSyncCallbacks @ chunk-RPCDYKBN.js?v=8c3a4734:9119
+commitRootImpl @ chunk-RPCDYKBN.js?v=8c3a4734:19432
+commitRoot @ chunk-RPCDYKBN.js?v=8c3a4734:19277
+finishConcurrentRender @ chunk-RPCDYKBN.js?v=8c3a4734:18805
+performConcurrentWorkOnRoot @ chunk-RPCDYKBN.js?v=8c3a4734:18718
+workLoop @ chunk-RPCDYKBN.js?v=8c3a4734:197
+flushWork @ chunk-RPCDYKBN.js?v=8c3a4734:176
+performWorkUntilDeadline @ chunk-RPCDYKBN.js?v=8c3a4734:384Understand this error
+injected.js:27 =====================================

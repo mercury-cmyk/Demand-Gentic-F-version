@@ -1,0 +1,792 @@
+# API‑Free Email Validation Engine (Drop‑In Module for Pivotal CRM)
+
+A production‑ready scaffold to run **multi‑stage, API‑free** email validation inside your Campaigns CRM (Node/Express + PostgreSQL/Drizzle + BullMQ + React console). Ships with: syntax/DNS checks, SMTP RCPT probe (no DATA), accept‑all detection, risk lists (disposable/role/free), scoring, TTL, queue rate‑limits, and a minimal React UI.
+
+---
+
+## 0) Quick Start
+
+```bash
+# 1) Clone into your monorepo (or as a standalone service)
+git clone <your-empty-repo> pivotal-email-validator && cd pivotal-email-validator
+
+# 2) Initialize
+pnpm i  # or npm i / yarn
+
+# 3) Env
+cp .env.example .env
+
+# 4) Generate SQL + migrate (Drizzle)
+pnpm drizzle:generate && pnpm drizzle:migrate
+
+# 5) Start services
+# Terminal A: API
+pnpm dev:api
+# Terminal B: Worker
+pnpm dev:worker
+# Terminal C: Web console
+pnpm dev:web
+```
+
+**Prereqs:** Node 20+, Redis (for BullMQ), Postgres 14+, Open ports to outbound 25/465/587; ideally a dedicated IP with correct PTR.
+
+---
+
+## 1) Folder Structure
+
+```
+.
+├── apps
+│   ├── api              # Express API for submit/query jobs
+│   │   └── src
+│   │       ├── index.ts
+│   │       ├── routes
+│   │       │   └── validation.ts
+│   │       └── lib
+│   │           └── queue.ts
+│   ├── worker           # BullMQ consumer + validators
+│   │   └── src
+│   │       ├── worker.ts
+│   │       ├── stages
+│   │       │   ├── syntax.ts
+│   │       │   ├── risk.ts
+│   │       │   ├── dns.ts
+│   │       │   ├── smtp.ts
+│   │       │   └── score.ts
+│   │       └── utils
+│   │           ├── logger.ts
+│   │           └── net.ts
+│   └── web             # Minimal React console (Vite + TS + Tailwind + shadcn)
+│       └── src
+│           ├── main.tsx
+│           ├── App.tsx
+│           └── pages/ValidationConsole.tsx
+├── packages
+│   └── db              # Drizzle schema + migrations
+│       └── src
+│           ├── schema.ts
+│           └── client.ts
+├── drizzle
+│   └── migrations      # Auto‑generated SQL
+├── .env.example
+├── package.json
+├── pnpm-workspace.yaml
+├── tsconfig.json
+└── README.md
+```
+
+---
+
+## 2) Environment (.env.example)
+
+```ini
+# Postgres
+DATABASE_URL=postgresql://user:pass@localhost:5432/pivotal
+
+# Redis (BullMQ)
+REDIS_URL=redis://localhost:6379
+
+# Network identity for SMTP probe
+VALIDATOR_HELO=validator.pivotal-b2b.ai
+VALIDATOR_MAIL_FROM=null-sender@pivotal-b2b.ai
+
+# Concurrency & timeouts
+GLOBAL_CONCURRENCY=50
+PER_DOMAIN_CONCURRENCY=1
+DNS_TIMEOUT_MS=3000
+SMTP_CONNECT_TIMEOUT_MS=10000
+SMTP_OP_TIMEOUT_MS=30000
+SESSION_BACKOFF_MS=1500
+
+# TTL (days)
+EMAIL_VALIDATION_TTL_DAYS=60
+DOMAIN_CACHE_TTL_HOURS=24
+```
+
+---
+
+## 3) package.json (root)
+
+```json
+{
+  "name": "pivotal-email-validator",
+  "private": true,
+  "scripts": {
+    "dev:api": "tsx apps/api/src/index.ts",
+    "dev:worker": "tsx apps/worker/src/worker.ts",
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "drizzle:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "drizzle:migrate": "drizzle-kit migrate --config=drizzle.config.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.15.0",
+    "vite": "^5.0.0",
+    "typescript": "^5.4.0",
+    "drizzle-kit": "^0.25.0"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "bullmq": "^5.7.8",
+    "ioredis": "^5.4.1",
+    "pg": "^8.11.0",
+    "drizzle-orm": "^0.35.0",
+    "zod": "^3.23.0",
+    "punycode": "^2.3.1",
+    "dns": "^0.2.2",
+    "nodemailer": "^6.9.13"
+  }
+}
+```
+
+> Note: `dns` is Node built‑in; included here for clarity if using stubs in some bundlers.
+
+---
+
+## 4) Drizzle schema (packages/db/src/schema.ts)
+
+```ts
+import { pgTable, text, integer, boolean, timestamp, uuid, jsonb, index, unique, sql } from 'drizzle-orm/pg-core'
+
+export const emailValidation = pgTable('email_validation', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  contactId: uuid('contact_id').notNull(),
+  email: text('email').notNull(),
+  domain: text('domain').notNull(),
+  status: text('status').notNull(), // valid | invalid | accept_all | unknown | risky | free_provider
+  confidence: integer('confidence').notNull().default(0),
+  reasons: jsonb('reasons').$type<string[]>().default(sql`'[]'::jsonb`),
+  dnsTrace: jsonb('dns_trace'),
+  smtpTrace: jsonb('smtp_trace'),
+  mxHosts: jsonb('mx_hosts'),
+  isDisposable: boolean('is_disposable').default(false),
+  isRole: boolean('is_role').default(false),
+  isFree: boolean('is_free').default(false),
+  checkedAt: timestamp('checked_at').defaultNow(),
+  ttlExpiresAt: timestamp('ttl_expires_at'),
+  attempts: integer('attempts').default(0),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (t) => ({
+  idxEmail: index('idx_email_validation_email').on(t.email),
+  idxDomain: index('idx_email_validation_domain').on(t.domain),
+  uniqContact: unique('uniq_contact_email').on(t.contactId, t.email),
+}));
+
+export const domainCache = pgTable('domain_cache', {
+  domain: text('domain').primaryKey(),
+  hasMX: boolean('has_mx').default(false),
+  hasA: boolean('has_a').default(false),
+  mxHosts: jsonb('mx_hosts'),
+  spf: text('spf'),
+  dmarc: text('dmarc'),
+  acceptAllProb: integer('accept_all_prob').default(0),
+  lastChecked: timestamp('last_checked').defaultNow(),
+});
+
+export const emailEvents = pgTable('email_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull(),
+  eventType: text('event_type').notNull(), // hard_bounce | soft_bounce | open | reply
+  eventAt: timestamp('event_at').defaultNow(),
+  campaignId: uuid('campaign_id'),
+});
+```
+
+**Client (packages/db/src/client.ts)**
+
+```ts
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { Pool } from 'pg'
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+export const db = drizzle(pool)
+```
+
+---
+
+## 5) Queue & API (apps/api)
+
+**lib/queue.ts**
+
+```ts
+import { Queue } from 'bullmq'
+import IORedis from 'ioredis'
+
+const connection = new IORedis(process.env.REDIS_URL!)
+export const validationQueue = new Queue('email-validation', { connection })
+```
+
+**routes/validation.ts**
+
+```ts
+import { Router } from 'express'
+import { z } from 'zod'
+import { validationQueue } from '../lib/queue'
+
+const router = Router()
+
+const SubmitSchema = z.object({
+  items: z.array(z.object({ contactId: z.string().uuid(), email: z.string().email() }))
+})
+
+router.post('/submit', async (req, res) => {
+  const parsed = SubmitSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json(parsed.error)
+  await validationQueue.add('batch', parsed.data.items, { removeOnComplete: true })
+  res.json({ ok: true, queued: parsed.data.items.length })
+})
+
+router.post('/revalidate', async (req, res) => {
+  const { emails } = req.body as { emails: string[] }
+  await validationQueue.add('revalidate', emails, { removeOnComplete: true })
+  res.json({ ok: true, queued: emails.length })
+})
+
+export default router
+```
+
+**index.ts**
+
+```ts
+import express from 'express'
+import validationRoutes from './routes/validation'
+
+const app = express()
+app.use(express.json())
+app.use('/validation', validationRoutes)
+app.get('/health', (_req, res) => res.json({ ok: true }))
+
+app.listen(4001, () => console.log('API listening on :4001'))
+```
+
+---
+
+## 6) Worker Core (apps/worker)
+
+**utils/logger.ts**
+
+```ts
+export const log = (...args: any[]) => console.log('[validator]', ...args)
+```
+
+**utils/net.ts**
+
+```ts
+export const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
+```
+
+**stages/syntax.ts**
+
+```ts
+import punycode from 'punycode'
+
+const EMAIL_MAX = 254
+const LOCAL_MAX = 64
+
+export function parseEmail(raw: string) {
+  const trimmed = raw.trim()
+  const at = trimmed.indexOf('@')
+  if (at <= 0) return { ok: false, reason: 'no_at' }
+  const local = trimmed.slice(0, at)
+  let domain = trimmed.slice(at + 1).toLowerCase()
+  if (!local || !domain) return { ok: false, reason: 'empty_parts' }
+  if (trimmed.length > EMAIL_MAX || local.length > LOCAL_MAX) return { ok: false, reason: 'len' }
+  if (/\s|\.\.|@|,$/.test(local)) return { ok: false, reason: 'local_chars' }
+  // IDN support
+  try { domain = punycode.toASCII(domain) } catch { return { ok: false, reason: 'idn' } }
+  if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/i.test(domain)) return { ok: false, reason: 'domain_syntax' }
+  return { ok: true, local, domain, normalized: `${local}@${domain}` }
+}
+```
+
+**stages/risk.ts**
+
+```ts
+const ROLE_PREFIXES = ['admin','info','sales','support','hr','careers','hello','contact','marketing']
+const FREE_PROVIDERS = ['gmail.com','outlook.com','yahoo.com','icloud.com','hotmail.com']
+
+export function riskChecks(local: string, domain: string) {
+  const isRole = ROLE_PREFIXES.includes(local.toLowerCase())
+  const isFree = FREE_PROVIDERS.includes(domain)
+  // Plug in your own disposable list from DB
+  return { isRole, isFree, isDisposable: false, reasons: [] as string[] }
+}
+```
+
+**stages/dns.ts**
+
+```ts
+import { db } from '../../../packages/db/src/client'
+import { domainCache } from '../../../packages/db/src/schema'
+import { eq } from 'drizzle-orm'
+import { Resolver } from 'dns'
+
+const resolver = new Resolver()
+resolver.setServers([]) // system defaults or specify resolvers
+
+export async function resolveDomain(domain: string) {
+  const cached = await db.select().from(domainCache).where(eq(domainCache.domain, domain)).limit(1)
+  const now = new Date()
+  if (cached[0]) {
+    const ageH = (now.getTime() - new Date(cached[0].lastChecked!).getTime()) / 36e5
+    if (ageH < Number(process.env.DOMAIN_CACHE_TTL_HOURS || 24)) return cached[0]
+  }
+  const trace: any = {}
+  let mxHosts: string[] = []
+  let hasMX = false, hasA = false
+  try {
+    const mx = await new Promise<any[]>((resolve, reject) => resolver.resolveMx(domain, (e, a) => e ? reject(e) : resolve(a)))
+    mx.sort((a,b) => a.priority - b.priority)
+    mxHosts = mx.map(m => m.exchange)
+    hasMX = mxHosts.length > 0
+    trace.mx = mxHosts
+  } catch (e) { trace.mxError = String(e) }
+  if (!hasMX) {
+    try {
+      const a = await new Promise<string[]>((resolve, reject) => resolver.resolve4(domain, (e, a) => e ? reject(e) : resolve(a)))
+      hasA = a.length > 0
+      trace.a = a
+    } catch (e) { trace.aError = String(e) }
+  }
+  const row = {
+    domain, hasMX, hasA, mxHosts: mxHosts as any, spf: null, dmarc: null, acceptAllProb: 0, lastChecked: now
+  }
+  await db.insert(domainCache).values(row).onConflictDoUpdate({ target: domainCache.domain, set: row })
+  return row
+}
+```
+
+**stages/smtp.ts**
+
+```ts
+import tls from 'tls'
+import net from 'net'
+
+type ProbeResult = { code?: number, banner?: string, isAcceptAll?: boolean, rcptOk?: boolean, raw: string[] }
+
+const HELO = process.env.VALIDATOR_HELO || 'localhost'
+const MAIL_FROM = process.env.VALIDATOR_MAIL_FROM || 'null@localhost'
+
+async function smtpTalk(host: string, port=25, secure=false, rcpt: string): Promise<ProbeResult> {
+  const raw: string[] = []
+  const sock = secure ? tls.connect({ host, port, servername: host, timeout: Number(process.env.SMTP_CONNECT_TIMEOUT_MS||10000) })
+                       : net.connect({ host, port, timeout: Number(process.env.SMTP_CONNECT_TIMEOUT_MS||10000) })
+  const send = (line: string) => new Promise<void>((res, rej) => {
+    raw.push('> ' + line)
+    sock.write(line + '\r\n', err => err ? rej(err) : res())
+  })
+  const recv = () => new Promise<string>((res) => {
+    sock.once('data', (buf) => res(buf.toString('utf8')))
+  })
+  return await new Promise((resolve) => {
+    let rcptOk = false
+    sock.on('data', async (d) => { raw.push('< ' + d.toString('utf8')) })
+    sock.once('data', async () => {
+      await send(`EHLO ${HELO}`)
+      await recv()
+      await send(`MAIL FROM:<${MAIL_FROM}>`)
+      await recv()
+      await send(`RCPT TO:<${rcpt}>`)
+      const ans = await recv()
+      const code = Number(ans.slice(0,3))
+      rcptOk = code >= 250 && code < 260
+      await send('QUIT')
+      sock.end()
+      resolve({ code, rcptOk, raw })
+    })
+    sock.on('error', () => resolve({ raw }))
+    sock.on('timeout', () => { sock.destroy(); resolve({ raw }) })
+  })
+}
+
+export async function smtpProbe(mxHosts: string[], email: string) {
+  for (const host of mxHosts) {
+    const r = await smtpTalk(host, 25, false, email)
+    if (r.rcptOk !== undefined) return { host, ...r }
+  }
+  return { host: mxHosts[0], rcptOk: false, raw: [] }
+}
+
+export async function detectAcceptAll(mxHosts: string[], domain: string) {
+  const fake = () => Math.random().toString(36).slice(2,10)
+  const samples = [fake(), fake(), fake()].map(l => `${l}@${domain}`)
+  let ok = 0
+  for (const addr of samples) {
+    const r = await smtpProbe(mxHosts, addr)
+    if (r.rcptOk) ok++
+  }
+  return ok >= 2
+}
+```
+
+**stages/score.ts**
+
+```ts
+export function score({ syntaxOk, hasMX, hasA, rcptOk, acceptAll, isDisposable, isRole, isFree, history }: any) {
+  let s = 0; const reasons: string[] = []
+  if (!syntaxOk) return { score: 0, reasons: ['bad_syntax'] }
+  s += 40
+  if (hasMX) s += 25; else if (hasA) s += 10; else { reasons.push('no_mx'); return { score: s, reasons } }
+  if (rcptOk) s += 30
+  if (acceptAll) { s -= 25; reasons.push('accept_all') }
+  if (isDisposable) { s -= 60; reasons.push('disposable') }
+  if (isRole) { s -= 10; reasons.push('role') }
+  if (isFree) reasons.push('free')
+  if (history?.open || history?.reply) { s += 40; reasons.push('positive_history') }
+  if (history?.hardBounce) { s -= 100; reasons.push('hard_bounce') }
+  return { score: Math.max(0, Math.min(100, s)), reasons }
+}
+
+export function classify(score: number, flags: {acceptAll?: boolean}) {
+  if (score >= 90) return 'valid'
+  if (score >= 70) return flags.acceptAll ? 'accept_all' : 'valid'
+  if (score >= 40) return 'unknown'
+  return 'invalid'
+}
+```
+
+**worker.ts**
+
+```ts
+import { Worker } from 'bullmq'
+import IORedis from 'ioredis'
+import { db } from '../../packages/db/src/client'
+import { emailValidation } from '../../packages/db/src/schema'
+import { parseEmail } from './stages/syntax'
+import { riskChecks } from './stages/risk'
+import { resolveDomain } from './stages/dns'
+import { smtpProbe, detectAcceptAll } from './stages/smtp'
+import { score, classify } from './stages/score'
+import { log } from './utils/logger'
+
+const connection = new IORedis(process.env.REDIS_URL!)
+
+new Worker('email-validation', async job => {
+  const items: { contactId: string, email: string }[] = Array.isArray(job.data) ? job.data : [job.data]
+  for (const it of items) {
+    const p = parseEmail(it.email)
+    if (!p.ok) {
+      await db.insert(emailValidation).values({
+        contactId: it.contactId, email: it.email, domain: '', status: 'invalid', confidence: 0,
+        reasons: ['syntax'], checkedAt: new Date(), ttlExpiresAt: new Date(Date.now() + 86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60))
+      })
+      continue
+    }
+    const risks = riskChecks(p.local!, p.domain!)
+    const dom = await resolveDomain(p.domain!)
+    if (!dom.hasMX && !dom.hasA) {
+      await db.insert(emailValidation).values({ contactId: it.contactId, email: it.email, domain: p.domain!, status: 'invalid', confidence: 10, reasons: ['no_mx'] })
+      continue
+    }
+    let rcptOk = false
+    let acceptAll = false
+    if (dom.hasMX) {
+      const probe = await smtpProbe((dom.mxHosts as string[]) || [], it.email)
+      rcptOk = !!probe.rcptOk
+      if (!rcptOk) {
+        // Could be accept-all; check
+        acceptAll = await detectAcceptAll((dom.mxHosts as string[]) || [], p.domain!)
+      }
+    }
+    const { score: s, reasons } = score({ syntaxOk: true, hasMX: dom.hasMX, hasA: dom.hasA, rcptOk, acceptAll, ...risks, history: {} })
+    const status = classify(s, { acceptAll })
+    await db.insert(emailValidation).values({
+      contactId: it.contactId, email: it.email, domain: p.domain!, status, confidence: s,
+      reasons, mxHosts: dom.mxHosts as any, checkedAt: new Date(), ttlExpiresAt: new Date(Date.now() + 86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60))
+    })
+    log('validated', it.email, status, s)
+  }
+}, { connection, concurrency: Number(process.env.GLOBAL_CONCURRENCY || 50) })
+```
+
+**Per‑domain rate limiting (optional enhancement)**
+
+* Add a `QueueScheduler` + named queues per domain or use `groupKey` in BullMQ v5 to ensure **PER_DOMAIN_CONCURRENCY=1**.
+
+```ts
+// When adding jobs:
+await validationQueue.add('batch', parsed.data.items, { group: { id: item.email.split('@')[1] } })
+// And configure Worker with group concurrency in BullMQ 5.x
+```
+
+---
+
+## 7) React Console (apps/web/src/pages/ValidationConsole.tsx)
+
+```tsx
+import { useEffect, useState } from 'react'
+
+export default function ValidationConsole(){
+  const [emails, setEmails] = useState('')
+  const [queued, setQueued] = useState<number|undefined>()
+
+  const submit = async () => {
+    const items = emails.split(/\n|,|;|\s+/).filter(Boolean).map((e,i)=>({ contactId: crypto.randomUUID(), email: e }))
+    const res = await fetch('/validation/submit', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items }) })
+    const j = await res.json(); setQueued(j.queued)
+  }
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Email Validation Console</h1>
+      <textarea className="w-full h-48 border rounded p-3" placeholder="Paste emails..." value={emails} onChange={e=>setEmails(e.target.value)} />
+      <div className="mt-3 flex gap-2">
+        <button onClick={submit} className="px-4 py-2 rounded bg-black text-white">Validate</button>
+        {queued !== undefined && <span>{queued} queued</span>}
+      </div>
+      <p className="text-sm mt-4 opacity-70">This console queues validations. Full results appear in CRM under each Contact & List export.</p>
+    </div>
+  )
+}
+```
+
+> In your main app, mount the API at `/validation` (proxy from Vite) and surface results on Contact detail/QA pages.
+
+---
+
+## 8) Operational Policies
+
+* **Never send DATA**: Stop after RCPT.
+* **Backoff** on 421/4xx. Limit group concurrency to 1 per domain.
+* **Cache** domain DNS for 24h; email results for 60d.
+* **History loop**: insert campaign hard bounces/opens/replies into `email_events` and adjust scoring.
+* **Allowlist**: Config for domains you must not probe.
+
+---
+
+## 9) Integration Hooks (Pivotal CRM)
+
+* When an import finishes, auto‑queue validation for new emails.
+* In Campaign Send Wizard: block send if `valid% < 95` or many `unknown` for small domains.
+* In QA pages: show `status`, `confidence`, `reasons`, traces; add **Fix Suggestion** for common typos.
+* Exports: provide toggles to include/exclude `accept_all`.
+
+---
+
+## 10) Next Steps / Extensions
+
+* Disposable list service (curate from your bounce logs + public lists).
+* SPF/DMARC parse for domain health scoring.
+* Greylisting aware re‑tries (15m → 2h → 8h).
+* ML scoring trained on your outcome labels.
+* Per‑client policy overrides (e.g., treat accept‑all as invalid for Client X).
+
+---
+
+### Notes
+
+* Some large providers always return 250 → expect many `accept_all`. Use your historical outcomes to upgrade/downgrade confidence.
+* For production, prefer TLS (STARTTLS) and implement full SMTP state machine (the included probe is a minimal, safe baseline).
+* Ensure your outbound IP has clean rDNS and SPF for `MAIL FROM` domain; you are not sending mail, but hygiene reduces throttling.
+
+---
+
+## 11) **Production Hardening Patch (copy‑paste)**
+
+This section upgrades the scaffold for real‑world performance: strict per‑domain concurrency, circuit breakers, total per‑email time budget, faster DNS, DB batch writes, metrics, and safer SMTP behavior. Apply changes below.
+
+### 11.1 Updated **.env.example** (defaults for prod)
+
+```ini
+# Concurrency & timeouts (prod‑safe)
+GLOBAL_CONCURRENCY=96            # spread across many domains
+PER_DOMAIN_CONCURRENCY=1         # enforced by BullMQ group
+DNS_TIMEOUT_MS=1500
+SMTP_CONNECT_TIMEOUT_MS=6000
+SMTP_OP_TIMEOUT_MS=8000
+SESSION_BACKOFF_MS=1200          # jitter added in code
+TOTAL_BUDGET_MS=12000            # hard cap per email
+
+# Caching TTLs
+EMAIL_VALIDATION_TTL_DAYS=60
+DOMAIN_CACHE_TTL_HOURS=24
+
+# Networking
+VALIDATOR_HELO=validator.pivotal-b2b.ai
+VALIDATOR_MAIL_FROM=null-sender@pivotal-b2b.ai
+PREFER_IPV4=true                 # avoid flaky v6 paths
+RESOLVERS=1.1.1.1,9.9.9.9       # optional; else system default
+
+# Metrics (console; wire Prometheus later)
+METRICS_LOG_EVERY=100            # log every N validations
+```
+
+### 11.2 **apps/api/src/routes/validation.ts** — enqueue with domain **group**
+
+```ts
+// ...existing imports
+function groupId(email: string){ return email.split('@')[1].toLowerCase() }
+
+router.post('/submit', async (req, res) => {
+  const parsed = SubmitSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json(parsed.error)
+
+  const jobs = parsed.data.items.map(item => ({
+    name: 'validate',
+    data: item,
+    opts: { removeOnComplete: true, group: { id: groupId(item.email) } }
+  }))
+  await validationQueue.addBulk(jobs)
+  res.json({ ok: true, queued: jobs.length })
+})
+```
+
+### 11.3 **apps/worker/src/worker.ts** — budget, circuit breaker, batching, metrics
+
+```ts
+import { Worker } from 'bullmq'
+import IORedis from 'ioredis'
+import { db } from '../../packages/db/src/client'
+import { emailValidation } from '../../packages/db/src/schema'
+import { parseEmail } from './stages/syntax'
+import { riskChecks } from './stages/risk'
+import { resolveDomain } from './stages/dns'
+import { smtpProbe, detectAcceptAll } from './stages/smtp'
+import { score, classify } from './stages/score'
+import { log } from './utils/logger'
+
+const connection = new IORedis(process.env.REDIS_URL!)
+const TOTAL_BUDGET = Number(process.env.TOTAL_BUDGET_MS || 12000)
+const METRICS_EVERY = Number(process.env.METRICS_LOG_EVERY || 100)
+
+function jitter(ms:number){ return Math.max(0, ms + Math.round((Math.random()-0.5)*400)) }
+
+const domainState = new Map<string,{fails:number, until?:number}>()
+function allowDomain(d:string){ const st = domainState.get(d); return !st || !st.until || Date.now()>st.until }
+function recordFail(d:string){ const st = domainState.get(d)||{fails:0}; st.fails++; if (st.fails>=5){ st.until=Date.now()+45*60*1000; st.fails=0 } domainState.set(d, st) }
+function recordSuccess(d:string){ domainState.set(d, {fails:0}) }
+
+async function withTimeout<T>(p:Promise<T>, ms:number){
+  return Promise.race([p, new Promise<never>((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))])
+}
+
+// Simple batcher
+const batch:any[]=[]; let processed=0
+async function flush(){
+  if (!batch.length) return
+  const b = batch.splice(0, batch.length)
+  await db.transaction(async (tx)=>{
+    await tx.insert(emailValidation).values(b).onConflictDoUpdate({
+      target: [emailValidation.contactId, emailValidation.email],
+      set: {
+        status: (sql) => sql`excluded.status`,
+        confidence: (sql) => sql`excluded.confidence`,
+        reasons: (sql) => sql`excluded.reasons`,
+        mxHosts: (sql) => sql`excluded.mx_hosts`,
+        checkedAt: (sql) => sql`excluded.checked_at`,
+        ttlExpiresAt: (sql) => sql`excluded.ttl_expires_at`
+      }
+    })
+  })
+}
+
+const worker = new Worker('email-validation', async job => {
+  const item = job.data as { contactId: string, email: string }
+  const started = Date.now(); const left = () => Math.max(0, TOTAL_BUDGET - (Date.now()-started))
+
+  const p = parseEmail(item.email)
+  if (!p.ok){
+    batch.push({ contactId: item.contactId, email: item.email, domain: '', status: 'invalid', confidence: 0, reasons: ['syntax'], checkedAt: new Date(), ttlExpiresAt: new Date(Date.now()+86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60)) })
+    return
+  }
+
+  const domain = p.domain!
+  if (!allowDomain(domain)){
+    batch.push({ contactId: item.contactId, email: item.email, domain, status: 'unknown', confidence: 40, reasons: ['circuit_open'], checkedAt: new Date(), ttlExpiresAt: new Date(Date.now()+86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60)) })
+    return
+  }
+
+  const risks = riskChecks(p.local!, domain)
+
+  let dom
+  try { dom = await withTimeout(resolveDomain(domain), Math.min(Number(process.env.DNS_TIMEOUT_MS||1500), left())) }
+  catch { recordFail(domain); batch.push({ contactId: item.contactId, email: item.email, domain, status: 'unknown', confidence: 40, reasons: ['dns_timeout'], checkedAt: new Date(), ttlExpiresAt: new Date(Date.now()+86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60)) }); return }
+
+  if (!dom.hasMX && !dom.hasA){
+    recordSuccess(domain)
+    batch.push({ contactId: item.contactId, email: item.email, domain, status: 'invalid', confidence: 10, reasons: ['no_mx'], checkedAt: new Date(), ttlExpiresAt: new Date(Date.now()+86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60)) })
+    return
+  }
+
+  let rcptOk=false, acceptAll=false
+  try {
+    if (dom.hasMX && left()>0){
+      const probe = await withTimeout(smtpProbe((dom.mxHosts as string[])||[], item.email), Math.min(Number(process.env.SMTP_OP_TIMEOUT_MS||8000), left()))
+      rcptOk = !!probe.rcptOk
+      if (!rcptOk && left()>0){
+        acceptAll = await withTimeout(detectAcceptAll((dom.mxHosts as string[])||[], domain), Math.min(Number(process.env.SMTP_OP_TIMEOUT_MS||8000), left()))
+      }
+    }
+    recordSuccess(domain)
+  } catch(e){
+    recordFail(domain)
+  }
+
+  const { score: sc, reasons } = score({ syntaxOk: true, hasMX: dom.hasMX, hasA: dom.hasA, rcptOk, acceptAll, ...risks, history: {} })
+  const status = classify(sc, { acceptAll })
+
+  batch.push({ contactId: item.contactId, email: item.email, domain, status, confidence: sc, reasons, mxHosts: dom.mxHosts as any, checkedAt: new Date(), ttlExpiresAt: new Date(Date.now()+86400000*Number(process.env.EMAIL_VALIDATION_TTL_DAYS||60)) })
+
+  processed++
+  if (batch.length >= 200 || (processed % METRICS_EVERY === 0)){
+    await flush()
+    if (processed % METRICS_EVERY === 0) log('metrics',{ processed, batchSize: batch.length })
+  }
+
+  // polite pacing to reduce throttles
+  await new Promise(r=>setTimeout(r, jitter(Number(process.env.SESSION_BACKOFF_MS||1200))))
+}, { connection, concurrency: Number(process.env.GLOBAL_CONCURRENCY || 96) })
+
+process.on('SIGINT', async()=>{ await flush(); process.exit(0) })
+process.on('SIGTERM', async()=>{ await flush(); process.exit(0) })
+```
+
+### 11.4 **apps/worker/src/stages/dns.ts** — fast resolvers & v4‑first
+
+```ts
+import { Resolver } from 'dns'
+const resolver = new Resolver()
+if (process.env.RESOLVERS){ resolver.setServers(process.env.RESOLVERS.split(',').map(s=>s.trim())) }
+// Optional: prefer IPv4 first by resolving A before AAAA; fall back to AAAA if needed.
+```
+
+### 11.5 **apps/worker/src/stages/smtp.ts** — safer SMTP session
+
+```ts
+// Add IPv4 preference & short connect timeout per host; randomize first MX
+export async function smtpProbe(mxHosts: string[], email: string) {
+  const hosts = [...mxHosts]
+  // randomize to avoid hammering same server
+  hosts.sort(()=>Math.random()-0.5)
+  for (const host of hosts) {
+    try {
+      const r = await smtpTalk(host, 25, false, email)
+      if (r.rcptOk !== undefined) return { host, ...r }
+    } catch {}
+  }
+  return { host: hosts[0], rcptOk: false, raw: [] }
+}
+```
+
+### 11.6 **DB write optimizations**
+
+* Writes now **batch** with `flush()` every 200 rows (or on signal). Tune batch size based on Postgres latency.
+* UPSERT only the columns that change; avoid rewriting large traces on every run.
+
+### 11.7 **Deployment checklist (updated)**
+
+* Run workers on a VPS where **port 25 is open**; confirm `telnet aspmx.l.google.com 25`.
+* PTR record for worker IP → matches `VALIDATOR_HELO`.
+* Queue groups enforce **PER_DOMAIN_CONCURRENCY=1**; global concurrency 64–128.
+* DNS resolver set to fast public or local Unbound; `DOMAIN_CACHE_TTL_HOURS=24`.
+* TOTAL_BUDGET_MS=12000; any over‑budget → `unknown` (no hangs).
+* DB pool ~10–20, batch writes 100–300, transaction duration < 100ms typical.
+* Metrics: log every N validations; add Prometheus later if needed.
+
+```
+
+> After updating, re‑deploy API & Worker separately. Validate with a domain known to throttle (e.g., corporate Exchange) to observe circuit breaking and budget behavior.
+
+```

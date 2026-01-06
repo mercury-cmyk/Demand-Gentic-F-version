@@ -1,0 +1,108 @@
+2.46
+3227d645
+User
+[ACTIVE CAMPAIGN] Agent 8aa5fd23-2d04-4260-8afc-6a2a7efd950c is assigned to campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-19 19:08:52.46
+3227d645
+User
+2:08:52 PM [express] GET /api/agents/me/active-campaign 304 in 138ms :: {"campaignId":"70434f6e-3ab6…
+2025-12-19 19:08:52.46
+3227d645
+User
+[AGENT QUEUE] Auto-detected active campaign: 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-19 19:08:52.46
+3227d645
+User
+[AGENT ASSIGNMENTS] Agent user 8aa5fd23-2d04-4260-8afc-6a2a7efd950c - returning 1 assigned campaigns
+2025-12-19 19:08:52.46
+3227d645
+User
+2:08:52 PM [express] GET /api/campaigns/agent-assignments 304 in 157ms :: [{"campaignId":"70434f6e-3…
+2025-12-19 19:08:52.49
+3227d645
+User
+[AGENT QUEUE] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 dial mode: manual
+2025-12-19 19:08:52.96
+3227d645
+User
+[AGENT QUEUE] Manual queue returned 2371 items
+2025-12-19 19:08:53.01
+3227d645
+User
+2:08:53 PM [express] GET /api/agents/me/queue 200 in 697ms :: [{"id":"f65b4582-743d-4bc2-8bb0-088821…
+2025-12-19 19:08:53.11
+3227d645
+User
+[AUTH] requireAuth called for: GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-19 19:08:53.11
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:08:53.11
+3227d645
+User
+[AUTH] Authentication successful for user: 8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:08:53.15
+3227d645
+User
+2:08:53 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2 304 in 36ms :: {"id":"7…
+2025-12-19 19:08:53.41
+3227d645
+User
+[AUTH] requireAuth called for: GET /70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/stats/8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:08:53.41
+3227d645
+User
+[AUTH] requireAuth called for: GET /campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/stats/8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:08:53.44
+3227d645
+User
+[AUTH] requireAuth called for: GET /api/agents/me/queue
+2025-12-19 19:08:53.44
+3227d645
+User
+[AUTH] Authentication successful for user: 8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 19:08:53.48
+3227d645
+User
+[AGENT QUEUE] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 dial mode: manual
+2025-12-19 19:08:53.93
+3227d645
+User
+2:08:53 PM [express] GET /api/agents/me/queue 200 in 476ms :: [{"id":"f65b4582-743d-4bc2-8bb0-088821…
+2025-12-19 19:08:54.35
+3227d645
+User
+[AUTH] requireAuth called for: GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-19 19:08:54.35
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:08:54.41
+3227d645
+User
+2:08:54 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2 304 in 51ms :: {"id":"7…
+2025-12-19 19:08:56.42
+3227d645
+User
+[AUTH] requireAuth called for: GET /api/contacts/9823bb9f-36e2-4d29-a9cb-694bfb2399e9
+2025-12-19 19:08:56.42
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:08:56.44
+3227d645
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:08:56.48
+3227d645
+User
+2:08:56 PM [express] GET /api/contacts/9823bb9f-36e2-4d29-a9cb-694bfb2399e9 304 in 67ms :: {"id":"98…
+2025-12-19 19:08:56.53
+3227d645
+User
+2:08:56 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…
+2025-12-19 19:08:56.53
+3227d645
+User
+2:08:56 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…

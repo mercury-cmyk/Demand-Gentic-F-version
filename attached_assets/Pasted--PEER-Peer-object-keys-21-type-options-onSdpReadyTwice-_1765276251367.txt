@@ -1,0 +1,290 @@
+[PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 54.19, totalPlayoutDelay: 128783.4744}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 3870}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 4848, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 4848, bytesSent: 3870, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 57.2, totalPlayoutDelay: 135965.20416}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 3870}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 5124, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 5124, bytesSent: 3870, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 60.19, totalPlayoutDelay: 143086.50576}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 5400, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 5400, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 63.19, totalPlayoutDelay: 150261.9576}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 5676, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 5676, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 66.19, totalPlayoutDelay: 157411.51728}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 5952, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 5952, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 69.2, totalPlayoutDelay: 164587.94736}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 6228, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 6228, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 72.21, totalPlayoutDelay: 171763.4472}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 6504, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 6504, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 75.19, totalPlayoutDelay: 178886.62848}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 7082, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 7082, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:173 [AUDIO-MONITOR] Element state: {paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+useTelnyxWebRTC.ts:204 [AUDIO-LEVELS] Frequency data: {averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+useTelnyxWebRTC.ts:224 [PEER] Peer object keys: (21) ['type', 'options', 'onSdpReadyTwice', 'statsReporter', '_negotiating', '_prevConnectionState', '_restartedIceOnConnectionStateFailed', 'handleConnectionStateChange', '_handleIceConnectionStateChange', '_handleIceGatheringStateChange', '_setAudioCodec', '_constraints', '_sdpReady', 'handleSignalingStateChangeEvent', 'handleNegotiationNeededEvent', 'handleTrackEvent', 'createPeerConnection', '_session', '_trickleIceSdpFn', '_registerPeerEvents', 'instance']
+useTelnyxWebRTC.ts:225 [PEER] Peer type: rt
+useTelnyxWebRTC.ts:232 [PEER] Connection state: connecting
+useTelnyxWebRTC.ts:235 [PEER] ICE state: connected
+useTelnyxWebRTC.ts:241 [PEER] Receivers count: 1
+useTelnyxWebRTC.ts:244 [PEER] Receiver 0: kind=audio, enabled=true, muted=false, readyState=live
+useTelnyxWebRTC.ts:252 [PEER] Transceivers count: 1
+useTelnyxWebRTC.ts:254 [PEER] Transceiver 0: {mid: '0', direction: 'sendrecv', currentDirection: 'sendrecv', stopped: false, senderTrackKind: 'audio', …}
+useTelnyxWebRTC.ts:270 [PEER] Getting stats from peer.instance...
+useTelnyxWebRTC.ts:288 [PEER-STATS] Media Playout: {kind: 'audio', synthesizedSamplesDuration: 0, totalSamplesDuration: 78.2, totalPlayoutDelay: 186071.8752}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'IA2VDdXwI', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 0, bytesSent: 4515}
+useTelnyxWebRTC.ts:312 [PEER-STATS] Active candidate pair: {localCandidateId: 'Ig4gttOjL', remoteCandidateId: 'InYKG7Rb8', bytesReceived: 7358, bytesSent: 0}
+useTelnyxWebRTC.ts:296 [PEER-STATS] Outbound RTP: {kind: 'audio', packetsSent: 0, bytesSent: 0}
+useTelnyxWebRTC.ts:303 [PEER-STATS] Transport: {bytesReceived: 7358, bytesSent: 4515, dtlsState: 'connecting', iceState: 'connected', selectedCandidatePairChanges: 1}
+useTelnyxWebRTC.ts:321 [PEER-STATS] All report types found: (10) ['media-playout', 'certificate', 'codec', 'candidate-pair', 'local-candidate', 'remote-candidate', 'outbound-rtp', 'peer-connection', 'media-source', 'transport']
+useTelnyxWebRTC.ts:334 [SDP] Remote audio section (truncated):  27858 UDP/TLS/RTP/SAVPF 111 110
+c=IN IP4 185.246.41.188
+a=rtcp:9 IN IP4 0.0.0.0
+a=candidate:3478206392 1 udp 2130706431 185.246.41.188 27858 typ host generation 0
+a=ice-ufrag:szwoaojLaMLFwLGH
+a=ice-pwd:OxTEx5ZP9gLZtXCo77bVGFvE
+a=fingerprint:sha-256 92:B2:82:3D:6D:AF:B0:F4:1F:F1:40:93:BA:6D:C9:4C:03:CB:A7:27:F1:0E:16:EA:B1:9D:EE:51:1D:09:B1:92
+a=setup:active
+a=mid:0
+a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:mid
+a=sendrecv
+a=rtcp-mux
+a=rtpmap:111 opus/48000/2
+a=fmtp:111 minptime=10;
+useTelnyxWebRTC.ts:338 [SDP] ✅ Audio direction: sendrecv
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: hangup
+useTelnyxWebRTC.ts:648 [AUDIO] Audio element cleaned up
+useTelnyxWebRTC.ts:512 Telnyx notification - Type: callUpdate Call State: destroy
+useTelnyxWebRTC.ts:648 [AUDIO] Audio element cleaned up

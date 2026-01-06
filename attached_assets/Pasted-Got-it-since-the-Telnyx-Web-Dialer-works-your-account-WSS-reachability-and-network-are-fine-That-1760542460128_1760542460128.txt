@@ -1,0 +1,69 @@
+Got it—since the Telnyx Web Dialer works, your account, WSS reachability, and network are fine. That narrows it to configuration/auth in your app. Here’s how to pinpoint and fix -32001 Login Incorrect quickly.
+
+Fast root-cause checklist (most to least likely)
+	1.	Wrong auth username vs URI user
+	•	In SIP.js (and similar), authorizationUsername must equal the WebRTC/SIP username on the credential.
+	•	Your uri user can match, but auth is checked against authorizationUsername (and the realm).
+	2.	Realm/registrar mismatch
+	•	The 401 challenge returns a WWW-Authenticate header with a realm (e.g., realm="…")—you must register to that realm/registrar.
+	•	If you point registrarServer (or proxy) to a different domain than the challenged realm, you’ll loop 401 → Login Incorrect.
+	3.	Using the wrong credential type
+	•	The Web Dialer may use WebRTC credentials or a JWT, while your app is trying SIP password auth for a different connection.
+	•	Ensure you’re using the exact WebRTC/SIP credential that is enabled for WebRTC, not your portal login or a different “SIP Connection”.
+	4.	Password handling
+	•	Retype it (no paste), make sure there’s no whitespace and no URL-encoding.
+	•	If your app reads from env vars, verify no trailing newline or truncation.
+	5.	WSS endpoint / outbound proxy
+	•	Use the provider’s WebRTC WSS endpoint (TLS). If you register to a generic SIP host or over the wrong transport, auth can fail even with correct creds.
+	6.	Clock/JWT only if you use tokens
+	•	If you use JWT with a Telnyx SDK, confirm it’s unexpired and signed with the correct key/subject.
+
+Compare your app vs Web Dialer (diff method)
+
+Open your browser DevTools while using your app:
+	•	Network → WebSocket (or Console if using SIP.js): find the REGISTER/401 exchange.
+	•	From the 401 response, note:
+	•	realm=… and nonce=…
+	•	From your Authorization header on the next REGISTER:
+	•	username=…, realm=…, uri=sip:…, and response=…
+	•	Mismatch pattern that causes -32001:
+	•	Authorization.username ≠ your SIP/WebRTC username, or
+	•	Authorization.realm ≠ the registrar you’re actually registering to.
+
+Do the same on the Telnyx Web Dialer tab if possible (its console often logs the SIP auth flow). Align your app’s values to match (username, realm, registrar, WSS).
+
+Known-good SIP.js template
+
+Use this as a baseline and change only the four UPPERCASE variables to your exact values:
+
+const ua = new SIP.UserAgent({
+  uri: SIP.UserAgent.makeURI(`sip:${SIP_USERNAME}@${SIP_REALM}`),
+  authorizationUsername: SIP_USERNAME,             // exact WebRTC/SIP username
+  authorizationPassword: SIP_PASSWORD,             // exact password
+  transportOptions: { server: WSS_URL },           // provider’s WebRTC WSS endpoint
+  // Optional but often helpful:
+  logLevel: "debug"
+});
+
+await ua.start();
+
+await ua.register({
+  registrarServer: `sip:${SIP_REALM}`              // must match the 401 realm
+});
+
+Common slip-ups:
+	•	Using your portal email (or a phone number) as the auth username.
+	•	Pointing registrarServer to a different host than the 401 realm.
+	•	Copying the display name instead of the username.
+	•	A stale password in environment variables.
+
+Quick recovery steps
+	1.	Reset the WebRTC/SIP credential password, update your app, retry.
+	2.	Create a fresh WebRTC/SIP credential and test only with that.
+	3.	Test with a neutral WebRTC softphone/SIP.js demo using the same username/realm/password. If it registers, your creds are correct and your app config is the issue.
+
+If you can share two redacted lines, I can diagnose precisely
+	•	The 401 WWW-Authenticate header (just the realm=… part).
+	•	Your subsequent REGISTER Authorization: header (only username=…; realm=…; uri=…; algorithm=…—no secrets).
+
+With those, I can tell you exactly whether it’s realm, username, or proxy/WSS causing -32001.

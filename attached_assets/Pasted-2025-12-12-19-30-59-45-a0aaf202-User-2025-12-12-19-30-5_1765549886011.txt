@@ -1,0 +1,97 @@
+2025-12-12 19:30:59.45
+a0aaf202
+User
+}
+
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_url: 'wss://ep-mute-sky-ahoyd10z-pooler.c-3.us-east-1.aws.neon.tech/v2',
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at Timeout. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1117:99)
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_closeMessage: ,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+}
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_events: [Object: null prototype],
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:426:4
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_readyState: 3,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+[Symbol(shapeMode)]: false,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_binaryType: 'arraybuffer',
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_closeFrameSent: false,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_req: [ClientRequest],
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at WebSocket.close (/home/runner/workspace/node_modules/ws/lib/websocket.js:299:7)
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_autoPong: true,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+[cause]: ErrorEvent {
+2025-12-12 19:30:59.45
+a0aaf202
+User
+[Symbol(kMessage)]: 'WebSocket was closed before the connection was established'
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at listOnTimeout (node:internal/timers:581:17)
+2025-12-12 19:30:59.45
+a0aaf202
+User
+[AI-QA] Error processing unanalyzed leads: Error: Connection terminated due to connection timeout
+2025-12-12 19:30:59.45
+a0aaf202
+User
+[Symbol(kError)]: Error: WebSocket was closed before the connection was established
+2025-12-12 19:30:59.45
+a0aaf202
+User
+},
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_closeTimer: null,
+2025-12-12 19:30:59.45
+a0aaf202
+User
+at process.processTimers (node:internal/timers:519:7),
+2025-12-12 19:30:59.45
+a0aaf202
+User
+_receiver: null,

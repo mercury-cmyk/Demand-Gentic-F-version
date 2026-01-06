@@ -1,0 +1,391 @@
+Unexpected error happened 😕
+
+d760ce2c01134d8ab7a5e047c6891848
+
+
+We're already looking into it! Feel free to reach out to our support team, make sure to copy error ID
+
+Invalid response from Replit driver
+DO $$ BEGIN
+    CREATE TYPE pipeline_type AS ENUM ('revenue', 'expansion', 'agency');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE pipeline_opportunity_status AS ENUM ('open', 'won', 'lost', 'on_hold');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE m365_activity_type AS ENUM ('email', 'meeting', 'call');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE m365_activity_direction AS ENUM ('inbound', 'outbound');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE email_sequence_status AS ENUM ('active', 'paused', 'archived');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE sequence_step_status AS ENUM ('active', 'paused');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE enrollment_status AS ENUM ('active', 'paused', 'completed', 'stopped');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE enrollment_stop_reason AS ENUM ('replied', 'unsubscribed', 'manual', 'bounced', 'completed', 'error');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE sequence_email_status AS ENUM (
+        'scheduled',
+        'sending',
+        'sent',
+        'delivered',
+        'opened',
+        'clicked',
+        'replied',
+        'bounced',
+        'failed'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS pipelines (
+  id varchar(36) PRIMARY KEY,
+  tenant_id varchar(36),
+  name varchar(255) NOT NULL,
+  description text,
+  owner_id varchar(36) NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  default_currency varchar(3) DEFAULT 'USD' NOT NULL,
+  stage_order jsonb NOT NULL,
+  sla_policy jsonb DEFAULT '{}'::jsonb NOT NULL,
+  active boolean DEFAULT true NOT NULL,
+  type pipeline_type DEFAULT 'revenue' NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_opportunities (
+  id varchar(36) PRIMARY KEY,
+  tenant_id varchar(36),
+  pipeline_id varchar(36) NOT NULL REFERENCES pipelines (id) ON DELETE CASCADE,
+  account_id varchar(36) REFERENCES accounts (id) ON DELETE SET NULL,
+  contact_id varchar(36) REFERENCES contacts (id) ON DELETE SET NULL,
+  owner_id varchar(36) REFERENCES users (id) ON DELETE SET NULL,
+  name varchar(255) NOT NULL,
+  stage varchar(120) NOT NULL,
+  status pipeline_opportunity_status DEFAULT 'open' NOT NULL,
+  amount numeric(14, 2) DEFAULT 0 NOT NULL,
+  currency varchar(3) DEFAULT 'USD' NOT NULL,
+  probability integer DEFAULT 0 NOT NULL,
+  close_date timestamp with time zone,
+  forecast_category varchar(64) DEFAULT 'Pipeline' NOT NULL,
+  flagged_for_sla boolean DEFAULT false NOT NULL,
+  reason text,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mailbox_accounts (
+  id varchar(36) PRIMARY KEY,
+  tenant_id varchar(36),
+  user_id varchar(36) NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  provider varchar(32) NOT NULL,
+  status varchar(32) DEFAULT 'disconnected' NOT NULL,
+  mailbox_email varchar(320),
+  display_name varchar(255),
+  connected_at timestamp with time zone,
+  last_sync_at timestamp with time zone,
+  access_token text,
+  refresh_token text,
+  token_expires_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS m365_activities (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid (),
+  mailbox_account_id varchar(36) NOT NULL REFERENCES mailbox_accounts (id) ON DELETE CASCADE,
+  activity_type m365_activity_type DEFAULT 'email' NOT NULL,
+  direction m365_activity_direction NOT NULL,
+  message_id text NOT NULL,
+  conversation_id text,
+  subject text,
+  body_preview text,
+  importance varchar(16),
+  from_email varchar(320),
+  from_name varchar(255),
+  to_recipients jsonb,
+  cc_recipients jsonb,
+  received_datetime timestamp with time zone,
+  sent_datetime timestamp with time zone,
+  is_read boolean DEFAULT false,
+  has_attachments boolean DEFAULT false,
+  account_id varchar(36) REFERENCES accounts (id) ON DELETE SET NULL,
+  contact_id varchar(36) REFERENCES contacts (id) ON DELETE SET NULL,
+  web_link text,
+  synced_at timestamp with time zone DEFAULT now() NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS email_sequences (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid (),
+  name varchar(255) NOT NULL,
+  description text,
+  status email_sequence_status DEFAULT 'active' NOT NULL,
+  mailbox_account_id varchar(36) NOT NULL REFERENCES mailbox_accounts (id) ON DELETE RESTRICT,
+  created_by varchar(36) NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  total_enrolled integer DEFAULT 0 NOT NULL,
+  active_enrollments integer DEFAULT 0 NOT NULL,
+  completed_enrollments integer DEFAULT 0 NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sequence_steps (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid (),
+  sequence_id varchar(36) NOT NULL REFERENCES email_sequences (id) ON DELETE CASCADE,
+  step_number integer NOT NULL,
+  name varchar(255),
+  status sequence_step_status DEFAULT 'active' NOT NULL,
+  delay_days integer DEFAULT 0 NOT NULL,
+  delay_hours integer DEFAULT 0 NOT NULL,
+  template_id varchar(36) REFERENCES email_templates (id) ON DELETE SET NULL,
+  subject text,
+  html_body text,
+  text_body text,
+  total_sent integer DEFAULT 0 NOT NULL,
+  total_opened integer DEFAULT 0 NOT NULL,
+  total_clicked integer DEFAULT 0 NOT NULL,
+  total_replied integer DEFAULT 0 NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sequence_enrollments (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid (),
+  sequence_id varchar(36) NOT NULL REFERENCES email_sequences (id) ON DELETE CASCADE,
+  contact_id varchar(36) NOT NULL REFERENCES contacts (id) ON DELETE CASCADE,
+  enrolled_by varchar(36) NOT NULL REFERENCES users (id) ON DELETE SET NULL,
+  status enrollment_status DEFAULT 'active' NOT NULL,
+  current_step_number integer DEFAULT 0 NOT NULL,
+  stop_reason enrollment_stop_reason,
+  stopped_at timestamp with time zone,
+  enrolled_at timestamp with time zone DEFAULT now() NOT NULL,
+  last_activity_at timestamp with time zone
+);
+
+CREATE TABLE IF NOT EXISTS sequence_email_sends (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid (),
+  enrollment_id varchar(36) NOT NULL REFERENCES sequence_enrollments (id) ON DELETE CASCADE,
+  step_id varchar(36) NOT NULL REFERENCES sequence_steps (id) ON DELETE CASCADE,
+  contact_id varchar(36) NOT NULL REFERENCES contacts (id) ON DELETE CASCADE,
+  sequence_id varchar(36) NOT NULL REFERENCES email_sequences (id) ON DELETE CASCADE,
+  status sequence_email_status DEFAULT 'scheduled' NOT NULL,
+  scheduled_for timestamp with time zone NOT NULL,
+  message_id text,
+  conversation_id text,
+  subject text NOT NULL,
+  html_body text NOT NULL,
+  text_body text,
+  error text,
+  retry_count integer DEFAULT 0 NOT NULL,
+  sent_at timestamp with time zone,
+  delivered_at timestamp with time zone,
+  opened_at timestamp with time zone,
+  clicked_at timestamp with time zone,
+  replied_at timestamp with time zone,
+  bounced_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS m365_activities_mailbox_idx ON m365_activities (mailbox_account_id);
+
+CREATE INDEX IF NOT EXISTS m365_activities_message_idx ON m365_activities (message_id);
+
+CREATE INDEX IF NOT EXISTS m365_activities_account_idx ON m365_activities (account_id);
+
+CREATE INDEX IF NOT EXISTS m365_activities_contact_idx ON m365_activities (contact_id);
+
+CREATE INDEX IF NOT EXISTS m365_activities_received_idx ON m365_activities (received_datetime);
+
+CREATE INDEX IF NOT EXISTS email_sequences_mailbox_idx ON email_sequences (mailbox_account_id);
+
+CREATE INDEX IF NOT EXISTS email_sequences_created_by_idx ON email_sequences (created_by);
+
+CREATE INDEX IF NOT EXISTS email_sequences_status_idx ON email_sequences (status);
+
+CREATE INDEX IF NOT EXISTS sequence_steps_sequence_idx ON sequence_steps (sequence_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sequence_steps_sequence_step_idx ON sequence_steps (sequence_id, step_number);
+
+CREATE INDEX IF NOT EXISTS sequence_enrollments_sequence_idx ON sequence_enrollments (sequence_id);
+
+CREATE INDEX IF NOT EXISTS sequence_enrollments_contact_idx ON sequence_enrollments (contact_id);
+
+CREATE INDEX IF NOT EXISTS sequence_enrollments_status_idx ON sequence_enrollments (status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sequence_enrollments_unique_idx ON sequence_enrollments (sequence_id, contact_id);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_enrollment_idx ON sequence_email_sends (enrollment_id);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_step_idx ON sequence_email_sends (step_id);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_contact_idx ON sequence_email_sends (contact_id);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_sequence_idx ON sequence_email_sends (sequence_id);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_status_idx ON sequence_email_sends (status);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_scheduled_idx ON sequence_email_sends (scheduled_for);
+
+CREATE INDEX IF NOT EXISTS sequence_email_sends_message_idx ON sequence_email_sends (message_id);
+
+INSERT INTO
+  pipelines (
+    id,
+    name,
+    description,
+    owner_id,
+    default_currency,
+    stage_order,
+    sla_policy,
+    active,
+    type,
+    created_at,
+    updated_at
+  )
+SELECT
+  gen_random_uuid (),
+  'Default Sales Pipeline',
+  'Automatically created default pipeline',
+  (
+    SELECT
+      id
+    FROM
+      users
+    LIMIT
+      1
+  ),
+  'USD',
+  '["Prospecting", "Qualification", "Proposal", "Negotiation", "Closed Won"]'::jsonb,
+  '{}'::jsonb,
+  true,
+  'revenue',
+  now(),
+  now()
+WHERE
+  NOT EXISTS (
+    SELECT
+      1
+    FROM
+      pipelines
+    LIMIT
+      1
+  );
+
+SELECT
+  table_name
+FROM
+  information_schema.tables
+WHERE
+  table_schema = 'public'
+  AND table_name IN (
+    'pipelines',
+    'pipeline_opportunities',
+    'mailbox_accounts',
+    'm365_activities',
+    'email_sequences',
+    'sequence_steps',
+    'sequence_enrollments',
+    'sequence_email_sends'
+  )
+ORDER BY
+  table_name;
+
+SELECT
+  typname
+FROM
+  pg_type
+WHERE
+  typtype = 'e'
+  AND typname IN (
+    'pipeline_type',
+    'pipeline_opportunity_status',
+    'm365_activity_type',
+    'm365_activity_direction',
+    'email_sequence_status',
+    'sequence_step_status',
+    'enrollment_status',
+    'enrollment_stop_reason',
+    'sequence_email_status'
+  )
+ORDER BY
+  typname;
+{
+  "sql": "DO $$ BEGIN\n    CREATE TYPE pipeline_type AS ENUM ('revenue', 'expansion', 'agency');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE pipeline_opportunity_status AS ENUM ('open', 'won', 'lost', 'on_hold');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE m365_activity_type AS ENUM ('email', 'meeting', 'call');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE m365_activity_direction AS ENUM ('inbound', 'outbound');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE email_sequence_status AS ENUM ('active', 'paused', 'archived');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE sequence_step_status AS ENUM ('active', 'paused');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE enrollment_status AS ENUM ('active', 'paused', 'completed', 'stopped');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE enrollment_stop_reason AS ENUM ('replied', 'unsubscribed', 'manual', 'bounced', 'completed', 'error');\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nDO $$ BEGIN\n    CREATE TYPE sequence_email_status AS ENUM (\n        'scheduled',\n        'sending',\n        'sent',\n        'delivered',\n        'opened',\n        'clicked',\n        'replied',\n        'bounced',\n        'failed'\n    );\nEXCEPTION\n    WHEN duplicate_object THEN null;\nEND $$;\n\nCREATE TABLE IF NOT EXISTS pipelines (\n    id varchar(36) PRIMARY KEY,\n    tenant_id varchar(36),\n    name varchar(255) NOT NULL,\n    description text,\n    owner_id varchar(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    default_currency varchar(3) DEFAULT 'USD' NOT NULL,\n    stage_order jsonb NOT NULL,\n    sla_policy jsonb DEFAULT '{}'::jsonb NOT NULL,\n    active boolean DEFAULT true NOT NULL,\n    type pipeline_type DEFAULT 'revenue' NOT NULL,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS pipeline_opportunities (\n    id varchar(36) PRIMARY KEY,\n    tenant_id varchar(36),\n    pipeline_id varchar(36) NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,\n    account_id varchar(36) REFERENCES accounts(id) ON DELETE SET NULL,\n    contact_id varchar(36) REFERENCES contacts(id) ON DELETE SET NULL,\n    owner_id varchar(36) REFERENCES users(id) ON DELETE SET NULL,\n    name varchar(255) NOT NULL,\n    stage varchar(120) NOT NULL,\n    status pipeline_opportunity_status DEFAULT 'open' NOT NULL,\n    amount numeric(14, 2) DEFAULT 0 NOT NULL,\n    currency varchar(3) DEFAULT 'USD' NOT NULL,\n    probability integer DEFAULT 0 NOT NULL,\n    close_date timestamp with time zone,\n    forecast_category varchar(64) DEFAULT 'Pipeline' NOT NULL,\n    flagged_for_sla boolean DEFAULT false NOT NULL,\n    reason text,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS mailbox_accounts (\n    id varchar(36) PRIMARY KEY,\n    tenant_id varchar(36),\n    user_id varchar(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    provider varchar(32) NOT NULL,\n    status varchar(32) DEFAULT 'disconnected' NOT NULL,\n    mailbox_email varchar(320),\n    display_name varchar(255),\n    connected_at timestamp with time zone,\n    last_sync_at timestamp with time zone,\n    access_token text,\n    refresh_token text,\n    token_expires_at timestamp with time zone,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS m365_activities (\n    id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),\n    mailbox_account_id varchar(36) NOT NULL REFERENCES mailbox_accounts(id) ON DELETE CASCADE,\n    activity_type m365_activity_type DEFAULT 'email' NOT NULL,\n    direction m365_activity_direction NOT NULL,\n    message_id text NOT NULL,\n    conversation_id text,\n    subject text,\n    body_preview text,\n    importance varchar(16),\n    from_email varchar(320),\n    from_name varchar(255),\n    to_recipients jsonb,\n    cc_recipients jsonb,\n    received_datetime timestamp with time zone,\n    sent_datetime timestamp with time zone,\n    is_read boolean DEFAULT false,\n    has_attachments boolean DEFAULT false,\n    account_id varchar(36) REFERENCES accounts(id) ON DELETE SET NULL,\n    contact_id varchar(36) REFERENCES contacts(id) ON DELETE SET NULL,\n    web_link text,\n    synced_at timestamp with time zone DEFAULT now() NOT NULL,\n    created_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS email_sequences (\n    id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),\n    name varchar(255) NOT NULL,\n    description text,\n    status email_sequence_status DEFAULT 'active' NOT NULL,\n    mailbox_account_id varchar(36) NOT NULL REFERENCES mailbox_accounts(id) ON DELETE RESTRICT,\n    created_by varchar(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,\n    total_enrolled integer DEFAULT 0 NOT NULL,\n    active_enrollments integer DEFAULT 0 NOT NULL,\n    completed_enrollments integer DEFAULT 0 NOT NULL,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS sequence_steps (\n    id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),\n    sequence_id varchar(36) NOT NULL REFERENCES email_sequences(id) ON DELETE CASCADE,\n    step_number integer NOT NULL,\n    name varchar(255),\n    status sequence_step_status DEFAULT 'active' NOT NULL,\n    delay_days integer DEFAULT 0 NOT NULL,\n    delay_hours integer DEFAULT 0 NOT NULL,\n    template_id varchar(36) REFERENCES email_templates(id) ON DELETE SET NULL,\n    subject text,\n    html_body text,\n    text_body text,\n    total_sent integer DEFAULT 0 NOT NULL,\n    total_opened integer DEFAULT 0 NOT NULL,\n    total_clicked integer DEFAULT 0 NOT NULL,\n    total_replied integer DEFAULT 0 NOT NULL,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS sequence_enrollments (\n    id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),\n    sequence_id varchar(36) NOT NULL REFERENCES email_sequences(id) ON DELETE CASCADE,\n    contact_id varchar(36) NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,\n    enrolled_by varchar(36) NOT NULL REFERENCES users(id) ON DELETE SET NULL,\n    status enrollment_status DEFAULT 'active' NOT NULL,\n    current_step_number integer DEFAULT 0 NOT NULL,\n    stop_reason enrollment_stop_reason,\n    stopped_at timestamp with time zone,\n    enrolled_at timestamp with time zone DEFAULT now() NOT NULL,\n    last_activity_at timestamp with time zone\n);\n\nCREATE TABLE IF NOT EXISTS sequence_email_sends (\n    id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),\n    enrollment_id varchar(36) NOT NULL REFERENCES sequence_enrollments(id) ON DELETE CASCADE,\n    step_id varchar(36) NOT NULL REFERENCES sequence_steps(id) ON DELETE CASCADE,\n    contact_id varchar(36) NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,\n    sequence_id varchar(36) NOT NULL REFERENCES email_sequences(id) ON DELETE CASCADE,\n    status sequence_email_status DEFAULT 'scheduled' NOT NULL,\n    scheduled_for timestamp with time zone NOT NULL,\n    message_id text,\n    conversation_id text,\n    subject text NOT NULL,\n    html_body text NOT NULL,\n    text_body text,\n    error text,\n    retry_count integer DEFAULT 0 NOT NULL,\n    sent_at timestamp with time zone,\n    delivered_at timestamp with time zone,\n    opened_at timestamp with time zone,\n    clicked_at timestamp with time zone,\n    replied_at timestamp with time zone,\n    bounced_at timestamp with time zone,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL\n);\n\nCREATE INDEX IF NOT EXISTS m365_activities_mailbox_idx ON m365_activities(mailbox_account_id);\n\nCREATE INDEX IF NOT EXISTS m365_activities_message_idx ON m365_activities(message_id);\n\nCREATE INDEX IF NOT EXISTS m365_activities_account_idx ON m365_activities(account_id);\n\nCREATE INDEX IF NOT EXISTS m365_activities_contact_idx ON m365_activities(contact_id);\n\nCREATE INDEX IF NOT EXISTS m365_activities_received_idx ON m365_activities(received_datetime);\n\nCREATE INDEX IF NOT EXISTS email_sequences_mailbox_idx ON email_sequences(mailbox_account_id);\n\nCREATE INDEX IF NOT EXISTS email_sequences_created_by_idx ON email_sequences(created_by);\n\nCREATE INDEX IF NOT EXISTS email_sequences_status_idx ON email_sequences(status);\n\nCREATE INDEX IF NOT EXISTS sequence_steps_sequence_idx ON sequence_steps(sequence_id);\n\nCREATE UNIQUE INDEX IF NOT EXISTS sequence_steps_sequence_step_idx ON sequence_steps(sequence_id, step_number);\n\nCREATE INDEX IF NOT EXISTS sequence_enrollments_sequence_idx ON sequence_enrollments(sequence_id);\n\nCREATE INDEX IF NOT EXISTS sequence_enrollments_contact_idx ON sequence_enrollments(contact_id);\n\nCREATE INDEX IF NOT EXISTS sequence_enrollments_status_idx ON sequence_enrollments(status);\n\nCREATE UNIQUE INDEX IF NOT EXISTS sequence_enrollments_unique_idx ON sequence_enrollments(sequence_id, contact_id);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_enrollment_idx ON sequence_email_sends(enrollment_id);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_step_idx ON sequence_email_sends(step_id);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_contact_idx ON sequence_email_sends(contact_id);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_sequence_idx ON sequence_email_sends(sequence_id);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_status_idx ON sequence_email_sends(status);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_scheduled_idx ON sequence_email_sends(scheduled_for);\n\nCREATE INDEX IF NOT EXISTS sequence_email_sends_message_idx ON sequence_email_sends(message_id);\n\nINSERT INTO pipelines (id, name, description, owner_id, default_currency, stage_order, sla_policy, active, type, created_at, updated_at)\nSELECT \n    gen_random_uuid(),\n    'Default Sales Pipeline',\n    'Automatically created default pipeline',\n    (SELECT id FROM users LIMIT 1),\n    'USD',\n    '[\"Prospecting\", \"Qualification\", \"Proposal\", \"Negotiation\", \"Closed Won\"]'::jsonb,\n    '{}'::jsonb,\n    true,\n    'revenue',\n    now(),\n    now()\nWHERE NOT EXISTS (SELECT 1 FROM pipelines LIMIT 1);\n\nSELECT table_name \nFROM information_schema.tables \nWHERE table_schema = 'public' \nAND table_name IN (\n    'pipelines',\n    'pipeline_opportunities',\n    'mailbox_accounts',\n    'm365_activities',\n    'email_sequences',\n    'sequence_steps',\n    'sequence_enrollments',\n    'sequence_email_sends'\n)\nORDER BY table_name;\n\nSELECT typname \nFROM pg_type \nWHERE typtype = 'e' \nAND typname IN (\n    'pipeline_type',\n    'pipeline_opportunity_status',\n    'm365_activity_type',\n    'm365_activity_direction',\n    'email_sequence_status',\n    'sequence_step_status',\n    'enrollment_status',\n    'enrollment_stop_reason',\n    'sequence_email_status'\n)\nORDER BY typname;"
+}
+[
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]",
+  "[Object]"
+]

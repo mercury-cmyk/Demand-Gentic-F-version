@@ -1,0 +1,16 @@
+Research Date	Contact Full Name	First Name	Last Name	Title	Department	Seniority	Company Name - Cleaned	Website	List	Contact LI Profile URL	Email 1	Email 1 Validation	Email 1 Total AI	Contact Phone 1	Contact Phone 1 Total AI	Company Phone 1	Contact Mobile Phone	Contact City	Contact State	Contact State Abbr	Contact Post Code	Contact Country	Contact Location	Company Location	Company Street 1	Company Street 2	Company Street 3	Company City	Company State	Company State Abbr	Company Post Code	Company Country	Company Annual Revenue	Company Description	Company Website Domain	Company Founded Date	Company Industry	Company LI Profile Url	Company LinkedIn ID	Company Revenue Range	Company Staff Count Range	Web Technologies	SIC Code	NAICS Code	Former Position	Time in Current Position	Time in Current Company
+2025-10-15T05:46:23.338Z	Suman Raveesh	Suman	Raveesh	Associate Director - People Operations	Human Resources	Director	Veranex	veranex.com	InFynd	https://www.linkedin.com/in/suman-raveesh-126b6a19	suman.raveesh@veranexsolutions.com	valid	98%	919880000662	95%	919.297.8881	919880000662	Bengaluru	Karnataka		583105	India	Bengaluru, Karnataka 583105, India	5420 Wade Park Boulevard, Raleigh, NC 27607, United States	5420 Wade Park Boulevard			Raleigh	North Carolina	NC	27607	United States	750000000	"End-to-End Service Provider for Medical Device Companies 
+When it comes to accelerating your healthcare product ideas into reality, Veranex stands out as the accomplished expert. We offer a revolutionary approach with our integrated service offering for medical technologies by providing comprehensive expertise to healthcare product companies. Our agile solutions ensure that you can develop life changing medical technologies that impact healthcare practitioners and patients worldwide.
+What We Offer: 
+â€¢	Product Design & Engineering 
+â€¢	Preclinical 
+â€¢	CRO & Consulting Services 
+For more information, visit https://veranex.com/"	veranex.com	2021	Medical Devices	https://www.linkedin.com/company/veranex	73984675	$500M - $1B	1,001 - 5,000 employees	http://www.builtwith.com/veranex.com	7322	3391	Senior Human Resources Manager	2 years	4 years
+																																								$1B+	5,001 - 10,000 employees						
+																																								$100M - $500M	10,001+ employees						
+																																								$50M - $100M	11 - 50 employees						
+																																								$5M - $20M	51 - 200 employees						
+																																								$1M - $5M	201 - 500 employees						
+																																								$20M - $50M	501 - 1,000 employees						
+																																								$0 - $100K	2-10 employees						
+																																								$100K - $1M							

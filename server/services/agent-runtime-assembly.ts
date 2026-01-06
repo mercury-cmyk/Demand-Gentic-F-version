@@ -1,0 +1,647 @@
+/**
+ * Agent Runtime Assembly Service
+ * 
+ * Assembles the complete agent context at runtime using the 3-layer model:
+ * 
+ * Layer 1: Universal Agent Knowledge (Always On)
+ *   - Professional posture, call flow, ethics, pacing
+ *   - AI disclosure rules, objection handling
+ *   - NEVER optional
+ * 
+ * Layer 2: Organization Intelligence (Campaign-Scoped)
+ *   - Organization name, offerings, ICP, value props
+ *   - Messaging principles, compliance rules
+ *   - Selected via OI Mode: use_existing | fresh_research | none
+ * 
+ * Layer 3: Campaign Context
+ *   - Campaign objective, audience context
+ *   - Contact-specific data at call time
+ * 
+ * Model:
+ *   Agent Core (immutable)
+ *   + Organization Intelligence Snapshot (campaign-scoped)
+ *   + Campaign Intent
+ *   + Audience Context
+ *   = Active Agent Instance
+ */
+
+import { db } from "../db";
+import {
+  virtualAgents,
+  campaigns,
+  campaignOrgIntelligenceBindings,
+  organizationIntelligenceSnapshots,
+  agentInstanceContexts,
+  accountIntelligence,
+  type OrgIntelligenceMode,
+  type OrganizationIntelligenceSnapshot,
+  type CampaignOrgIntelligenceBinding,
+} from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { createHash } from "crypto";
+import { AGENT_DEFAULT_KNOWLEDGE, AGENT_TYPE_KNOWLEDGE } from "./agent-brain-service";
+import { stripVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+
+// ==================== LAYER 1: UNIVERSAL AGENT KNOWLEDGE ====================
+
+/**
+ * Universal Agent Knowledge - ALWAYS injected, non-negotiable
+ */
+export const UNIVERSAL_AGENT_KNOWLEDGE = `
+# UNIVERSAL AGENT PROTOCOL
+
+## Professional Standards (Non-Negotiable)
+
+### Identity & Disclosure
+- You are an AI assistant. If asked directly, acknowledge this truthfully.
+- Always identify yourself and your purpose at the start of conversations.
+- Never misrepresent who you are or who you represent.
+
+### Ethics & Consent
+- Respect the person's time and decisions.
+- Accept "no" gracefully without manipulation or pressure.
+- Honor Do Not Call requests immediately and apologize.
+- Process opt-outs without requiring explanation.
+- Never make false promises or guarantees.
+
+### Professional Posture
+- Maintain calm, confident, respectful demeanor.
+- Listen more than you speak (30/70 rule).
+- Ask one question at a time.
+- Never interrupt or talk over the person.
+- Acknowledge what they say before responding.
+
+### Pacing & Delivery
+- Speak at a natural, moderate pace.
+- Use brief pauses after important points.
+- Vary your phrasing - don't repeat identical phrases.
+- Match energy level appropriately (not too eager, not too flat).
+
+### Call Flow Intelligence
+- Navigate IVR systems efficiently and politely.
+- Handle gatekeepers professionally without pitching.
+- Detect voicemail and exit gracefully.
+- Recognize when to conclude conversations.
+
+### Objection Handling
+- Listen to objections completely before responding.
+- Acknowledge concerns genuinely.
+- Provide relevant information without arguing.
+- Know when to gracefully exit.
+
+### Data & Privacy
+- Never discuss prospect details with third parties.
+- Do not record or share sensitive information inappropriately.
+- Defer privacy questions to official policy.
+
+### Escalation Protocol
+- Transfer to human immediately when requested.
+- Remain calm with upset prospects.
+- Never engage in arguments or confrontations.
+`;
+
+/**
+ * Get hash of universal knowledge for version tracking
+ */
+function getUniversalKnowledgeHash(): string {
+  return createHash('md5').update(UNIVERSAL_AGENT_KNOWLEDGE).digest('hex').slice(0, 8);
+}
+
+// ==================== LAYER 2: ORGANIZATION INTELLIGENCE ====================
+
+/**
+ * Build Organization Intelligence context based on mode
+ */
+async function buildOrganizationContext(
+  binding: CampaignOrgIntelligenceBinding | null,
+  disclosureLevel: 'minimal' | 'standard' | 'detailed' = 'standard'
+): Promise<{ context: string; hash: string } | null> {
+  if (!binding || binding.mode === 'none') {
+    return null; // Mode C: No Organization Intelligence
+  }
+
+  let intelligence: any = null;
+  let compiledContext: string | null = null;
+
+  if (binding.mode === 'fresh_research' && binding.snapshotId) {
+    // Mode B: Use fresh research snapshot
+    const [snapshot] = await db
+      .select()
+      .from(organizationIntelligenceSnapshots)
+      .where(eq(organizationIntelligenceSnapshots.id, binding.snapshotId))
+      .limit(1);
+
+    if (snapshot) {
+      compiledContext = snapshot.compiledOrgContext;
+      intelligence = {
+        identity: snapshot.identity,
+        offerings: snapshot.offerings,
+        icp: snapshot.icp,
+        positioning: snapshot.positioning,
+        outreach: snapshot.outreach,
+      };
+    }
+  } else if (binding.mode === 'use_existing') {
+    // Mode A: Use master organization intelligence
+    if (binding.masterOrgIntelligenceId) {
+      const [master] = await db
+        .select()
+        .from(accountIntelligence)
+        .where(eq(accountIntelligence.id, binding.masterOrgIntelligenceId))
+        .limit(1);
+
+      if (master) {
+        intelligence = {
+          identity: master.identity,
+          offerings: master.offerings,
+          icp: master.icp,
+          positioning: master.positioning,
+          outreach: master.outreach,
+        };
+      }
+    } else if (binding.snapshotId) {
+      // Fallback to snapshot if no master ID
+      const [snapshot] = await db
+        .select()
+        .from(organizationIntelligenceSnapshots)
+        .where(eq(organizationIntelligenceSnapshots.id, binding.snapshotId))
+        .limit(1);
+
+      if (snapshot) {
+        compiledContext = snapshot.compiledOrgContext;
+        intelligence = {
+          identity: snapshot.identity,
+          offerings: snapshot.offerings,
+          icp: snapshot.icp,
+          positioning: snapshot.positioning,
+          outreach: snapshot.outreach,
+        };
+      }
+    } else {
+      // Use most recent master org intelligence
+      const [master] = await db
+        .select()
+        .from(accountIntelligence)
+        .orderBy(desc(accountIntelligence.createdAt))
+        .limit(1);
+
+      if (master) {
+        intelligence = {
+          identity: master.identity,
+          offerings: master.offerings,
+          icp: master.icp,
+          positioning: master.positioning,
+          outreach: master.outreach,
+        };
+      }
+    }
+  }
+
+  if (!intelligence) {
+    return null;
+  }
+
+  // Build context based on disclosure level
+  const context = compiledContext || buildContextFromIntelligence(intelligence, disclosureLevel);
+  const hash = createHash('md5').update(context).digest('hex').slice(0, 8);
+
+  return { context, hash };
+}
+
+/**
+ * Build prompt context from intelligence structure
+ */
+function buildContextFromIntelligence(
+  intelligence: any,
+  disclosureLevel: 'minimal' | 'standard' | 'detailed'
+): string {
+  const identity = intelligence.identity || {};
+  const offerings = intelligence.offerings || {};
+  const icp = intelligence.icp || {};
+  const positioning = intelligence.positioning || {};
+  const outreach = intelligence.outreach || {};
+
+  // Helper to extract value
+  const getValue = (field: any): string => {
+    if (!field) return '';
+    return typeof field === 'object' ? (field.value || '') : String(field);
+  };
+
+  const sections: string[] = [];
+
+  // Minimal: Just org name and one-liner
+  sections.push(`## Organization You Represent
+Company: ${getValue(identity.legalName) || 'Not specified'}
+${getValue(positioning.oneLiner) ? `Positioning: ${getValue(positioning.oneLiner)}` : ''}`);
+
+  if (disclosureLevel === 'minimal') {
+    return sections.join('\n\n');
+  }
+
+  // Standard: Add offerings and ICP
+  if (getValue(offerings.coreProducts)) {
+    sections.push(`## What We Offer
+${getValue(offerings.coreProducts)}
+${getValue(offerings.problemsSolved) ? `\nProblems We Solve: ${getValue(offerings.problemsSolved)}` : ''}`);
+  }
+
+  if (getValue(icp.targetPersonas) || getValue(icp.targetIndustries)) {
+    sections.push(`## Who We Help
+${getValue(icp.targetPersonas) ? `Target Roles: ${getValue(icp.targetPersonas)}` : ''}
+${getValue(icp.targetIndustries) ? `Target Industries: ${getValue(icp.targetIndustries)}` : ''}`);
+  }
+
+  if (disclosureLevel === 'standard') {
+    // Add outreach guidance for standard
+    if (getValue(outreach.callOpeners)) {
+      sections.push(`## Call Guidance
+Opening Approaches: ${getValue(outreach.callOpeners)}`);
+    }
+    return sections.join('\n\n');
+  }
+
+  // Detailed: Add everything
+  if (getValue(identity.description)) {
+    sections.push(`## About the Organization
+${getValue(identity.description)}`);
+  }
+
+  if (getValue(offerings.differentiators)) {
+    sections.push(`## Why Customers Choose Us
+${getValue(offerings.differentiators)}
+${getValue(positioning.whyChooseUs) ? getValue(positioning.whyChooseUs) : ''}`);
+  }
+
+  if (getValue(outreach.emailAngles)) {
+    sections.push(`## Outreach Angles
+Email Angles: ${getValue(outreach.emailAngles)}
+Call Openers: ${getValue(outreach.callOpeners)}`);
+  }
+
+  if (getValue(outreach.objectionHandlers)) {
+    sections.push(`## Objection Handling
+${getValue(outreach.objectionHandlers)}`);
+  }
+
+  return sections.join('\n\n');
+}
+
+// ==================== LAYER 3: CAMPAIGN CONTEXT ====================
+
+/**
+ * Campaign context structure
+ */
+export interface CampaignContext {
+  campaignName: string;
+  campaignObjective: string;
+  targetAudience?: string;
+  callScript?: string;
+  qualificationCriteria?: string;
+}
+
+/**
+ * Contact context for runtime injection
+ */
+export interface ContactContext {
+  firstName: string;
+  lastName: string;
+  title?: string;
+  company?: string;
+  industry?: string;
+  customFields?: Record<string, any>;
+}
+
+/**
+ * Build campaign context section
+ */
+function buildCampaignContext(campaign: CampaignContext): string {
+  const sections: string[] = [];
+
+  sections.push(`## Campaign Objective
+Campaign: ${campaign.campaignName}
+Goal: ${campaign.campaignObjective}`);
+
+  if (campaign.targetAudience) {
+    sections.push(`## Target Audience
+${campaign.targetAudience}`);
+  }
+
+  if (campaign.qualificationCriteria) {
+    sections.push(`## Qualification Criteria
+${campaign.qualificationCriteria}`);
+  }
+
+  if (campaign.callScript) {
+    sections.push(`## Call Script
+${campaign.callScript}`);
+  }
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Build contact context for runtime
+ */
+function buildContactContext(contact: ContactContext): string {
+  return `## Current Contact
+Name: ${contact.firstName} ${contact.lastName}
+${contact.title ? `Title: ${contact.title}` : ''}
+${contact.company ? `Company: ${contact.company}` : ''}
+${contact.industry ? `Industry: ${contact.industry}` : ''}`;
+}
+
+// ==================== ASSEMBLY SERVICE ====================
+
+export interface AssemblyInput {
+  agentId: string;
+  campaignId?: string;
+  campaignContext?: CampaignContext;
+  contactContext?: ContactContext;
+  includeAgentTypeKnowledge?: boolean;
+}
+
+export interface AssembledPrompt {
+  systemPrompt: string;
+  firstMessage: string;
+  metadata: {
+    universalKnowledgeHash: string;
+    organizationContextHash: string | null;
+    orgIntelligenceMode: OrgIntelligenceMode | null;
+    layers: string[];
+    assembledAt: Date;
+  };
+}
+
+/**
+ * Assemble complete agent runtime prompt
+ * 
+ * This is the main function called at agent activation/call time
+ */
+export async function assembleAgentPrompt(input: AssemblyInput): Promise<AssembledPrompt> {
+  const layers: string[] = [];
+  const promptParts: string[] = [];
+
+  // Fetch agent
+  const [agent] = await db
+    .select()
+    .from(virtualAgents)
+    .where(eq(virtualAgents.id, input.agentId))
+    .limit(1);
+
+  if (!agent) {
+    throw new Error(`Agent not found: ${input.agentId}`);
+  }
+
+  const agentType = (agent.demandAgentType || 'voice') as keyof typeof AGENT_TYPE_KNOWLEDGE;
+
+  // ========== LAYER 1: Universal Knowledge (Always On) ==========
+  if (agentType === 'voice' || agentType === 'demand_qual') {
+    promptParts.push(AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl);
+    layers.push('voice_agent_control');
+  }
+
+  promptParts.push(UNIVERSAL_AGENT_KNOWLEDGE);
+  layers.push('universal_knowledge');
+
+  // Add agent-type-specific knowledge if requested
+  if (input.includeAgentTypeKnowledge !== false) {
+    const typeKnowledge = AGENT_TYPE_KNOWLEDGE[agentType];
+    if (typeKnowledge) {
+      promptParts.push(`\n# ${typeKnowledge.name} Guidelines\n${typeKnowledge.additionalRules}`);
+      layers.push(`agent_type_${agentType}`);
+    }
+
+    // Add default B2B knowledge for voice agents
+    if (agentType === 'voice' || agentType === 'demand_qual') {
+      promptParts.push(AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines);
+      promptParts.push(AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl);
+      layers.push('disposition_guidelines');
+      layers.push('voice_agent_control');
+    }
+  }
+
+  // ========== LAYER 2: Organization Intelligence (Campaign-Scoped) ==========
+  let orgContextHash: string | null = null;
+  let orgMode: OrgIntelligenceMode | null = null;
+
+  if (input.campaignId) {
+    // Fetch campaign OI binding
+    const [binding] = await db
+      .select()
+      .from(campaignOrgIntelligenceBindings)
+      .where(eq(campaignOrgIntelligenceBindings.campaignId, input.campaignId))
+      .limit(1);
+
+    if (binding) {
+      orgMode = binding.mode as OrgIntelligenceMode;
+      const disclosureLevel = (binding.disclosureLevel || 'standard') as 'minimal' | 'standard' | 'detailed';
+      
+      const orgContext = await buildOrganizationContext(binding, disclosureLevel);
+      
+      if (orgContext) {
+        promptParts.push(`\n# Organization Intelligence\n${orgContext.context}`);
+        orgContextHash = orgContext.hash;
+        layers.push(`org_intelligence_${orgMode}`);
+      }
+    }
+  }
+
+  // ========== LAYER 3: Campaign Context ==========
+  if (input.campaignContext) {
+    promptParts.push(`\n# Campaign Context\n${buildCampaignContext(input.campaignContext)}`);
+    layers.push('campaign_context');
+  }
+
+  // ========== Agent's Custom System Prompt ==========
+  if (agent.systemPrompt) {
+    const sanitizedPrompt = stripVoiceAgentControlLayer(agent.systemPrompt).trim();
+    if (sanitizedPrompt) {
+      promptParts.push(`\n# Agent Instructions\n${sanitizedPrompt}`);
+      layers.push('agent_custom_prompt');
+    }
+  }
+
+  // ========== Contact Context (Runtime) ==========
+  if (input.contactContext) {
+    promptParts.push(`\n# ${buildContactContext(input.contactContext)}`);
+    layers.push('contact_context');
+  }
+
+  return {
+    systemPrompt: promptParts.join('\n'),
+    firstMessage: agent.firstMessage || "Hello, how can I help you today?",
+    metadata: {
+      universalKnowledgeHash: getUniversalKnowledgeHash(),
+      organizationContextHash: orgContextHash,
+      orgIntelligenceMode: orgMode,
+      layers,
+      assembledAt: new Date(),
+    },
+  };
+}
+
+/**
+ * Create or update agent instance context
+ * Caches the assembled prompt for performance
+ */
+export async function createAgentInstanceContext(
+  agentId: string,
+  campaignId: string | null
+): Promise<string> {
+  const assembled = await assembleAgentPrompt({
+    agentId,
+    campaignId: campaignId || undefined,
+    includeAgentTypeKnowledge: true,
+  });
+
+  // Check for existing context
+  const existing = campaignId
+    ? await db
+        .select()
+        .from(agentInstanceContexts)
+        .where(and(
+          eq(agentInstanceContexts.virtualAgentId, agentId),
+          eq(agentInstanceContexts.campaignId, campaignId)
+        ))
+        .limit(1)
+    : [];
+
+  if (existing.length > 0) {
+    // Update existing
+    await db
+      .update(agentInstanceContexts)
+      .set({
+        assembledSystemPrompt: assembled.systemPrompt,
+        assembledFirstMessage: assembled.firstMessage,
+        universalKnowledgeHash: assembled.metadata.universalKnowledgeHash,
+        organizationContextHash: assembled.metadata.organizationContextHash,
+        assemblyMetadata: assembled.metadata,
+        isActive: true,
+        activatedAt: new Date(),
+        deactivatedAt: null,
+      })
+      .where(eq(agentInstanceContexts.id, existing[0].id));
+
+    return existing[0].id;
+  }
+
+  // Create new
+  const [context] = await db
+    .insert(agentInstanceContexts)
+    .values({
+      virtualAgentId: agentId,
+      campaignId,
+      assembledSystemPrompt: assembled.systemPrompt,
+      assembledFirstMessage: assembled.firstMessage,
+      universalKnowledgeHash: assembled.metadata.universalKnowledgeHash,
+      organizationContextHash: assembled.metadata.organizationContextHash,
+      assemblyMetadata: assembled.metadata,
+      isActive: true,
+    })
+    .returning();
+
+  return context.id;
+}
+
+/**
+ * Get active agent instance context
+ */
+export async function getAgentInstanceContext(
+  agentId: string,
+  campaignId?: string
+): Promise<AssembledPrompt | null> {
+  const conditions = [
+    eq(agentInstanceContexts.virtualAgentId, agentId),
+    eq(agentInstanceContexts.isActive, true),
+  ];
+
+  if (campaignId) {
+    conditions.push(eq(agentInstanceContexts.campaignId, campaignId));
+  }
+
+  const [context] = await db
+    .select()
+    .from(agentInstanceContexts)
+    .where(and(...conditions))
+    .orderBy(desc(agentInstanceContexts.activatedAt))
+    .limit(1);
+
+  if (!context) {
+    return null;
+  }
+
+  return {
+    systemPrompt: context.assembledSystemPrompt,
+    firstMessage: context.assembledFirstMessage || '',
+    metadata: context.assemblyMetadata as any,
+  };
+}
+
+/**
+ * Bind organization intelligence to a campaign
+ */
+export async function bindOrgIntelligenceToCampaign(
+  campaignId: string,
+  mode: OrgIntelligenceMode,
+  options: {
+    snapshotId?: string;
+    masterOrgIntelligenceId?: number;
+    disclosureLevel?: 'minimal' | 'standard' | 'detailed';
+    boundBy?: string;
+  } = {}
+): Promise<CampaignOrgIntelligenceBinding> {
+  // Check for existing binding
+  const [existing] = await db
+    .select()
+    .from(campaignOrgIntelligenceBindings)
+    .where(eq(campaignOrgIntelligenceBindings.campaignId, campaignId))
+    .limit(1);
+
+  if (existing) {
+    // Update existing
+    const [updated] = await db
+      .update(campaignOrgIntelligenceBindings)
+      .set({
+        mode,
+        snapshotId: options.snapshotId || null,
+        masterOrgIntelligenceId: options.masterOrgIntelligenceId || null,
+        disclosureLevel: options.disclosureLevel || 'standard',
+        boundBy: options.boundBy,
+        boundAt: new Date(),
+      })
+      .where(eq(campaignOrgIntelligenceBindings.id, existing.id))
+      .returning();
+
+    return updated;
+  }
+
+  // Create new binding
+  const [binding] = await db
+    .insert(campaignOrgIntelligenceBindings)
+    .values({
+      campaignId,
+      mode,
+      snapshotId: options.snapshotId,
+      masterOrgIntelligenceId: options.masterOrgIntelligenceId,
+      disclosureLevel: options.disclosureLevel || 'standard',
+      boundBy: options.boundBy,
+    })
+    .returning();
+
+  return binding;
+}
+
+/**
+ * Get campaign's OI binding
+ */
+export async function getCampaignOrgIntelligenceBinding(
+  campaignId: string
+): Promise<CampaignOrgIntelligenceBinding | null> {
+  const [binding] = await db
+    .select()
+    .from(campaignOrgIntelligenceBindings)
+    .where(eq(campaignOrgIntelligenceBindings.campaignId, campaignId))
+    .limit(1);
+
+  return binding || null;
+}

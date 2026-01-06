@@ -1,0 +1,263 @@
+20) Campaigns Upgrade (Email + Telemarketing)
+20.1 Objectives
+
+Industrial-grade execution for Email and Telemarketing campaigns.
+
+Seamless audience selection from Segments/Lists/Domain Sets with snapshotting.
+
+Strong compliance (Unsubscribe/DNC/consent) and pre-flight safety.
+
+Scalable queues & workers (100k+ contacts; controlled throttling).
+
+Unified analytics: impressions (opens), clicks, connects, conversations, leads.
+
+Tight linkage to Orders (bridge) for pacing & delivery goals.
+
+Enriched agent tools (scripts, qualification) and QA handoff.
+
+20.2 Shared Foundations
+20.2.1 Audience Selection & Snapshotting
+
+Source: Segments, Static Lists, Domain Sets, or Ad-hoc filters.
+
+At launch, persist CampaignAudienceSnapshot (audience_definition, contact_ids, account_ids, counts, created_at) for reproducibility.
+
+Optional “dynamic refresh” toggle (re-hydrate audience daily) with audit logs.
+
+20.2.2 Compliance Guardrails
+
+Global Unsubscribe (email) and Global DNC (phone) are enforced at two stages:
+
+Pre-enqueue (bulk filter)
+
+Just-in-time (per message/call) to catch late changes.
+
+Consent fields checked; low-risk default is “send only if consented OR legitimate interest flagged.”
+
+Jurisdiction windows and quiet hours per contact country/timezone.
+
+20.2.3 Queues & Workers
+
+BullMQ + Redis:
+
+email.send.queue, email.event.queue
+
+call.dispatch.queue, call.event.queue
+
+import.queue, verification.queue
+
+Back-pressure, idempotency keys, retry with exponential backoff; poison queue & DLQ metrics.
+
+20.2.4 Pacing, Throttling, Frequency Caps
+
+Per-campaign and per-tenant TPS caps (provider/domain pool friendly).
+
+Frequency caps per contact (e.g., ≤2 emails/week; ≤1 call/3 days).
+
+Order-linked pacing: read linked Campaign Order goals & daily caps; surface warnings if pacing drifts.
+
+20.2.5 Unified Engagement Model
+
+All events write to Activity Timeline:
+
+Email: delivered/opened/clicked/replied/bounced/complaint.
+
+Calls: attempt/connect/talk time/disposition/callback/voicemail.
+
+Leads: created/approved/rejected (with QA status).
+
+20.3 Email Campaigns (Upgraded)
+20.3.1 Sending Stack
+
+Providers: AWS SES / SendGrid / Mailgun via pluggable adapters.
+
+Sender Profiles per brand (from name, address, DKIM domain pool, tracking domain).
+
+Warm-up mode: gradually increase TPS & daily limits.
+
+Pre-send verification: exclude invalid/bounced emails; warn for accept_all/risky.
+
+20.3.2 Template & Personalization
+
+Responsive HTML editor (drag-and-drop + code view).
+
+Placeholders with fallbacks: {{contact.first_name|there}}, {{account.name}}.
+
+Conditional sections (if/else on contact/account/custom fields).
+
+Mandatory Unsubscribe block + physical address; cannot be removed.
+
+20.3.3 Tracking & Replies
+
+Pixel for opens; link wrapping for clicks; UTM auto-tagging.
+
+Inbound reply webhook (SES/SendGrid parse) → attach to contact timeline; optional auto-create task.
+
+20.3.4 A/B/n & Scheduling
+
+Subject/content variants; auto-allocation; early-stop on lift thresholds.
+
+Schedule by date/time; send-time optimization (optional AI).
+
+Staggered sends by timezone & domain.
+
+20.3.5 Data Model (Delta)
+
+EmailCampaign(id, name, sender_profile_id, status, start_at, tps_cap, freq_cap_json, ... )
+
+EmailTemplate(id, html, placeholders[], approved_by, version)
+
+EmailSend(id, campaign_id, contact_id, send_at, provider, status)
+
+EmailEvent(id, send_id, type, ts, meta_json)
+
+SenderProfile(id, brand_id, from_name, from_email, dkim_domain, tracking_domain)
+
+20.4 Telemarketing Campaigns (Upgraded, Click-to-Call)
+20.4.1 Telnyx WebRTC Integration
+
+Embedded softphone; authenticated with short-lived tokens.
+
+Pre-dial DNC check; per-country recording prompt & consent capture.
+
+Live status (ringing/connected/duration) and wrap-up timers.
+
+20.4.2 Scripts & Qualification
+
+Attach Script (versioned) with merge tags.
+
+Qualification Form (dropdowns, radio, checkbox, free-text) with required flags.
+
+Autosave responses; link to created Lead when disposition = Qualified/Success.
+
+20.4.3 Dispositions & Queue Rules
+
+Standard set (No Answer, VM, Callback, Not Interested, Qualified/Success, DNC, Wrong Number, Invalid).
+
+Rules:
+
+DNC → add to Global DNC & remove from queue.
+
+Not Interested → remove from this queue; cooldown tag.
+
+Success → create Lead, attach qual answers; remove from queue.
+
+Callback → create task at chosen time; agent Callbacks view.
+
+20.4.4 Agent Experience
+
+Single pane: Queue | Softphone | Script | Qual Form | Notes | Disposition.
+
+Keyboard shortcuts; fail-safe save; poor-network offline notes cache.
+
+Personal productivity dashboard (connect rate, talk time, conversions).
+
+20.4.5 Data Model (Delta)
+
+CallCampaign(id, name, status, caller_team_id[], pacing_rules_json, ...)
+
+CallAttempt(id, campaign_id, contact_id, agent_id, started_at, ended_at, telnyx_call_id, recording_url)
+
+CallEvent(id, attempt_id, type, ts, meta_json) (connect, disposition, vm, callback)
+
+Script(id, campaign_id?, html/blocks, version, changelog)
+
+QualResponse(id, attempt_id|lead_id, schema_version, answers_json)
+
+20.5 Pre-Flight Checklist (Both Channels)
+
+Audience size & health (valid emails, callable phones, DNC/unsub counts).
+
+Compliance confirmations (jurisdictions, quiet hours, unsubscribe present).
+
+Pacing vs. Order goals; frequency caps check.
+
+Seed test (email) and test call (telephony) before Go-Live.
+
+“Fix and launch” suggestions (missing sender profile, template not approved, script not attached).
+
+20.6 Reporting & Dashboards
+20.6.1 Core Metrics
+
+Email: sent, delivered, open rate, click rate, bounce type, complaint rate, reply rate, domain health.
+
+Telemarketing: attempts, connect rate, avg talk time, disposition mix, callbacks, conversations (connects ≥ X sec).
+
+Leads: leads created, QA pass rate, lead velocity (time to QA).
+
+20.6.2 Order-Scoped Views (Bridge)
+
+Impressions (opens), Clicks, Connects, Conversations, Approved Leads by day.
+
+Goal tracking vs. pacing; daily cap adherence; asset performance.
+
+Export order-scoped leads and reports (CSV/XLSX).
+
+20.6.3 Data Layer
+
+campaign_stats_projection (per campaign/day).
+
+order_aggregate_projection (linked campaigns).
+
+Materialized views with hourly refresh; drill-down to events.
+
+20.7 APIs (Illustrative)
+Email
+
+POST /email-campaigns (create)
+
+POST /email-campaigns/:id/launch
+
+POST /email-campaigns/:id/audience/snapshot
+
+POST /email-campaigns/:id/templates (attach/approve)
+
+GET /email-campaigns/:id/stats
+
+Webhooks: /webhooks/email-events (delivered/open/click/bounce/complaint/reply)
+
+Telemarketing
+
+POST /call-campaigns (create)
+
+POST /call-campaigns/:id/launch
+
+POST /call-campaigns/:id/assign-agents
+
+POST /call-campaigns/:id/script
+
+POST /call-attempts/:id/disposition
+
+GET /call-campaigns/:id/stats
+
+Webhooks: /webhooks/telnyx-events
+
+Shared
+
+POST /campaigns/:id/pause | resume | stop
+
+GET /campaigns/:id/audience/preview
+
+GET /orders/:id/aggregate-stats (bridge)
+
+20.8 Security, Audit, Governance
+
+RBAC: Campaign Manager vs Agent vs QA scoped actions.
+
+Tamper-evident AuditLog for launches, pauses, script changes, template approvals.
+
+Secrets via KMS/Vault; scoped provider keys per tenant/brand.
+
+WAF & rate limiting on webhooks; signed webhook verification.
+
+20.9 Acceptance Criteria (Key)
+
+Email: create → attach template → audience snapshot → pre-flight passes → launch → events ingested → stats visible → unsub enforced.
+
+Telemarketing: create → assign agents → script + qual form attached → DNC checks enforced → dispositions recorded → leads created → QA visible.
+
+Bridge: link campaign(s) to order → order dashboard shows opens, clicks, connects, conversations, approved leads.
+
+Bulk: 100k recipients enqueue without timeouts; queues scale horizontally.
+
+Compliance: frequency caps & quiet hours verifiably en

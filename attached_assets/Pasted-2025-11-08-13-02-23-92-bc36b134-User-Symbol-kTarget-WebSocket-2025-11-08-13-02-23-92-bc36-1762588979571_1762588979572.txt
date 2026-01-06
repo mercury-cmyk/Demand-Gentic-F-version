@@ -1,0 +1,165 @@
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(kTarget)]: WebSocket {
+2025-11-08 13:02:23.92
+bc36b134
+User
+_events: [Object: null prototype],
+2025-11-08 13:02:23.92
+bc36b134
+User
+_eventsCount: 4,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_maxListeners: undefined,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_binaryType: 'arraybuffer',
+2025-11-08 13:02:23.92
+bc36b134
+User
+_closeCode: 1006,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_closeFrameReceived: false,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_closeFrameSent: false,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_closeMessage: ,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_closeTimer: null,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_errorEmitted: true,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_extensions: {},
+2025-11-08 13:02:23.92
+bc36b134
+User
+_paused: false,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_protocol: '',
+2025-11-08 13:02:23.92
+bc36b134
+User
+_readyState: 3,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_receiver: null,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_sender: null,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_socket: null,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_bufferedAmount: 0,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_isServer: false,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_redirects: 0,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_autoPong: true,
+2025-11-08 13:02:23.92
+bc36b134
+User
+_url: 'wss://ep-mute-sky-ahoyd10z-pooler.c-3.us-east-1.aws.neon.tech/v2',
+2025-11-08 13:02:23.92
+bc36b134
+User
+_req: [ClientRequest],
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(shapeMode)]: false,
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(kCapture)]: false
+2025-11-08 13:02:23.92
+bc36b134
+User
+},
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(kType)]: 'error',
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(kError)]: Error: WebSocket was closed before the connection was established
+2025-11-08 13:02:23.92
+bc36b134
+User
+at WebSocket.close (/home/runner/workspace/node_modules/ws/lib/websocket.js:299:7)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:426:4
+2025-11-08 13:02:23.92
+bc36b134
+User
+at S.write (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:423:51)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at S.end (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:425:83)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at S.destroy (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:426:63)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at Timeout. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1117:99)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at listOnTimeout (node:internal/timers:581:17)
+2025-11-08 13:02:23.92
+bc36b134
+User
+at process.processTimers (node:internal/timers:519:7),
+2025-11-08 13:02:23.92
+bc36b134
+User
+[Symbol(kMessage)]: 'WebSocket was closed before the connection was established'
+2025-11-08 13:02:23.92
+bc36b134
+User
+}
+2025-11-08 13:02:23.92
+bc36b134
+User
+}
+
+2025-11-08 13:02:29.06
+bc36b134
+User
+8:02:29 AM [express] POST /api/leads/d742e57e-e833-4538-8b6c-d3847f8

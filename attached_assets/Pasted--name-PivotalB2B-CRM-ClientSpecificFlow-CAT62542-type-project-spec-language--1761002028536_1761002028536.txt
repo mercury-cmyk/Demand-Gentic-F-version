@@ -1,0 +1,160 @@
+{
+  "name": "PivotalB2B_CRM_ClientSpecificFlow_CAT62542",
+  "type": "project-spec",
+  "language": "typescript",
+  "framework": "react-express-postgres",
+  "description": "Implements a client-specific Data Verification & Enrichment workflow for CAT Aviation (Campaign 62542) inside Pivotal B2B CRM's Data Verification Module. This is not the general verification flow, but a customized process with suppression gates, eligibility engine, CAV auto-linking, manual ELV (EmailListVerify) validation, and strict cap/QA/export rules.",
+  "modules": [
+    {
+      "name": "server",
+      "framework": "express",
+      "database": "postgres",
+      "description": "Backend service implementing campaign-specific verification logic, suppression gate, eligibility filters, manual ELV validation endpoint, queue management, and export preparation."
+    },
+    {
+      "name": "client",
+      "framework": "react",
+      "description": "Front-end agent verification console with Verify, Company (Add-from-New-Leads), History, and QA tabs; includes manual ELV trigger button, cap meter, and suppression-aware queue display."
+    }
+  ],
+  "requirements": {
+    "runtime": "node18",
+    "packages": [
+      "express",
+      "pg",
+      "drizzle-orm",
+      "jsonwebtoken",
+      "axios",
+      "zod",
+      "react",
+      "react-dom",
+      "vite",
+      "tanstack-query",
+      "tailwindcss",
+      "shadcn-ui"
+    ]
+  },
+  "spec": {
+    "campaign_id": "CAT62542",
+    "client_specific": true,
+    "monthly_target": 1000,
+    "lead_cap_per_account": 10,
+    "email_validation_provider": "emaillistverify",
+    "ok_email_states": ["valid", "accept_all"],
+    "suppress_on_match": {
+      "match_fields": [
+        "email_lower",
+        "cav_id",
+        "cav_user_id",
+        "name_company_hash"
+      ],
+      "stages": ["import", "queue_assignment", "save_update"]
+    },
+    "eligibility_rules": {
+      "geo_allow": ["Asia", "Africa", "Middle East"],
+      "title_keywords": [
+        "Flight Operations",
+        "Training",
+        "Learning",
+        "Quality",
+        "Maintenance Training",
+        "Education",
+        "Chief Pilot",
+        "Chief Instructor",
+        "Simulator",
+        "Safety",
+        "Fleet Captain",
+        "Human Factors"
+      ],
+      "senior_dm_fallback": ["CEO", "MD", "President"]
+    },
+    "address_model": {
+      "account_hq_readonly": true,
+      "contact_address_preferred": true,
+      "export_precedence": ["contact", "hq"]
+    },
+    "agent_queue": {
+      "eligibility_filter": "Eligible",
+      "exclude_suppressed": true,
+      "tabs": ["Verify", "Company", "History", "QA"],
+      "actions": {
+        "validate_save": true,
+        "mark_replacement": true,
+        "flag_qa": true,
+        "add_from_pool": true,
+        "manual_elv_trigger": true
+      }
+    },
+    "manual_elv": {
+      "endpoint_single": "/api/contacts/{id}/email/verify",
+      "endpoint_batch": "/api/campaigns/{campaignId}/email/verify",
+      "preconditions": [
+        "eligibility_status='Eligible'",
+        "verification_status='Validated'",
+        "suppressed=false"
+      ],
+      "cache_ttl_days": 60,
+      "result_map": {
+        "valid": "ok",
+        "accept_all": "ok",
+        "unknown": "risky",
+        "catch_all": "risky",
+        "invalid": "invalid",
+        "role": "invalid",
+        "disposable": "invalid",
+        "spam_trap": "invalid"
+      }
+    },
+    "queue_population_sql": "SELECT c.id FROM contacts c JOIN accounts a ON a.id=c.account_id WHERE c.campaign_id=:campaign_id AND c.eligibility_status='Eligible' AND c.verification_status='Pending' AND c.suppressed=FALSE AND c.in_submission_buffer=FALSE AND (SELECT COUNT(*) FROM lead_submissions s WHERE s.account_id=a.id AND s.campaign_id=:campaign_id)<10 ORDER BY c.priority_score DESC LIMIT :batch FOR UPDATE SKIP LOCKED;",
+    "qa_checklist": [
+      "Eligibility Confirmed",
+      "CAV Linked (if Client)",
+      "Suppression = False",
+      "Data Completeness (Name, Title, Email, Website)",
+      "Email Quality (no role/disposable/spam-trap)",
+      "Phone & LinkedIn formatted",
+      "Cap Compliance ≤ 10",
+      "ELV Run → email_status='ok'"
+    ],
+    "export_rules": {
+      "client_cav_template": {
+        "filters": [
+          "eligibility='Eligible'",
+          "suppressed=false",
+          "email_status='ok'",
+          "cav_id IS NOT NULL"
+        ],
+        "address_precedence": ["contact", "hq"]
+      },
+      "enriched_template": {
+        "filters": [
+          "eligibility='Eligible'",
+          "suppressed=false",
+          "email_status='ok'"
+        ],
+        "address_precedence": ["contact", "hq"]
+      },
+      "audit_log": true
+    },
+    "metrics": {
+      "ok_rate_target": 0.95,
+      "deliverability_target": 0.97,
+      "suppression_hit_rate_max": 0.05,
+      "qa_pass_rate_min": 0.98
+    },
+    "monthly_cycle": [
+      "Import & Normalize (Week 1-2)",
+      "Eligibility + Suppression Screening (Week 1-2)",
+      "Agent Verification & Manual ELV (Week 3)",
+      "QA Review & Export OK Leads (Week 4)"
+    ],
+    "compliance": {
+      "gdpr": true,
+      "can_spam": true,
+      "emaillistverify_data_policy": "email-only, https, token rotation 90 days",
+      "elv_cache_days": 60,
+      "audit_log_retention_months": 24
+    },
+    "expected_outcome": "CAT62542 client-specific pipeline that blocks suppressed contacts before queueing, ensures only eligible contacts reach agents, enables agents to trigger ELV manually post-validation, delivers OK (Valid + Accept-All) emails only, enforces 10-lead caps, and maintains full CAV linkage and audit traceability."
+  }
+}
