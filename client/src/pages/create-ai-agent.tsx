@@ -175,6 +175,12 @@ const SKILLS = [
         { value: 'demo', label: 'Product Demo' },
         { value: 'consultation', label: 'Consultation' }
       ]},
+      { key: 'meeting_duration', label: 'Meeting Duration (minutes)', type: 'select', required: true, options: [
+        { value: '15', label: '15 minutes' },
+        { value: '30', label: '30 minutes' },
+        { value: '45', label: '45 minutes' },
+        { value: '60', label: '60 minutes' }
+      ]},
       { key: 'calendar_link', label: 'Calendar Link', type: 'url', required: true, placeholder: 'https://calendly.com/...' },
       { key: 'meeting_with', label: 'Meeting With', type: 'text', required: false, placeholder: 'e.g., Sarah Johnson, VP Sales' }
     ]
