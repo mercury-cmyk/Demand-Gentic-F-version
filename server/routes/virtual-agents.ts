@@ -32,7 +32,16 @@ import {
   getSkillById,
   type AgentSkillCategory,
 } from "../services/agent-skills";
-import { DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE } from "../services/voice-agent-control-defaults";
+import {
+  estimateCallCost,
+  getActiveCostSummary,
+  getCurrentCostMetrics,
+  OPENAI_REALTIME_PRICING,
+} from "../services/call-cost-tracker";
+import {
+  getActiveSessionCount,
+} from "../services/openai-realtime-dialer";
+// Note: DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE removed - using canonical structure instead
 
 const router = Router();
 
@@ -47,17 +56,110 @@ const insertVirtualAgentSchema = createInsertSchema(virtualAgents).omit({
   updatedAt: true,
 });
 
-const DEFAULT_B2B_SYSTEM_PROMPT = `${DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE}
+// Default B2B System Prompt - uses canonical structure for consistency
+// Note: This is a fallback when no custom prompt is provided
+// The actual prompt with contact data is built by buildSystemPrompt() in openai-realtime-dialer.ts
+const DEFAULT_B2B_SYSTEM_PROMPT = `# Personality
 
-# Default B2B Calling Fundamentals
-You are a professional B2B outbound caller. Follow these rules:
-- Be conversational, friendly, and professional
-- Listen carefully and ask one question at a time
-- Respect business hours in the prospect's local time; avoid calls before 8am or after 6pm unless requested
-- If you encounter an IVR, navigate to dial-by-name or operator quickly and politely
-- If you reach a gatekeeper, be concise and ask to be connected to the prospect (do not pitch unless asked)
-- If dial-by-name is available, try the prospect's last name first; otherwise ask for an operator
-- If the prospect asks not to be called again, comply immediately`;
+You are a professional outbound caller representing the organization.
+
+You sound like a senior B2B professional who understands the domain.
+You are thoughtful, confident, and forward-looking.
+You speak like someone who is calm, credible, and comfortable discussing industry topics.
+
+You never sound scripted, hype-driven, or salesy.
+You sound like a peer speaking to another peer.
+
+---
+
+# Environment
+
+You are making cold calls to business leaders.
+You only have access to the phone and your conversational ability.
+
+---
+
+# Tone
+
+Your voice is calm, composed, and professional.
+Speak clearly and slightly slowly.
+Use natural pauses.
+Ask one question at a time and always wait for the response.
+Never interrupt.
+Never rush.
+Never sound pushy or overly enthusiastic.
+
+You should sound present, human, and respectful of the person's time.
+
+---
+
+# Goal
+
+Your primary objective is to confirm that you are speaking directly with the intended contact and to have a short, thoughtful, and memorable conversation.
+
+This is **not a sales call**.
+
+Do not explain the purpose of the call until the right person is confirmed.
+
+---
+
+## Call Flow Logic
+
+### 1. Identity Detection
+Begin every call by asking to speak with the contact.
+Listen carefully and classify the response.
+
+---
+
+### 2. Right Party Detected
+If the person confirms they are the intended contact:
+
+- Thank them for taking the call and acknowledge their time.
+- Explain that you're calling from the organization and that you're speaking with a small number of leaders.
+- Clearly state that this is not a sales call.
+- Explain the purpose of the conversation briefly.
+- Ask one reflective, open-ended question.
+- Listen carefully and allow them to speak without interruption.
+- Acknowledge their perspective thoughtfully, without correcting or persuading.
+- Politely ask whether they would be open to receiving follow-up information.
+- Confirm the email address only if they agree.
+- Close the call warmly, thanking them for their time.
+
+---
+
+### 3. Gatekeeper Detected
+If the person indicates they are not the contact or sounds like a gatekeeper:
+
+- Be polite and respectful.
+- Ask to be connected to the contact.
+- Do not pitch, explain details, or justify the call.
+- Make no more than two polite attempts.
+- If refused, thank them sincerely and end the call.
+
+---
+
+### 4. Call Transfer
+If you are connected to the contact after a transfer:
+
+- Restart the introduction calmly.
+- Continue the conversation following the same flow.
+
+---
+
+# Guardrails
+
+Once the right person is confirmed, do not re-check or re-confirm identity later in the conversation.
+If the contact says "I don't know" or hesitates, treat it as uncertainty about the topic — not about who they are.
+
+If a person asks whether you are an AI or automated system:
+- Acknowledge honestly and confidently.
+- Do not apologize for being AI.
+- Clearly state that the message and intent are created by real humans.
+- Ask briefly if they are comfortable continuing.
+
+If the person expresses discomfort or asks to stop:
+- Apologize politely.
+- End the call calmly.`;
 
 const refineSystemPromptSchema = z.object({
   instructions: z.string().optional(),
@@ -1066,11 +1168,302 @@ router.get("/:id/assignments", requireAuth, async (req, res) => {
       .innerJoin(campaigns, eq(campaigns.id, campaignAgentAssignments.campaignId))
       .where(eq(campaignAgentAssignments.virtualAgentId, req.params.id))
       .orderBy(desc(campaignAgentAssignments.assignedAt));
-    
+
     res.json(assignments);
   } catch (error) {
     console.error("[Virtual Agents] Error fetching assignments:", error);
     res.status(500).json({ message: "Failed to fetch virtual agent assignments" });
+  }
+});
+
+// ==================== PROMPT VALIDATION & GENERATION ====================
+
+import {
+  validateVoiceAgentPrompt,
+  quickValidatePrompt,
+  generateValidatedPrompt,
+} from "../services/prompt-validator";
+
+/**
+ * POST /api/virtual-agents/validate-prompt
+ * Validate a system prompt for voice agent use
+ */
+router.post("/validate-prompt", requireAuth, async (req, res) => {
+  try {
+    const { prompt, strictMode, autoOptimize } = req.body;
+
+    if (!prompt || typeof prompt !== "string") {
+      return res.status(400).json({ message: "prompt is required and must be a string" });
+    }
+
+    const result = await validateVoiceAgentPrompt(prompt, {
+      strictMode: strictMode === true,
+      autoOptimize: autoOptimize === true,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("[Virtual Agents] Error validating prompt:", error);
+    res.status(500).json({
+      message: "Failed to validate prompt",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * POST /api/virtual-agents/generate-prompt
+ * Generate a validated system prompt from structured inputs using OpenAI
+ */
+router.post("/generate-prompt", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { agentGoal, targetAudience, openingMessage, keyQuestions, objectionHandling, companyContext } = req.body;
+
+    if (!agentGoal || !targetAudience) {
+      return res.status(400).json({ message: "agentGoal and targetAudience are required" });
+    }
+
+    const result = await generateValidatedPrompt({
+      agentGoal,
+      targetAudience,
+      openingMessage,
+      keyQuestions,
+      objectionHandling,
+      companyContext,
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("[Virtual Agents] Error generating prompt:", error);
+    res.status(500).json({
+      message: "Failed to generate prompt",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * POST /api/virtual-agents/:id/validate
+ * Validate an existing agent's prompt
+ */
+router.post("/:id/validate", requireAuth, async (req, res) => {
+  try {
+    const [agent] = await db
+      .select()
+      .from(virtualAgents)
+      .where(eq(virtualAgents.id, req.params.id))
+      .limit(1);
+
+    if (!agent) {
+      return res.status(404).json({ message: "Virtual agent not found" });
+    }
+
+    if (!agent.systemPrompt) {
+      return res.status(400).json({ message: "Agent has no system prompt to validate" });
+    }
+
+    const { strictMode, autoOptimize } = req.body || {};
+
+    const result = await validateVoiceAgentPrompt(agent.systemPrompt, {
+      strictMode: strictMode === true,
+      autoOptimize: autoOptimize === true,
+    });
+
+    // Optionally update agent with optimized prompt
+    if (autoOptimize && result.optimizedPrompt && req.body.applyOptimization) {
+      await db
+        .update(virtualAgents)
+        .set({
+          systemPrompt: result.optimizedPrompt,
+          updatedAt: new Date(),
+        })
+        .where(eq(virtualAgents.id, req.params.id));
+    }
+
+    res.json({
+      agentId: agent.id,
+      agentName: agent.name,
+      validation: result,
+      applied: autoOptimize && result.optimizedPrompt && req.body.applyOptimization,
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error validating agent prompt:", error);
+    res.status(500).json({
+      message: "Failed to validate agent prompt",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+// ==================== COST VISIBILITY ENDPOINTS ====================
+
+/**
+ * GET /api/virtual-agents/cost/pricing
+ * Returns current OpenAI Realtime pricing for cost estimation
+ */
+router.get("/cost/pricing", requireAuth, async (_req, res) => {
+  res.json({
+    pricing: OPENAI_REALTIME_PRICING,
+    notes: {
+      audioInputPerSecond: "Cost per second of incoming audio (caller speaking)",
+      audioOutputPerSecond: "Cost per second of outgoing audio (agent speaking)",
+      textInputPerToken: "Cost per token for system prompts and context",
+      textOutputPerToken: "Cost per token for model responses",
+      transcriptionPerSecond: "Cost per second if transcription enabled",
+      telnyxPerMinute: "Carrier cost per minute (approximate)",
+    },
+    lastUpdated: "2024-12",
+  });
+});
+
+/**
+ * POST /api/virtual-agents/cost/estimate
+ * Estimate call costs based on configuration
+ */
+router.post("/cost/estimate", requireAuth, async (req, res) => {
+  try {
+    const {
+      durationMinutes = 2,
+      systemPromptTokens = 2500, // Condensed prompt default
+      avgResponseTokensPerTurn = 80,
+      turnsPerCall = 6,
+      transcriptionEnabled = true,
+      callsPerDay = 100,
+      hoursPerDay = 8,
+    } = req.body;
+
+    const perCallEstimate = estimateCallCost({
+      durationMinutes,
+      systemPromptTokens,
+      avgResponseTokensPerTurn,
+      turnsPerCall,
+      transcriptionEnabled,
+    });
+
+    // Calculate daily/monthly projections
+    const dailyCost = perCallEstimate.estimated * callsPerDay;
+    const monthlyCost = dailyCost * 22; // ~22 business days
+
+    res.json({
+      perCall: {
+        estimated: perCallEstimate.estimated,
+        breakdown: perCallEstimate.breakdown,
+        durationMinutes,
+      },
+      daily: {
+        estimated: dailyCost,
+        callsPerDay,
+        hoursPerDay,
+      },
+      monthly: {
+        estimated: monthlyCost,
+        businessDays: 22,
+      },
+      config: {
+        systemPromptTokens,
+        avgResponseTokensPerTurn,
+        turnsPerCall,
+        transcriptionEnabled,
+      },
+      optimizationTips: [
+        systemPromptTokens > 3000 ? "Use condensed prompt (useCondensedPrompt: true) to reduce from ~6000 to ~2500 tokens" : null,
+        avgResponseTokensPerTurn > 100 ? "Reduce maxResponseTokens to 512 for more concise responses" : null,
+        transcriptionEnabled ? "Disable transcription (transcriptionEnabled: false) if you don't need call logs - saves ~$0.006/min" : null,
+        "Use eagerness: 'high' for faster turn-taking and reduced idle time",
+      ].filter(Boolean),
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error estimating cost:", error);
+    res.status(500).json({
+      message: "Failed to estimate cost",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * GET /api/virtual-agents/cost/active
+ * Get cost summary of all active calls
+ */
+router.get("/cost/active", requireAuth, async (_req, res) => {
+  try {
+    const summary = getActiveCostSummary();
+    const sessionCount = getActiveSessionCount();
+
+    res.json({
+      activeCalls: summary.activeCalls,
+      totalSessions: sessionCount,
+      totalEstimatedCost: summary.totalEstimatedCost,
+      calls: summary.calls.map(call => ({
+        callId: call.callId,
+        durationSeconds: Math.round(call.durationSeconds),
+        durationMinutes: (call.durationSeconds / 60).toFixed(2),
+        currentCost: call.currentCost.toFixed(4),
+      })),
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error getting active costs:", error);
+    res.status(500).json({
+      message: "Failed to get active call costs",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * GET /api/virtual-agents/cost/:callId
+ * Get current cost metrics for a specific call
+ */
+router.get("/cost/:callId", requireAuth, async (req, res) => {
+  try {
+    const metrics = getCurrentCostMetrics(req.params.callId);
+
+    if (!metrics) {
+      return res.status(404).json({
+        message: "Call not found or cost tracking not enabled",
+      });
+    }
+
+    res.json({
+      callId: metrics.callId,
+      startTime: metrics.startTime.toISOString(),
+      duration: {
+        seconds: metrics.endTime
+          ? (metrics.endTime.getTime() - metrics.startTime.getTime()) / 1000
+          : (Date.now() - metrics.startTime.getTime()) / 1000,
+      },
+      audio: {
+        inputSeconds: metrics.audioInputSeconds.toFixed(2),
+        outputSeconds: metrics.audioOutputSeconds.toFixed(2),
+        inputFrames: metrics.audioInputFrames,
+        outputFrames: metrics.audioOutputFrames,
+      },
+      tokens: {
+        systemPrompt: metrics.systemPromptTokens,
+        textInput: metrics.textInputTokens,
+        textOutput: metrics.textOutputTokens,
+      },
+      transcription: {
+        enabled: metrics.transcriptionEnabled,
+        seconds: metrics.transcriptionSeconds.toFixed(2),
+      },
+      costs: {
+        audioInput: metrics.costs.audioInput.toFixed(4),
+        audioOutput: metrics.costs.audioOutput.toFixed(4),
+        textInput: metrics.costs.textInput.toFixed(4),
+        textOutput: metrics.costs.textOutput.toFixed(4),
+        transcription: metrics.costs.transcription.toFixed(4),
+        carrier: metrics.costs.carrier.toFixed(4),
+        total: metrics.costs.total.toFixed(4),
+      },
+      rateLimits: metrics.rateLimits,
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error getting call cost:", error);
+    res.status(500).json({
+      message: "Failed to get call cost metrics",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 

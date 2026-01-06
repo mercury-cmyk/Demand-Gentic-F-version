@@ -30,7 +30,10 @@
       "Bash(taskkill:*)",
       "Bash(ping:*)",
       "Bash(psql:*)",
-      "Bash(npx ts-node:*)"
+      "Bash(npx ts-node:*)",
+      "Bash(gcloud.cmd secrets versions access latest:*)",
+      "Bash(gcloud.cmd secrets versions access:*)",
+      "Bash(gcloud.cmd run services logs read:*)"
     ]
   }
 }

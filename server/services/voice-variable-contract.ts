@@ -28,6 +28,64 @@ const VOICE_VARIABLE_CONTRACT: ContractItem[] = [
 
 export const CANONICAL_VOICE_VARIABLE_KEYS = VOICE_VARIABLE_CONTRACT.map((item) => item.key);
 
+const VOICE_TEMPLATE_TOKEN_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
+const VOICE_TEMPLATE_TOKEN_ALIASES: Record<string, string> = {
+  "agent.full_name": "agent.name",
+  "agentfullname": "agent.name",
+  "agent_full_name": "agent.name",
+  "agent.name": "agent.name",
+  "agentname": "agent.name",
+  "agent_name": "agent.name",
+  "org.name": "org.name",
+  "orgname": "org.name",
+  "org_name": "org.name",
+  "account.name": "account.name",
+  "accountname": "account.name",
+  "account_name": "account.name",
+  "companyname": "account.name",
+  "company_name": "account.name",
+  "contact.full_name": "contact.full_name",
+  "contact.fullname": "contact.full_name",
+  "contactfullname": "contact.full_name",
+  "contact_full_name": "contact.full_name",
+  "contact_fullname": "contact.full_name",
+  "contact.first_name": "contact.first_name",
+  "contact.firstname": "contact.first_name",
+  "contactfirstname": "contact.first_name",
+  "contact_first_name": "contact.first_name",
+  "contact_firstname": "contact.first_name",
+  "contact.last_name": "contact.last_name",
+  "contact.lastname": "contact.last_name",
+  "contactlastname": "contact.last_name",
+  "contact_last_name": "contact.last_name",
+  "contact_lastname": "contact.last_name",
+  "contact.job_title": "contact.job_title",
+  "contact.jobtitle": "contact.job_title",
+  "contactjobtitle": "contact.job_title",
+  "contact_job_title": "contact.job_title",
+  "contact_jobtitle": "contact.job_title",
+  "contact.email": "contact.email",
+  "contactemail": "contact.email",
+  "contact_email": "contact.email",
+  "system.time_utc": "system.time_utc",
+  "system.timeutc": "system.time_utc",
+  "system_time_utc": "system.time_utc",
+  "system__time_utc": "system.time_utc",
+  "system.time": "system.time_utc",
+  "time_utc": "system.time_utc",
+  "timeutc": "system.time_utc",
+  "system.caller_id": "system.caller_id",
+  "system.callerid": "system.caller_id",
+  "system_caller_id": "system.caller_id",
+  "system__caller_id": "system.caller_id",
+  "caller_id": "system.caller_id",
+  "system.called_number": "system.called_number",
+  "system.callednumber": "system.called_number",
+  "system_called_number": "system.called_number",
+  "system__called_number": "system.called_number",
+  "called_number": "system.called_number",
+};
+
 const PLACEHOLDER_VALUES = new Set([
   "",
   "unknown",
@@ -98,10 +156,33 @@ export function extractTemplateVariables(template: string): string[] {
   return Array.from(new Set(variables));
 }
 
+export function normalizeVoiceTemplateToken(token: string): string {
+  const normalized = token.trim().toLowerCase();
+  if (!normalized) return "";
+  const alias = VOICE_TEMPLATE_TOKEN_ALIASES[normalized];
+  if (alias) return alias;
+  const dotted = normalized.replace(/__+/g, ".");
+  if (dotted !== normalized) {
+    return VOICE_TEMPLATE_TOKEN_ALIASES[dotted] ?? dotted;
+  }
+  return normalized;
+}
+
 export function findDisallowedVoiceVariables(template: string): string[] {
-  const variables = extractTemplateVariables(template);
+  const variables = extractTemplateVariables(template).map(normalizeVoiceTemplateToken);
   const allowed = new Set(CANONICAL_VOICE_VARIABLE_KEYS);
-  return variables.filter((variable) => !allowed.has(variable));
+  return variables.filter((variable) => variable && !allowed.has(variable));
+}
+
+export function interpolateVoiceTemplate(template: string, values: Record<string, string>): string {
+  if (!template || !template.includes("{{")) return template;
+  return template.replace(VOICE_TEMPLATE_TOKEN_PATTERN, (match, raw) => {
+    const normalized = normalizeVoiceTemplateToken(raw);
+    if (!normalized) return match;
+    const value = values[normalized];
+    if (!value || !value.trim()) return match;
+    return value;
+  });
 }
 
 function normalizeValue(value: string | null | undefined): string {

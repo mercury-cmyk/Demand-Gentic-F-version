@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { db } from '../db';
-import { leads } from '@shared/schema';
+import { leads, dialerCallAttempts } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
@@ -168,70 +168,122 @@ async function transcribeWithSpeakers(
 export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
   'auto-recording-sync',
   async (job) => {
-    const { leadId, contactFirstName, telnyxCallId, dialedNumber } = job.data;
+    const { leadId, callAttemptId, contactFirstName, telnyxCallId, dialedNumber } = job.data;
 
-    console.log(`[AutoRecordingSyncWorker] Processing job for lead ${leadId}`);
+    if (!leadId && !callAttemptId) {
+      console.error('[AutoRecordingSyncWorker] Job missing leadId and callAttemptId');
+      return { success: false, reason: 'Missing leadId and callAttemptId' };
+    }
+
+    const targetLabel = leadId ? `lead ${leadId}` : `call attempt ${callAttemptId}`;
+    console.log(`[AutoRecordingSyncWorker] Processing job for ${targetLabel}`);
 
     try {
-      // Update status to fetching
-      await db.update(leads)
-        .set({ recordingStatus: 'fetching' })
-        .where(eq(leads.id, leadId));
+      // Update status to fetching for leads only
+      if (leadId) {
+        await db.update(leads)
+          .set({ recordingStatus: 'fetching' })
+          .where(eq(leads.id, leadId));
+      }
 
       // Step 1: Fetch recording from Telnyx
       const recordingUrl = await fetchRecordingFromTelnyx(telnyxCallId, dialedNumber);
 
       if (!recordingUrl) {
-        await db.update(leads)
-          .set({ recordingStatus: 'failed' })
-          .where(eq(leads.id, leadId));
-        console.log(`[AutoRecordingSyncWorker] No recording found for lead ${leadId}`);
+        if (leadId) {
+          await db.update(leads)
+            .set({ recordingStatus: 'failed' })
+            .where(eq(leads.id, leadId));
+        }
+        console.log(`[AutoRecordingSyncWorker] No recording found for ${targetLabel}`);
         return { success: false, reason: 'No recording found' };
       }
 
       // Update lead with recording URL
-      await db.update(leads)
-        .set({ recordingUrl })
-        .where(eq(leads.id, leadId));
+      if (leadId) {
+        await db.update(leads)
+          .set({ recordingUrl })
+          .where(eq(leads.id, leadId));
+      }
 
-      console.log(`[AutoRecordingSyncWorker] Recording URL saved for lead ${leadId}`);
+      // Update call attempt with recording URL
+      if (callAttemptId) {
+        await db.update(dialerCallAttempts)
+          .set({ recordingUrl, updatedAt: new Date() })
+          .where(eq(dialerCallAttempts.id, callAttemptId));
+      }
+
+      console.log(`[AutoRecordingSyncWorker] Recording URL saved for ${targetLabel}`);
 
       // Step 2: Transcribe with speaker diarization
-      await db.update(leads)
-        .set({ transcriptionStatus: 'processing' })
-        .where(eq(leads.id, leadId));
+      if (leadId) {
+        await db.update(leads)
+          .set({ transcriptionStatus: 'processing' })
+          .where(eq(leads.id, leadId));
+      }
 
       const transcriptionResult = await transcribeWithSpeakers(recordingUrl, contactFirstName);
 
       if (!transcriptionResult) {
-        await db.update(leads)
-          .set({
-            transcriptionStatus: 'failed',
-            recordingStatus: 'completed',
-          })
-          .where(eq(leads.id, leadId));
-        console.log(`[AutoRecordingSyncWorker] Transcription failed for lead ${leadId}`);
+        if (leadId) {
+          await db.update(leads)
+            .set({
+              transcriptionStatus: 'failed',
+              recordingStatus: 'completed',
+            })
+            .where(eq(leads.id, leadId));
+        }
+        console.log(`[AutoRecordingSyncWorker] Transcription failed for ${targetLabel}`);
         return { success: true, transcriptionFailed: true };
       }
 
       // Step 3: Save transcript and structured transcript
-      await db.update(leads)
-        .set({
-          transcript: transcriptionResult.transcript,
-          structuredTranscript: transcriptionResult.structuredTranscript,
-          transcriptionStatus: 'completed',
-          recordingStatus: 'completed',
-        })
-        .where(eq(leads.id, leadId));
+      if (leadId) {
+        await db.update(leads)
+          .set({
+            transcript: transcriptionResult.transcript,
+            structuredTranscript: transcriptionResult.structuredTranscript,
+            transcriptionStatus: 'completed',
+            recordingStatus: 'completed',
+          })
+          .where(eq(leads.id, leadId));
+      }
 
-      console.log(`[AutoRecordingSyncWorker] Completed processing for lead ${leadId}`);
+      if (callAttemptId && transcriptionResult.transcript?.trim()) {
+        const transcriptText = transcriptionResult.transcript.trim();
+        const transcriptMarker = "[Call Transcript]";
+        const [attempt] = await db
+          .select({ notes: dialerCallAttempts.notes })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, callAttemptId))
+          .limit(1);
+        const existingNotes = attempt?.notes || "";
+        const hasTranscript = existingNotes.includes(transcriptMarker);
+        const transcriptBlock = `${transcriptMarker}\n${transcriptText}`;
+        const nextNotes = hasTranscript
+          ? existingNotes
+          : existingNotes
+            ? `${existingNotes}\n\n${transcriptBlock}`
+            : transcriptBlock;
+
+        await db.update(dialerCallAttempts)
+          .set({
+            notes: nextNotes,
+            updatedAt: new Date()
+          })
+          .where(eq(dialerCallAttempts.id, callAttemptId));
+      }
+
+      console.log(`[AutoRecordingSyncWorker] Completed processing for ${targetLabel}`);
       return { success: true };
     } catch (error: any) {
-      console.error(`[AutoRecordingSyncWorker] Error processing lead ${leadId}:`, error);
+      console.error(`[AutoRecordingSyncWorker] Error processing ${targetLabel}:`, error);
 
-      await db.update(leads)
-        .set({ recordingStatus: 'failed', transcriptionStatus: 'failed' })
-        .where(eq(leads.id, leadId));
+      if (leadId) {
+        await db.update(leads)
+          .set({ recordingStatus: 'failed', transcriptionStatus: 'failed' })
+          .where(eq(leads.id, leadId));
+      }
 
       throw error;
     }

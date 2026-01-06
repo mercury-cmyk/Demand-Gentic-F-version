@@ -294,6 +294,19 @@ const PROVIDER_OPTIONS = [
 
 const PREVIEW_TOKEN_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
 const PREVIEW_TOKEN_CONTROLS = new Set(["if", "elseif", "else", "endif"]);
+const PREVIEW_TOKEN_ALIASES: Record<string, string> = {
+  contactfullname: "contact.full_name",
+  contactfirstname: "contact.first_name",
+  jobtitle: "contact.job_title",
+  companyname: "account.name",
+  agentname: "agent.name",
+  orgname: "org.name",
+  callerid: "system.caller_id",
+  callednumber: "system.called_number",
+  time_utc: "system.time_utc",
+  timeutc: "system.time_utc",
+  "system.time": "system.time_utc",
+};
 const PREVIEW_TOKEN_DEFAULTS: Record<string, string> = {
   "agent.name": "Alex Morgan",
   "agent.full_name": "Alex Morgan",
@@ -342,18 +355,24 @@ const PREVIEW_TOKEN_DEFAULTS: Record<string, string> = {
   "phone_number": "+14155559876",
 };
 
+const normalizePreviewToken = (token: string) => token.trim().toLowerCase();
+
+const resolvePreviewToken = (token: string) => {
+  const normalized = normalizePreviewToken(token);
+  return PREVIEW_TOKEN_ALIASES[normalized] ?? normalized;
+};
+
 const getPreviewTokenDefault = (token: string): string | undefined => {
-  const normalized = token.trim().toLowerCase();
+  const normalized = normalizePreviewToken(token);
   if (!normalized) return undefined;
+  const canonical = resolvePreviewToken(token);
   if (
-    normalized === "system.time_utc"
-    || normalized === "system.time"
-    || normalized === "time_utc"
-    || normalized === "timeutc"
+    canonical === "system.time_utc"
+    || canonical === "system.time"
   ) {
     return new Date().toISOString();
   }
-  return PREVIEW_TOKEN_DEFAULTS[normalized];
+  return PREVIEW_TOKEN_DEFAULTS[canonical] ?? PREVIEW_TOKEN_DEFAULTS[normalized];
 };
 
 const extractPreviewTokens = (inputs: Array<string | null | undefined>): string[] => {
@@ -388,28 +407,37 @@ const getFirstPreviewValue = (values: Record<string, string>, keys: string[]) =>
   return "";
 };
 
+const buildPreviewValueLookup = (values: Record<string, string>) => {
+  const lookup: Record<string, string> = {};
+  Object.entries(values).forEach(([key, value]) => {
+    if (!value || !value.trim()) return;
+    const normalized = normalizePreviewToken(key);
+    const canonical = resolvePreviewToken(key);
+    lookup[normalized] = value;
+    lookup[canonical] = value;
+  });
+  return lookup;
+};
+
 const applyPreviewValues = (input: string, values: Record<string, string>) => {
-  const derivedValues = { ...values };
-  const firstName = getFirstPreviewValue(values, [
+  const derivedValues = buildPreviewValueLookup(values);
+  const firstName = getFirstPreviewValue(derivedValues, [
     "contact.first_name",
     "contact.firstname",
     "first_name",
     "firstname",
-    "firstName",
   ]);
-  const lastName = getFirstPreviewValue(values, [
+  const lastName = getFirstPreviewValue(derivedValues, [
     "contact.last_name",
     "contact.lastname",
     "last_name",
     "lastname",
-    "lastName",
   ]);
-  const existingFullName = getFirstPreviewValue(values, [
+  const existingFullName = getFirstPreviewValue(derivedValues, [
     "contact.full_name",
     "contact.fullname",
     "full_name",
     "fullname",
-    "fullName",
   ]);
   const computedFullName = existingFullName || [firstName, lastName].filter(Boolean).join(" ").trim();
   if (computedFullName) {
@@ -418,7 +446,6 @@ const applyPreviewValues = (input: string, values: Record<string, string>) => {
       "contact.fullname",
       "full_name",
       "fullname",
-      "fullName",
     ].forEach((key) => {
       if (!derivedValues[key]) {
         derivedValues[key] = computedFullName;
@@ -426,52 +453,57 @@ const applyPreviewValues = (input: string, values: Record<string, string>) => {
     });
   }
 
-  const companyName = getFirstPreviewValue(values, [
+  const companyName = getFirstPreviewValue(derivedValues, [
     "account.name",
     "accountname",
     "account_name",
     "company",
     "companyname",
     "company_name",
-    "companyName",
   ]);
   if (companyName) {
-    ["account.name", "company", "companyname", "company_name", "companyName"].forEach((key) => {
+    ["account.name", "company", "companyname", "company_name"].forEach((key) => {
       if (!derivedValues[key]) {
         derivedValues[key] = companyName;
       }
     });
   }
 
-  const orgName = getFirstPreviewValue(values, [
+  const orgName = getFirstPreviewValue(derivedValues, [
     "org.name",
     "orgname",
     "org_name",
-    "agentCompany",
+    "agentcompany",
     "agent_company",
   ]);
   if (orgName) {
-    ["org.name", "orgname", "org_name", "agentCompany", "agent_company"].forEach((key) => {
+    ["org.name", "orgname", "org_name", "agentcompany", "agent_company"].forEach((key) => {
       if (!derivedValues[key]) {
         derivedValues[key] = orgName;
       }
     });
   }
 
-  const agentName = getFirstPreviewValue(values, [
+  const agentName = getFirstPreviewValue(derivedValues, [
     "agent.name",
     "agentname",
     "agent_name",
-    "agentFullName",
+    "agentfullname",
     "agent_full_name",
   ]);
   if (agentName) {
-    ["agent.name", "agentname", "agent_name", "agentFullName", "agent_full_name"].forEach((key) => {
+    ["agent.name", "agentname", "agent_name", "agentfullname", "agent_full_name"].forEach((key) => {
       if (!derivedValues[key]) {
         derivedValues[key] = agentName;
       }
     });
   }
+
+  Object.entries(PREVIEW_TOKEN_ALIASES).forEach(([alias, canonical]) => {
+    if (!derivedValues[alias] && derivedValues[canonical]) {
+      derivedValues[alias] = derivedValues[canonical];
+    }
+  });
 
   let result = input;
   for (const [token, value] of Object.entries(derivedValues)) {

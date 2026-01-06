@@ -6,7 +6,8 @@ const connection = new Redis(process.env.REDIS_URL || '', {
 });
 
 export interface AutoRecordingSyncJobData {
-  leadId: string;
+  leadId?: string;
+  callAttemptId?: string;
   contactFirstName: string | null;
   agentId: string | null;
   telnyxCallId: string | null;
@@ -38,19 +39,29 @@ export const autoRecordingSyncQueue = new Queue<AutoRecordingSyncJobData>('auto-
  */
 export async function scheduleAutoRecordingSync(data: AutoRecordingSyncJobData): Promise<void> {
   try {
+    if (!data.leadId && !data.callAttemptId) {
+      throw new Error("scheduleAutoRecordingSync requires leadId or callAttemptId");
+    }
+
+    const jobId = data.leadId
+      ? `auto-sync-${data.leadId}`
+      : `auto-sync-attempt-${data.callAttemptId}`;
+
     // Add job with 60-second delay
     await autoRecordingSyncQueue.add(
       'fetch-and-transcribe',
       data,
       {
         delay: 60000, // 60 seconds
-        jobId: `auto-sync-${data.leadId}`, // Prevent duplicate jobs for same lead
+        jobId, // Prevent duplicate jobs for same lead/attempt
       }
     );
 
-    console.log(`[AutoRecordingSync] Scheduled job for lead ${data.leadId} (will execute in 60s)`);
+    const target = data.leadId ? `lead ${data.leadId}` : `call attempt ${data.callAttemptId}`;
+    console.log(`[AutoRecordingSync] Scheduled job for ${target} (will execute in 60s)`);
   } catch (error) {
-    console.error(`[AutoRecordingSync] Error scheduling job for lead ${data.leadId}:`, error);
+    const target = data.leadId ? `lead ${data.leadId}` : `call attempt ${data.callAttemptId}`;
+    console.error(`[AutoRecordingSync] Error scheduling job for ${target}:`, error);
     throw error;
   }
 }

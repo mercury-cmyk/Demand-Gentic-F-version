@@ -17,6 +17,10 @@ interface UseTelnyxWebRTCProps {
   sipUsername?: string;
   sipPassword?: string;
   sipDomain?: string;
+  // JWT token authentication (preferred over SIP credentials)
+  loginToken?: string;
+  // Set to true to auto-fetch JWT token from server
+  useJwtAuth?: boolean;
   rtcHost?: string;
   rtcEnv?: 'production' | 'development';
   rtcRegion?: string;
@@ -31,6 +35,8 @@ export function useTelnyxWebRTC({
   sipUsername,
   sipPassword,
   sipDomain = 'sip.telnyx.com',
+  loginToken,
+  useJwtAuth = true, // Default to JWT auth
   rtcHost,
   rtcEnv,
   rtcRegion,
@@ -50,6 +56,8 @@ export function useTelnyxWebRTC({
   const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
   const [selectedMicId, setSelectedMicId] = useState<string | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(null);
+  const [jwtToken, setJwtToken] = useState<string | null>(loginToken || null);
+  const [tokenLoading, setTokenLoading] = useState(false);
   const { toast } = useToast();
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioMonitorRef = useRef<NodeJS.Timeout | null>(null);
@@ -63,6 +71,72 @@ export function useTelnyxWebRTC({
     if (savedMic) setSelectedMicId(savedMic);
     if (savedSpeaker) setSelectedSpeakerId(savedSpeaker);
   }, []);
+
+  // Fetch JWT token for WebRTC authentication
+  useEffect(() => {
+    if (!useJwtAuth || jwtToken) {
+      return; // Skip if not using JWT auth or already have token
+    }
+
+    const fetchToken = async () => {
+      setTokenLoading(true);
+      console.log('[TELNYX] Fetching JWT token for WebRTC authentication...');
+
+      try {
+        // Get auth token from localStorage for API authentication
+        const authToken = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
+        if (!authToken) {
+          throw new Error('Not authenticated. Please log in first.');
+        }
+
+        const response = await fetch('/api/telnyx/webrtc-token', {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+        const payload = isJson ? await response.json() : await response.text();
+
+        if (!response.ok) {
+          const errorMessage = isJson && payload && typeof payload === 'object'
+            ? (payload as { message?: string }).message
+            : typeof payload === 'string'
+              ? payload.slice(0, 200)
+              : undefined;
+          throw new Error(errorMessage || `Failed to fetch token: ${response.status}`);
+        }
+
+        if (!isJson || !payload || typeof payload !== 'object') {
+          throw new Error('Unexpected response from token endpoint. Please re-login and try again.');
+        }
+
+        const data = payload as { token?: string };
+        console.log('[TELNYX] JWT token received successfully');
+
+        if (data.token) {
+          setJwtToken(data.token);
+        } else {
+          throw new Error('No token in response');
+        }
+      } catch (error) {
+        console.error('[TELNYX] Failed to fetch JWT token:', error);
+        toast({
+          variant: "destructive",
+          title: "Authentication Failed",
+          description: error instanceof Error ? error.message : "Could not authenticate with Telnyx",
+        });
+      } finally {
+        setTokenLoading(false);
+      }
+    };
+
+    fetchToken();
+  }, [useJwtAuth, jwtToken, toast]);
 
   /**
    * Attach remote audio stream to audio element
@@ -212,8 +286,19 @@ export function useTelnyxWebRTC({
 
   // Initialize Telnyx client
   useEffect(() => {
-    if (!sipUsername || !sipPassword) {
-      console.warn('WebRTC initialization skipped: Missing SIP credentials');
+    // Determine authentication method
+    const hasJwtToken = useJwtAuth && jwtToken;
+    const hasSipCredentials = sipUsername && sipPassword;
+
+    // Wait for JWT token if using JWT auth but don't have token yet
+    if (useJwtAuth && !jwtToken && !tokenLoading) {
+      console.log('[TELNYX] Waiting for JWT token...');
+      return;
+    }
+
+    // Skip if no valid auth method
+    if (!hasJwtToken && !hasSipCredentials) {
+      console.warn('WebRTC initialization skipped: No authentication available');
       return;
     }
 
@@ -221,32 +306,15 @@ export function useTelnyxWebRTC({
     let telnyxClient: TelnyxRTC | null = null;
 
     try {
-      // Extract just the username if full SIP URI is provided
-      const username = sipUsername.includes('@') ? sipUsername.split('@')[0] : sipUsername;
-
       console.log('=== TELNYX WebRTC CONNECTION START ===');
-      console.log('Connection details:', {
-        login: username,
-        domain: sipDomain,
-        rtcHost: rtcHost || null,
-        rtcEnv: rtcEnv || null,
-        rtcRegion: rtcRegion || null,
-        rtcIp: rtcIp || null,
-        rtcPort: rtcPort ?? null,
-        useCanaryRtcServer: !!useCanaryRtcServer,
-        hasPassword: !!sipPassword,
-        timestamp: new Date().toISOString(),
-      });
 
-      // Initialize TelnyxRTC with optimized configuration
-      telnyxClient = new TelnyxRTC({
-        login: username,
-        password: sipPassword,
+      // Build configuration based on auth method
+      let clientConfig: any = {
         // Enable debug mode for troubleshooting
         debug: true,
         debugOutput: 'console',
-        // Use relay for more reliable connections through restrictive networks
-        iceTransportPolicy: 'relay',
+        // Allow all ICE transport types (STUN/TURN) for better compatibility
+        iceTransportPolicy: 'all',
         // Prefetch ICE candidates for faster connection
         prefetchIceCandidates: true,
         host: rtcHost,
@@ -255,7 +323,39 @@ export function useTelnyxWebRTC({
         rtcIp: rtcIp,
         rtcPort: rtcPort,
         useCanaryRtcServer: useCanaryRtcServer,
-      } as any);
+      };
+
+      if (hasJwtToken) {
+        // JWT Token Authentication (preferred)
+        console.log('Authentication: JWT Token');
+        console.log('Token prefix:', jwtToken?.substring(0, 20) + '...');
+        clientConfig.login_token = jwtToken;
+      } else {
+        // SIP Credentials Authentication (fallback)
+        const username = sipUsername!.includes('@') ? sipUsername!.split('@')[0] : sipUsername;
+        console.log('Authentication: SIP Credentials');
+        console.log('Connection details:', {
+          login: username,
+          loginLength: username?.length,
+          domain: sipDomain,
+          hasPassword: !!sipPassword,
+          passwordLength: sipPassword?.length,
+          passwordPrefix: sipPassword?.substring(0, 3) + '...',
+        });
+        clientConfig.login = username;
+        clientConfig.password = sipPassword;
+      }
+
+      console.log('RTC Options:', {
+        rtcHost: rtcHost || null,
+        rtcEnv: rtcEnv || null,
+        rtcRegion: rtcRegion || null,
+        useCanaryRtcServer: !!useCanaryRtcServer,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Initialize TelnyxRTC
+      telnyxClient = new TelnyxRTC(clientConfig);
 
       // Set connection timeout (30 seconds)
       connectionTimeout = setTimeout(() => {
@@ -486,6 +586,9 @@ export function useTelnyxWebRTC({
     sipUsername,
     sipPassword,
     sipDomain,
+    jwtToken,
+    useJwtAuth,
+    tokenLoading,
     rtcHost,
     rtcEnv,
     rtcRegion,
@@ -753,6 +856,9 @@ export function useTelnyxWebRTC({
     telnyxCallId,
     selectedMicId,
     selectedSpeakerId,
+    // JWT token authentication state
+    tokenLoading,
+    hasJwtToken: !!jwtToken,
     formatDuration,
     makeCall,
     hangup,

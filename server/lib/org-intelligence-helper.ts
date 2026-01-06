@@ -9,6 +9,51 @@ import { desc, gte, sql } from "drizzle-orm";
 import { ZAHID_PROFESSIONAL_CALLING_STRATEGY } from "../services/voice-agent-control-defaults";
 import { TRAINING_RULES_FOR_PROMPT } from "../training/taxonomy";
 
+// ==================== DEFAULT ORGANIZATION INTELLIGENCE ====================
+// This is used when no organization-specific intelligence is configured in the database.
+// It provides sensible defaults for professional B2B outreach.
+
+export const DEFAULT_ORG_INTELLIGENCE = `**Organization Context**
+You are calling on behalf of a professional B2B organization focused on helping business leaders achieve better outcomes.
+
+**Value Proposition**
+- We help companies improve their operations through thoughtful engagement
+- Our approach is consultative, not transactional
+- We believe in earning trust through genuine value exchange
+
+**Target Audience**
+- Business leaders and decision-makers
+- Companies looking for strategic improvements
+- Organizations open to exploring new approaches
+
+**Key Differentiators**
+- We lead with insight, not sales pressure
+- Every conversation is designed to be valuable regardless of outcome
+- We respect time and prioritize quality over quantity`;
+
+export const DEFAULT_COMPLIANCE_POLICY = `**Compliance Requirements**
+- Honor all opt-out requests immediately and permanently
+- Never call numbers on Do Not Call lists
+- Respect business hours (8am-6pm in recipient's timezone)
+- Document all consent and opt-out requests
+- Never misrepresent identity or purpose
+- Comply with TCPA, GDPR, CCPA and regional regulations`;
+
+export const DEFAULT_PLATFORM_POLICIES = `**Platform Rules**
+- Calls must have a clear, legitimate business purpose
+- Never use deceptive tactics or high-pressure techniques
+- Maintain professional, respectful tone at all times
+- End calls gracefully when requested
+- Report any compliance concerns immediately`;
+
+export const DEFAULT_VOICE_DEFAULTS = `**Voice & Communication Style**
+- Speak clearly at a natural, unhurried pace
+- Use professional but warm language
+- Ask one question at a time and wait for response
+- Listen actively without interrupting
+- Acknowledge what the other person says before responding
+- If uncertain, ask for clarification rather than assuming`;
+
 export interface OrganizationPromptSettings {
   orgIntelligence: string;
   compliancePolicy: string;
@@ -327,7 +372,7 @@ export async function getOrganizationLearningSummary(): Promise<string> {
 
 /**
  * Gets the organization's prompt optimization settings for AI agents
- * Always reads from database - no fallback to environment variables
+ * Reads from database first, falls back to sensible defaults if not configured
  */
 export async function getOrganizationPromptSettings(): Promise<OrganizationPromptSettings> {
   try {
@@ -337,20 +382,22 @@ export async function getOrganizationPromptSettings(): Promise<OrganizationPromp
       .orderBy(desc(accountIntelligence.createdAt))
       .limit(1);
 
+    // Use database values if set, otherwise use defaults
+    // This ensures agents always have baseline guidance even without configuration
     return {
-      orgIntelligence: profile?.orgIntelligence || '',
-      compliancePolicy: profile?.compliancePolicy || '',
-      platformPolicies: profile?.platformPolicies || '',
-      agentVoiceDefaults: profile?.agentVoiceDefaults || '',
+      orgIntelligence: profile?.orgIntelligence?.trim() || DEFAULT_ORG_INTELLIGENCE,
+      compliancePolicy: profile?.compliancePolicy?.trim() || DEFAULT_COMPLIANCE_POLICY,
+      platformPolicies: profile?.platformPolicies?.trim() || DEFAULT_PLATFORM_POLICIES,
+      agentVoiceDefaults: profile?.agentVoiceDefaults?.trim() || DEFAULT_VOICE_DEFAULTS,
     };
   } catch (error) {
     console.error('[OrgIntelligence] Failed to fetch prompt settings from database:', error);
-    // Return empty strings - force configuration through UI
+    // Return defaults on error - agents should still have baseline guidance
     return {
-      orgIntelligence: '',
-      compliancePolicy: '',
-      platformPolicies: '',
-      agentVoiceDefaults: '',
+      orgIntelligence: DEFAULT_ORG_INTELLIGENCE,
+      compliancePolicy: DEFAULT_COMPLIANCE_POLICY,
+      platformPolicies: DEFAULT_PLATFORM_POLICIES,
+      agentVoiceDefaults: DEFAULT_VOICE_DEFAULTS,
     };
   }
 }
@@ -428,15 +475,35 @@ export async function buildAgentSystemPrompt(basePrompt: string): Promise<string
     promptParts.push('\n## Agent Voice Defaults\n' + settings.agentVoiceDefaults);
   }
 
-  // Add Zahid Professional Calling Strategy as training data
-  // This is methodology-focused and agnostic to organization/message
-  // It trains the agent HOW to conduct professional B2B calls
-  promptParts.push('\n## Professional B2B Calling Methodology\n' + ZAHID_PROFESSIONAL_CALLING_STRATEGY);
+  // Check if basePrompt already follows the canonical structure
+  // (has Personality/Environment/Tone/Goal/Call Flow sections)
+  // If so, do NOT append ZAHID_PROFESSIONAL_CALLING_STRATEGY to avoid duplication and confusion
+  const isCanonicalStructure =
+    basePrompt.includes('# Personality') &&
+    basePrompt.includes('# Goal') &&
+    basePrompt.includes('## Call Flow Logic');
 
-  // Add training rules and taxonomy (CRITICAL for consistency)
-  // This layer ensures all agents follow canonical call flow and classification logic
-  // Includes: hard constraints, learning rules, preflight requirements, voicemail detection
-  promptParts.push(TRAINING_RULES_FOR_PROMPT);
+  if (!isCanonicalStructure) {
+    // Add Zahid Professional Calling Strategy as training data
+    // Only for prompts that don't already follow the canonical structure
+    promptParts.push('\n## Professional B2B Calling Methodology\n' + ZAHID_PROFESSIONAL_CALLING_STRATEGY);
+
+    // Add training rules and taxonomy (CRITICAL for consistency)
+    // This layer ensures all agents follow canonical call flow and classification logic
+    // Includes: hard constraints, learning rules, preflight requirements, voicemail detection
+    promptParts.push(TRAINING_RULES_FOR_PROMPT);
+  } else {
+    // For canonical prompts, only add the compact training rules (not the full methodology)
+    // This prevents duplication while still ensuring hard constraints are enforced
+    promptParts.push(`
+## Hard Constraints (MUST OBEY)
+- Once identity is confirmed, NEVER re-ask or re-verify identity
+- If contact says "I don't know" or hesitates, treat as uncertainty about the TOPIC, not the PERSON
+- Forward-only state progression: never return to earlier conversation states
+- Maximum 2 gatekeeper attempts; then thank and end call
+- Keep voicemail ≤18 seconds
+- Acknowledge time pressure immediately if expressed`);
+  }
 
   return promptParts.join('\n');
 }
