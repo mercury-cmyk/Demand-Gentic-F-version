@@ -237,12 +237,6 @@ const VOICE_OPTIONS = {
     { id: 'shimmer', name: 'Shimmer', gender: 'Female', style: 'Friendly & Energetic' },
     { id: 'onyx', name: 'Onyx', gender: 'Male', style: 'Deep & Authoritative' },
     { id: 'fable', name: 'Fable', gender: 'Neutral', style: 'Storytelling & Engaging' },
-  ],
-  elevenlabs: [
-    { id: 'rachel', name: 'Rachel', gender: 'Female', style: 'American Professional' },
-    { id: 'drew', name: 'Drew', gender: 'Male', style: 'American Confident' },
-    { id: 'clyde', name: 'Clyde', gender: 'Male', style: 'American Casual' },
-    { id: 'emily', name: 'Emily', gender: 'Female', style: 'British Professional' },
   ]
 };
 
@@ -703,8 +697,9 @@ export default function CreateAIAgentPage() {
                           <Badge variant="secondary" className="text-xs">Recommended</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                          AI will research a new organization from their website and build a comprehensive 
-                          intelligence profile. You'll review and approve before proceeding.
+                          AI will research a new organization from their website and build a campaign-scoped snapshot
+                          you control with the same Organization Profile intelligence workflow. You'll review and
+                          approve before proceeding.
                         </p>
                       </div>
                     </div>
@@ -1080,24 +1075,16 @@ export default function CreateAIAgentPage() {
 
                   <Separator />
 
-                  {/* Voice Provider */}
+                  {/* Voice Provider - OpenAI only */}
                   <div className="space-y-4">
                     <div>
                       <Label className="text-base font-semibold">Voice Provider</Label>
-                      <p className="text-sm text-muted-foreground">Choose your preferred text-to-speech provider</p>
+                      <p className="text-sm text-muted-foreground">Using OpenAI text-to-speech</p>
                     </div>
-                    <Tabs value={voiceConfig.provider} onValueChange={(v) => setVoiceConfig(prev => ({ ...prev, provider: v, voice: VOICE_OPTIONS[v as keyof typeof VOICE_OPTIONS][0].id }))}>
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="openai" className="gap-2">
-                          <Zap className="h-4 w-4" />
-                          OpenAI
-                        </TabsTrigger>
-                        <TabsTrigger value="elevenlabs" className="gap-2">
-                          <Volume2 className="h-4 w-4" />
-                          ElevenLabs
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
+                      <Zap className="h-4 w-4" />
+                      <span className="font-medium">OpenAI</span>
+                    </div>
                   </div>
 
                   {/* Voice Selection */}

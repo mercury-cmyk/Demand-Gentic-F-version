@@ -261,7 +261,8 @@ export function OrganizationIntelligenceSetup({
                 Run Fresh Research
               </Label>
               <p className="text-sm text-muted-foreground mt-1">
-                Research a new organization from their website. Creates a campaign-scoped snapshot you control.
+                Research a new organization from their website. Creates a campaign-scoped snapshot you control with
+                the same level of intelligence as the Organization Profile workflow.
               </p>
             </div>
           </div>

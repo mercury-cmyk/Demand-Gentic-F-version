@@ -500,7 +500,7 @@ router.get("/available-sources", requireAuth, async (req, res) => {
       reusableSnapshots: snapshots,
       modes: [
         { value: 'use_existing', label: 'Use Existing Organization Intelligence', description: 'Load from saved organization profile or snapshot' },
-        { value: 'fresh_research', label: 'Run Fresh Research', description: 'Research a new organization from their website' },
+        { value: 'fresh_research', label: 'Run Fresh Research', description: 'Research a new organization from their website with Organization Profile-level intelligence' },
         { value: 'none', label: 'No Organization Intelligence', description: 'Agent operates without organization context (neutral/research mode)' },
       ],
     });
