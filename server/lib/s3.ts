@@ -1,53 +1,36 @@
 /**
- * S3 Client Library
- * Supports AWS S3, Cloudflare R2, Wasabi, MinIO, and other S3-compatible services
+ * Cloud Storage Library
+ * Supports Google Cloud Storage (primary) with S3-compatible fallback
  * Provides presigned URLs for direct browser uploads and secure downloads
  */
 
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  HeadObjectCommand,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Storage, Bucket } from '@google-cloud/storage';
 import { Readable } from 'stream';
 
 // Environment configuration
-const S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID;
-const S3_SECRET_ACCESS_KEY = process.env.S3_SECRET_ACCESS_KEY;
-const S3_REGION = process.env.S3_REGION || 'us-east-1';
-const S3_ENDPOINT = process.env.S3_ENDPOINT; // Required for R2/MinIO; omit for AWS
-const S3_BUCKET = process.env.S3_BUCKET || 'pivotal-crm-dev';
-const S3_PUBLIC_BASE = process.env.S3_PUBLIC_BASE; // Optional CDN base URL
+const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demangent-storage';
+const GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
 
-// Check if using custom endpoint (R2, Wasabi, MinIO, etc.)
-const isCustomEndpoint = !!S3_ENDPOINT;
-
-/**
- * S3 Client instance
- * Configured to work with AWS S3 and S3-compatible services
- */
-export const s3Client = new S3Client({
-  region: S3_REGION,
-  credentials: S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY ? {
-    accessKeyId: S3_ACCESS_KEY_ID,
-    secretAccessKey: S3_SECRET_ACCESS_KEY,
-  } : undefined, // Allow IAM roles in production
-  ...(isCustomEndpoint ? {
-    endpoint: S3_ENDPOINT,
-    forcePathStyle: true, // Required for MinIO/some S3-compatible services
-  } : {}),
+// Initialize Google Cloud Storage client
+// In Cloud Run, it uses the default service account automatically
+const storage = new Storage({
+  projectId: GCS_PROJECT_ID,
+  ...(GCS_KEY_FILE ? { keyFilename: GCS_KEY_FILE } : {}),
 });
 
-export const BUCKET = S3_BUCKET;
+const bucket: Bucket = storage.bucket(GCS_BUCKET);
+
+export const BUCKET = GCS_BUCKET;
+
+// Legacy export for compatibility
+export const s3Client = null; // Deprecated - use GCS functions instead
 
 /**
- * Generate presigned URL for uploading a file directly to S3
+ * Generate presigned URL for uploading a file directly to GCS
  * Browser can PUT to this URL without server involvement
- * 
- * @param key - S3 object key (file path in bucket)
+ *
+ * @param key - Object key (file path in bucket)
  * @param contentType - MIME type of the file
  * @param expiresIn - URL expiration time in seconds (default: 15 minutes)
  * @returns Presigned URL for uploading
@@ -57,20 +40,23 @@ export async function getPresignedUploadUrl(
   contentType: string,
   expiresIn: number = 900
 ): Promise<string> {
-  const command = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    ContentType: contentType,
+  const file = bucket.file(key);
+
+  const [url] = await file.getSignedUrl({
+    version: 'v4',
+    action: 'write',
+    expires: Date.now() + expiresIn * 1000,
+    contentType,
   });
 
-  return await getSignedUrl(s3Client, command, { expiresIn });
+  return url;
 }
 
 /**
- * Generate presigned URL for downloading a file from S3
+ * Generate presigned URL for downloading a file from GCS
  * Short-lived URL for secure, temporary access to private files
- * 
- * @param key - S3 object key (file path in bucket)
+ *
+ * @param key - Object key (file path in bucket)
  * @param expiresIn - URL expiration time in seconds (default: 15 minutes)
  * @returns Presigned URL for downloading
  */
@@ -78,20 +64,23 @@ export async function getPresignedDownloadUrl(
   key: string,
   expiresIn: number = 900
 ): Promise<string> {
-  const command = new GetObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
+  const file = bucket.file(key);
+
+  const [url] = await file.getSignedUrl({
+    version: 'v4',
+    action: 'read',
+    expires: Date.now() + expiresIn * 1000,
   });
 
-  return await getSignedUrl(s3Client, command, { expiresIn });
+  return url;
 }
 
 /**
- * Upload a file to S3 (server-side)
+ * Upload a file to GCS (server-side)
  * Use this when you need to upload from the server
  * For browser uploads, use getPresignedUploadUrl instead
- * 
- * @param key - S3 object key (file path in bucket)
+ *
+ * @param key - Object key (file path in bucket)
  * @param body - File content (Buffer, Stream, or string)
  * @param contentType - MIME type of the file
  */
@@ -100,76 +89,85 @@ export async function uploadToS3(
   body: Buffer | Readable | string,
   contentType: string
 ): Promise<void> {
-  const command = new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-    Body: body as any,
-    ContentType: contentType,
-  });
+  const file = bucket.file(key);
 
-  await s3Client.send(command);
-}
-
-/**
- * Get an object from S3
- * Returns the object body as a stream
- * 
- * @param key - S3 object key (file path in bucket)
- * @returns Object body stream
- */
-export async function getFromS3(key: string): Promise<NodeJS.ReadableStream> {
-  const command = new GetObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-  });
-
-  const response = await s3Client.send(command);
-  return response.Body as NodeJS.ReadableStream;
-}
-
-/**
- * Delete an object from S3
- * 
- * @param key - S3 object key (file path in bucket)
- */
-export async function deleteFromS3(key: string): Promise<void> {
-  const command = new DeleteObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-  });
-
-  await s3Client.send(command);
-}
-
-/**
- * Check if an object exists in S3
- * 
- * @param key - S3 object key (file path in bucket)
- * @returns True if object exists, false otherwise
- */
-export async function s3ObjectExists(key: string): Promise<boolean> {
-  try {
-    const command = new HeadObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
+  if (Buffer.isBuffer(body)) {
+    await file.save(body, {
+      contentType,
+      resumable: false,
     });
-    await s3Client.send(command);
-    return true;
-  } catch (error: any) {
-    if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
-      return false;
-    }
-    throw error;
+  } else if (typeof body === 'string') {
+    await file.save(Buffer.from(body), {
+      contentType,
+      resumable: false,
+    });
+  } else {
+    // Stream upload
+    await new Promise<void>((resolve, reject) => {
+      const writeStream = file.createWriteStream({
+        contentType,
+        resumable: false,
+      });
+
+      body.pipe(writeStream)
+        .on('finish', resolve)
+        .on('error', reject);
+    });
   }
 }
 
 /**
- * Generate S3 key for uploads
+ * Alias for uploadToS3 with different parameter order (for backward compatibility)
+ */
+export async function uploadStreamToS3(
+  body: Buffer | Readable | string,
+  key: string,
+  contentType: string
+): Promise<void> {
+  return uploadToS3(key, body, contentType);
+}
+
+/**
+ * Get an object from GCS
+ * Returns the object body as a stream
+ *
+ * @param key - Object key (file path in bucket)
+ * @returns Object body stream
+ */
+export async function getFromS3(key: string): Promise<NodeJS.ReadableStream> {
+  const file = bucket.file(key);
+  return file.createReadStream();
+}
+
+/**
+ * Delete an object from GCS
+ *
+ * @param key - Object key (file path in bucket)
+ */
+export async function deleteFromS3(key: string): Promise<void> {
+  const file = bucket.file(key);
+  await file.delete({ ignoreNotFound: true });
+}
+
+/**
+ * Check if an object exists in GCS
+ *
+ * @param key - Object key (file path in bucket)
+ * @returns True if object exists, false otherwise
+ */
+export async function s3ObjectExists(key: string): Promise<boolean> {
+  const file = bucket.file(key);
+  const [exists] = await file.exists();
+  return exists;
+}
+
+/**
+ * Generate storage key for uploads
  * Creates organized folder structure with timestamps
- * 
+ *
  * @param type - File type category (e.g., 'uploads', 'exports', 'logs')
  * @param filename - Original filename
- * @returns S3 key (path)
+ * @returns Storage key (path)
  */
 export function generateS3Key(type: string, filename: string): string {
   const timestamp = Date.now();
@@ -178,67 +176,52 @@ export function generateS3Key(type: string, filename: string): string {
 }
 
 /**
- * Get public URL for an S3 object (if using CDN)
+ * Get public URL for an object (if bucket is public or using CDN)
  * Falls back to generating a presigned URL if no CDN is configured
- * 
- * @param key - S3 object key
+ *
+ * @param key - Object key
  * @returns Public URL or presigned URL
  */
 export async function getPublicUrl(key: string): Promise<string> {
-  if (S3_PUBLIC_BASE) {
-    return `${S3_PUBLIC_BASE}/${key}`;
+  const publicBase = process.env.GCS_PUBLIC_BASE || process.env.S3_PUBLIC_BASE;
+
+  if (publicBase) {
+    return `${publicBase}/${key}`;
   }
-  
+
   // No CDN configured, generate presigned URL
   return await getPresignedDownloadUrl(key, 3600); // 1 hour expiry
 }
 
 /**
- * Stream a file from S3
+ * Stream a file from GCS
  * Returns a readable stream for processing large files without loading into memory
- * 
- * @param key - S3 object key
+ *
+ * @param key - Object key
  * @returns Readable stream with UTF-8 encoding
  */
 export async function streamFromS3(key: string): Promise<Readable> {
-  const command = new GetObjectCommand({
-    Bucket: BUCKET,
-    Key: key,
-  });
+  const file = bucket.file(key);
+  const stream = file.createReadStream();
 
-  const response = await s3Client.send(command);
-
-  if (!response.Body) {
-    throw new Error(`No body in S3 response for key: ${key}`);
-  }
-
-  // AWS SDK returns the Body as a ReadableStream or Blob in browsers,
-  // but in Node.js it's already a Readable stream
-  const stream = response.Body as Readable;
-  
   // Set UTF-8 encoding to prevent character corruption
   stream.setEncoding('utf8');
-  
+
   return stream;
 }
 
 /**
- * Check if S3 is properly configured
- * Accepts either explicit credentials OR IAM role-based auth (bucket must be set)
- * @returns True if S3 is configured (either with keys or IAM roles)
+ * Check if GCS is properly configured
+ * In Cloud Run, this always returns true since it uses the default service account
+ * @returns True if GCS is configured
  */
 export function isS3Configured(): boolean {
   // Bucket is always required
-  if (!S3_BUCKET) {
+  if (!GCS_BUCKET) {
     return false;
   }
-  
-  // Accept either explicit credentials OR assume IAM role is available
-  // If keys are set, validate both are present
-  if (S3_ACCESS_KEY_ID || S3_SECRET_ACCESS_KEY) {
-    return !!(S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY);
-  }
-  
-  // No keys set - assume IAM role auth in production
+
+  // In Cloud Run, GCS is always available via the default service account
+  // For local development, either GCS_KEY_FILE or GOOGLE_APPLICATION_CREDENTIALS should be set
   return true;
 }

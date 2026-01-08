@@ -14,8 +14,6 @@
     "test-audio": "tsx test-audio-transmission.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.917.0",
-    "@aws-sdk/s3-request-presigner": "^3.917.0",
     "@google/genai": "^1.29.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
