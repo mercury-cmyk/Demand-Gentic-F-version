@@ -690,7 +690,7 @@ const testCallSchema = z.object({
   campaignId: z.string().optional(), // Optional - will use campaign settings if provided
 });
 
-router.post("/test-call", requireAuth, requireRole("admin"), async (req, res) => {
+router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { phoneNumber, contactFirstName, contactLastName, contactTitle, companyName, campaignId } = testCallSchema.parse(req.body);
     
@@ -883,7 +883,7 @@ const testOpenAIRealtimeSchema = z.object({
   settings: z.record(z.unknown()).optional(),
 });
 
-router.post("/test-openai-realtime", requireAuth, requireRole("admin"), async (req, res) => {
+router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const {
       phoneNumber,
