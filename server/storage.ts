@@ -5142,6 +5142,7 @@ export class DatabaseStorage implements IStorage {
       id: record.id,
       mailboxEmail: record.mailboxEmail || '',
       mailboxName: record.displayName || record.mailboxEmail || 'Unknown',
+      provider: record.provider,
       isActive: record.status === 'connected',
       lastSyncAt: record.lastSyncAt ? record.lastSyncAt.toISOString() : undefined,
     }));

@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot } from "lucide-react";
+import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus } from "lucide-react";
 import { HybridAgentAssignment } from "@/components/hybrid-agent-assignment";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,20 +27,27 @@ export default function PhoneCampaignEditPage() {
 
   // State for campaign fields
   const [name, setName] = useState("");
-  const [callScript, setCallScript] = useState("");
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedLists, setSelectedLists] = useState<string[]>([]);
   const [selectedDomainSets, setSelectedDomainSets] = useState<string[]>([]);
   const [audienceSource, setAudienceSource] = useState<"segment" | "list" | "domain_set">("segment");
-  
+
+  // Campaign Context fields (replaces call script)
+  const [campaignObjective, setCampaignObjective] = useState("");
+  const [productServiceInfo, setProductServiceInfo] = useState("");
+  const [talkingPoints, setTalkingPoints] = useState<string[]>([]);
+  const [newTalkingPoint, setNewTalkingPoint] = useState("");
+  const [targetAudienceDescription, setTargetAudienceDescription] = useState("");
+  const [successCriteria, setSuccessCriteria] = useState("");
+
   // Account Cap state
   const [capEnabled, setCapEnabled] = useState(false);
   const [leadsPerAccount, setLeadsPerAccount] = useState(3);
   const [capMode, setCapMode] = useState<string>('queue_size');
-  
+
   // QA Parameters state
   const [qaParameters, setQaParameters] = useState<any>(null);
-  
+
   // Lead Delivery state
   const [deliveryTemplateId, setDeliveryTemplateId] = useState<string | null>(null);
 
@@ -65,11 +72,6 @@ export default function PhoneCampaignEditPage() {
     queryKey: ['/api/domain-sets'],
   });
 
-  // Fetch call scripts
-  const { data: callScripts = [] } = useQuery<any[]>({
-    queryKey: ['/api/call-scripts'],
-  });
-  
   // Fetch export templates for lead delivery
   const { data: exportTemplates = [] } = useQuery<any[]>({
     queryKey: ['/api/export-templates'],
@@ -79,14 +81,20 @@ export default function PhoneCampaignEditPage() {
   useEffect(() => {
     if (campaign) {
       setName(campaign.name || "");
-      setCallScript(campaign.callScript || "");
-      
+
+      // Initialize Campaign Context fields
+      setCampaignObjective(campaign.campaignObjective || "");
+      setProductServiceInfo(campaign.productServiceInfo || "");
+      setTalkingPoints(campaign.talkingPoints || []);
+      setTargetAudienceDescription(campaign.targetAudienceDescription || "");
+      setSuccessCriteria(campaign.successCriteria || "");
+
       // Initialize audience selections
       if (campaign.audienceRefs) {
         setSelectedSegments(campaign.audienceRefs.segments || []);
         setSelectedLists(campaign.audienceRefs.lists || []);
         setSelectedDomainSets(campaign.audienceRefs.domain_sets || []);
-        
+
         // Determine source
         if (campaign.audienceRefs.segments?.length > 0) {
           setAudienceSource("segment");
@@ -96,21 +104,33 @@ export default function PhoneCampaignEditPage() {
           setAudienceSource("domain_set");
         }
       }
-      
+
       // Initialize account cap
       if (campaign.accountCap) {
         setCapEnabled(campaign.accountCap.enabled || false);
         setLeadsPerAccount(campaign.accountCap.leadsPerAccount || 3);
         setCapMode(campaign.accountCap.mode || 'queue_size');
       }
-      
+
       // Initialize QA parameters
       setQaParameters(campaign.qaParameters || null);
-      
+
       // Initialize delivery template
       setDeliveryTemplateId(campaign.deliveryTemplateId || null);
     }
   }, [campaign]);
+
+  // Talking Points management
+  const addTalkingPoint = () => {
+    if (newTalkingPoint.trim()) {
+      setTalkingPoints(prev => [...prev, newTalkingPoint.trim()]);
+      setNewTalkingPoint('');
+    }
+  };
+
+  const removeTalkingPoint = (index: number) => {
+    setTalkingPoints(prev => prev.filter((_, i) => i !== index));
+  };
 
   // Update campaign mutation
   const updateMutation = useMutation({
@@ -144,23 +164,14 @@ export default function PhoneCampaignEditPage() {
       return;
     }
 
-    if (!callScript.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Call script is required",
-        variant: "destructive",
-      });
-      return;
-    }
-
     // Build audienceRefs - preserve existing refs and update only the selected source
     const audienceRefs: any = { ...campaign?.audienceRefs };
-    
+
     // Clear all audience sources first
     delete audienceRefs.segments;
     delete audienceRefs.lists;
     delete audienceRefs.domain_sets;
-    
+
     // Set only the selected source
     if (audienceSource === 'segment' && selectedSegments.length > 0) {
       audienceRefs.segments = selectedSegments;
@@ -189,11 +200,16 @@ export default function PhoneCampaignEditPage() {
 
     updateMutation.mutate({
       name,
-      callScript,
       audienceRefs,
       accountCap,
       qaParameters,
       deliveryTemplateId,
+      // Campaign Context fields
+      campaignObjective,
+      productServiceInfo,
+      talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
+      targetAudienceDescription,
+      successCriteria,
     });
   };
 
@@ -296,7 +312,7 @@ export default function PhoneCampaignEditPage() {
             <CardHeader>
               <CardTitle>Basic Information</CardTitle>
               <CardDescription>
-                Update campaign name and call script
+                Update campaign name
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -310,68 +326,119 @@ export default function PhoneCampaignEditPage() {
                   data-testid="input-name"
                 />
               </div>
+            </CardContent>
+          </Card>
 
+          {/* Campaign Context Section */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-primary" />
+                <CardTitle>Campaign Context</CardTitle>
+              </div>
+              <CardDescription>
+                Define the campaign goals and context. This information will be displayed to agents during calls
+                to help them understand the campaign objectives and have informed conversations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Campaign Objective */}
               <div className="space-y-2">
-                <Label htmlFor="script-select">Call Script</Label>
-                <Select value={callScript} onValueChange={setCallScript}>
-                  <SelectTrigger data-testid="select-script">
-                    <SelectValue placeholder="Select a call script" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {callScripts.map((script: any) => (
-                      <SelectItem key={script.id} value={script.content}>
-                        {script.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="campaign-objective">Campaign Objective</Label>
+                <Textarea
+                  id="campaign-objective"
+                  placeholder="e.g., Book qualified meetings with IT decision makers interested in cloud security solutions"
+                  value={campaignObjective}
+                  onChange={(e) => setCampaignObjective(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-campaign-objective"
+                />
+                <p className="text-xs text-muted-foreground">What is the primary goal of each call?</p>
               </div>
 
+              {/* Product/Service Info */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="script">Call Script Content</Label>
-                  <div className="text-xs text-muted-foreground">
-                    Use special bullets: ✓ (checkmark), ★ (star), → (arrow), ○ (circle), 1. (numbered)
-                  </div>
-                </div>
+                <Label htmlFor="product-service-info">
+                  <Package className="w-4 h-4 inline mr-1" />
+                  Product/Service Information
+                </Label>
                 <Textarea
-                  id="script"
-                  value={callScript}
-                  onChange={(e) => setCallScript(e.target.value)}
-                  placeholder="Enter your call script here...&#10;&#10;Example:&#10;Opening&#10;✓ Introduce yourself&#10;✓ Confirm contact name&#10;&#10;Key Benefits&#10;★ 40% faster lead qualification&#10;★ Reduces manual data entry&#10;&#10;Next Steps&#10;→ Schedule demo&#10;→ Send follow-up"
-                  rows={12}
-                  data-testid="textarea-script"
-                  className="font-mono text-sm"
+                  id="product-service-info"
+                  placeholder="Describe your product/service, key features, and value proposition..."
+                  value={productServiceInfo}
+                  onChange={(e) => setProductServiceInfo(e.target.value)}
+                  rows={4}
+                  data-testid="textarea-product-info"
                 />
-                <div className="rounded-lg border bg-muted/50 p-3 space-y-2">
-                  <p className="text-xs font-semibold text-foreground">📋 Stylish Bullet Points Guide</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">✓</code>
-                      <span>Green checkmark (important steps)</span>
+              </div>
+
+              {/* Key Talking Points */}
+              <div className="space-y-3">
+                <Label>
+                  <ListChecks className="w-4 h-4 inline mr-1" />
+                  Key Talking Points
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Add the main points agents should emphasize during conversations.
+                </p>
+                <div className="space-y-2">
+                  {talkingPoints.map((point, index) => (
+                    <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                      <span className="flex-1 text-sm">{point}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeTalkingPoint(index)}
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">★</code>
-                      <span>Gold star (key benefits)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">→</code>
-                      <span>Blue arrow (next steps)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">○</code>
-                      <span>Gray circle (optional items)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">1. 2. 3.</code>
-                      <span>Numbered steps (sequential)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <code className="px-1.5 py-0.5 bg-background rounded">- * •</code>
-                      <span>Default bullets (standard)</span>
-                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="e.g., Reduces security incidents by 40%"
+                      value={newTalkingPoint}
+                      onChange={(e) => setNewTalkingPoint(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTalkingPoint())}
+                      data-testid="input-new-talking-point"
+                    />
+                    <Button variant="outline" onClick={addTalkingPoint} data-testid="button-add-talking-point">
+                      <Plus className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
+              </div>
+
+              {/* Target Audience */}
+              <div className="space-y-2">
+                <Label htmlFor="target-audience">
+                  <Users className="w-4 h-4 inline mr-1" />
+                  Target Audience
+                </Label>
+                <Textarea
+                  id="target-audience"
+                  placeholder="e.g., CISOs and IT Directors at mid-market companies (500-5000 employees) in healthcare and finance"
+                  value={targetAudienceDescription}
+                  onChange={(e) => setTargetAudienceDescription(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-target-audience"
+                />
+                <p className="text-xs text-muted-foreground">Who are you trying to reach?</p>
+              </div>
+
+              {/* Success Criteria */}
+              <div className="space-y-2">
+                <Label htmlFor="success-criteria">Success Criteria</Label>
+                <Textarea
+                  id="success-criteria"
+                  placeholder="e.g., Meeting booked with decision maker, or referral to correct contact"
+                  value={successCriteria}
+                  onChange={(e) => setSuccessCriteria(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-success-criteria"
+                />
+                <p className="text-xs text-muted-foreground">What counts as a successful call outcome?</p>
               </div>
             </CardContent>
           </Card>
@@ -500,8 +567,16 @@ export default function PhoneCampaignEditPage() {
         {/* QA Parameters Tab */}
         <TabsContent value="qa-parameters" className="space-y-4">
           <StepQAParameters
-            data={{ qaParameters }}
+            data={{
+              qaParameters,
+              campaignObjective,
+              productServiceInfo,
+              talkingPoints,
+              targetAudienceDescription,
+              successCriteria,
+            }}
             onChange={(data) => setQaParameters(data.qaParameters)}
+            onNext={() => {}}
           />
         </TabsContent>
 

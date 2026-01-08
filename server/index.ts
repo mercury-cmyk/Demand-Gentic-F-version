@@ -244,6 +244,15 @@ app.use((req, res, next) => {
   } else {
     console.log("[M365SyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
   }
+
+  // Gmail email sync - Only start if enabled
+  const ENABLE_GMAIL_SYNC = process.env.ENABLE_GMAIL_SYNC === 'true';
+  if (ENABLE_GMAIL_SYNC) {
+    const { startGmailSyncJob } = await import("./jobs/gmail-sync-job");
+    startGmailSyncJob();
+  } else {
+    console.log("[GmailSyncJob] AUTO-SYNC DISABLED - Use manual trigger API endpoint");
+  }
   
   // Auto-resume stuck email validation jobs (with error handling and timeout)
   const { resumeStuckEmailValidationJobs } = await import("./lib/resume-validation-jobs");

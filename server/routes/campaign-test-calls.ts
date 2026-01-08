@@ -195,6 +195,9 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
   - Test Call ID: ${testCallId}
   - WebSocket URL: ${wsUrl}`);
 
+    // DEBUG: Log connection_id being used
+    console.log(`[Campaign Test Call] Using connection_id: ${connectionId} (from TELNYX_CALL_CONTROL_APP_ID=${process.env.TELNYX_CALL_CONTROL_APP_ID}, TELNYX_CONNECTION_ID=${process.env.TELNYX_CONNECTION_ID})`);
+
     // Initiate the Telnyx call
     const telnyxResponse = await fetch("https://api.telnyx.com/v2/calls", {
       method: "POST",

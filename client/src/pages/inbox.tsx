@@ -675,7 +675,7 @@ export default function InboxPage() {
                     <div>
                       <h4 className="font-semibold text-sm mb-1">No Mailbox Connected</h4>
                       <p className="text-sm text-muted-foreground">
-                        You need to connect a mailbox account before sending emails. Go to Settings to connect your Microsoft 365 account.
+                        You need to connect a mailbox account before sending emails. Go to Settings to connect your Microsoft 365 or Google account.
                       </p>
                     </div>
                   </div>
@@ -1086,7 +1086,7 @@ export default function InboxPage() {
                       <>
                         <h3 className="text-lg font-semibold mb-2">Your Inbox is Empty</h3>
                         <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                          Connect your Microsoft 365 account and sync your emails to start managing communications from within the CRM
+                          Connect your Microsoft 365 or Google account and sync your emails to start managing communications from within the CRM
                         </p>
                         <div className="flex flex-col gap-3 items-center">
                           <Button
@@ -1095,7 +1095,7 @@ export default function InboxPage() {
                             data-testid="button-connect-m365"
                           >
                             <Mail className="h-4 w-4 mr-2" />
-                            Connect Microsoft 365
+                            Connect Email
                           </Button>
                           <p className="text-xs text-muted-foreground">
                             Or sync your existing connection

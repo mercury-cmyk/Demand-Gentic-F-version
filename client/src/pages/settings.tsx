@@ -623,6 +623,7 @@ export default function SettingsPage() {
 
         <TabsContent value="integrations" className="space-y-4 mt-6">
           <Microsoft365IntegrationCard />
+          <GoogleIntegrationCard />
 
           <Card>
             <CardHeader>
@@ -957,6 +958,213 @@ function Microsoft365IntegrationCard() {
                 <li>Email sequence automation</li>
                 <li>Contact engagement history</li>
                 <li>Email analytics and insights</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Google Integration Component
+function GoogleIntegrationCard() {
+  const { toast } = useToast();
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const { data: status, isLoading } = useQuery<{
+    connected: boolean;
+    mailboxEmail?: string | null;
+    displayName?: string | null;
+    connectedAt?: string | null;
+    lastSyncAt?: string | null;
+  }>({
+    queryKey: ['/api/oauth/google/status'],
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest('POST', '/api/oauth/google/disconnect');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/oauth/google/status'] });
+      toast({
+        title: "Disconnected",
+        description: "Google mailbox has been disconnected",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to disconnect mailbox",
+      });
+    },
+  });
+
+  const handleConnect = async () => {
+    try {
+      setIsConnecting(true);
+      const response = await apiRequest('GET', '/api/oauth/google/authorize');
+      const data = await response.json();
+      const authUrl = data.authUrl;
+
+      const width = 600;
+      const height = 700;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+
+      const authWindow = window.open(
+        authUrl,
+        'Google OAuth',
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+
+      if (!authWindow || authWindow.closed || typeof authWindow.closed === 'undefined') {
+        setIsConnecting(false);
+        toast({
+          variant: "destructive",
+          title: "Popup Blocked",
+          description: "Please allow popups for this site to connect your Google account",
+        });
+        return;
+      }
+
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data.type === 'oauth-success' && event.data.provider === 'google') {
+          clearInterval(pollTimer);
+          window.removeEventListener('message', handleMessage);
+          setIsConnecting(false);
+          queryClient.invalidateQueries({ queryKey: ['/api/oauth/google/status'] });
+          toast({
+            title: "Connected",
+            description: "Google account connected successfully",
+          });
+        } else if (event.data.type === 'oauth-error' && event.data.provider === 'google') {
+          clearInterval(pollTimer);
+          window.removeEventListener('message', handleMessage);
+          setIsConnecting(false);
+          toast({
+            variant: "destructive",
+            title: "Connection Failed",
+            description: event.data.error || "Failed to connect Google account",
+          });
+        }
+      };
+      window.addEventListener('message', handleMessage);
+
+      const pollTimer = setInterval(() => {
+        if (authWindow?.closed) {
+          clearInterval(pollTimer);
+          window.removeEventListener('message', handleMessage);
+          setIsConnecting(false);
+          queryClient.invalidateQueries({ queryKey: ['/api/oauth/google/status'] });
+        }
+      }, 500);
+    } catch (error: any) {
+      setIsConnecting(false);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to initiate OAuth flow",
+      });
+    }
+  };
+
+  const handleDisconnect = () => {
+    if (confirm('Are you sure you want to disconnect your Google mailbox?')) {
+      disconnectMutation.mutate();
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Mail className="h-5 w-5" />
+          Google Workspace / Gmail Integration
+        </CardTitle>
+        <CardDescription>
+          Connect your Google account to sync emails and send from your inbox
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center p-4">
+            <p className="text-muted-foreground">Loading...</p>
+          </div>
+        ) : status?.connected ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 border rounded-lg bg-accent/5">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-8 w-8 text-green-600" />
+                <div className="space-y-1">
+                  <h4 className="font-medium flex items-center gap-2">
+                    {status.displayName || 'Google'}
+                    <Badge variant="outline" className="text-green-600 border-green-600">
+                      Connected
+                    </Badge>
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    {status.mailboxEmail}
+                  </p>
+                  {status.connectedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Connected {new Date(status.connectedAt).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleDisconnect}
+                disabled={disconnectMutation.isPending}
+                data-testid="button-disconnect-google"
+              >
+                {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
+              </Button>
+            </div>
+
+            <div className="text-sm space-y-2">
+              <h4 className="font-medium">Enabled Features:</h4>
+              <ul className="space-y-1 text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  Inbox sync and history
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  Send and reply from Gmail
+                </li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-8 w-8 text-muted-foreground" />
+                <div>
+                  <h4 className="font-medium">Google Workspace / Gmail</h4>
+                  <p className="text-sm text-muted-foreground">Not connected</p>
+                </div>
+              </div>
+              <Button
+                onClick={handleConnect}
+                disabled={isConnecting}
+                data-testid="button-connect-google"
+              >
+                <LinkIcon className="mr-2 h-4 w-4" />
+                {isConnecting ? 'Connecting...' : 'Connect'}
+              </Button>
+            </div>
+
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p className="font-medium">Connect to unlock:</p>
+              <ul className="space-y-1 ml-4 list-disc">
+                <li>Automatic inbox synchronization</li>
+                <li>Email replies from Gmail</li>
+                <li>Contact engagement history</li>
               </ul>
             </div>
           </div>

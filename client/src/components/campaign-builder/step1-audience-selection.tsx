@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Users, Filter, List, Globe, Eye, Save, ChevronRight, X, Plus, Loader2 } from "lucide-react";
+import { Users, Filter, List, Globe, Eye, Save, ChevronRight, X, Loader2, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
@@ -31,7 +31,10 @@ interface AudienceSelection {
 }
 
 // Renamed Step1AudienceSelection to match the original component name and updated prop type.
-export function Step1AudienceSelection({ data, onNext }: Step1Props) { 
+export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Props) {
+  // Campaign Name
+  const [campaignName, setCampaignName] = useState(data.name || "");
+
   const [audienceSource, setAudienceSource] = useState<"filters" | "segment" | "list" | "domain_set">(
     data.audience?.source || "filters"
   );
@@ -82,6 +85,7 @@ export function Step1AudienceSelection({ data, onNext }: Step1Props) {
     console.log('Campaign audience data:', audienceData); // Debug log
 
     onNext({
+      name: campaignName,
       audience: audienceData,
     });
   };
@@ -164,6 +168,29 @@ export function Step1AudienceSelection({ data, onNext }: Step1Props) {
 
   return (
     <div className="space-y-6">
+      {/* Campaign Name */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            Campaign Name
+          </CardTitle>
+          <CardDescription>Give your campaign a descriptive name</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="campaign-name">Name</Label>
+            <Input
+              id="campaign-name"
+              data-testid="input-campaign-name"
+              placeholder={campaignType === "email" ? "e.g., Q4 Product Launch Email" : "e.g., Q4 Outbound Dialer Campaign"}
+              value={campaignName}
+              onChange={(e) => setCampaignName(e.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs value={audienceSource} onValueChange={(v) => setAudienceSource(v as any)}>
         <TabsList className="grid w-full grid-cols-4 rounded-xl border border-border/60 bg-card/60 p-1.5">
           <TabsTrigger value="filters" data-testid="tab-advanced-filters">
@@ -585,11 +612,12 @@ export function Step1AudienceSelection({ data, onNext }: Step1Props) {
 
       {/* Next Button */}
       <div className="flex justify-end">
-        <Button 
-          onClick={handleNext} 
-          size="lg" 
+        <Button
+          onClick={handleNext}
+          size="lg"
           data-testid="button-next-step"
           disabled={
+            !campaignName.trim() ||
             (audienceSource === "segment" && selectedSegments.length === 0) ||
             (audienceSource === "list" && selectedLists.length === 0) ||
             (audienceSource === "domain_set" && selectedDomainSets.length === 0) ||

@@ -26,6 +26,7 @@ import {
   validateSkillInputs,
   previewCompiledPrompt,
 } from "../services/agent-skill-compiler";
+import { buildCampaignContextSection } from "../services/foundation-capabilities";
 import {
   getAllSkills,
   getSkillsByCategory,
@@ -173,6 +174,7 @@ const refineSystemPromptSchema = z.object({
 
 const previewConversationSchema = z.object({
   virtualAgentId: z.string().optional(),
+  campaignId: z.string().optional(),  // Load campaign context for preview
   systemPrompt: z.string().optional(),
   firstMessage: z.string().optional(),
   messages: z.array(z.object({
@@ -184,6 +186,7 @@ const previewConversationSchema = z.object({
 function detectIdentityConfirmedPreview(
   messages: Array<{ role: "user" | "assistant"; content: string }>
 ): boolean {
+  // Simple substring patterns for quick matching
   const confirmPatterns = [
     "yes",
     "yeah",
@@ -193,9 +196,25 @@ function detectIdentityConfirmedPreview(
     "this is me",
     "that's me",
     "it is me",
+    "it's me",
     "this is ",
     "speaking with",
+    "i am ",           // "I am Jordan"
+    "i'm ",            // "I'm Jordan"
+    " here",           // "Jordan here"
   ];
+
+  // Regex patterns for more complex matching
+  const confirmRegexPatterns = [
+    /\bi am \w+/,                    // "I am Jordan", "Yes I am Jordan"
+    /\bi'?m \w+/,                    // "I'm Jordan"
+    /\w+ speaking$/,                 // "Jordan speaking"
+    /\w+ here$/,                     // "Jordan here"
+    /why\s+(are\s+)?you\s+ask/,      // "Why are you asking" - frustration at re-asking
+    /i\s+(said|told|already)/,       // "I said...", "I told you...", "I already..." - frustration at repeating
+    /you('re)?\s*(talking|speaking)\s*(to|with)/,  // "You're talking to Jordan"
+  ];
+
   const denyPatterns = [
     "not me",
     "wrong number",
@@ -203,16 +222,30 @@ function detectIdentityConfirmedPreview(
     "not available",
     "not speaking",
     "can't talk",
+    "cannot talk",
+    "who is this",
+    "who's calling",
   ];
 
   for (const msg of messages) {
     if (msg.role !== "user") continue;
     const text = msg.content.toLowerCase();
+
+    // Skip if denial pattern detected
     if (denyPatterns.some((pattern) => text.includes(pattern))) {
       continue;
     }
+
+    // Check simple patterns
     if (confirmPatterns.some((pattern) => text.includes(pattern))) {
       return true;
+    }
+
+    // Check regex patterns
+    for (const regex of confirmRegexPatterns) {
+      if (regex.test(text)) {
+        return true;
+      }
     }
   }
 
@@ -450,7 +483,7 @@ router.post("/:id/refine-system", requireAuth, requireRole("admin"), async (req,
 // Preview conversation without placing a call
 router.post("/preview-conversation", requireAuth, async (req, res) => {
   try {
-    const { virtualAgentId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
+    const { virtualAgentId, campaignId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
     const historyLimit = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_HISTORY || "16", 10);
     const maxTokens = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MAX_TOKENS || "320", 10);
     const temperature = Number.parseFloat(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_TEMPERATURE || "0.2");
@@ -485,6 +518,39 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
 
     if (!resolvedSystemPrompt) {
       resolvedSystemPrompt = DEFAULT_B2B_SYSTEM_PROMPT;
+    }
+
+    // Load campaign context if campaignId is provided
+    let campaignContextSection = "";
+    if (campaignId) {
+      const [campaign] = await db
+        .select({
+          campaignObjective: campaigns.campaignObjective,
+          productServiceInfo: campaigns.productServiceInfo,
+          talkingPoints: campaigns.talkingPoints,
+          targetAudienceDescription: campaigns.targetAudienceDescription,
+          campaignObjections: campaigns.campaignObjections,
+          successCriteria: campaigns.successCriteria,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+
+      if (campaign) {
+        campaignContextSection = buildCampaignContextSection({
+          objective: campaign.campaignObjective,
+          productInfo: campaign.productServiceInfo,
+          talkingPoints: campaign.talkingPoints as string[] | null,
+          targetAudience: campaign.targetAudienceDescription,
+          objections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
+          successCriteria: campaign.successCriteria,
+        });
+      }
+    }
+
+    // Inject campaign context into system prompt
+    if (campaignContextSection) {
+      resolvedSystemPrompt += `\n\n---\n\n${campaignContextSection}`;
     }
 
     const rawMessages = (messages || [])

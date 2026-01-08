@@ -26,15 +26,14 @@ interface Step5Props {
 
 export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
   const [isLaunching, setIsLaunching] = useState(false);
-  const [campaignName, setCampaignName] = useState(data.name || "");
 
   const handleLaunch = () => {
     setIsLaunching(true);
-    onNext({ ...data, name: campaignName, action: "launch" });
+    onNext({ ...data, action: "launch" });
   };
 
   const handleSaveDraft = () => {
-    onNext({ ...data, name: campaignName, action: "draft" });
+    onNext({ ...data, action: "draft" });
   };
 
   const handleSendTest = () => {
@@ -65,19 +64,9 @@ export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
       <Card>
         <CardHeader>
           <CardTitle>Campaign Name</CardTitle>
-          <CardDescription>Give your campaign a descriptive name</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="campaign-name">Name</Label>
-            <Input
-              id="campaign-name"
-              data-testid="input-campaign-name"
-              placeholder={campaignType === "email" ? "e.g., Q4 Product Launch Email" : "e.g., Q4 Outbound Dialer Campaign"}
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-            />
-          </div>
+          <p className="text-lg font-medium">{data.name || "Untitled Campaign"}</p>
         </CardContent>
       </Card>
 
@@ -277,26 +266,39 @@ export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Timing</span>
-            <span className="font-medium capitalize">
-              {data.scheduling?.type === "now" ? "Send Immediately" : `Scheduled: ${data.scheduling?.date} ${data.scheduling?.time}`}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Timezone</span>
-            <span className="font-medium">{data.scheduling?.timezone || "UTC"}</span>
-          </div>
           {campaignType === "email" ? (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Throttling</span>
-              <span className="font-medium">{data.scheduling?.throttle || "100"} emails/minute</span>
-            </div>
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Timing</span>
+                <span className="font-medium capitalize">
+                  {data.scheduling?.type === "now" ? "Send Immediately" : `Scheduled: ${data.scheduling?.date} ${data.scheduling?.time}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Timezone</span>
+                <span className="font-medium">{data.scheduling?.timezone || "UTC"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Throttling</span>
+                <span className="font-medium">{data.scheduling?.throttle || "100"} emails/minute</span>
+              </div>
+            </>
           ) : (
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Call Window</span>
-              <span className="font-medium">9:00 AM - 6:00 PM</span>
-            </div>
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Business Hours</span>
+                <span className="font-medium">9:00 AM - 6:00 PM</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Timezone</span>
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                  Contact's Local Time
+                </Badge>
+              </div>
+              <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
+                Calls will be placed based on each contact's country and location data.
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

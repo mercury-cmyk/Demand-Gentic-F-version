@@ -811,6 +811,8 @@ export default function VirtualAgentsPage() {
   const [trainingCenter, setTrainingCenter] = useState<TrainingCenter>(DEFAULT_TRAINING_CENTER);
   const [activeTrainingType, setActiveTrainingType] = useState<'generic' | 'demand_intel' | 'demand_qual' | 'demand_engage'>('generic');
   const [testCallAgent, setTestCallAgent] = useState<VirtualAgent | null>(null);
+  const [testCallAgentCampaignId, setTestCallAgentCampaignId] = useState<string | null>(null);
+  const [testCallAgentCampaigns, setTestCallAgentCampaigns] = useState<Array<{ campaignId: string; campaignName: string; isActive: boolean }>>([]);
   const [previewTokens, setPreviewTokens] = useState<string[]>([]);
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewMessages, setPreviewMessages] = useState<PreviewMessage[]>([]);
@@ -990,6 +992,49 @@ export default function VirtualAgentsPage() {
     });
   }, [testCallAgent]);
 
+  // Fetch campaign assignments for preview context selector
+  useEffect(() => {
+    if (!testCallAgent?.id) {
+      setTestCallAgentCampaignId(null);
+      setTestCallAgentCampaigns([]);
+      return;
+    }
+
+    // Fetch the agent's campaign assignments
+    const fetchCampaignAssignments = async () => {
+      try {
+        const response = await apiRequest('GET', `/api/virtual-agents/${testCallAgent.id}/assignments`);
+        const assignments = await response.json() as Array<{
+          campaignId: string;
+          campaignName: string;
+          isActive: boolean;
+        }>;
+
+        // Store all assignments for the selector
+        setTestCallAgentCampaigns(assignments);
+
+        // Auto-select the first active campaign assignment
+        const activeAssignment = assignments.find(a => a.isActive);
+        if (activeAssignment) {
+          setTestCallAgentCampaignId(activeAssignment.campaignId);
+          console.log('[Preview Studio] Auto-selected campaign context:', activeAssignment.campaignName);
+        } else if (assignments.length > 0) {
+          // Fall back to first assignment if none are active
+          setTestCallAgentCampaignId(assignments[0].campaignId);
+          console.log('[Preview Studio] Using first campaign context:', assignments[0].campaignName);
+        } else {
+          setTestCallAgentCampaignId(null);
+        }
+      } catch (error) {
+        console.error('[Preview Studio] Failed to fetch campaign assignments:', error);
+        setTestCallAgentCampaignId(null);
+        setTestCallAgentCampaigns([]);
+      }
+    };
+
+    fetchCampaignAssignments();
+  }, [testCallAgent?.id]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const speechApi = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1126,17 +1171,20 @@ export default function VirtualAgentsPage() {
   const previewConversationMutation = useMutation({
     mutationFn: async ({
       virtualAgentId,
+      campaignId,
       systemPrompt,
       firstMessage,
       messages,
     }: {
       virtualAgentId?: string;
+      campaignId?: string;
       systemPrompt?: string;
       firstMessage?: string;
       messages: PreviewMessage[];
     }) => {
       const response = await apiRequest('POST', '/api/virtual-agents/preview-conversation', {
         virtualAgentId,
+        campaignId,
         systemPrompt,
         firstMessage,
         messages,
@@ -2230,6 +2278,7 @@ export default function VirtualAgentsPage() {
     try {
       const data = await previewConversationMutation.mutateAsync({
         virtualAgentId: testCallAgent.id,
+        campaignId: testCallAgentCampaignId || undefined,
         systemPrompt: previewSystemPrompt || undefined,
         firstMessage: previewOpeningMessage || undefined,
         messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
@@ -3231,6 +3280,32 @@ export default function VirtualAgentsPage() {
                       {testCallAgent?.provider} • {testCallAgent?.voice || 'Default'}
                     </div>
                   </div>
+
+                  {/* Campaign Context Selector */}
+                  {testCallAgentCampaigns.length > 0 && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Campaign Context</Label>
+                      <Select
+                        value={testCallAgentCampaignId || "none"}
+                        onValueChange={(v) => setTestCallAgentCampaignId(v === "none" ? null : v)}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select campaign..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No campaign context</SelectItem>
+                          {testCallAgentCampaigns.map((c) => (
+                            <SelectItem key={c.campaignId} value={c.campaignId}>
+                              {c.campaignName} {c.isActive ? "" : "(inactive)"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground">
+                        Campaign objective, talking points, and objections will be injected into the agent context.
+                      </p>
+                    </div>
+                  )}
 
                   <div className="rounded-lg border p-2">
                     <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Opening Line</div>

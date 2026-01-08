@@ -1668,15 +1668,23 @@ function detectIdentityConfirmation(transcript: string): boolean {
     /^that'?s me$/,
     /^it'?s me$/,
     /^i am$/,
+    /^i am \w+/,              // "I am Jordan", "I am John Smith"
+    /^i'?m \w+/,              // "I'm Jordan"
+    /\bi am \w+/,             // "Yes I am Jordan", "I said I am Jordan"
+    /\bi'?m \w+/,             // "Yes I'm Jordan"
     /^that'?s correct$/,
     /^correct$/,
     /^right$/,
-    /^yes[,.]?\s*(this is|speaking|that'?s me)/,
-    /^hi[,.]?\s*(yes|this is|speaking)/,
+    /^yes[,.]?\s*(this is|speaking|that'?s me|i am|i'm)/,
+    /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/,
     /speaking$/,
-    /this is \w+(\s+\w+)?$/,  // "This is John" or "This is John Smith"
+    /this is \w+(\s+\w+)?/,   // "This is John" or "This is John Smith" anywhere in text
     /\w+ speaking$/,          // "John speaking"
+    /\w+ here$/,              // "Jordan here"
     /^you('ve)?\s*(got|reached|found)\s*(me|him|her)/,
+    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,  // "You're talking to Jordan"
+    /why\s+(are\s+)?you\s+ask/,  // "Why are you asking" implies frustration at re-asking = already confirmed
+    /i\s+(said|told|already)/,   // "I said...", "I told you...", "I already..." = frustration at repeating
   ];
 
   for (const pattern of identityConfirmPatterns) {

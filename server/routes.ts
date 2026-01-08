@@ -270,6 +270,13 @@ const MAILBOX_ENCRYPTION_KEY =
   process.env.MSFT_OAUTH_CLIENT_SECRET ??
   process.env.M365_CLIENT_SECRET ??
   M365_CLIENT_SECRET;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GMAIL_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
+const GOOGLE_SCOPES =
+  process.env.GOOGLE_OAUTH_SCOPES ??
+  "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+const GOOGLE_REDIRECT_URI =
+  process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`;
 
 type MicrosoftTokenSet = {
   accessToken: string;
@@ -278,6 +285,7 @@ type MicrosoftTokenSet = {
 };
 
 const MAILBOX_PROVIDER = "o365";
+const GOOGLE_MAILBOX_PROVIDER = "google";
 
 function deriveOpportunityStatus(stage: string, requested?: string | null): "open" | "won" | "lost" | "on_hold" {
   const normalized = requested?.toLowerCase();
@@ -523,6 +531,57 @@ async function fetchMicrosoftMessages(accessToken: string) {
     from: message.from?.emailAddress ?? null,
     toRecipients: (message.toRecipients ?? []).map((recipient) => recipient.emailAddress ?? null).filter(Boolean),
   }));
+}
+
+async function exchangeGoogleAuthorizationCodeForTokens(code: string, codeVerifier: string) {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    client_secret: GOOGLE_CLIENT_SECRET,
+    code,
+    redirect_uri: GOOGLE_REDIRECT_URI,
+    grant_type: "authorization_code",
+    code_verifier: codeVerifier,
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to exchange Google authorization code");
+  }
+
+  return (await response.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+    id_token?: string;
+    scope?: string;
+    token_type: string;
+  };
+}
+
+async function fetchGoogleProfile(accessToken: string) {
+  const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to fetch Google profile");
+  }
+
+  return (await response.json()) as {
+    email?: string;
+    name?: string;
+    given_name?: string;
+    family_name?: string;
+  };
 }
 
 async function ensureMailboxTokens(userId: string) {
@@ -1536,15 +1595,18 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Missing required fields: to, subject, body, mailboxAccountId" });
       }
 
-      // Import M365 sync service
-      const { m365SyncService } = await import('./services/m365-sync-service');
-      
-      await m365SyncService.sendEmail(mailboxAccountId, {
-        to,
-        cc,
-        subject,
-        body,
-      });
+      const mailboxAccount = await storage.getMailboxAccountById(mailboxAccountId);
+      if (!mailboxAccount) {
+        return res.status(404).json({ message: "Mailbox account not found" });
+      }
+
+      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+        const { gmailSyncService } = await import('./services/gmail-sync-service');
+        await gmailSyncService.sendEmail(mailboxAccountId, { to, cc, subject, body });
+      } else {
+        const { m365SyncService } = await import('./services/m365-sync-service');
+        await m365SyncService.sendEmail(mailboxAccountId, { to, cc, subject, body });
+      }
 
       res.json({ message: "Email sent successfully" });
     } catch (error: any) {
@@ -1574,6 +1636,28 @@ export function registerRoutes(app: Express) {
     } catch (error: any) {
       console.error("Failed to sync emails:", error);
       res.status(500).json({ message: "Failed to sync emails", error: error.message });
+    }
+  });
+
+  // Manually trigger Gmail email sync
+  app.post("/api/gmail-sync", requireAuth, async (req, res) => {
+    try {
+      const { mailboxAccountId } = req.body;
+
+      if (!mailboxAccountId) {
+        return res.status(400).json({ message: "Missing mailboxAccountId" });
+      }
+
+      const { gmailSyncService } = await import('./services/gmail-sync-service');
+      const result = await gmailSyncService.syncEmails(mailboxAccountId, { limit: 50 });
+
+      res.json({
+        message: "Gmail sync completed successfully",
+        ...result
+      });
+    } catch (error: any) {
+      console.error("Failed to sync Gmail emails:", error);
+      res.status(500).json({ message: "Failed to sync Gmail emails", error: error.message });
     }
   });
 
@@ -1621,18 +1705,36 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Opportunity not found" });
       }
 
-      const { m365SyncService } = await import('./services/m365-sync-service');
       const { dealConversationService } = await import('./services/deal-conversation-service');
+      const mailboxAccount = await storage.getMailboxAccountById(mailboxAccountId);
+
+      if (!mailboxAccount) {
+        return res.status(404).json({ message: "Mailbox account not found" });
+      }
 
       const toAddresses = Array.isArray(to) ? to.join(", ") : to;
       const ccAddresses = cc && Array.isArray(cc) ? cc.join(", ") : cc;
 
-      const sentMessage = await m365SyncService.sendEmail(mailboxAccountId, {
-        to: toAddresses,
-        cc: ccAddresses,
-        subject,
-        body,
-      });
+      let externalMessageId = crypto.randomUUID();
+
+      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+        const { gmailSyncService } = await import('./services/gmail-sync-service');
+        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body,
+        });
+        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId);
+      } else {
+        const { m365SyncService } = await import('./services/m365-sync-service');
+        await m365SyncService.sendEmail(mailboxAccountId, {
+          to: toAddresses,
+          cc: ccAddresses,
+          subject,
+          body,
+        });
+      }
 
       const result = await dealConversationService.sendEmailFromOpportunity({
         opportunityId,
@@ -1641,7 +1743,7 @@ export function registerRoutes(app: Express) {
         cc: cc || [],
         subject,
         body,
-        m365MessageId: (sentMessage as any)?.messageId || crypto.randomUUID(),
+        m365MessageId: externalMessageId,
         threadId: threadId || undefined
       });
 
@@ -1987,6 +2089,229 @@ export function registerRoutes(app: Express) {
     } catch (error: any) {
       console.error("[M365Activities] Error:", error);
       res.status(500).json({ error: error.message || "Failed to fetch activities" });
+    }
+  });
+
+  // ==================== GOOGLE OAUTH ====================
+
+  // Initiate Google OAuth flow
+  app.get("/api/oauth/google/authorize", requireAuth, async (req, res) => {
+    try {
+      if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+        return res.status(500).json({
+          message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
+        });
+      }
+
+      const state = generateState();
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+      await oauthStateStore.set(state, { codeVerifier, userId: req.user!.userId });
+
+      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
+      authUrl.searchParams.set("scope", GOOGLE_SCOPES);
+      authUrl.searchParams.set("access_type", "offline");
+      authUrl.searchParams.set("prompt", "consent");
+      authUrl.searchParams.set("include_granted_scopes", "true");
+      authUrl.searchParams.set("state", state);
+      authUrl.searchParams.set("code_challenge", codeChallenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+
+      res.json({ authUrl: authUrl.toString() });
+    } catch (error) {
+      console.error("Google OAuth authorize error:", error);
+      res.status(500).json({ message: "Failed to initiate Google OAuth flow" });
+    }
+  });
+
+  // OAuth callback handler for Google
+  app.get("/api/oauth/google/callback", async (req, res) => {
+    try {
+      const { code, state, error, error_description } = req.query;
+
+      if (error) {
+        console.error("Google OAuth error:", error, error_description);
+        return res.redirect(`/?error=${encodeURIComponent(error_description as string || 'Google OAuth failed')}`);
+      }
+
+      if (!code || typeof code !== "string" || !state || typeof state !== "string") {
+        return res.redirect("/?error=missing_code_or_state");
+      }
+
+      const pending = await oauthStateStore.get(state);
+      if (!pending) {
+        console.error("[Google OAuth] Invalid or expired state:", state);
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>OAuth Failed</title>
+            </head>
+            <body>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'oauth-error', provider: 'google', error: 'Invalid or expired authorization request. Please try again.' }, '*');
+                  window.close();
+                } else {
+                  window.location.href = '/?error=invalid_or_expired_state';
+                }
+              </script>
+              <p>Invalid or expired authorization request. This window should close automatically...</p>
+            </body>
+          </html>
+        `);
+      }
+
+      await oauthStateStore.delete(state);
+
+      const { codeVerifier, userId } = pending;
+      const tokenData = await exchangeGoogleAuthorizationCodeForTokens(code, codeVerifier);
+      const profile = await fetchGoogleProfile(tokenData.access_token);
+
+      const encryptionKey =
+        process.env.ENCRYPTION_KEY ||
+        process.env.MAILBOX_ENCRYPTION_KEY ||
+        "default-encryption-key-change-in-production";
+      const encryptedAccessToken = CryptoJS.AES.encrypt(tokenData.access_token, encryptionKey).toString();
+      const encryptedRefreshToken = tokenData.refresh_token
+        ? CryptoJS.AES.encrypt(tokenData.refresh_token, encryptionKey).toString()
+        : null;
+      const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
+
+      const existing = await storage.getMailboxAccount(userId, GOOGLE_MAILBOX_PROVIDER);
+
+      if (existing) {
+        await storage.updateMailboxAccount(existing.id, {
+          mailboxEmail: profile.email || existing.mailboxEmail || null,
+          displayName: profile.name || existing.displayName || null,
+          connectedAt: new Date(),
+          accessToken: encryptedAccessToken,
+          refreshToken: encryptedRefreshToken || existing.refreshToken,
+          tokenExpiresAt: expiresAt,
+          status: "connected",
+        });
+      } else {
+        await storage.createMailboxAccount({
+          userId,
+          provider: GOOGLE_MAILBOX_PROVIDER,
+          mailboxEmail: profile.email || null,
+          displayName: profile.name || null,
+          connectedAt: new Date(),
+          accessToken: encryptedAccessToken,
+          refreshToken: encryptedRefreshToken,
+          tokenExpiresAt: expiresAt,
+          status: "connected",
+        });
+      }
+
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>OAuth Success</title>
+          </head>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'oauth-success', provider: 'google' }, '*');
+                window.close();
+              } else {
+                window.location.href = '/?oauth=success';
+              }
+            </script>
+            <p>Authentication successful! This window should close automatically...</p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error("Google OAuth callback error:", error);
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>OAuth Failed</title>
+          </head>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage({ type: 'oauth-error', provider: 'google', error: 'OAuth callback failed' }, '*');
+                window.close();
+              } else {
+                window.location.href = '/?error=${encodeURIComponent('OAuth callback failed')}';
+              }
+            </script>
+            <p>Authentication failed. This window should close automatically...</p>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  // Get Google mailbox connection status
+  app.get("/api/oauth/google/status", requireAuth, async (req, res) => {
+    try {
+      const mailbox = await storage.getMailboxAccount(req.user!.userId, GOOGLE_MAILBOX_PROVIDER);
+
+      if (!mailbox) {
+        return res.json({ connected: false });
+      }
+
+      res.json({
+        connected: mailbox.status === "connected",
+        mailboxEmail: mailbox.mailboxEmail,
+        displayName: mailbox.displayName,
+        connectedAt: mailbox.connectedAt,
+        lastSyncAt: mailbox.lastSyncAt,
+      });
+    } catch (error) {
+      console.error("Get Google mailbox status error:", error);
+      res.status(500).json({ message: "Failed to get Google mailbox status" });
+    }
+  });
+
+  // Disconnect Google mailbox
+  app.post("/api/oauth/google/disconnect", requireAuth, async (req, res) => {
+    try {
+      const mailbox = await storage.getMailboxAccount(req.user!.userId, GOOGLE_MAILBOX_PROVIDER);
+
+      if (!mailbox) {
+        return res.status(404).json({ message: "No Google mailbox connected" });
+      }
+
+      await storage.updateMailboxAccount(mailbox.id, {
+        status: "disconnected",
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiresAt: null,
+      });
+
+      res.json({ message: "Google mailbox disconnected successfully" });
+    } catch (error) {
+      console.error("Disconnect Google mailbox error:", error);
+      res.status(500).json({ message: "Failed to disconnect Google mailbox" });
+    }
+  });
+
+  // Sync Gmail emails to CRM
+  app.post("/api/oauth/google/sync", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const mailboxAccount = await storage.getMailboxAccount(userId, GOOGLE_MAILBOX_PROVIDER);
+
+      if (!mailboxAccount) {
+        return res.status(404).json({ error: "No connected Google account found" });
+      }
+
+      const { gmailSyncService } = await import("./services/gmail-sync-service");
+      const result = await gmailSyncService.syncEmails(mailboxAccount.id, { limit: 50 });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[GmailSync] Error:", error);
+      res.status(500).json({ error: error.message || "Failed to sync Gmail emails" });
     }
   });
 
@@ -13051,6 +13376,11 @@ Provide JSON response with:
             autoRun: process.env.ENABLE_M365_SYNC === 'true',
             frequency: 'manual trigger (or every 6hrs if auto-run enabled)',
             triggerEndpoint: 'POST /api/jobs/trigger/m365-sync'
+          },
+          gmailSync: {
+            autoRun: process.env.ENABLE_GMAIL_SYNC === 'true',
+            frequency: 'manual trigger (or every 5min if auto-run enabled)',
+            triggerEndpoint: 'POST /api/gmail-sync'
           },
           telnyxRecordings: {
             autoRun: false,

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronRight, Calendar, Clock, Zap } from "lucide-react";
+import { ChevronRight, Calendar, Clock, Zap, Globe, Info } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Calendar as CalendarUI } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -196,81 +196,77 @@ export function Step3Scheduling({ data, onNext, campaignType }: Step3Props) {
         </CardContent>
       </Card>
 
-      {/* Schedule Type */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {campaignType === "email" ? "Send Schedule" : "Call Schedule"}
-          </CardTitle>
-          <CardDescription>
-            {campaignType === "email"
-              ? "Choose when to send your email campaign"
-              : "Define call window and scheduling parameters"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <RadioGroup value={schedulingType} onValueChange={(v) => setSchedulingType(v as any)}>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="now" id="now" data-testid="radio-send-now" />
-              <Label htmlFor="now" className="font-normal cursor-pointer">
-                {campaignType === "email" ? "Send immediately after launch" : "Start calling immediately"}
-              </Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="scheduled" id="scheduled" data-testid="radio-schedule" />
-              <Label htmlFor="scheduled" className="font-normal cursor-pointer">
-                Schedule for later
-              </Label>
-            </div>
-          </RadioGroup>
-
-          {schedulingType === "scheduled" && (
-            <div className="grid grid-cols-2 gap-4 pl-6">
-              <div className="space-y-2">
-                <Label>
-                  <Calendar className="w-4 h-4 inline mr-2" />
-                  Date
+      {/* Schedule Type - Email Only */}
+      {campaignType === "email" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Send Schedule</CardTitle>
+            <CardDescription>Choose when to send your email campaign</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <RadioGroup value={schedulingType} onValueChange={(v) => setSchedulingType(v as any)}>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="now" id="now" data-testid="radio-send-now" />
+                <Label htmlFor="now" className="font-normal cursor-pointer">
+                  Send immediately after launch
                 </Label>
-                <Input
-                  type="date"
-                  value={scheduleDate}
-                  onChange={(e) => setScheduleDate(e.target.value)}
-                  data-testid="input-schedule-date"
-                />
               </div>
-              <div className="space-y-2">
-                <Label>
-                  <Clock className="w-4 h-4 inline mr-2" />
-                  Time
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="scheduled" id="scheduled" data-testid="radio-schedule" />
+                <Label htmlFor="scheduled" className="font-normal cursor-pointer">
+                  Schedule for later
                 </Label>
-                <Input
-                  type="time"
-                  value={scheduleTime}
-                  onChange={(e) => setScheduleTime(e.target.value)}
-                  data-testid="input-schedule-time"
-                />
               </div>
-            </div>
-          )}
+            </RadioGroup>
 
-          <div className="space-y-2">
-            <Label>Timezone</Label>
-            <Select value={timezone} onValueChange={setTimezone}>
-              <SelectTrigger data-testid="select-timezone">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="UTC">UTC (Coordinated Universal Time)</SelectItem>
-                <SelectItem value="America/New_York">Eastern Time (ET)</SelectItem>
-                <SelectItem value="America/Chicago">Central Time (CT)</SelectItem>
-                <SelectItem value="America/Denver">Mountain Time (MT)</SelectItem>
-                <SelectItem value="America/Los_Angeles">Pacific Time (PT)</SelectItem>
-                <SelectItem value="Europe/London">London (GMT)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+            {schedulingType === "scheduled" && (
+              <div className="grid grid-cols-2 gap-4 pl-6">
+                <div className="space-y-2">
+                  <Label>
+                    <Calendar className="w-4 h-4 inline mr-2" />
+                    Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    data-testid="input-schedule-date"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    <Clock className="w-4 h-4 inline mr-2" />
+                    Time
+                  </Label>
+                  <Input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    data-testid="input-schedule-time"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Timezone</Label>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger data-testid="select-timezone">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UTC">UTC (Coordinated Universal Time)</SelectItem>
+                  <SelectItem value="America/New_York">Eastern Time (ET)</SelectItem>
+                  <SelectItem value="America/Chicago">Central Time (CT)</SelectItem>
+                  <SelectItem value="America/Denver">Mountain Time (MT)</SelectItem>
+                  <SelectItem value="America/Los_Angeles">Pacific Time (PT)</SelectItem>
+                  <SelectItem value="Europe/London">London (GMT)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pacing & Throttling */}
       <Card>
@@ -316,14 +312,30 @@ export function Step3Scheduling({ data, onNext, campaignType }: Step3Props) {
             </>
           ) : (
             <>
+              {/* Business Hours Info */}
+              <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <Globe className="w-5 h-5 text-blue-500 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-medium text-blue-600 dark:text-blue-400">Smart Timezone Detection</p>
+                    <p className="text-blue-600/80 dark:text-blue-400/80 mt-1">
+                      Calls will be placed during business hours (9:00 AM - 6:00 PM) in each contact's local timezone,
+                      automatically determined from their country and location data.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Call Window Start</Label>
-                  <Input type="time" defaultValue="09:00" data-testid="input-call-window-start" />
+                  <Label>Business Hours Start</Label>
+                  <Input type="time" defaultValue="09:00" disabled className="bg-muted" data-testid="input-call-window-start" />
+                  <p className="text-xs text-muted-foreground">In contact's local time</p>
                 </div>
                 <div className="space-y-2">
-                  <Label>Call Window End</Label>
-                  <Input type="time" defaultValue="18:00" data-testid="input-call-window-end" />
+                  <Label>Business Hours End</Label>
+                  <Input type="time" defaultValue="18:00" disabled className="bg-muted" data-testid="input-call-window-end" />
+                  <p className="text-xs text-muted-foreground">In contact's local time</p>
                 </div>
               </div>
 
@@ -335,83 +347,6 @@ export function Step3Scheduling({ data, onNext, campaignType }: Step3Props) {
               <div className="space-y-2">
                 <Label>Frequency Cap (Days between calls to same contact)</Label>
                 <Input type="number" defaultValue="7" min="1" data-testid="input-frequency-cap" />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Assign Agents</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (assignedAgents.length === agents.length) {
-                        setAssignedAgents([]);
-                      } else {
-                        setAssignedAgents(agents.map((a: any) => a.id));
-                      }
-                    }}
-                    data-testid="button-toggle-all-agents"
-                  >
-                    {assignedAgents.length === agents.length ? "Deselect All" : "Select All"}
-                  </Button>
-                </div>
-
-                <div className="border rounded-lg p-3 space-y-2 max-h-60 overflow-y-auto">
-                  {agents.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No agents available
-                    </p>
-                  ) : (
-                    agents.map((agent: any) => (
-                      <div
-                        key={agent.id}
-                        className="flex items-center space-x-3 p-2 rounded hover:bg-muted/50 cursor-pointer"
-                        onClick={() => {
-                          setAssignedAgents(prev =>
-                            prev.includes(agent.id)
-                              ? prev.filter(id => id !== agent.id)
-                              : [...prev, agent.id]
-                          );
-                        }}
-                        data-testid={`agent-item-${agent.id}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={assignedAgents.includes(agent.id)}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            setAssignedAgents(prev =>
-                              prev.includes(agent.id)
-                                ? prev.filter(id => id !== agent.id)
-                                : [...prev, agent.id]
-                            );
-                          }}
-                          className="h-4 w-4"
-                        />
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">
-                            {agent.firstName} {agent.lastName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            @{agent.username}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="text-xs">
-                          Agent
-                        </Badge>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {assignedAgents.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    {assignedAgents.length === agents.length
-                      ? `All ${agents.length} agents assigned`
-                      : `${assignedAgents.length} of ${agents.length} agent(s) assigned`}
-                  </p>
-                )}
               </div>
             </>
           )}
