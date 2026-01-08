@@ -209,8 +209,6 @@ export function EmailBuilderBrevoStyle({
       ...template,
       subject: subject || template.subject,
       preheader: preheader || template.preheader,
-      fromName: "Your Company",
-      fromEmail: "hello@example.com"
     };
 
     const html = buildBrandedEmailHtml({
@@ -221,7 +219,7 @@ export function EmailBuilderBrevoStyle({
 
     setHtmlContent(html);
     setSubject(copy.subject);
-    setPreheader(copy.preheader);
+    setPreheader(copy.preheader || "");
   };
 
   const generateFromPrompt = async () => {
@@ -248,8 +246,6 @@ export function EmailBuilderBrevoStyle({
           const html = buildBrandedEmailHtml({
             copy: {
               ...data.content,
-              fromName: "Your Company",
-              fromEmail: "hello@example.com"
             },
             brandPalette: selectedBrand,
             includeFooter: true
@@ -257,7 +253,7 @@ export function EmailBuilderBrevoStyle({
 
           setHtmlContent(html);
           setSubject(data.content.subject);
-          setPreheader(data.content.preheader || '');
+          setPreheader(data.content.preheader || "");
           setAiPrompt("");
           return;
         }
@@ -585,7 +581,6 @@ export function EmailBuilderBrevoStyle({
                   onChange={(e) => setTestEmails(e.target.value)}
                   placeholder="test@example.com"
                   className="text-xs"
-                  size="sm"
                 />
                 <Button
                   onClick={handleSendTest}

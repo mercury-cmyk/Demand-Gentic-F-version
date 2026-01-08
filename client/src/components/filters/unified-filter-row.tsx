@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
-import { FilterCondition, operatorLabels, type Operator, operatorsByFieldType, type FilterFieldType } from "@shared/filter-types";
+import { FilterCondition, operatorLabels, type Operator, operatorsByFieldType, type FilterFieldType, type EntityType } from "@shared/filter-types";
 
 interface DynamicFieldConfig {
   key: string;
@@ -28,7 +28,7 @@ interface DynamicFieldConfig {
 
 interface UnifiedFilterRowProps {
   condition: FilterCondition;
-  entityType: "account" | "contact";
+  entityType: EntityType;
   onChange: (condition: FilterCondition) => void;
   onRemove: () => void;
   dynamicFields?: DynamicFieldConfig[];

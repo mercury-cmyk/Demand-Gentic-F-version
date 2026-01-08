@@ -185,6 +185,13 @@ interface OpenAIRealtimeSession {
     tokensLimit: number;
     resetAt: Date | null;
   } | null;
+  // Conversation state tracking (prevents identity re-verification)
+  conversationState: {
+    identityConfirmed: boolean;
+    identityConfirmedAt: Date | null;
+    currentState: 'IDENTITY_CHECK' | 'RIGHT_PARTY_INTRO' | 'CONTEXT_FRAMING' | 'DISCOVERY' | 'LISTENING' | 'ACKNOWLEDGEMENT' | 'PERMISSION_REQUEST' | 'CLOSE' | 'GATEKEEPER';
+    stateHistory: string[];
+  };
 }
 
 interface DispositionFunctionResult {
@@ -498,6 +505,13 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               lastAudioDeltaTimestamp: null,
               // Rate limiting state
               rateLimits: null,
+              // Conversation state tracking
+              conversationState: {
+                identityConfirmed: false,
+                identityConfirmedAt: null,
+                currentState: 'IDENTITY_CHECK',
+                stateHistory: ['IDENTITY_CHECK'],
+              },
             };
           } else {
             console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
@@ -552,6 +566,13 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               lastAudioDeltaTimestamp: null,
               // Rate limiting state
               rateLimits: null,
+              // Conversation state tracking
+              conversationState: {
+                identityConfirmed: false,
+                identityConfirmedAt: null,
+                currentState: 'IDENTITY_CHECK',
+                stateHistory: ['IDENTITY_CHECK'],
+              },
             };
           }
 
@@ -671,6 +692,10 @@ function mergeAgentSettings(raw?: Partial<VirtualAgentSettings>): VirtualAgentSe
         ...DEFAULT_ADVANCED_SETTINGS.privacy,
         ...(raw?.advanced?.privacy ?? {}),
       },
+      costOptimization: {
+        ...DEFAULT_ADVANCED_SETTINGS.costOptimization,
+        ...(raw?.advanced?.costOptimization ?? {}),
+      },
     },
   };
 }
@@ -681,28 +706,24 @@ function mapAsrModel(model: AdvancedSettings['asr']['model']): string {
 
 function buildTurnDetection(settings: AdvancedSettings['conversational']) {
   const takeTurnSeconds = Number(settings.takeTurnAfterSilenceSeconds);
-  
-  // Use semantic_vad for better turn detection (OpenAI best practice)
-  // semantic_vad is more accurate at detecting when users are done speaking
-  if (!Number.isFinite(takeTurnSeconds) || takeTurnSeconds < 0) {
-    return {
-      type: "semantic_vad",
-      eagerness: settings.eagerness || "normal", // low, normal, high
-      create_response: true,
-      interrupt_response: true,
-    };
-  }
 
-  // Legacy server_vad fallback for custom silence duration
-  const threshold = settings.eagerness === 'high' ? 0.5 : settings.eagerness === 'low' ? 0.7 : 0.6;
-  const prefixPaddingMs = settings.eagerness === 'high' ? 120 : settings.eagerness === 'low' ? 300 : 200;
-  const silenceDurationMs = Math.max(200, takeTurnSeconds * 1000);
+  // ALWAYS use semantic_vad for lowest latency turn detection
+  // semantic_vad understands speech patterns and responds faster than server_vad
+  // Eagerness levels:
+  //   - "high": Responds quickly, may occasionally interrupt (best for B2B calls)
+  //   - "normal": Balanced response timing
+  //   - "low": Waits longer before responding (more conservative)
+
+  // Force "high" eagerness for B2B outbound calls where quick responses matter
+  const eagerness = settings.eagerness === 'low' ? 'normal' : (settings.eagerness || 'high');
+
+  console.log(`[Turn Detection] Using semantic_vad with eagerness: ${eagerness}`);
 
   return {
-    type: "server_vad",
-    threshold,
-    prefix_padding_ms: prefixPaddingMs,
-    silence_duration_ms: silenceDurationMs,
+    type: "semantic_vad",
+    eagerness: eagerness,
+    create_response: true,      // Auto-create response when turn detected
+    interrupt_response: true,   // Allow user to interrupt agent
   };
 }
 
@@ -1376,6 +1397,27 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           timestamp: new Date()
         });
 
+        // Check for identity confirmation in user response
+        // This prevents the agent from re-asking identity mid-conversation
+        if (!session.conversationState.identityConfirmed) {
+          const identityConfirmed = detectIdentityConfirmation(message.transcript);
+          if (identityConfirmed) {
+            session.conversationState.identityConfirmed = true;
+            session.conversationState.identityConfirmedAt = new Date();
+            session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
+            session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+            console.log(`${LOG_PREFIX} ✅ Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
+
+            // Inject a system reminder to prevent identity re-verification
+            // Use setImmediate to not block the audio processing pipeline
+            setImmediate(() => {
+              injectIdentityLockReminder(session).catch(err => {
+                console.error(`${LOG_PREFIX} Error injecting identity lock:`, err);
+              });
+            });
+          }
+        }
+
         // Voicemail detection is now handled by the agent via disposition function call
         // Disabling aggressive string matching to avoid false positives
         // await checkForVoicemailDetection(session, message.transcript);
@@ -1601,6 +1643,108 @@ function createOutOfBandResponse(
   } catch (error) {
     console.error(`${LOG_PREFIX} Error creating out-of-band response for call ${session.callId}:`, error);
   }
+}
+
+/**
+ * Detect if user's response confirms their identity.
+ * This matches common affirmative responses to identity questions.
+ */
+function detectIdentityConfirmation(transcript: string): boolean {
+  const normalizedText = transcript.toLowerCase().trim();
+
+  // Short affirmatives that confirm identity
+  const identityConfirmPatterns = [
+    /^yes$/,
+    /^yeah$/,
+    /^yep$/,
+    /^yup$/,
+    /^speaking$/,
+    /^this is (me|him|her|they|them)$/,
+    /^that'?s me$/,
+    /^it'?s me$/,
+    /^i am$/,
+    /^that'?s correct$/,
+    /^correct$/,
+    /^right$/,
+    /^yes[,.]?\s*(this is|speaking|that'?s me)/,
+    /^hi[,.]?\s*(yes|this is|speaking)/,
+    /speaking$/,
+    /this is \w+(\s+\w+)?$/,  // "This is John" or "This is John Smith"
+    /\w+ speaking$/,          // "John speaking"
+    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)/,
+  ];
+
+  for (const pattern of identityConfirmPatterns) {
+    if (pattern.test(normalizedText)) {
+      return true;
+    }
+  }
+
+  // Check for name confirmation patterns (user says their own name)
+  // e.g., "Yes, this is John", "John here", "This is John Smith"
+  if (normalizedText.includes('yes') || normalizedText.includes('hi') || normalizedText.includes('hello')) {
+    // If they're responding with yes/hi and it's short, likely confirmation
+    if (normalizedText.length < 50) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Inject a system-level reminder into the conversation to prevent identity re-verification.
+ * Uses conversation.item.create to add a system message that reinforces the identity lock.
+ */
+async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promise<void> {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    // Add a system message to reinforce identity lock
+    session.openaiWs.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `[SYSTEM STATE UPDATE] Identity has been CONFIRMED. The person on the line is the intended contact.
+
+CRITICAL RULES NOW IN EFFECT:
+1. NEVER ask "Am I speaking with..." or any identity verification question again
+2. NEVER return to identity confirmation - this is PERMANENTLY LOCKED
+3. If the contact says "I don't know" or hesitates, treat it as uncertainty about the TOPIC, not about WHO they are
+4. Proceed with the conversation naturally - move to introduction and context framing
+5. Any ambiguity in responses is about the subject matter, not identity
+
+Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and explaining the call purpose.`
+          }
+        ]
+      }
+    }));
+
+    console.log(`${LOG_PREFIX} Injected identity lock reminder for call: ${session.callId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error injecting identity lock reminder for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Update conversation state and inject state transition reminder if needed.
+ */
+function updateConversationState(
+  session: OpenAIRealtimeSession,
+  newState: OpenAIRealtimeSession['conversationState']['currentState']
+): void {
+  const oldState = session.conversationState.currentState;
+  if (oldState === newState) return;
+
+  session.conversationState.currentState = newState;
+  session.conversationState.stateHistory.push(newState);
+  console.log(`${LOG_PREFIX} State transition: ${oldState} → ${newState} for call: ${session.callId}`);
 }
 
 function normalizeCallSummary(args: unknown): CallSummary | null {

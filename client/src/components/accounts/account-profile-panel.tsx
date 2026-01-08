@@ -23,7 +23,7 @@ export function AccountProfilePanel({ account }: AccountProfilePanelProps) {
   const description = account.description || "";
   const shouldTruncate = description.length > 280;
   const visibleDescription =
-    shouldTruncate && !expanded ? `${description.slice(0, 280)}…` : description;
+    shouldTruncate && !expanded ? `${description.slice(0, 280)}...` : description;
 
   return (
     <div className="space-y-4">

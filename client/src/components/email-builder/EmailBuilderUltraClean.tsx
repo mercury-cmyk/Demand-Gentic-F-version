@@ -172,7 +172,6 @@ export function EmailBuilderUltraClean({
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 className="text-sm h-8"
-                size="sm"
               />
             </div>
             <div>
@@ -182,7 +181,6 @@ export function EmailBuilderUltraClean({
                 onChange={(e) => setPreheader(e.target.value)}
                 placeholder="Optional preview text..."
                 className="text-sm h-8"
-                size="sm"
               />
             </div>
           </div>
@@ -223,7 +221,6 @@ export function EmailBuilderUltraClean({
             onChange={(e) => setTestEmail(e.target.value)}
             placeholder="test@example.com"
             className="text-sm h-9 flex-1"
-            size="sm"
           />
           <Button
             onClick={handleSendTest}

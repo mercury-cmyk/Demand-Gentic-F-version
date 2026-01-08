@@ -140,7 +140,9 @@ export function EmailBuilderClean({
               initialHtml={htmlContent}
               initialDesign={design}
               onChange={handleEmailCanvasChange}
-              onModeChange={setBuilderMode}
+              onModeChange={(mode) =>
+                setBuilderMode(mode === "design" ? "visual" : "code")
+              }
             />
           </TabsContent>
 

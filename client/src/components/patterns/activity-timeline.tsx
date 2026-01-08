@@ -7,6 +7,7 @@ import {
   MessageSquare,
   FileText,
   UserPlus,
+  Megaphone,
   Edit,
   Trash,
   Check,
@@ -20,7 +21,7 @@ import { formatDistanceToNow } from "date-fns";
 
 export interface ActivityItem {
   id: string;
-  type: "email" | "call" | "note" | "task" | "edit" | "create" | "delete" | "qa" | "custom";
+  type: "email" | "call" | "note" | "task" | "campaign" | "edit" | "create" | "delete" | "qa" | "custom";
   title: string;
   description?: string;
   timestamp: Date | string;
@@ -47,6 +48,7 @@ const activityIcons: Record<ActivityItem["type"], LucideIcon> = {
   call: Phone,
   note: MessageSquare,
   task: FileText,
+  campaign: Megaphone,
   edit: Edit,
   create: UserPlus,
   delete: Trash,
@@ -59,6 +61,7 @@ const activityColors: Record<ActivityItem["type"], string> = {
   call: "text-success",
   note: "text-warning",
   task: "text-primary",
+  campaign: "text-accent",
   edit: "text-accent",
   create: "text-success",
   delete: "text-destructive",

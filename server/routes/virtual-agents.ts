@@ -181,6 +181,44 @@ const previewConversationSchema = z.object({
   })).optional(),
 });
 
+function detectIdentityConfirmedPreview(
+  messages: Array<{ role: "user" | "assistant"; content: string }>
+): boolean {
+  const confirmPatterns = [
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "speaking",
+    "this is me",
+    "that's me",
+    "it is me",
+    "this is ",
+    "speaking with",
+  ];
+  const denyPatterns = [
+    "not me",
+    "wrong number",
+    "not here",
+    "not available",
+    "not speaking",
+    "can't talk",
+  ];
+
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    const text = msg.content.toLowerCase();
+    if (denyPatterns.some((pattern) => text.includes(pattern))) {
+      continue;
+    }
+    if (confirmPatterns.some((pattern) => text.includes(pattern))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Schema for simplified agent creation (just task + first message)
 const createSmartAgentSchema = z.object({
   name: z.string().min(1, "Agent name is required"),
@@ -413,7 +451,7 @@ router.post("/:id/refine-system", requireAuth, requireRole("admin"), async (req,
 router.post("/preview-conversation", requireAuth, async (req, res) => {
   try {
     const { virtualAgentId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
-    const historyLimit = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_HISTORY || "8", 10);
+    const historyLimit = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_HISTORY || "16", 10);
     const maxTokens = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MAX_TOKENS || "320", 10);
     const temperature = Number.parseFloat(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_TEMPERATURE || "0.2");
     const safeHistoryLimit = Number.isFinite(historyLimit) && historyLimit > 0 ? historyLimit : 8;
@@ -449,16 +487,23 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
       resolvedSystemPrompt = DEFAULT_B2B_SYSTEM_PROMPT;
     }
 
-    const trimmedMessages = (messages || [])
+    const rawMessages = (messages || [])
       .filter((msg) => typeof msg?.content === "string" && msg.content.trim().length > 0)
       .map((msg) => ({
         role: msg.role,
         content: msg.content.trim(),
-      }))
-      .slice(-safeHistoryLimit);
+      }));
+
+    const identityConfirmed = detectIdentityConfirmedPreview(rawMessages);
+
+    const trimmedMessages = rawMessages.slice(-safeHistoryLimit);
 
     if (resolvedFirstMessage && trimmedMessages.length === 0) {
       trimmedMessages.push({ role: "assistant", content: resolvedFirstMessage });
+    }
+
+    if (identityConfirmed) {
+      resolvedSystemPrompt += `\n\n---\n\n[Conversation State]\nIdentity is already confirmed. Do not ask to confirm identity again. Continue the conversation without restarting the opening.`;
     }
 
     const fullSystemPrompt = await buildAgentSystemPrompt(resolvedSystemPrompt);

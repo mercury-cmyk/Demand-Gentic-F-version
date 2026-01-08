@@ -45,7 +45,14 @@ export function TemplateSelectorModal({
   });
 
   // Get unique categories
-  const categories = ["all", ...new Set(templates.map(t => t.category).filter(Boolean))];
+  const categories = [
+    "all",
+    ...new Set(
+      templates
+        .map((t) => t.category)
+        .filter((value): value is string => Boolean(value))
+    ),
+  ];
 
   // Filter templates
   const filteredTemplates = templates.filter(template => {

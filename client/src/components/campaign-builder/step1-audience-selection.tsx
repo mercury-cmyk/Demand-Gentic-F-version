@@ -539,7 +539,9 @@ export function Step1AudienceSelection({ data, onNext }: Step1Props) {
                         />
                         <div>
                           <p className="font-medium">{ds.name}</p>
-                          <p className="text-sm text-muted-foreground">{ds.domains?.length || 0} accounts</p>
+                          <p className="text-sm text-muted-foreground">
+                            {ds.matchedAccounts ?? ds.totalUploaded ?? 0} accounts
+                          </p>
                         </div>
                       </div>
                       <Badge>ABM</Badge>

@@ -293,17 +293,17 @@ export function FilterBuilder({ entityType, onApplyFilter, initialFilter, includ
       );
     }
 
-    if (operator === 'isEmpty' as any || operator === 'isNotEmpty' as any) {
+    if (operator === 'is_empty' || operator === 'has_any_value') {
       return (
         <div className="flex items-center gap-2 text-sm text-muted-foreground p-2 bg-muted rounded">
           <span className="font-medium">
-            {operator === 'isEmpty' ? 'Will find empty/null values' : 'Will find non-empty values'}
+            {operator === 'is_empty' ? 'Will find empty/null values' : 'Will find non-empty values'}
           </span>
         </div>
       );
     }
 
-    if (fieldType === 'array' && (operator === 'containsAny' as any || operator === 'containsAll' as any)) {
+    if (fieldType === 'array' && (operator === 'contains' || operator === 'not_contains')) {
       const arrayValue = Array.isArray(condition.value) ? condition.value.join(', ') : '';
       return (
         <Input

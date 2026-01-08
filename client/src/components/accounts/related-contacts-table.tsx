@@ -71,14 +71,16 @@ export function RelatedContactsTable({ contacts = [] }: RelatedContactsTableProp
                 {filtered.map((contact) => {
                   const legacyName =
                     (contact as unknown as { full_name?: string }).full_name;
+                  const composedName = [contact.firstName, contact.lastName]
+                    .filter(Boolean)
+                    .join(" ")
+                    .trim();
                   const fullName =
-                    contact.fullName || legacyName || contact.name;
+                    contact.fullName || composedName || legacyName || "-";
                   const emailStatus = contact.emailVerificationStatus || "unknown";
                   const phone = contact.directPhone || contact.mobilePhone;
                   const lastActivity =
-                    contact.lastActivityAt ||
-                    contact.updatedAt?.toString() ||
-                    contact.createdAt?.toString();
+                    contact.updatedAt?.toString() || contact.createdAt?.toString();
                   return (
                     <TableRow key={contact.id}>
                       <TableCell className="font-medium">
@@ -89,11 +91,11 @@ export function RelatedContactsTable({ contacts = [] }: RelatedContactsTableProp
                           {fullName}
                         </Link>
                       </TableCell>
-                      <TableCell>{contact.jobTitle || "—"}</TableCell>
+                      <TableCell>{contact.jobTitle || "-"}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-sm">
-                            {contact.email || "—"}
+                            {contact.email || "-"}
                           </span>
                           {contact.email && (
                             <CopyButton value={contact.email} size="xs" />
@@ -108,7 +110,7 @@ export function RelatedContactsTable({ contacts = [] }: RelatedContactsTableProp
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span>{phone ?? "—"}</span>
+                          <span>{phone ?? "-"}</span>
                           {phone && <CopyButton value={phone} size="xs" />}
                         </div>
                       </TableCell>
@@ -129,13 +131,13 @@ export function RelatedContactsTable({ contacts = [] }: RelatedContactsTableProp
                             </a>
                           </Button>
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {lastActivity
                           ? new Date(lastActivity).toLocaleDateString()
-                          : "—"}
+                          : "-"}
                       </TableCell>
                     </TableRow>
                   );

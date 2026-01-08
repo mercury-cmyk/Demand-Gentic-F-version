@@ -607,23 +607,23 @@ export default function AccountDetailPage() {
                             <TableCell>{contact.jobTitle || "-"}</TableCell>
                             <TableCell className="font-mono text-sm">{contact.email}</TableCell>
                             <TableCell className="font-mono text-sm">
-                              {contact.directWorkPhoneE164 ? (
-                                <a href={`tel:${contact.directWorkPhoneE164}`} className="text-primary hover:underline flex items-center gap-1">
+                              {contact.directPhoneE164 ? (
+                                <a href={`tel:${contact.directPhoneE164}`} className="text-primary hover:underline flex items-center gap-1">
                                   <Phone className="w-3 h-3" />
-                                  {contact.directWorkPhone}
+                                  {contact.directPhone}
                                 </a>
                               ) : (
-                                contact.directWorkPhone || "-"
+                                contact.directPhone || "-"
                               )}
                             </TableCell>
                             <TableCell className="font-mono text-sm">
-                              {contact.mobileDirectE164 ? (
-                                <a href={`tel:${contact.mobileDirectE164}`} className="text-primary hover:underline flex items-center gap-1">
+                              {contact.mobilePhoneE164 ? (
+                                <a href={`tel:${contact.mobilePhoneE164}`} className="text-primary hover:underline flex items-center gap-1">
                                   <Phone className="w-3 h-3" />
-                                  {contact.mobileDirect}
+                                  {contact.mobilePhone}
                                 </a>
                               ) : (
-                                contact.mobileDirect || "-"
+                                contact.mobilePhone || "-"
                               )}
                             </TableCell>
                             <TableCell>

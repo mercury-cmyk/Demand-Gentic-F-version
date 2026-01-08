@@ -105,7 +105,7 @@ export function EmailCanvas({
       storageManager: false,
       plugins: [newsletterPlugin],
       pluginsOpts: {
-        [newsletterPlugin]: {
+        [newsletterPlugin as unknown as string]: {
           modalTitleImport: "Import template",
           // Add custom blocks and options
         }

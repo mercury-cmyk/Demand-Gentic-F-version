@@ -284,16 +284,32 @@ export function useTelnyxWebRTC({
     }
   }, []);
 
+  // Track if JWT fetch has completed (success or failure)
+  const [jwtFetchAttempted, setJwtFetchAttempted] = useState(false);
+
+  // Mark JWT fetch as attempted when loading completes
+  useEffect(() => {
+    if (useJwtAuth && !tokenLoading && !jwtFetchAttempted) {
+      setJwtFetchAttempted(true);
+    }
+  }, [useJwtAuth, tokenLoading, jwtFetchAttempted]);
+
   // Initialize Telnyx client
   useEffect(() => {
     // Determine authentication method
     const hasJwtToken = useJwtAuth && jwtToken;
     const hasSipCredentials = sipUsername && sipPassword;
 
-    // Wait for JWT token if using JWT auth but don't have token yet
-    if (useJwtAuth && !jwtToken && !tokenLoading) {
-      console.log('[TELNYX] Waiting for JWT token...');
+    // Wait for JWT token fetch to complete if using JWT auth
+    // But only if we haven't already attempted and the fetch is still in progress
+    if (useJwtAuth && tokenLoading) {
+      console.log('[TELNYX] Waiting for JWT token fetch to complete...');
       return;
+    }
+
+    // If JWT auth was attempted but failed, allow fallback to SIP credentials
+    if (useJwtAuth && !jwtToken && jwtFetchAttempted) {
+      console.log('[TELNYX] JWT token fetch failed, will try SIP credentials if available');
     }
 
     // Skip if no valid auth method
@@ -531,6 +547,7 @@ export function useTelnyxWebRTC({
         updateCallState('idle');
       });
 
+      let socketErrorShown = false;
       telnyxClient.on('telnyx.socket.error', (error: any) => {
         console.error('=== TELNYX SOCKET ERROR ===');
         console.error('Socket error:', error);
@@ -542,6 +559,20 @@ export function useTelnyxWebRTC({
           readyState: error?.error?.target?.readyState,
         });
         console.error('===========================');
+
+        // Show user-friendly error for connection issues (only once)
+        if (!socketErrorShown) {
+          socketErrorShown = true;
+          // Only show toast after a few retry attempts to avoid spamming
+          setTimeout(() => {
+            toast({
+              variant: "destructive",
+              title: "WebRTC Connection Issue",
+              description: "Having trouble connecting to calling service. Retrying...",
+              duration: 5000,
+            });
+          }, 3000);
+        }
       });
 
       // Connect to Telnyx
@@ -589,6 +620,7 @@ export function useTelnyxWebRTC({
     jwtToken,
     useJwtAuth,
     tokenLoading,
+    jwtFetchAttempted,
     rtcHost,
     rtcEnv,
     rtcRegion,

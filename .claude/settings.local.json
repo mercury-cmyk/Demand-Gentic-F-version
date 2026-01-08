@@ -33,7 +33,9 @@
       "Bash(npx ts-node:*)",
       "Bash(gcloud.cmd secrets versions access latest:*)",
       "Bash(gcloud.cmd secrets versions access:*)",
-      "Bash(gcloud.cmd run services logs read:*)"
+      "Bash(gcloud.cmd run services logs read:*)",
+      "Bash(cat:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

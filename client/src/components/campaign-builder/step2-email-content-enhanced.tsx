@@ -236,7 +236,7 @@ export function Step2EmailContentEnhanced({
                     <SelectItem key={profile.id} value={profile.id}>
                       <div className="flex items-center gap-2">
                         {profile.name || profile.email}
-                        {profile.verified ? (
+                        {profile.isVerified ? (
                           <Badge variant="secondary" className="text-xs">
                             <CheckCircle2 className="w-3 h-3 mr-1" />
                             Verified

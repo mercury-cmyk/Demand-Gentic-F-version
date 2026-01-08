@@ -6390,6 +6390,13 @@ export function registerRoutes(app: Express) {
         return res.status(500).json({ message: "Telnyx API key not configured" });
       }
 
+      // Check if we have a pre-configured credential ID (faster path)
+      const preConfiguredCredentialId = process.env.TELNYX_WEBRTC_CREDENTIAL_ID;
+      if (preConfiguredCredentialId) {
+        console.log('[TELNYX-TOKEN] Using pre-configured credential ID:', preConfiguredCredentialId);
+        return await generateAndReturnToken(apiKey, preConfiguredCredentialId, res);
+      }
+
       console.log('[TELNYX-TOKEN] Fetching telephony credentials...');
 
       // Step 1: List telephony credentials to find an active one
@@ -6404,6 +6411,14 @@ export function registerRoutes(app: Express) {
       if (!credentialsResponse.ok) {
         const errorText = await credentialsResponse.text();
         console.error('[TELNYX-TOKEN] Failed to list credentials:', credentialsResponse.status, errorText);
+
+        // If credentials list fails, try to use SIP Connection ID from environment
+        const sipConnectionId = process.env.TELNYX_SIP_CONNECTION_ID;
+        if (sipConnectionId) {
+          console.log('[TELNYX-TOKEN] Falling back to SIP_CONNECTION_ID for credential creation');
+          return await createAndUseCredential(apiKey, sipConnectionId, res);
+        }
+
         return res.status(500).json({
           message: "Failed to list Telnyx credentials",
           error: errorText
@@ -6414,12 +6429,27 @@ export function registerRoutes(app: Express) {
       const credentials = credentialsData.data || [];
 
       console.log('[TELNYX-TOKEN] Found credentials:', credentials.length);
+      if (credentials.length > 0) {
+        console.log('[TELNYX-TOKEN] Credentials:', credentials.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          expired: c.expired,
+          connection_id: c.connection_id
+        })));
+      }
 
       // Find first non-expired credential
       const activeCredential = credentials.find((c: any) => !c.expired);
 
       if (!activeCredential) {
         console.log('[TELNYX-TOKEN] No active credentials found, will need to create one');
+
+        // Try environment variable first
+        const sipConnectionId = process.env.TELNYX_SIP_CONNECTION_ID;
+        if (sipConnectionId) {
+          console.log('[TELNYX-TOKEN] Using SIP_CONNECTION_ID from environment:', sipConnectionId);
+          return await createAndUseCredential(apiKey, sipConnectionId, res);
+        }
 
         // Need to get connection ID from SIP Connection
         // First, try to get it from environment or fetch connections
@@ -6435,7 +6465,7 @@ export function registerRoutes(app: Express) {
           const errorText = await connectionsResponse.text();
           console.error('[TELNYX-TOKEN] Failed to list connections:', connectionsResponse.status, errorText);
           return res.status(500).json({
-            message: "No active telephony credentials and cannot list connections",
+            message: "No active telephony credentials and cannot list connections. Set TELNYX_SIP_CONNECTION_ID or TELNYX_WEBRTC_CREDENTIAL_ID in environment.",
             error: errorText
           });
         }
@@ -6443,43 +6473,24 @@ export function registerRoutes(app: Express) {
         const connectionsData = await connectionsResponse.json();
         const connections = connectionsData.data || [];
 
+        console.log('[TELNYX-TOKEN] Found credential connections:', connections.length);
+        if (connections.length > 0) {
+          console.log('[TELNYX-TOKEN] Connections:', connections.map((c: any) => ({
+            id: c.id,
+            name: c.connection_name,
+            active: c.active
+          })));
+        }
+
         if (connections.length === 0) {
           return res.status(500).json({
-            message: "No Telnyx credential connections found. Please set up a SIP Connection in Telnyx portal."
+            message: "No Telnyx credential connections found. Please set up a Credential Connection in Telnyx portal, or set TELNYX_SIP_CONNECTION_ID environment variable."
           });
         }
 
-        // Use first connection to create a credential
-        const connectionId = connections[0].id;
-        console.log('[TELNYX-TOKEN] Creating credential on connection:', connectionId);
-
-        const createCredResponse = await fetch('https://api.telnyx.com/v2/telephony_credentials', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            connection_id: connectionId,
-            name: `webrtc-${Date.now()}`,
-          }),
-        });
-
-        if (!createCredResponse.ok) {
-          const errorText = await createCredResponse.text();
-          console.error('[TELNYX-TOKEN] Failed to create credential:', createCredResponse.status, errorText);
-          return res.status(500).json({
-            message: "Failed to create telephony credential",
-            error: errorText
-          });
-        }
-
-        const newCredData = await createCredResponse.json();
-        const newCredential = newCredData.data;
-        console.log('[TELNYX-TOKEN] Created new credential:', newCredential.id);
-
-        // Generate token from new credential
-        return await generateAndReturnToken(apiKey, newCredential.id, res);
+        // Use first active connection to create a credential
+        const activeConnection = connections.find((c: any) => c.active) || connections[0];
+        return await createAndUseCredential(apiKey, activeConnection.id, res);
       }
 
       console.log('[TELNYX-TOKEN] Using existing credential:', activeCredential.id);
@@ -6493,6 +6504,39 @@ export function registerRoutes(app: Express) {
       });
     }
   });
+
+  // Helper function to create a credential and generate token
+  async function createAndUseCredential(apiKey: string, connectionId: string, res: any) {
+    console.log('[TELNYX-TOKEN] Creating credential on connection:', connectionId);
+
+    const createCredResponse = await fetch('https://api.telnyx.com/v2/telephony_credentials', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        connection_id: connectionId,
+        name: `webrtc-${Date.now()}`,
+      }),
+    });
+
+    if (!createCredResponse.ok) {
+      const errorText = await createCredResponse.text();
+      console.error('[TELNYX-TOKEN] Failed to create credential:', createCredResponse.status, errorText);
+      return res.status(500).json({
+        message: "Failed to create telephony credential",
+        error: errorText
+      });
+    }
+
+    const newCredData = await createCredResponse.json();
+    const newCredential = newCredData.data;
+    console.log('[TELNYX-TOKEN] Created new credential:', newCredential.id);
+
+    // Generate token from new credential
+    return await generateAndReturnToken(apiKey, newCredential.id, res);
+  }
 
   // Helper function to generate JWT token from credential ID
   async function generateAndReturnToken(apiKey: string, credentialId: string, res: any) {
