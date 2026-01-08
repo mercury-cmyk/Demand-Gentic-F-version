@@ -294,6 +294,36 @@ app.use((req, res, next) => {
     }
   }, 5000); // Wait 5 seconds after startup
   
+  // =========================================================================
+  // CALL ORCHESTRATION ENVIRONMENT VALIDATION
+  // Logs critical configuration at startup to help diagnose production issues
+  // =========================================================================
+  console.log("\n" + "=".repeat(70));
+  console.log("[Call Orchestration] Environment Configuration:");
+  console.log("=".repeat(70));
+  const telnyxKey = process.env.TELNYX_API_KEY;
+  const telnyxConnId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_SIP_CONNECTION_ID;
+  const publicWsUrl = process.env.PUBLIC_WEBSOCKET_URL;
+  const telnyxFrom = process.env.TELNYX_FROM_NUMBER;
+  
+  console.log(`  TELNYX_API_KEY: ${telnyxKey ? '✅ Configured (' + telnyxKey.slice(0, 12) + '...)' : '❌ NOT SET'}`);
+  console.log(`  TELNYX_CONNECTION_ID: ${telnyxConnId ? '✅ ' + telnyxConnId : '❌ NOT SET'}`);
+  console.log(`  PUBLIC_WEBSOCKET_URL: ${publicWsUrl ? '✅ ' + publicWsUrl : '❌ NOT SET'}`);
+  console.log(`  TELNYX_FROM_NUMBER: ${telnyxFrom ? '✅ ' + telnyxFrom : '❌ NOT SET'}`);
+  console.log(`  REDIS_URL: ${hasRedis ? '✅ Configured (session persistence enabled)' : '⚠️ NOT SET (in-memory only - may cause call control ID issues in prod)'}`);
+  console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+  
+  if (!telnyxKey || !telnyxConnId || !publicWsUrl) {
+    console.log("\n⚠️  WARNING: Some Telnyx configuration is missing. Calls may fail.");
+    console.log("   Check /api/call-orchestration for detailed diagnostics.");
+  }
+  if (process.env.NODE_ENV === 'production' && !hasRedis) {
+    console.log("\n⚠️  WARNING: Production without Redis!");
+    console.log("   Call control IDs may become invalid across server instances.");
+    console.log("   Enable sticky sessions on your load balancer as a workaround.");
+  }
+  console.log("=".repeat(70) + "\n");
+  
   registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

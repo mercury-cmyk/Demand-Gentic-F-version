@@ -197,6 +197,21 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 
     // DEBUG: Log connection_id being used
     console.log(`[Campaign Test Call] Using connection_id: ${connectionId} (from TELNYX_CALL_CONTROL_APP_ID=${process.env.TELNYX_CALL_CONTROL_APP_ID}, TELNYX_CONNECTION_ID=${process.env.TELNYX_CONNECTION_ID})`);
+    
+    const payload = {
+      connection_id: connectionId,
+      to: normalizedPhone,
+      from: fromNumber,
+      answering_machine_detection: "detect",
+      stream_url: wsUrl,
+      stream_track: "both_tracks",
+      stream_bidirectional_mode: "rtp",
+      custom_parameters: customParams,
+      client_state: clientStateB64,
+      webhook_url: `${webhookProtocol}://${webhookHost}/api/campaign-test-calls/webhook`,
+    };
+
+    console.log('[Campaign Test Call] Sending payload to Telnyx:', JSON.stringify(payload, null, 2));
 
     // Initiate the Telnyx call
     const telnyxResponse = await fetch("https://api.telnyx.com/v2/calls", {
@@ -205,35 +220,39 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         "Content-Type": "application/json",
         "Authorization": `Bearer ${telnyxApiKey}`,
       },
-      body: JSON.stringify({
-        connection_id: connectionId,
-        to: normalizedPhone,
-        from: fromNumber,
-        answering_machine_detection: "detect",
-        stream_url: wsUrl,
-        stream_track: "both_tracks",
-        stream_bidirectional_mode: "rtp",
-        custom_parameters: customParams,
-        client_state: clientStateB64,
-        webhook_url: `${webhookProtocol}://${webhookHost}/api/campaign-test-calls/webhook`,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!telnyxResponse.ok) {
       const errorText = await telnyxResponse.text();
       console.error(`[Campaign Test Call] Telnyx API error: ${telnyxResponse.status} - ${errorText}`);
 
+      let friendlyMessage = `Telnyx API error: ${telnyxResponse.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.errors && errorJson.errors.length > 0) {
+           const firstError = errorJson.errors[0];
+           if (firstError.code === '90041') {
+             friendlyMessage = "Call limit reached. Your Telnyx account has exceeded its concurrent call limit. Please try again later or upgrade your plan.";
+           } else {
+             friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
+           }
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+
       // Update test call status to failed
       await db.update(campaignTestCalls)
         .set({
           status: 'failed',
-          testNotes: `Telnyx API error: ${telnyxResponse.status} - ${errorText}`,
+          testNotes: friendlyMessage,
           updatedAt: new Date()
         })
         .where(eq(campaignTestCalls.id, testCallId));
 
-      return res.status(500).json({
-        message: "Failed to initiate test call via Telnyx",
+      return res.status(400).json({
+        message: friendlyMessage,
         error: errorText,
         status: telnyxResponse.status
       });

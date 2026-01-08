@@ -42,6 +42,12 @@ import {
 import {
   getActiveSessionCount,
 } from "../services/openai-realtime-dialer";
+import {
+  createPreviewSession,
+  getPreviewSession,
+  addPreviewMessage,
+  deletePreviewSession,
+} from "../services/call-session-store";
 // Note: DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE removed - using canonical structure instead
 
 const router = Router();
@@ -173,6 +179,7 @@ const refineSystemPromptSchema = z.object({
 });
 
 const previewConversationSchema = z.object({
+  sessionId: z.string().optional(),    // Session ID for persisting conversation state (prevents resets)
   virtualAgentId: z.string().optional(),
   campaignId: z.string().optional(),  // Load campaign context for preview
   systemPrompt: z.string().optional(),
@@ -481,9 +488,10 @@ router.post("/:id/refine-system", requireAuth, requireRole("admin"), async (req,
 });
 
 // Preview conversation without placing a call
+// Supports optional sessionId for persisting conversation state across turns (prevents resets)
 router.post("/preview-conversation", requireAuth, async (req, res) => {
   try {
-    const { virtualAgentId, campaignId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
+    const { sessionId, virtualAgentId, campaignId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
     const historyLimit = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_HISTORY || "16", 10);
     const maxTokens = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MAX_TOKENS || "320", 10);
     const temperature = Number.parseFloat(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_TEMPERATURE || "0.2");
@@ -493,8 +501,19 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
       ? Math.min(Math.max(temperature, 0), 1)
       : 0.2;
 
-    let resolvedSystemPrompt = systemPrompt?.trim() || "";
-    let resolvedFirstMessage = firstMessage?.trim() || "";
+    // Load existing session if sessionId provided (prevents conversation resets)
+    let previewSession = sessionId ? await getPreviewSession(sessionId) : null;
+    
+    // If no session exists and we have configuration, create a new one
+    let newSessionId: string | undefined;
+    if (!previewSession && (virtualAgentId || campaignId || systemPrompt)) {
+      previewSession = await createPreviewSession(virtualAgentId, campaignId, systemPrompt, firstMessage);
+      newSessionId = previewSession.sessionId;
+      console.log(`[Virtual Agents] Created new preview session: ${newSessionId}`);
+    }
+
+    let resolvedSystemPrompt = systemPrompt?.trim() || previewSession?.systemPrompt || "";
+    let resolvedFirstMessage = firstMessage?.trim() || previewSession?.firstMessage || "";
 
     if (virtualAgentId) {
       const [agent] = await db
@@ -522,7 +541,8 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
 
     // Load campaign context if campaignId is provided
     let campaignContextSection = "";
-    if (campaignId) {
+    const effectiveCampaignId = campaignId || previewSession?.campaignId;
+    if (effectiveCampaignId) {
       const [campaign] = await db
         .select({
           campaignObjective: campaigns.campaignObjective,
@@ -533,7 +553,7 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
           successCriteria: campaigns.successCriteria,
         })
         .from(campaigns)
-        .where(eq(campaigns.id, campaignId))
+        .where(eq(campaigns.id, effectiveCampaignId))
         .limit(1);
 
       if (campaign) {
@@ -560,7 +580,8 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
         content: msg.content.trim(),
       }));
 
-    const identityConfirmed = detectIdentityConfirmedPreview(rawMessages);
+    // Use session's conversation state for identity detection if available
+    const identityConfirmed = previewSession?.conversationState?.identityConfirmed || detectIdentityConfirmedPreview(rawMessages);
 
     const trimmedMessages = rawMessages.slice(-safeHistoryLimit);
 
@@ -589,7 +610,22 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
       return res.status(502).json({ message: "OpenAI returned an empty preview response" });
     }
 
-    res.json({ reply });
+    // Persist conversation to session if we have one
+    if (previewSession) {
+      // Add user message if present
+      const lastUserMsg = rawMessages.filter(m => m.role === 'user').pop();
+      if (lastUserMsg) {
+        await addPreviewMessage(previewSession.sessionId, 'user', lastUserMsg.content);
+      }
+      // Add assistant reply
+      await addPreviewMessage(previewSession.sessionId, 'assistant', reply);
+    }
+
+    res.json({ 
+      reply,
+      sessionId: newSessionId || sessionId, // Return session ID so client can maintain state
+      conversationState: previewSession?.conversationState,
+    });
   } catch (error) {
     console.error("[Virtual Agents] Preview conversation error:", error);
     if (error instanceof z.ZodError) {
@@ -600,6 +636,18 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
       return res.status(503).json({ message: "OpenAI API key not configured" });
     }
     res.status(500).json({ message: "Failed to generate preview response", error: message });
+  }
+});
+
+// Delete a preview session
+router.delete("/preview-session/:sessionId", requireAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    await deletePreviewSession(sessionId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("[Virtual Agents] Error deleting preview session:", error);
+    res.status(500).json({ message: "Failed to delete preview session" });
   }
 });
 

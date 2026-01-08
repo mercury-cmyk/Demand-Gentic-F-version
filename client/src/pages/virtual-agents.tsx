@@ -817,6 +817,7 @@ export default function VirtualAgentsPage() {
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewMessages, setPreviewMessages] = useState<PreviewMessage[]>([]);
   const [previewInput, setPreviewInput] = useState('');
+  const [previewSessionId, setPreviewSessionId] = useState<string | undefined>(undefined); // Session ID for persistent conversation state
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [autoSendVoice, setAutoSendVoice] = useState(true);
@@ -1170,12 +1171,14 @@ export default function VirtualAgentsPage() {
 
   const previewConversationMutation = useMutation({
     mutationFn: async ({
+      sessionId,
       virtualAgentId,
       campaignId,
       systemPrompt,
       firstMessage,
       messages,
     }: {
+      sessionId?: string;
       virtualAgentId?: string;
       campaignId?: string;
       systemPrompt?: string;
@@ -1183,13 +1186,14 @@ export default function VirtualAgentsPage() {
       messages: PreviewMessage[];
     }) => {
       const response = await apiRequest('POST', '/api/virtual-agents/preview-conversation', {
+        sessionId,
         virtualAgentId,
         campaignId,
         systemPrompt,
         firstMessage,
         messages,
       });
-      return response.json() as Promise<{ reply: string }>;
+      return response.json() as Promise<{ reply: string; sessionId?: string; conversationState?: any }>;
     },
     onError: (error: Error) => {
       toast({ title: "Preview failed", description: error.message, variant: "destructive" });
@@ -2201,6 +2205,7 @@ export default function VirtualAgentsPage() {
       setPreviewMessages([]);
     }
     setPreviewInput('');
+    setPreviewSessionId(undefined); // Reset session ID for new conversation
     lastAssistantSpokenRef.current = "";
     lastAssistantSpokenAtRef.current = 0;
     assistantPlaybackUntilRef.current = 0;
@@ -2277,12 +2282,18 @@ export default function VirtualAgentsPage() {
 
     try {
       const data = await previewConversationMutation.mutateAsync({
+        sessionId: previewSessionId, // Use session ID for persistent conversation state
         virtualAgentId: testCallAgent.id,
         campaignId: testCallAgentCampaignId || undefined,
         systemPrompt: previewSystemPrompt || undefined,
         firstMessage: previewOpeningMessage || undefined,
         messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
       });
+
+      // Store session ID if returned (prevents conversation resets)
+      if (data?.sessionId && !previewSessionId) {
+        setPreviewSessionId(data.sessionId);
+      }
 
       if (data?.reply) {
         const newStage = analyzeConversationStage([...nextMessages, { role: 'assistant', content: data.reply, timestamp: new Date() }]);
@@ -2333,6 +2344,7 @@ export default function VirtualAgentsPage() {
     previewInput,
     previewMessages,
     previewOpeningMessage,
+    previewSessionId,
     previewSystemPrompt,
     testCallAgent,
     analyzeConversationStage,

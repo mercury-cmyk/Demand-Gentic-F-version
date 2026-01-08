@@ -7,6 +7,14 @@ import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { scheduleAutoRecordingSync } from "../lib/auto-recording-sync-queue";
 import {
+  setCallSession,
+  updateCallSessionStatus,
+  deleteCallSession,
+  getCallSession,
+  getActiveCallSessions,
+  type CallSession,
+} from "./call-session-store";
+import {
   ensureVoiceAgentControlLayer,
   validateOpeningMessageVariables,
   interpolateCanonicalOpening,
@@ -582,6 +590,30 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           }
 
           activeSessions.set(sessionId!, session!);
+          
+          // Persist session to Redis for cross-instance state sharing
+          // This solves "invalid call control ID" in production with multiple instances
+          await setCallSession({
+            callId: sessionId!,
+            callControlId: sessionId!, // Will be updated when webhook provides actual control ID
+            runId: runId || '',
+            campaignId: campaignId || '',
+            queueItemId: queueItemId || '',
+            callAttemptId: callAttemptId || '',
+            contactId: contactId || '',
+            virtualAgentId: session!.virtualAgentId,
+            status: 'active',
+            provider: provider,
+            isTestSession,
+            createdAt: session!.startTime.toISOString(),
+            updatedAt: new Date().toISOString(),
+            conversationState: {
+              identityConfirmed: false,
+              currentState: 'IDENTITY_CHECK',
+            },
+          });
+          console.log(`${LOG_PREFIX} ✅ Session persisted to store for call: ${sessionId}`);
+          
           const initialStreamId = message.stream_id || message.start?.stream_id;
           if (initialStreamId) {
             session!.streamSid = initialStreamId;
@@ -2121,6 +2153,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   if (session.streamSid) {
     streamIdToCallId.delete(session.streamSid);
   }
+  
+  // Clean up from persistent session store
+  await updateCallSessionStatus(callId, 'ended', {
+    endedAt: new Date().toISOString(),
+  }).catch(err => {
+    console.warn(`${LOG_PREFIX} Failed to update session store on call end:`, err);
+  });
+  
   activeSessions.delete(callId);
 }
 
