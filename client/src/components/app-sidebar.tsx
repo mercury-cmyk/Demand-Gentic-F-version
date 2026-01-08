@@ -199,6 +199,12 @@ const getNavSections = (): NavSection[] => [
         roles: ["admin", "campaign_manager", "quality_analyst", "client_user"],
       },
       {
+        title: "AI Call Analytics",
+        url: "/ai-call-analytics",
+        icon: Bot,
+        roles: ["admin", "campaign_manager"],
+      },
+      {
         title: "Reports",
         url: "/reports",
         icon: FileText,
