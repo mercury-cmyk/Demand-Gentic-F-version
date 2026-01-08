@@ -79,6 +79,6 @@ jobs:
         run: |
           curl -f -s "${{ needs.deploy.outputs.service_url }}/api/health" || exit 1
       
-      - name: Test API connectivity
+      - name: Test readiness endpoint
         run: |
-          curl -f -s "${{ needs.deploy.outputs.service_url }}/api/status" || exit 1
+          curl -f -s "${{ needs.deploy.outputs.service_url }}/api/ready" || exit 1
