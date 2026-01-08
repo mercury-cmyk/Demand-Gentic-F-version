@@ -23,6 +23,7 @@ import {
   Legend
 } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Campaign } from "@shared/schema";
 
 interface CallStats {
   attempted: number;
@@ -72,7 +73,7 @@ export default function CampaignAnalyticsPage() {
   });
 
   // Fetch campaigns for queue filter
-  const { data: campaigns = [] } = useQuery({
+  const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
   });
 

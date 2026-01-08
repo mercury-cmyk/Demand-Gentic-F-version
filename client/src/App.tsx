@@ -88,6 +88,7 @@ import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
 import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
+import CampaignTestPage from "@/pages/campaign-test";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -218,6 +219,7 @@ function AuthenticatedApp() {
               <Route path="/campaigns/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/campaigns/telemarketing" component={PhoneCampaignsPage} />
               <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />
               <Route path="/campaigns/:id/queue" component={CampaignQueuePage} />
               <Route path="/campaigns/config" component={CampaignConfigPage} />

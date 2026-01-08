@@ -58,6 +58,7 @@ import aiOperatorRouter from './routes/ai-operator';
 import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
+import campaignTestCallsRouter from './routes/campaign-test-calls';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -6263,58 +6264,119 @@ export function registerRoutes(app: Express) {
   });
 
   // Get default SIP trunk config (for agents)
+  // Returns WebRTC Credential Connection credentials for browser-based calling
+  // PRIORITY: Database config first, then environment variables as fallback
   app.get("/api/sip-trunks/default", requireAuth, async (req, res) => {
+    try {
+      // First, try to get config from database
+      const config = await storage.getDefaultSipTrunkConfig();
+      if (config) {
+        console.log('[SIP-TRUNK] Using database config:', config.name, '| Username:', config.sipUsername, '| Domain:', config.sipDomain);
+        return res.json(config);
+      }
+
+      // If no default is set, try to get any active trunk from database
+      const allConfigs = await storage.getSipTrunkConfigs();
+      const activeConfig = allConfigs.find(c => c.isActive);
+
+      if (activeConfig) {
+        console.log('[SIP-TRUNK] Using active database config:', activeConfig.name);
+        return res.json(activeConfig);
+      }
+
+      // FALLBACK: Use environment variables if no database config exists
+      const envUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const envPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+
+      if (envUsername && envPassword) {
+        console.log('[SIP-TRUNK] No database config, using environment variables');
+        return res.json({
+          id: 'env-default',
+          name: 'Telnyx (Environment)',
+          provider: 'telnyx',
+          sipUsername: envUsername,
+          sipPassword: envPassword,
+          sipDomain: 'sip.telnyx.com',
+          callerIdNumber: process.env.TELNYX_FROM_NUMBER || '',
+          isActive: true,
+          isDefault: true,
+        });
+      }
+
+      return res.status(404).json({ message: "No SIP trunk configured. Add one in Telephony Settings or set environment variables." });
+    } catch (error) {
+      console.error('[SIP-TRUNK] Error:', error);
+      res.status(500).json({ message: "Failed to fetch default SIP trunk" });
+    }
+  });
+
+  // Test/verify SIP trunk credentials
+  // This endpoint helps diagnose WebRTC connection issues
+  app.get("/api/sip-trunks/test", requireAuth, async (req, res) => {
     try {
       const config = await storage.getDefaultSipTrunkConfig();
       if (!config) {
-        // If no default is set, try to get any active trunk
-        const allConfigs = await storage.getSipTrunkConfigs();
-        const activeConfig = allConfigs.find(c => c.isActive);
-
-        if (!activeConfig) {
-          // FALLBACK: Create virtual config from environment variables
-          // This allows WebRTC to work even without database SIP trunk config
-          const envUsername = process.env.TELNYX_SIP_USERNAME;
-          const envPassword = process.env.TELNYX_SIP_PASSWORD;
-
-          if (envUsername && envPassword) {
-            console.log('[SIP-TRUNK] No database config found, using environment variables');
-            return res.json({
-              id: 'env-default',
-              name: 'Telnyx (Environment)',
-              provider: 'telnyx',
-              sipUsername: envUsername,
-              sipPassword: envPassword,
-              sipDomain: 'sip.telnyx.com',
-              callerIdNumber: process.env.TELNYX_FROM_NUMBER || '',
-              isActive: true,
-              isDefault: true,
-            });
-          }
-
-          return res.status(404).json({ message: "No default SIP trunk configured" });
-        }
-
-        // Use environment variables for credentials (syncs to production automatically)
-        const secureConfig = {
-          ...activeConfig,
-          sipUsername: process.env.TELNYX_SIP_USERNAME || activeConfig.sipUsername,
-          sipPassword: process.env.TELNYX_SIP_PASSWORD || activeConfig.sipPassword,
-        };
-
-        return res.json(secureConfig);
+        return res.json({
+          success: false,
+          message: "No SIP trunk configured",
+          recommendation: "Go to Telephony Settings and add a Credential Connection from Telnyx Portal"
+        });
       }
 
-      // Use environment variables for credentials (syncs to production automatically)
-      const secureConfig = {
-        ...config,
-        sipUsername: process.env.TELNYX_SIP_USERNAME || config.sipUsername,
-        sipPassword: process.env.TELNYX_SIP_PASSWORD || config.sipPassword,
-      };
+      // Check if credentials look valid
+      const issues: string[] = [];
 
-      res.json(secureConfig);
+      if (!config.sipUsername || config.sipUsername.length < 5) {
+        issues.push("SIP username appears invalid (too short)");
+      }
+
+      if (!config.sipPassword || config.sipPassword.length < 8) {
+        issues.push("SIP password appears invalid (too short)");
+      }
+
+      // Check if username looks like a Credential Connection format
+      // Telnyx Credential Connection usernames are typically in format: user123456789
+      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9_-]+$/)) {
+        issues.push("SIP username contains invalid characters - should be alphanumeric");
+      }
+
+      // Check domain
+      if (config.sipDomain && !config.sipDomain.includes('telnyx')) {
+        issues.push("SIP domain doesn't look like Telnyx - ensure you're using sip.telnyx.com");
+      }
+
+      console.log('[SIP-TRUNK-TEST] Config:', {
+        id: config.id,
+        name: config.name,
+        sipUsername: config.sipUsername,
+        sipDomain: config.sipDomain,
+        connectionId: config.connectionId,
+        hasPassword: !!config.sipPassword,
+        passwordLength: config.sipPassword?.length,
+        issues: issues.length > 0 ? issues : 'None'
+      });
+
+      res.json({
+        success: issues.length === 0,
+        config: {
+          id: config.id,
+          name: config.name,
+          sipUsername: config.sipUsername,
+          sipDomain: config.sipDomain,
+          connectionId: config.connectionId,
+          hasPassword: !!config.sipPassword,
+          passwordLength: config.sipPassword?.length,
+          isActive: config.isActive,
+          isDefault: config.isDefault,
+        },
+        issues,
+        recommendation: issues.length > 0
+          ? "Please verify your Credential Connection credentials in Telnyx Portal"
+          : "Credentials look valid. If WebRTC still fails, check browser console for socket errors."
+      });
     } catch (error) {
-      res.status(500).json({ message: "Failed to fetch default SIP trunk" });
+      console.error('[SIP-TRUNK-TEST] Error:', error);
+      res.status(500).json({ success: false, message: "Test failed", error: String(error) });
     }
   });
 
@@ -6390,14 +6452,21 @@ export function registerRoutes(app: Express) {
         return res.status(500).json({ message: "Telnyx API key not configured" });
       }
 
-      // Check if we have a pre-configured credential ID (faster path)
+      // PRIORITY 1: Check database for credential connection ID
+      const dbConfig = await storage.getDefaultSipTrunkConfig();
+      if (dbConfig?.connectionId) {
+        console.log('[TELNYX-TOKEN] Using database connection ID:', dbConfig.connectionId);
+        return await generateAndReturnToken(apiKey, dbConfig.connectionId, res);
+      }
+
+      // PRIORITY 2: Check if we have a pre-configured credential ID in environment
       const preConfiguredCredentialId = process.env.TELNYX_WEBRTC_CREDENTIAL_ID;
       if (preConfiguredCredentialId) {
-        console.log('[TELNYX-TOKEN] Using pre-configured credential ID:', preConfiguredCredentialId);
+        console.log('[TELNYX-TOKEN] Using env TELNYX_WEBRTC_CREDENTIAL_ID:', preConfiguredCredentialId);
         return await generateAndReturnToken(apiKey, preConfiguredCredentialId, res);
       }
 
-      console.log('[TELNYX-TOKEN] Fetching telephony credentials...');
+      console.log('[TELNYX-TOKEN] No connection ID in database or env, fetching telephony credentials...');
 
       // Step 1: List telephony credentials to find an active one
       const credentialsResponse = await fetch('https://api.telnyx.com/v2/telephony_credentials', {
@@ -11971,6 +12040,11 @@ Provide JSON response with:
   // ==================== AI VOICE AGENT CALLS ====================
 
   app.use("/api/ai-calls", aiCallsRouter);
+
+  // ==================== CAMPAIGN TEST CALLS (AI Agent Testing) ====================
+
+  app.use("/api/campaigns", campaignTestCallsRouter);
+  app.use("/api/campaign-test-calls", campaignTestCallsRouter);
 
   // ==================== VIRTUAL AGENTS (AI Personas) ====================
 

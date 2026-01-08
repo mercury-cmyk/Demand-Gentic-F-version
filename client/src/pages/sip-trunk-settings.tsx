@@ -54,6 +54,8 @@ type SipTrunkConfig = {
   sipUsername: string;
   sipPassword: string;
   sipDomain?: string;
+  connectionId?: string;
+  callerIdNumber?: string;
   isDefault: boolean | null;
   isActive: boolean | null;
   createdAt: Date;
@@ -84,6 +86,8 @@ export default function SipTrunkSettingsPage() {
       sipUsername: "",
       sipPassword: "",
       sipDomain: "sip.telnyx.com",
+      connectionId: "",
+      callerIdNumber: "",
       isActive: true,
       isDefault: false,
     },
@@ -188,6 +192,8 @@ export default function SipTrunkSettingsPage() {
       sipUsername: config.sipUsername,
       sipPassword: config.sipPassword,
       sipDomain: config.sipDomain || "sip.telnyx.com",
+      connectionId: config.connectionId || "",
+      callerIdNumber: config.callerIdNumber || "",
       isActive: config.isActive ?? true,
     });
     setIsDialogOpen(true);
@@ -200,6 +206,8 @@ export default function SipTrunkSettingsPage() {
       sipUsername: "",
       sipPassword: "",
       sipDomain: "sip.telnyx.com",
+      connectionId: "",
+      callerIdNumber: "",
       isActive: true,
     });
     setIsDialogOpen(true);
@@ -255,7 +263,7 @@ export default function SipTrunkSettingsPage() {
                 <TableRow>
                   <TableHead>Connection Name</TableHead>
                   <TableHead>SIP Username</TableHead>
-                  <TableHead>SIP Domain</TableHead>
+                  <TableHead>Connection ID</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Default</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -266,8 +274,8 @@ export default function SipTrunkSettingsPage() {
                   <TableRow key={config.id} data-testid={`row-trunk-${config.id}`}>
                     <TableCell className="font-medium">{config.name}</TableCell>
                     <TableCell className="font-mono text-sm">{config.sipUsername}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {config.sipDomain || 'sip.telnyx.com'}
+                    <TableCell className="font-mono text-sm text-muted-foreground">
+                      {config.connectionId ? config.connectionId.slice(0, 10) + '...' : '-'}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -425,6 +433,50 @@ export default function SipTrunkSettingsPage() {
                     </FormControl>
                     <FormDescription>
                       The Telnyx SIP domain (usually sip.telnyx.com)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="connectionId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Credential Connection ID</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="e.g., 2845920641004078445"
+                        className="font-mono"
+                        data-testid="input-connection-id"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      The Credential Connection ID from Telnyx Portal (Voice → Credentials). Required for WebRTC authentication.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="callerIdNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Caller ID Number</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="+44 1234 567890"
+                        className="font-mono"
+                        data-testid="input-caller-id"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      The phone number to display as caller ID for outbound calls
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

@@ -59,7 +59,7 @@ export default function AgentReportsDashboard() {
   const { toast } = useToast();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
-  const effectiveAgentId = selectedAgentId || user?.userId;
+  const effectiveAgentId = selectedAgentId || user?.id;
 
   // Fetch current leaderboard
   const { data: leaderboardData, isLoading: leaderboardLoading } = useQuery<{
@@ -109,7 +109,7 @@ export default function AgentReportsDashboard() {
     (entry) => entry.agentId === effectiveAgentId
   );
 
-  const isAdminOrManager = user?.role === 'admin' || user?.role === 'manager';
+  const isAdminOrManager = user?.role === 'admin' || user?.role === 'campaign_manager';
 
   return (
     <div className="container mx-auto p-6 space-y-6" data-testid="page-agent-reports">

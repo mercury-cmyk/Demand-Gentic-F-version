@@ -17,16 +17,6 @@ interface UseTelnyxWebRTCProps {
   sipUsername?: string;
   sipPassword?: string;
   sipDomain?: string;
-  // JWT token authentication (preferred over SIP credentials)
-  loginToken?: string;
-  // Set to true to auto-fetch JWT token from server
-  useJwtAuth?: boolean;
-  rtcHost?: string;
-  rtcEnv?: 'production' | 'development';
-  rtcRegion?: string;
-  rtcIp?: string;
-  rtcPort?: number;
-  useCanaryRtcServer?: boolean;
   onCallStateChange?: (state: CallState) => void;
   onCallEnd?: () => void;
 }
@@ -35,14 +25,6 @@ export function useTelnyxWebRTC({
   sipUsername,
   sipPassword,
   sipDomain = 'sip.telnyx.com',
-  loginToken,
-  useJwtAuth = true, // Default to JWT auth
-  rtcHost,
-  rtcEnv,
-  rtcRegion,
-  rtcIp,
-  rtcPort,
-  useCanaryRtcServer,
   onCallStateChange,
   onCallEnd,
 }: UseTelnyxWebRTCProps = {}) {
@@ -56,8 +38,6 @@ export function useTelnyxWebRTC({
   const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
   const [selectedMicId, setSelectedMicId] = useState<string | null>(null);
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | null>(null);
-  const [jwtToken, setJwtToken] = useState<string | null>(loginToken || null);
-  const [tokenLoading, setTokenLoading] = useState(false);
   const { toast } = useToast();
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioMonitorRef = useRef<NodeJS.Timeout | null>(null);
@@ -71,72 +51,6 @@ export function useTelnyxWebRTC({
     if (savedMic) setSelectedMicId(savedMic);
     if (savedSpeaker) setSelectedSpeakerId(savedSpeaker);
   }, []);
-
-  // Fetch JWT token for WebRTC authentication
-  useEffect(() => {
-    if (!useJwtAuth || jwtToken) {
-      return; // Skip if not using JWT auth or already have token
-    }
-
-    const fetchToken = async () => {
-      setTokenLoading(true);
-      console.log('[TELNYX] Fetching JWT token for WebRTC authentication...');
-
-      try {
-        // Get auth token from localStorage for API authentication
-        const authToken = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
-        if (!authToken) {
-          throw new Error('Not authenticated. Please log in first.');
-        }
-
-        const response = await fetch('/api/telnyx/webrtc-token', {
-          method: 'GET',
-          credentials: 'include',
-          headers: {
-            'Authorization': `Bearer ${authToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        const contentType = response.headers.get('content-type') || '';
-        const isJson = contentType.includes('application/json');
-        const payload = isJson ? await response.json() : await response.text();
-
-        if (!response.ok) {
-          const errorMessage = isJson && payload && typeof payload === 'object'
-            ? (payload as { message?: string }).message
-            : typeof payload === 'string'
-              ? payload.slice(0, 200)
-              : undefined;
-          throw new Error(errorMessage || `Failed to fetch token: ${response.status}`);
-        }
-
-        if (!isJson || !payload || typeof payload !== 'object') {
-          throw new Error('Unexpected response from token endpoint. Please re-login and try again.');
-        }
-
-        const data = payload as { token?: string };
-        console.log('[TELNYX] JWT token received successfully');
-
-        if (data.token) {
-          setJwtToken(data.token);
-        } else {
-          throw new Error('No token in response');
-        }
-      } catch (error) {
-        console.error('[TELNYX] Failed to fetch JWT token:', error);
-        toast({
-          variant: "destructive",
-          title: "Authentication Failed",
-          description: error instanceof Error ? error.message : "Could not authenticate with Telnyx",
-        });
-      } finally {
-        setTokenLoading(false);
-      }
-    };
-
-    fetchToken();
-  }, [useJwtAuth, jwtToken, toast]);
 
   /**
    * Attach remote audio stream to audio element
@@ -152,13 +66,13 @@ export function useTelnyxWebRTC({
 
       // Try multiple ways to get the remote stream from the call object
       let remoteStream: MediaStream | null = null;
-      
+
       // Method 1: Direct remoteStream property
       if ((call as any).remoteStream) {
         remoteStream = (call as any).remoteStream;
         console.log('[AUDIO] Got remoteStream from call.remoteStream');
       }
-      
+
       // Method 2: From peer connection
       if (!remoteStream && (call as any).peer) {
         const pc = (call as any).peer;
@@ -194,7 +108,7 @@ export function useTelnyxWebRTC({
       // Check if stream has active audio tracks
       const audioTracks = remoteStream.getAudioTracks();
       console.log('[AUDIO] Remote stream audio tracks:', audioTracks.length);
-      
+
       if (audioTracks.length === 0) {
         console.warn('[AUDIO] Remote stream has no audio tracks');
         return false;
@@ -209,7 +123,7 @@ export function useTelnyxWebRTC({
       audioElement.srcObject = remoteStream;
       audioElement.volume = 1.0;
       audioElement.muted = false;
-      
+
       // Try to play
       const playPromise = audioElement.play();
       if (playPromise) {
@@ -243,13 +157,13 @@ export function useTelnyxWebRTC({
     if (audioMonitorRef.current) {
       clearInterval(audioMonitorRef.current);
     }
-    
+
     let noAudioCount = 0;
     const maxRetries = 3;
-    
+
     audioMonitorRef.current = setInterval(() => {
       const audioElement = document.getElementById('remoteAudio') as HTMLAudioElement;
-      
+
       if (!audioElement || !audioElement.srcObject) {
         noAudioCount++;
         if (noAudioCount <= maxRetries) {
@@ -262,7 +176,7 @@ export function useTelnyxWebRTC({
       // Check if audio tracks are active
       const stream = audioElement.srcObject as MediaStream;
       const audioTracks = stream.getAudioTracks();
-      
+
       if (audioTracks.length === 0 || !audioTracks[0].enabled) {
         noAudioCount++;
         if (noAudioCount <= maxRetries) {
@@ -284,37 +198,10 @@ export function useTelnyxWebRTC({
     }
   }, []);
 
-  // Track if JWT fetch has completed (success or failure)
-  const [jwtFetchAttempted, setJwtFetchAttempted] = useState(false);
-
-  // Mark JWT fetch as attempted when loading completes
-  useEffect(() => {
-    if (useJwtAuth && !tokenLoading && !jwtFetchAttempted) {
-      setJwtFetchAttempted(true);
-    }
-  }, [useJwtAuth, tokenLoading, jwtFetchAttempted]);
-
   // Initialize Telnyx client
   useEffect(() => {
-    // Determine authentication method
-    const hasJwtToken = useJwtAuth && jwtToken;
-    const hasSipCredentials = sipUsername && sipPassword;
-
-    // Wait for JWT token fetch to complete if using JWT auth
-    // But only if we haven't already attempted and the fetch is still in progress
-    if (useJwtAuth && tokenLoading) {
-      console.log('[TELNYX] Waiting for JWT token fetch to complete...');
-      return;
-    }
-
-    // If JWT auth was attempted but failed, allow fallback to SIP credentials
-    if (useJwtAuth && !jwtToken && jwtFetchAttempted) {
-      console.log('[TELNYX] JWT token fetch failed, will try SIP credentials if available');
-    }
-
-    // Skip if no valid auth method
-    if (!hasJwtToken && !hasSipCredentials) {
-      console.warn('WebRTC initialization skipped: No authentication available');
+    if (!sipUsername || !sipPassword) {
+      console.warn('WebRTC initialization skipped: Missing SIP credentials');
       return;
     }
 
@@ -322,56 +209,29 @@ export function useTelnyxWebRTC({
     let telnyxClient: TelnyxRTC | null = null;
 
     try {
+      // Extract just the username if full SIP URI is provided
+      const username = sipUsername.includes('@') ? sipUsername.split('@')[0] : sipUsername;
+
       console.log('=== TELNYX WebRTC CONNECTION START ===');
-
-      // Build configuration based on auth method
-      let clientConfig: any = {
-        // Enable debug mode for troubleshooting
-        debug: true,
-        debugOutput: 'console',
-        // Allow all ICE transport types (STUN/TURN) for better compatibility
-        iceTransportPolicy: 'all',
-        // Prefetch ICE candidates for faster connection
-        prefetchIceCandidates: true,
-        host: rtcHost,
-        env: rtcEnv,
-        region: rtcRegion,
-        rtcIp: rtcIp,
-        rtcPort: rtcPort,
-        useCanaryRtcServer: useCanaryRtcServer,
-      };
-
-      if (hasJwtToken) {
-        // JWT Token Authentication (preferred)
-        console.log('Authentication: JWT Token');
-        console.log('Token prefix:', jwtToken?.substring(0, 20) + '...');
-        clientConfig.login_token = jwtToken;
-      } else {
-        // SIP Credentials Authentication (fallback)
-        const username = sipUsername!.includes('@') ? sipUsername!.split('@')[0] : sipUsername;
-        console.log('Authentication: SIP Credentials');
-        console.log('Connection details:', {
-          login: username,
-          loginLength: username?.length,
-          domain: sipDomain,
-          hasPassword: !!sipPassword,
-          passwordLength: sipPassword?.length,
-          passwordPrefix: sipPassword?.substring(0, 3) + '...',
-        });
-        clientConfig.login = username;
-        clientConfig.password = sipPassword;
-      }
-
-      console.log('RTC Options:', {
-        rtcHost: rtcHost || null,
-        rtcEnv: rtcEnv || null,
-        rtcRegion: rtcRegion || null,
-        useCanaryRtcServer: !!useCanaryRtcServer,
+      console.log('Connection details:', {
+        login: username,
+        domain: sipDomain,
+        hasPassword: !!sipPassword,
         timestamp: new Date().toISOString(),
       });
 
-      // Initialize TelnyxRTC
-      telnyxClient = new TelnyxRTC(clientConfig);
+      // Initialize TelnyxRTC with optimized configuration
+      telnyxClient = new TelnyxRTC({
+        login: username,
+        password: sipPassword,
+        // Enable debug mode for troubleshooting
+        debug: true,
+        debugOutput: 'console',
+        // Use relay for more reliable connections through restrictive networks
+        iceTransportPolicy: 'relay',
+        // Prefetch ICE candidates for faster connection
+        prefetchIceCandidates: true,
+      } as any);
 
       // Set connection timeout (30 seconds)
       connectionTimeout = setTimeout(() => {
@@ -466,10 +326,10 @@ export function useTelnyxWebRTC({
           if (call.state === 'active') {
             console.log('[AUDIO] Call active - attempting to attach remote stream');
             streamAttachRetryRef.current = 0;
-            
+
             // Try to attach immediately
             const attached = attachRemoteStream(call);
-            
+
             if (!attached) {
               // Retry with delays if initial attach fails
               const retryAttach = () => {
@@ -530,16 +390,8 @@ export function useTelnyxWebRTC({
         }
       });
 
-      telnyxClient.on('telnyx.socket.close', (event: any) => {
-        console.warn('=== TELNYX SOCKET CLOSED ===');
-        console.warn('Close details:', {
-          code: event?.code,
-          reason: event?.reason,
-          wasClean: event?.wasClean,
-          url: event?.target?.url,
-          readyState: event?.target?.readyState,
-        });
-        console.warn('============================');
+      telnyxClient.on('telnyx.socket.close', () => {
+        console.log('Telnyx socket closed');
         setIsConnected(false);
         setActiveCall(null);
         stopAudioMonitor();
@@ -547,32 +399,10 @@ export function useTelnyxWebRTC({
         updateCallState('idle');
       });
 
-      let socketErrorShown = false;
       telnyxClient.on('telnyx.socket.error', (error: any) => {
         console.error('=== TELNYX SOCKET ERROR ===');
         console.error('Socket error:', error);
-        console.error('Socket error details:', {
-          sessionId: error?.sessionId,
-          type: error?.error?.type,
-          message: error?.error?.message,
-          url: error?.error?.target?.url,
-          readyState: error?.error?.target?.readyState,
-        });
         console.error('===========================');
-
-        // Show user-friendly error for connection issues (only once)
-        if (!socketErrorShown) {
-          socketErrorShown = true;
-          // Only show toast after a few retry attempts to avoid spamming
-          setTimeout(() => {
-            toast({
-              variant: "destructive",
-              title: "WebRTC Connection Issue",
-              description: "Having trouble connecting to calling service. Retrying...",
-              duration: 5000,
-            });
-          }, 3000);
-        }
       });
 
       // Connect to Telnyx
@@ -613,24 +443,7 @@ export function useTelnyxWebRTC({
         description: "Failed to initialize calling service",
       });
     }
-  }, [
-    sipUsername,
-    sipPassword,
-    sipDomain,
-    jwtToken,
-    useJwtAuth,
-    tokenLoading,
-    jwtFetchAttempted,
-    rtcHost,
-    rtcEnv,
-    rtcRegion,
-    rtcIp,
-    rtcPort,
-    useCanaryRtcServer,
-    attachRemoteStream,
-    startAudioMonitor,
-    stopAudioMonitor,
-  ]);
+  }, [sipUsername, sipPassword, sipDomain, attachRemoteStream, startAudioMonitor, stopAudioMonitor]);
 
   /**
    * Clean up audio element between calls
@@ -888,9 +701,6 @@ export function useTelnyxWebRTC({
     telnyxCallId,
     selectedMicId,
     selectedSpeakerId,
-    // JWT token authentication state
-    tokenLoading,
-    hasJwtToken: !!jwtToken,
     formatDuration,
     makeCall,
     hangup,

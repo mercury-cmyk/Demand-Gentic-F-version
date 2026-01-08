@@ -4,16 +4,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  Rocket, 
-  Save, 
-  Mail, 
-  Phone,
+import {
+  Rocket,
+  Save,
+  Mail,
   Users,
   Calendar,
   Shield,
   Eye,
-  Send
+  Send,
+  Bot,
+  Target
 } from "lucide-react";
 
 interface Step5Props {
@@ -166,8 +167,8 @@ export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
               </>
             ) : (
               <>
-                <Phone className="w-5 h-5 inline mr-2" />
-                Call Script
+                <Bot className="w-5 h-5 inline mr-2" />
+                AI Agent Configuration
               </>
             )}
           </CardTitle>
@@ -191,21 +192,81 @@ export function Step5Summary({ data, onNext, campaignType }: Step5Props) {
           ) : (
             <>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Script Length</span>
-                <span className="font-medium">{data.content?.script?.length || 0} characters</span>
+                <span className="text-muted-foreground">AI Context Mode</span>
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                  Foundation + Campaign Layer
+                </Badge>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Qualification Questions</span>
                 <span className="font-medium">{data.content?.qualificationFields?.length || 0} questions</span>
               </div>
+              <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
+                AI agents use Foundation capabilities combined with Campaign context for intelligent conversations.
+              </div>
             </>
           )}
-          <Button variant="outline" size="sm" className="w-full" data-testid="button-preview-content">
-            <Eye className="w-4 h-4 mr-2" />
-            Preview {campaignType === "email" ? "Email" : "Script"}
-          </Button>
+          {campaignType === "email" && (
+            <Button variant="outline" size="sm" className="w-full" data-testid="button-preview-content">
+              <Eye className="w-4 h-4 mr-2" />
+              Preview Email
+            </Button>
+          )}
         </CardContent>
       </Card>
+
+      {/* Campaign Context Summary (Telemarketing Only) */}
+      {campaignType === "telemarketing" && (data.campaignObjective || data.productServiceInfo || data.talkingPoints?.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <Target className="w-5 h-5 inline mr-2" />
+              Campaign Context
+            </CardTitle>
+            <CardDescription>
+              This context will be displayed to agents during calls
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {data.campaignObjective && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Objective</span>
+                <p className="text-sm mt-1">{data.campaignObjective}</p>
+              </div>
+            )}
+            {data.productServiceInfo && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Product/Service</span>
+                <p className="text-sm mt-1 line-clamp-3">{data.productServiceInfo}</p>
+              </div>
+            )}
+            {data.talkingPoints && data.talkingPoints.length > 0 && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Talking Points</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {data.talkingPoints.map((point: string, idx: number) => (
+                    <Badge key={idx} variant="secondary" className="text-xs">
+                      {point}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {data.targetAudienceDescription && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Target Audience</span>
+                <p className="text-sm mt-1">{data.targetAudienceDescription}</p>
+              </div>
+            )}
+            {data.successCriteria && (
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Success Criteria</span>
+                <p className="text-sm mt-1">{data.successCriteria}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scheduling Summary */}
       <Card>

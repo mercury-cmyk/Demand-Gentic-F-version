@@ -521,14 +521,19 @@ export async function createRun(
   orgId?: number
 ): Promise<{ runId: string; sseUrl: string }> {
   const runId = generateId('run');
+  const requestText = request.requestText || request.request || request.command;
+  if (!requestText) {
+    throw new Error("Request text is required");
+  }
+  const requestContext = request.requestContext || request.context;
   
   // Create run record
   await db.insert(agentCommandRuns).values({
     id: runId,
     orgId,
     userId,
-    command: request.command,
-    context: request.context,
+    requestText,
+    requestContext,
     status: 'queued',
     phase: 'understand',
     dryRun: request.dryRun,
@@ -538,8 +543,8 @@ export async function createRun(
   // Emit created event
   await emitEvent(runId, 'run.created', {
     runId,
-    command: request.command,
-    context: request.context,
+    requestText,
+    requestContext,
     dryRun: request.dryRun,
     safeMode: request.safeMode,
   });
@@ -641,15 +646,15 @@ async function continueRun(runId: string, interruptResponse: InterruptResponse):
   
   // Merge interrupt response into context
   const updatedContext = {
-    ...(run.context as Record<string, unknown> || {}),
+    ...(run.requestContext as Record<string, unknown> || {}),
     interruptResponses: {
-      ...((run.context as any)?.interruptResponses || {}),
+      ...((run.requestContext as any)?.interruptResponses || {}),
       [run.lastInterruptId!]: interruptResponse,
     },
   };
   
   await db.update(agentCommandRuns)
-    .set({ context: updatedContext })
+    .set({ requestContext: updatedContext })
     .where(eq(agentCommandRuns.id, runId));
   
   // Resume from current phase
@@ -659,7 +664,7 @@ async function continueRun(runId: string, interruptResponse: InterruptResponse):
     if (currentPhase === 'understand' || currentPhase === 'plan') {
       // Re-run planning with new context
       const plan = await runPhase(runId, 'plan', async () => {
-        return await executePlanPhase({ ...run, context: updatedContext });
+        return await executePlanPhase({ ...run, requestContext: updatedContext });
       });
       
       if (await isRunPaused(runId)) return;
@@ -871,7 +876,7 @@ async function executeUnderstandPhase(run: AgentCommandRun): Promise<ParsedReque
           role: "system",
           content: systemPrompt
         },
-        { role: "user", content: run.command }
+        { role: "user", content: run.requestText }
       ],
       response_format: { type: "json_object" }
     });
@@ -892,7 +897,7 @@ async function executeUnderstandPhase(run: AgentCommandRun): Promise<ParsedReque
         missingRequired: [],
         conflicts: [],
       },
-      normalized: run.command,
+      normalized: run.requestText,
     };
   }
   

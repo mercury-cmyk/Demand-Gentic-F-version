@@ -386,7 +386,7 @@ export default function AgentConsolePage() {
   });
 
   const dialMode = campaignDetails?.dialMode || 'manual';
-  const amdEnabled = campaignDetails?.powerSettings?.amd?.enabled ?? false;
+  const amdEnabled = campaignDetails?.hybridSettings?.amd?.enabled ?? false;
 
   // Fetch related contacts from the same company
   const { data: relatedContacts = [] } = useQuery<Array<{

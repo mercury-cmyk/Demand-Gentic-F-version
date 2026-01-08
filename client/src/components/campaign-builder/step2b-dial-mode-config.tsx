@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Phone, Zap, Settings, Volume2, Clock, Bot, User, MessageSquare, Shield, PhoneForwarded, Sparkles, Loader2, Globe, Calendar } from "lucide-react";
+import { Phone, Zap, Settings, Volume2, Clock, Bot, User, MessageSquare, Shield, PhoneForwarded, Sparkles, Loader2, Globe, Calendar, Target, Package, ListChecks, Users, AlertCircle, Plus, X, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -97,6 +97,20 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
   const [operatingDays, setOperatingDays] = useState<string[]>(
     data.aiAgentSettings?.businessHours?.operatingDays || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']
   );
+
+  // Campaign AI Context (Foundation + Campaign Layer Architecture)
+  const [campaignObjective, setCampaignObjective] = useState(data.campaignObjective || '');
+  const [productServiceInfo, setProductServiceInfo] = useState(data.productServiceInfo || '');
+  const [talkingPoints, setTalkingPoints] = useState<string[]>(data.talkingPoints || []);
+  const [newTalkingPoint, setNewTalkingPoint] = useState('');
+  const [targetAudienceDescription, setTargetAudienceDescription] = useState(data.targetAudienceDescription || '');
+  const [campaignObjections, setCampaignObjections] = useState<Array<{ objection: string; response: string }>>(
+    data.campaignObjections || []
+  );
+  const [newObjection, setNewObjection] = useState('');
+  const [newObjectionResponse, setNewObjectionResponse] = useState('');
+  const [successCriteria, setSuccessCriteria] = useState(data.successCriteria || '');
+  const [showLegacyScripts, setShowLegacyScripts] = useState(false);
 
   // AI Script Generation
   const generateScriptsMutation = useMutation({
@@ -198,15 +212,47 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
       dialMode,
       hybridSettings,
       aiAgentSettings,
+      // Campaign AI Context fields (Foundation + Campaign Layer Architecture)
+      campaignObjective: dialMode === 'ai_agent' ? campaignObjective : undefined,
+      productServiceInfo: dialMode === 'ai_agent' ? productServiceInfo : undefined,
+      talkingPoints: dialMode === 'ai_agent' && talkingPoints.length > 0 ? talkingPoints : undefined,
+      targetAudienceDescription: dialMode === 'ai_agent' ? targetAudienceDescription : undefined,
+      campaignObjections: dialMode === 'ai_agent' && campaignObjections.length > 0 ? campaignObjections : undefined,
+      successCriteria: dialMode === 'ai_agent' ? successCriteria : undefined,
     });
   };
 
   const toggleHandoffTrigger = (trigger: HandoffTrigger) => {
-    setHandoffTriggers(prev => 
-      prev.includes(trigger) 
+    setHandoffTriggers(prev =>
+      prev.includes(trigger)
         ? prev.filter(t => t !== trigger)
         : [...prev, trigger]
     );
+  };
+
+  // Talking Points management
+  const addTalkingPoint = () => {
+    if (newTalkingPoint.trim()) {
+      setTalkingPoints(prev => [...prev, newTalkingPoint.trim()]);
+      setNewTalkingPoint('');
+    }
+  };
+
+  const removeTalkingPoint = (index: number) => {
+    setTalkingPoints(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Campaign Objections management
+  const addObjection = () => {
+    if (newObjection.trim() && newObjectionResponse.trim()) {
+      setCampaignObjections(prev => [...prev, { objection: newObjection.trim(), response: newObjectionResponse.trim() }]);
+      setNewObjection('');
+      setNewObjectionResponse('');
+    }
+  };
+
+  const removeObjection = (index: number) => {
+    setCampaignObjections(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -593,127 +639,326 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
             </CardContent>
           </Card>
 
-          {/* AI Scripts Configuration */}
+          {/* Campaign AI Context - Foundation + Campaign Layer Architecture */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-primary" />
+                <CardTitle>Campaign Context for AI Agent</CardTitle>
+                <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary">Recommended</span>
+              </div>
+              <CardDescription>
+                Define what this campaign is about. The AI agent will use this context along with its
+                foundational training to have informed conversations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Campaign Objective */}
+              <div className="space-y-2">
+                <Label htmlFor="campaign-objective">Campaign Objective</Label>
+                <Textarea
+                  id="campaign-objective"
+                  placeholder="e.g., Book qualified meetings with IT decision makers interested in cloud security solutions"
+                  value={campaignObjective}
+                  onChange={(e) => setCampaignObjective(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-campaign-objective"
+                />
+                <p className="text-xs text-muted-foreground">What is the primary goal of each call?</p>
+              </div>
+
+              {/* Product/Service Info */}
+              <div className="space-y-2">
+                <Label htmlFor="product-service-info">
+                  <Package className="w-4 h-4 inline mr-1" />
+                  Product/Service Information
+                </Label>
+                <Textarea
+                  id="product-service-info"
+                  placeholder="Describe your product/service, key features, and value proposition. The AI will use this to explain what you offer naturally in conversation..."
+                  value={productServiceInfo}
+                  onChange={(e) => setProductServiceInfo(e.target.value)}
+                  rows={4}
+                  data-testid="textarea-product-info"
+                />
+              </div>
+
+              {/* Key Talking Points */}
+              <div className="space-y-3">
+                <Label>
+                  <ListChecks className="w-4 h-4 inline mr-1" />
+                  Key Talking Points
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Add the main points the AI should emphasize during conversations.
+                </p>
+                <div className="space-y-2">
+                  {talkingPoints.map((point, index) => (
+                    <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                      <span className="flex-1 text-sm">{point}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeTalkingPoint(index)}
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="e.g., Reduces security incidents by 40%"
+                      value={newTalkingPoint}
+                      onChange={(e) => setNewTalkingPoint(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTalkingPoint())}
+                      data-testid="input-new-talking-point"
+                    />
+                    <Button variant="outline" onClick={addTalkingPoint} data-testid="button-add-talking-point">
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Audience */}
+              <div className="space-y-2">
+                <Label htmlFor="target-audience">
+                  <Users className="w-4 h-4 inline mr-1" />
+                  Target Audience
+                </Label>
+                <Textarea
+                  id="target-audience"
+                  placeholder="e.g., CISOs and IT Directors at mid-market companies (500-5000 employees) in healthcare and finance"
+                  value={targetAudienceDescription}
+                  onChange={(e) => setTargetAudienceDescription(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-target-audience"
+                />
+                <p className="text-xs text-muted-foreground">Who are you trying to reach? The AI will tailor its approach accordingly.</p>
+              </div>
+
+              {/* Success Criteria */}
+              <div className="space-y-2">
+                <Label htmlFor="success-criteria">Success Criteria</Label>
+                <Textarea
+                  id="success-criteria"
+                  placeholder="e.g., Meeting booked with decision maker, or referral to correct contact"
+                  value={successCriteria}
+                  onChange={(e) => setSuccessCriteria(e.target.value)}
+                  rows={2}
+                  data-testid="textarea-success-criteria"
+                />
+                <p className="text-xs text-muted-foreground">What counts as a successful call outcome?</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Campaign-Specific Objections */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5" />
-                <CardTitle>Conversation Scripts</CardTitle>
+                <AlertCircle className="w-5 h-5" />
+                <CardTitle>Campaign-Specific Objection Handling</CardTitle>
               </div>
               <CardDescription>
-                Define what the AI should say in different scenarios. Use {"{{firstName}}"}, {"{{lastName}}"}, {"{{companyName}}"} for personalization.
+                Add objections specific to this campaign. The AI agent already knows general objection
+                handling - add only campaign-specific responses here.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* AI Script Generator */}
-              <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
-                <CardContent className="pt-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                    <Label className="font-semibold">Generate Scripts with AI</Label>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Describe your campaign and let AI generate optimized call scripts for you.
-                  </p>
-                  <Textarea
-                    placeholder="E.g., We're a B2B software company selling cloud security solutions to mid-market IT directors. Our main value proposition is reducing security incidents by 60% while cutting costs. We want to book demo meetings..."
-                    value={campaignBrief}
-                    onChange={(e) => setCampaignBrief(e.target.value)}
-                    rows={4}
-                    data-testid="textarea-campaign-brief"
+              {campaignObjections.length > 0 && (
+                <div className="space-y-3">
+                  {campaignObjections.map((obj, index) => (
+                    <div key={index} className="p-3 bg-muted rounded-lg space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">"{obj.objection}"</p>
+                          <p className="text-sm text-muted-foreground mt-1">Response: {obj.response}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeObjection(index)}
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-3 p-3 border rounded-lg border-dashed">
+                <div className="space-y-2">
+                  <Label htmlFor="new-objection" className="text-sm">Objection</Label>
+                  <Input
+                    id="new-objection"
+                    placeholder='e.g., "We already have a security solution"'
+                    value={newObjection}
+                    onChange={(e) => setNewObjection(e.target.value)}
+                    data-testid="input-new-objection"
                   />
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      {campaignBrief.length}/20 characters minimum
-                    </span>
-                    <Button
-                      onClick={handleGenerateScripts}
-                      disabled={generateScriptsMutation.isPending || campaignBrief.length < 20}
-                      data-testid="button-generate-scripts"
-                    >
-                      {generateScriptsMutation.isPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Generate Scripts
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Separator />
-
-              <div className="space-y-2">
-                <Label htmlFor="ai-opening">Opening Script</Label>
-                <Textarea
-                  id="ai-opening"
-                  placeholder="Hi, this is {{agentName}} from {{companyName}}. I'm reaching out to speak with {{firstName}} {{lastName}} regarding..."
-                  value={aiOpeningScript}
-                  onChange={(e) => setAiOpeningScript(e.target.value)}
-                  rows={3}
-                  data-testid="textarea-ai-opening"
-                />
-                <p className="text-xs text-muted-foreground">Initial greeting when call connects</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="ai-gatekeeper">Gatekeeper Script</Label>
-                <Textarea
-                  id="ai-gatekeeper"
-                  placeholder="I'm calling from {{companyName}} regarding a business matter for {{firstName}}. Would you be able to connect me, or could I leave a message?"
-                  value={aiGatekeeperScript}
-                  onChange={(e) => setAiGatekeeperScript(e.target.value)}
-                  rows={3}
-                  data-testid="textarea-ai-gatekeeper"
-                />
-                <p className="text-xs text-muted-foreground">Professional responses when speaking with receptionists or assistants</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="ai-pitch">Main Pitch Script</Label>
-                <Textarea
-                  id="ai-pitch"
-                  placeholder="The reason for my call is to discuss how {{companyName}} can help your organization with..."
-                  value={aiPitchScript}
-                  onChange={(e) => setAiPitchScript(e.target.value)}
-                  rows={4}
-                  data-testid="textarea-ai-pitch"
-                />
-                <p className="text-xs text-muted-foreground">Core telemarketing message for decision makers</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="ai-objections">Objection Handling</Label>
-                <Textarea
-                  id="ai-objections"
-                  placeholder="Common objections and responses. Format: 'Not interested' -> 'I completely understand. Many of our current clients felt the same way initially...'"
-                  value={aiObjectionsScript}
-                  onChange={(e) => setAiObjectionsScript(e.target.value)}
-                  rows={4}
-                  data-testid="textarea-ai-objections"
-                />
-                <p className="text-xs text-muted-foreground">How to respond to common objections</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="ai-closing">Closing Script</Label>
-                <Textarea
-                  id="ai-closing"
-                  placeholder="Thank you for your time, {{firstName}}. I'll have one of our specialists follow up with more details..."
-                  value={aiClosingScript}
-                  onChange={(e) => setAiClosingScript(e.target.value)}
-                  rows={3}
-                  data-testid="textarea-ai-closing"
-                />
-                <p className="text-xs text-muted-foreground">How to end calls professionally</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-objection-response" className="text-sm">Response</Label>
+                  <Textarea
+                    id="new-objection-response"
+                    placeholder="That makes sense. How is it working for you? Many of our clients found that..."
+                    value={newObjectionResponse}
+                    onChange={(e) => setNewObjectionResponse(e.target.value)}
+                    rows={2}
+                    data-testid="textarea-new-objection-response"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={addObjection}
+                  disabled={!newObjection.trim() || !newObjectionResponse.trim()}
+                  className="w-full"
+                  data-testid="button-add-objection"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Objection & Response
+                </Button>
               </div>
             </CardContent>
+          </Card>
+
+          {/* Legacy Scripts Section - Collapsible */}
+          <Card className="border-muted">
+            <CardHeader
+              className="cursor-pointer hover:bg-muted/50 transition-colors"
+              onClick={() => setShowLegacyScripts(!showLegacyScripts)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-muted-foreground" />
+                  <CardTitle className="text-muted-foreground">Advanced: Legacy Scripts</CardTitle>
+                </div>
+                {showLegacyScripts ? (
+                  <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                )}
+              </div>
+              <CardDescription>
+                Detailed conversation scripts for specific scenarios. The Campaign Context above is usually sufficient.
+              </CardDescription>
+            </CardHeader>
+            {showLegacyScripts && (
+              <CardContent className="space-y-4">
+                {/* AI Script Generator */}
+                <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+                  <CardContent className="pt-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-primary" />
+                      <Label className="font-semibold">Generate Scripts with AI</Label>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Describe your campaign and let AI generate optimized call scripts for you.
+                    </p>
+                    <Textarea
+                      placeholder="E.g., We're a B2B software company selling cloud security solutions to mid-market IT directors. Our main value proposition is reducing security incidents by 60% while cutting costs. We want to book demo meetings..."
+                      value={campaignBrief}
+                      onChange={(e) => setCampaignBrief(e.target.value)}
+                      rows={4}
+                      data-testid="textarea-campaign-brief"
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {campaignBrief.length}/20 characters minimum
+                      </span>
+                      <Button
+                        onClick={handleGenerateScripts}
+                        disabled={generateScriptsMutation.isPending || campaignBrief.length < 20}
+                        data-testid="button-generate-scripts"
+                      >
+                        {generateScriptsMutation.isPending ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Generate Scripts
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-opening">Opening Script</Label>
+                  <Textarea
+                    id="ai-opening"
+                    placeholder="Hi, this is {{agentName}} from {{companyName}}. I'm reaching out to speak with {{firstName}} {{lastName}} regarding..."
+                    value={aiOpeningScript}
+                    onChange={(e) => setAiOpeningScript(e.target.value)}
+                    rows={3}
+                    data-testid="textarea-ai-opening"
+                  />
+                  <p className="text-xs text-muted-foreground">Initial greeting when call connects</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-gatekeeper">Gatekeeper Script</Label>
+                  <Textarea
+                    id="ai-gatekeeper"
+                    placeholder="I'm calling from {{companyName}} regarding a business matter for {{firstName}}. Would you be able to connect me, or could I leave a message?"
+                    value={aiGatekeeperScript}
+                    onChange={(e) => setAiGatekeeperScript(e.target.value)}
+                    rows={3}
+                    data-testid="textarea-ai-gatekeeper"
+                  />
+                  <p className="text-xs text-muted-foreground">Professional responses when speaking with receptionists or assistants</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-pitch">Main Pitch Script</Label>
+                  <Textarea
+                    id="ai-pitch"
+                    placeholder="The reason for my call is to discuss how {{companyName}} can help your organization with..."
+                    value={aiPitchScript}
+                    onChange={(e) => setAiPitchScript(e.target.value)}
+                    rows={4}
+                    data-testid="textarea-ai-pitch"
+                  />
+                  <p className="text-xs text-muted-foreground">Core telemarketing message for decision makers</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-objections">Objection Handling</Label>
+                  <Textarea
+                    id="ai-objections"
+                    placeholder="Common objections and responses. Format: 'Not interested' -> 'I completely understand. Many of our current clients felt the same way initially...'"
+                    value={aiObjectionsScript}
+                    onChange={(e) => setAiObjectionsScript(e.target.value)}
+                    rows={4}
+                    data-testid="textarea-ai-objections"
+                  />
+                  <p className="text-xs text-muted-foreground">How to respond to common objections</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-closing">Closing Script</Label>
+                  <Textarea
+                    id="ai-closing"
+                    placeholder="Thank you for your time, {{firstName}}. I'll have one of our specialists follow up with more details..."
+                    value={aiClosingScript}
+                    onChange={(e) => setAiClosingScript(e.target.value)}
+                    rows={3}
+                    data-testid="textarea-ai-closing"
+                  />
+                  <p className="text-xs text-muted-foreground">How to end calls professionally</p>
+                </div>
+              </CardContent>
+            )}
           </Card>
 
           {/* Gatekeeper Navigation */}

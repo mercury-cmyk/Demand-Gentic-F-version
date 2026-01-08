@@ -82,6 +82,7 @@ import {
   CheckCircle,
   X,
   RefreshCw,
+  Layers,
 } from "lucide-react";
 import { format } from "date-fns";
 import { SkillBasedAgentCreator } from "@/components/virtual-agents/skill-based-agent-creator";
@@ -102,6 +103,9 @@ interface VirtualAgent {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  // Foundation Agent fields (Foundation + Campaign Layer Architecture)
+  isFoundationAgent: boolean;
+  foundationCapabilities: string[] | null;
 }
 
 interface VirtualAgentFormData {
@@ -117,6 +121,9 @@ interface VirtualAgentFormData {
   demandAgentType: 'demand_intel' | 'demand_qual' | 'demand_engage' | null;
   // Organization Intelligence Injection Model
   orgIntelligenceConfig?: OrgIntelligenceConfig;
+  // Foundation Agent fields (Foundation + Campaign Layer Architecture)
+  isFoundationAgent: boolean;
+  foundationCapabilities: string[];
 }
 
 // Preview Studio Types - Agent Preview Lab specification
@@ -751,6 +758,18 @@ const ASSISTANT_POST_PLAYBACK_COOLDOWN_MS = 800;
 
 const DEFAULT_FIRST_MESSAGE = 'Hi, may I speak with {{ContactFullName}}, the {{JobTitle}} at {{CompanyName}}?';
 
+// Foundation Capability options (matches server/services/foundation-capabilities.ts)
+const FOUNDATION_CAPABILITIES = [
+  { id: 'gatekeeper_handling', label: 'Gatekeeper Handling', description: 'Navigate receptionists and assistants professionally' },
+  { id: 'right_party_verification', label: 'Right Party Verification', description: 'Confirm you are speaking with the correct person' },
+  { id: 'objection_handling', label: 'Objection Handling', description: 'Framework for handling common objections professionally' },
+  { id: 'meeting_booking', label: 'Meeting Booking', description: 'Calendar coordination and availability discussion' },
+  { id: 'survey_collection', label: 'Survey Collection', description: 'Question asking and response capture' },
+  { id: 'qualification', label: 'Lead Qualification', description: 'BANT/qualification criteria discovery' },
+  { id: 'voicemail_handling', label: 'Voicemail Handling', description: 'Policy for voicemail detection' },
+  { id: 'transfer_handoff', label: 'Transfer & Handoff', description: 'Human agent transfer triggers and process' },
+];
+
 const defaultFormData: VirtualAgentFormData = {
   name: '',
   description: '',
@@ -770,6 +789,9 @@ const defaultFormData: VirtualAgentFormData = {
   orgIntelligenceConfig: {
     mode: 'use_existing',
   },
+  // Foundation Agent defaults
+  isFoundationAgent: false,
+  foundationCapabilities: [],
 };
 
 export default function VirtualAgentsPage() {
@@ -1189,6 +1211,9 @@ export default function VirtualAgentsPage() {
       settings: mergedSettings,
       isActive: agent.isActive,
       demandAgentType: agent.demandAgentType || null,
+      // Foundation Agent fields
+      isFoundationAgent: agent.isFoundationAgent ?? false,
+      foundationCapabilities: agent.foundationCapabilities || [],
     });
     setEditingAgent(agent);
   };
@@ -2900,10 +2925,32 @@ export default function VirtualAgentsPage() {
                           <Bot className="h-5 w-5 text-primary" />
                         </div>
                         <div>
-                          <div className="font-medium">{agent.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{agent.name}</span>
+                            {agent.isFoundationAgent && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] px-1.5 py-0">
+                                <Layers className="w-3 h-3 mr-0.5" />
+                                Foundation
+                              </Badge>
+                            )}
+                          </div>
                           {agent.description && (
                             <div className="text-sm text-muted-foreground truncate max-w-[200px]">
                               {agent.description}
+                            </div>
+                          )}
+                          {agent.isFoundationAgent && agent.foundationCapabilities && agent.foundationCapabilities.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {agent.foundationCapabilities.slice(0, 3).map((cap) => (
+                                <Badge key={cap} variant="secondary" className="text-[10px] px-1 py-0">
+                                  {cap.replace(/_/g, ' ')}
+                                </Badge>
+                              ))}
+                              {agent.foundationCapabilities.length > 3 && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                                  +{agent.foundationCapabilities.length - 3} more
+                                </Badge>
+                              )}
                             </div>
                           )}
                         </div>
@@ -4512,10 +4559,67 @@ If the person expresses discomfort or asks to stop:
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      {formData.demandAgentType 
-                        ? AGENT_TYPE_OPTIONS.find(t => t.value === formData.demandAgentType)?.description 
+                      {formData.demandAgentType
+                        ? AGENT_TYPE_OPTIONS.find(t => t.value === formData.demandAgentType)?.description
                         : 'Specialized agent roles for coordinated demand generation'}
                     </p>
+                  </div>
+
+                  {/* Foundation Agent Section */}
+                  <div className="space-y-4 p-4 rounded-lg border bg-blue-50/50 dark:bg-blue-950/20">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-blue-600" />
+                        <Label htmlFor="isFoundationAgent" className="font-medium">Foundation Agent</Label>
+                      </div>
+                      <Switch
+                        id="isFoundationAgent"
+                        checked={formData.isFoundationAgent}
+                        onCheckedChange={(checked) => setFormData({ ...formData, isFoundationAgent: checked })}
+                        data-testid="switch-foundation-agent"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Mark this agent as a reusable foundation that can be assigned to multiple campaigns.
+                      Foundation agents have core capabilities that campaigns can extend with specific context.
+                    </p>
+
+                    {formData.isFoundationAgent && (
+                      <div className="space-y-3">
+                        <Label className="text-sm">Foundation Capabilities</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Select the core capabilities this agent should have. These will be injected into the system prompt.
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {FOUNDATION_CAPABILITIES.map((cap) => (
+                            <div
+                              key={cap.id}
+                              className="flex items-start space-x-2 p-2 rounded border bg-background hover:bg-muted/50 transition-colors"
+                            >
+                              <Switch
+                                id={`cap-${cap.id}`}
+                                checked={formData.foundationCapabilities.includes(cap.id)}
+                                onCheckedChange={(checked) => {
+                                  setFormData({
+                                    ...formData,
+                                    foundationCapabilities: checked
+                                      ? [...formData.foundationCapabilities, cap.id]
+                                      : formData.foundationCapabilities.filter(c => c !== cap.id)
+                                  });
+                                }}
+                                className="mt-0.5"
+                              />
+                              <div className="flex-1">
+                                <Label htmlFor={`cap-${cap.id}`} className="text-sm font-medium cursor-pointer">
+                                  {cap.label}
+                                </Label>
+                                <p className="text-xs text-muted-foreground">{cap.description}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">

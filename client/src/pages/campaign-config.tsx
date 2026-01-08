@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +39,16 @@ import {
 } from "@shared/schema";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+
+function DeliveryTemplatesManager() {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="py-10 text-center text-muted-foreground">
+        Delivery templates configuration is coming soon.
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function CampaignConfigPage() {
   const [activeTab, setActiveTab] = useState("sender-profiles");
@@ -502,7 +513,7 @@ export default function CampaignConfigPage() {
                           campaigns?.find((c: any) => c.id === selectedCampaignForValidation)?.companiesHouseValidation?.enabled &&
                           campaigns?.find((c: any) => c.id === selectedCampaignForValidation)?.companiesHouseValidation?.autoValidateOnLeadCreation
                         }
-                        onCheckedChange={async (checked) => {
+                        onCheckedChange={async (checked: boolean) => {
                           try {
                             await apiRequest('PATCH', `/api/campaigns/${selectedCampaignForValidation}`, {
                               companiesHouseValidation: {

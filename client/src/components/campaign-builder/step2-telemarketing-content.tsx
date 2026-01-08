@@ -6,13 +6,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { 
-  ChevronRight, 
+import {
+  ChevronRight,
   Plus,
-  FileText,
-  Eye,
-  History,
-  ClipboardList
+  ClipboardList,
+  Target,
+  Package,
+  ListChecks,
+  Users,
+  X
 } from "lucide-react";
 
 interface Step2TelemarketingProps {
@@ -22,15 +24,27 @@ interface Step2TelemarketingProps {
 }
 
 export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingProps) {
-  const [scriptContent, setScriptContent] = useState(data.content?.script || "");
   const [qualificationFields, setQualificationFields] = useState(data.content?.qualificationFields || []);
+
+  // Campaign Context fields (shared between AI and Human agents)
+  const [campaignObjective, setCampaignObjective] = useState(data.campaignObjective || '');
+  const [productServiceInfo, setProductServiceInfo] = useState(data.productServiceInfo || '');
+  const [talkingPoints, setTalkingPoints] = useState<string[]>(data.talkingPoints || []);
+  const [newTalkingPoint, setNewTalkingPoint] = useState('');
+  const [targetAudienceDescription, setTargetAudienceDescription] = useState(data.targetAudienceDescription || '');
+  const [successCriteria, setSuccessCriteria] = useState(data.successCriteria || '');
 
   const handleNext = () => {
     onNext({
       content: {
-        script: scriptContent,
         qualificationFields,
       },
+      // Campaign Context fields
+      campaignObjective,
+      productServiceInfo,
+      talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
+      targetAudienceDescription,
+      successCriteria,
     });
   };
 
@@ -41,131 +55,130 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
     ]);
   };
 
-  const placeholderGroups = [
-    {
-      name: "Contact",
-      items: [
-        "{{contact.fullName}}",
-        "{{contact.firstName}}",
-        "{{contact.lastName}}",
-        "{{contact.email}}",
-        "{{contact.directPhone}}",
-        "{{contact.mobilePhone}}",
-        "{{contact.jobTitle}}",
-        "{{contact.department}}",
-        "{{contact.seniorityLevel}}",
-        "{{contact.city}}",
-        "{{contact.state}}",
-        "{{contact.country}}",
-        "{{contact.linkedinUrl}}",
-      ]
-    },
-    {
-      name: "Account",
-      items: [
-        "{{account.name}}",
-        "{{account.domain}}",
-        "{{account.industry}}",
-        "{{account.staffCount}}",
-        "{{account.revenue}}",
-        "{{account.mainPhone}}",
-        "{{account.hqCity}}",
-        "{{account.hqState}}",
-        "{{account.hqCountry}}",
-        "{{account.yearFounded}}",
-        "{{account.techStack}}",
-        "{{account.linkedinUrl}}",
-      ]
-    },
-    {
-      name: "Agent",
-      items: [
-        "{{agent.fullName}}",
-        "{{agent.firstName}}",
-        "{{agent.lastName}}",
-        "{{agent.email}}",
-      ]
-    },
-    {
-      name: "Campaign",
-      items: [
-        "{{campaign.name}}",
-      ]
+  // Talking Points management
+  const addTalkingPoint = () => {
+    if (newTalkingPoint.trim()) {
+      setTalkingPoints(prev => [...prev, newTalkingPoint.trim()]);
+      setNewTalkingPoint('');
     }
-  ];
+  };
+
+  const removeTalkingPoint = (index: number) => {
+    setTalkingPoints(prev => prev.filter((_, i) => i !== index));
+  };
 
   return (
     <div className="space-y-6">
-      {/* Call Script Builder */}
-      <Card>
+      {/* Campaign Context Section */}
+      <Card className="border-primary/30 bg-primary/5">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Call Script</CardTitle>
-              <CardDescription>Create your calling script with personalization placeholders</CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" data-testid="button-script-history">
-                <History className="w-4 h-4 mr-2" />
-                Version History
-              </Button>
-              <Button variant="outline" size="sm" data-testid="button-preview-script">
-                <Eye className="w-4 h-4 mr-2" />
-                Preview
-              </Button>
-            </div>
+          <div className="flex items-center gap-2">
+            <Target className="w-5 h-5 text-primary" />
+            <CardTitle>Campaign Context</CardTitle>
           </div>
+          <CardDescription>
+            Define the campaign goals and context. This information will be displayed to agents during calls
+            to help them understand the campaign objectives and have informed conversations.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
+          {/* Campaign Objective */}
           <div className="space-y-2">
-            <Label>Script Content</Label>
+            <Label htmlFor="campaign-objective">Campaign Objective</Label>
             <Textarea
-              value={scriptContent}
-              onChange={(e) => setScriptContent(e.target.value)}
-              placeholder="Hello {{contact.first_name}}, my name is [YOUR NAME] calling from [COMPANY]..."
-              className="min-h-[300px]"
-              data-testid="textarea-script-content"
+              id="campaign-objective"
+              placeholder="e.g., Book qualified meetings with IT decision makers interested in cloud security solutions"
+              value={campaignObjective}
+              onChange={(e) => setCampaignObjective(e.target.value)}
+              rows={2}
+              data-testid="textarea-campaign-objective"
+            />
+            <p className="text-xs text-muted-foreground">What is the primary goal of each call?</p>
+          </div>
+
+          {/* Product/Service Info */}
+          <div className="space-y-2">
+            <Label htmlFor="product-service-info">
+              <Package className="w-4 h-4 inline mr-1" />
+              Product/Service Information
+            </Label>
+            <Textarea
+              id="product-service-info"
+              placeholder="Describe your product/service, key features, and value proposition..."
+              value={productServiceInfo}
+              onChange={(e) => setProductServiceInfo(e.target.value)}
+              rows={4}
+              data-testid="textarea-product-info"
             />
           </div>
 
-          {/* Grouped Placeholders */}
+          {/* Key Talking Points */}
           <div className="space-y-3">
-            <Label>Available Placeholders</Label>
-            <div className="space-y-3">
-              {placeholderGroups.map((group) => (
-                <div key={group.name} className="space-y-2">
-                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    {group.name}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {group.items.map((placeholder) => (
-                      <Button
-                        key={placeholder}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setScriptContent(scriptContent + " " + placeholder)}
-                        className="font-mono text-xs h-7"
-                        data-testid={`button-insert-${placeholder}`}
-                      >
-                        {placeholder}
-                      </Button>
-                    ))}
-                  </div>
+            <Label>
+              <ListChecks className="w-4 h-4 inline mr-1" />
+              Key Talking Points
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Add the main points agents should emphasize during conversations.
+            </p>
+            <div className="space-y-2">
+              {talkingPoints.map((point, index) => (
+                <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-md">
+                  <span className="flex-1 text-sm">{point}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeTalkingPoint(index)}
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
                 </div>
               ))}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="e.g., Reduces security incidents by 40%"
+                  value={newTalkingPoint}
+                  onChange={(e) => setNewTalkingPoint(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTalkingPoint())}
+                  data-testid="input-new-talking-point"
+                />
+                <Button variant="outline" onClick={addTalkingPoint} data-testid="button-add-talking-point">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
 
-          <div className="p-4 bg-muted rounded-lg">
-            <div className="flex items-start gap-2">
-              <FileText className="w-4 h-4 text-muted-foreground mt-0.5" />
-              <div className="text-sm">
-                <p className="font-medium">Agent View</p>
-                <p className="text-muted-foreground">
-                  Agents will see this script in read-only mode during calls. All changes are version-tracked.
-                </p>
-              </div>
-            </div>
+          {/* Target Audience */}
+          <div className="space-y-2">
+            <Label htmlFor="target-audience">
+              <Users className="w-4 h-4 inline mr-1" />
+              Target Audience
+            </Label>
+            <Textarea
+              id="target-audience"
+              placeholder="e.g., CISOs and IT Directors at mid-market companies (500-5000 employees) in healthcare and finance"
+              value={targetAudienceDescription}
+              onChange={(e) => setTargetAudienceDescription(e.target.value)}
+              rows={2}
+              data-testid="textarea-target-audience"
+            />
+            <p className="text-xs text-muted-foreground">Who are you trying to reach?</p>
+          </div>
+
+          {/* Success Criteria */}
+          <div className="space-y-2">
+            <Label htmlFor="success-criteria">Success Criteria</Label>
+            <Textarea
+              id="success-criteria"
+              placeholder="e.g., Meeting booked with decision maker, or referral to correct contact"
+              value={successCriteria}
+              onChange={(e) => setSuccessCriteria(e.target.value)}
+              rows={2}
+              data-testid="textarea-success-criteria"
+            />
+            <p className="text-xs text-muted-foreground">What counts as a successful call outcome?</p>
           </div>
         </CardContent>
       </Card>

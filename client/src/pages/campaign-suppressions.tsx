@@ -6,12 +6,13 @@ import { Link } from "wouter";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { CampaignSuppressionManager } from "@/components/campaign-suppression-manager";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Campaign } from "@shared/schema";
 
 export default function CampaignSuppressionsPage() {
   const [, params] = useRoute("/campaigns/:id/suppressions");
   const campaignId = params?.id;
 
-  const { data: campaign, isLoading } = useQuery({
+  const { data: campaign, isLoading } = useQuery<Campaign>({
     queryKey: ['/api/campaigns', campaignId],
     enabled: !!campaignId,
   });

@@ -162,6 +162,8 @@ export function useAgentRun(runId: string | null) {
   
   // Handle SSE events
   const handleEvent = useCallback((event: AgentEventEnvelope) => {
+    const eventData = (event.data ?? event.payload) as any;
+    const eventTs = event.ts ?? event.timestamp ?? new Date().toISOString();
     // Update run in cache
     queryClient.setQueryData(['agent-run', runId], (old: any) => {
       if (!old) return old;
@@ -171,23 +173,23 @@ export function useAgentRun(runId: string | null) {
       switch (event.type) {
         case 'run.started':
           updatedRun.status = 'running';
-          updatedRun.startedAt = event.ts;
+          updatedRun.startedAt = eventTs;
           break;
         case 'run.phase.changed':
-          updatedRun.phase = (event.data as any).to;
+          updatedRun.phase = eventData?.to;
           break;
         case 'run.progress':
-          updatedRun.currentStepIdx = (event.data as any).currentStep;
-          updatedRun.totalSteps = (event.data as any).totalSteps;
+          updatedRun.currentStepIdx = eventData?.currentStep;
+          updatedRun.totalSteps = eventData?.totalSteps;
           break;
         case 'run.completed':
           updatedRun.status = 'completed';
-          updatedRun.completedAt = event.ts;
-          updatedRun.summaryMd = (event.data as any).summary;
+          updatedRun.completedAt = eventTs;
+          updatedRun.summaryMd = eventData?.summary;
           break;
         case 'run.failed':
           updatedRun.status = 'failed';
-          updatedRun.errorMessage = (event.data as any).errorMessage;
+          updatedRun.errorMessage = eventData?.errorMessage;
           break;
         case 'run.cancelled':
           updatedRun.status = 'cancelled';
@@ -206,7 +208,7 @@ export function useAgentRun(runId: string | null) {
         case 'step.started':
         case 'step.completed':
         case 'step.failed': {
-          const stepData = event.data as any;
+          const stepData = eventData as any;
           const existingIdx = newState.steps.findIndex(s => s.id === stepData.stepId);
           
           if (existingIdx >= 0) {
@@ -233,16 +235,16 @@ export function useAgentRun(runId: string | null) {
               resultSummary: null,
               errorMessage: null,
               retryCount: 0,
-              startedAt: event.type === 'step.started' ? new Date(event.ts) : null,
+              startedAt: event.type === 'step.started' ? new Date(eventTs) : null,
               finishedAt: null,
-              createdAt: new Date(event.ts),
+              createdAt: new Date(eventTs),
             }];
           }
           break;
         }
         
         case 'output.upserted': {
-          const artifactData = event.data as any;
+          const artifactData = eventData as any;
           newState.artifacts = [
             ...newState.artifacts.filter(a => a.id !== artifactData.artifactId),
             {
@@ -254,14 +256,14 @@ export function useAgentRun(runId: string | null) {
               url: artifactData.url,
               refId: artifactData.refId ?? null,
               contentJson: null,
-              createdAt: new Date(event.ts),
+              createdAt: new Date(eventTs),
             },
           ];
           break;
         }
         
         case 'interrupt.raised': {
-          const interruptData = event.data as any;
+          const interruptData = eventData as any;
           newState.pendingInterrupt = {
             id: interruptData.interruptId,
             runId: event.runId,
@@ -279,7 +281,7 @@ export function useAgentRun(runId: string | null) {
             response: null,
             respondedAt: null,
             respondedByUserId: null,
-            createdAt: new Date(event.ts),
+            createdAt: new Date(eventTs),
             expiresAt: null,
           };
           break;

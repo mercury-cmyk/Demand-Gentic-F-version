@@ -29,6 +29,11 @@ import {
   estimateTokenCount,
   type CallCostMetrics,
 } from "./call-cost-tracker";
+import {
+  buildFoundationPromptSections,
+  buildCampaignContextSection,
+  buildContactContextSection,
+} from "./foundation-capabilities";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -2289,21 +2294,29 @@ async function releaseQueueLock(queueItemId: string): Promise<void> {
 
 async function getCampaignConfig(campaignId: string): Promise<any> {
   if (!campaignId) return null;
-  
+
   try {
     const [campaign] = await db
       .select()
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);
-    
+
     if (!campaign) return null;
-    
+
     return {
       script: campaign.callScript,
       voice: (campaign.aiAgentSettings as any)?.persona?.voice || 'alloy',
       openingScript: (campaign.aiAgentSettings as any)?.scripts?.opening,
       qualificationCriteria: campaign.qualificationQuestions,
+      // New campaign context fields (Foundation + Campaign Layer Architecture)
+      campaignObjective: campaign.campaignObjective,
+      productServiceInfo: campaign.productServiceInfo,
+      talkingPoints: campaign.talkingPoints as string[] | null,
+      targetAudienceDescription: campaign.targetAudienceDescription,
+      campaignObjections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
+      successCriteria: campaign.successCriteria,
+      campaignContextBrief: campaign.campaignContextBrief,
       ...(campaign.aiAgentSettings as any || {})
     };
   } catch (error) {
@@ -2375,30 +2388,56 @@ async function buildSystemPrompt(
   campaignConfig: any,
   contactInfo: any,
   agentPrompt?: string,
-  useCondensedPrompt: boolean = true  // Default to condensed for cost optimization
+  useCondensedPrompt: boolean = true,  // Default to condensed for cost optimization
+  foundationCapabilities?: string[]    // Foundation agent capabilities
 ): Promise<string> {
-  // If custom agent prompt provided, use it DIRECTLY without layering
+  // =====================================================================
+  // FOUNDATION + CAMPAIGN + CONTACT LAYER ARCHITECTURE
+  // =====================================================================
+  //
+  // Priority order:
+  // 1. Custom agent prompt (agentPrompt) - Used directly with minimal layering
+  // 2. Foundation agent prompt with Campaign Context layering (NEW)
+  // 3. Canonical fallback prompt
+  //
+  // Layer structure:
+  // - Foundation Layer (Virtual Agent): Core capabilities, methodology, professional standards
+  // - Campaign Layer: Goals, product info, talking points, objections (injected at runtime)
+  // - Contact Layer: Per-call personalization (name, company, title, etc.)
+  // =====================================================================
+
+  // PATH 1: Custom agent prompt provided - use it DIRECTLY without layering
   // This allows well-structured agentic prompts to work exactly as designed
   // (e.g., prompts tested in OpenAI Realtime Preview)
   if (agentPrompt?.trim()) {
     let prompt = agentPrompt.trim();
 
-    // Only append minimal prospect context - DO NOT add control layers or org intelligence
-    // The custom prompt is assumed to be self-contained and complete
-    if (contactInfo) {
-      const fullName = contactInfo.fullName || `${contactInfo.firstName || ''} ${contactInfo.lastName || ''}`.trim();
-      const jobTitle = contactInfo.jobTitle || '';
-      const companyName = contactInfo.companyName || contactInfo.company || '';
+    // Layer campaign context from new fields if available
+    const campaignContextSection = buildCampaignContextSection({
+      objective: campaignConfig?.campaignObjective,
+      productInfo: campaignConfig?.productServiceInfo,
+      talkingPoints: campaignConfig?.talkingPoints,
+      targetAudience: campaignConfig?.targetAudienceDescription,
+      objections: campaignConfig?.campaignObjections,
+      successCriteria: campaignConfig?.successCriteria,
+      brief: campaignConfig?.campaignContextBrief,
+    });
 
-      // Append runtime context at the end (minimal, non-intrusive)
-      prompt += `\n\n---\n# Runtime Context\n- Contact: ${fullName}${jobTitle ? `, ${jobTitle}` : ''}${companyName ? ` at ${companyName}` : ''}`;
+    if (campaignContextSection) {
+      prompt += `\n\n---\n\n${campaignContextSection}`;
+    }
+
+    // Layer contact context
+    const contactContextSection = buildContactContextSection(contactInfo);
+    if (contactContextSection) {
+      prompt += `\n\n---\n\n${contactContextSection}`;
     }
 
     // Apply control layer based on useCondensedPrompt setting
     // This ensures proper call handling even with custom prompts
     const finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
     const tokenEstimate = estimateTokenCount(finalPrompt);
-    console.log(`${LOG_PREFIX} Using custom agent prompt (${finalPrompt.length} chars, ~${tokenEstimate} tokens) - condensed=${useCondensedPrompt}`);
+    console.log(`${LOG_PREFIX} Using foundation agent prompt with campaign context layering (${finalPrompt.length} chars, ~${tokenEstimate} tokens) - condensed=${useCondensedPrompt}`);
     return finalPrompt;
   }
 
@@ -2554,28 +2593,49 @@ Before calling: say "Thanks for your patience—I'm connecting you with someone 
 
   let prompt = basePrompt;
 
-  // Add campaign-specific context if provided
-  if (campaignConfig?.qualificationCriteria) {
-    prompt += `\n\n---\n\n# Qualification Criteria\n${campaignConfig.qualificationCriteria}`;
+  // Add foundation capabilities if provided
+  if (foundationCapabilities && foundationCapabilities.length > 0) {
+    const capabilitiesSection = buildFoundationPromptSections(foundationCapabilities);
+    if (capabilitiesSection) {
+      prompt += `\n\n---\n\n${capabilitiesSection}`;
+    }
   }
 
-  if (campaignConfig?.script) {
-    prompt += `\n\n---\n\n# Additional Context\n${campaignConfig.script}`;
+  // Add campaign context from new fields (Foundation + Campaign Layer Architecture)
+  const campaignContextSection = buildCampaignContextSection({
+    objective: campaignConfig?.campaignObjective,
+    productInfo: campaignConfig?.productServiceInfo,
+    talkingPoints: campaignConfig?.talkingPoints,
+    targetAudience: campaignConfig?.targetAudienceDescription,
+    objections: campaignConfig?.campaignObjections,
+    successCriteria: campaignConfig?.successCriteria,
+    brief: campaignConfig?.campaignContextBrief,
+  });
+
+  if (campaignContextSection) {
+    prompt += `\n\n---\n\n${campaignContextSection}`;
   }
 
-  // Add prospect context
-  if (contactInfo) {
-    prompt += `\n\n---\n\n# Prospect Information`;
-    if (contactInfo.firstName) prompt += `\n- Name: ${fullName}`;
-    if (contactInfo.company || contactInfo.companyName) prompt += `\n- Company: ${contactInfo.company || contactInfo.companyName}`;
-    if (contactInfo.jobTitle) prompt += `\n- Title: ${contactInfo.jobTitle}`;
-    if (contactInfo.industry) prompt += `\n- Industry: ${contactInfo.industry}`;
-    if (contactInfo.email) prompt += `\n- Email: ${contactInfo.email}`;
+  // Legacy: Add old-style campaign-specific context if new fields not populated
+  if (!campaignContextSection) {
+    if (campaignConfig?.qualificationCriteria) {
+      prompt += `\n\n---\n\n# Qualification Criteria\n${campaignConfig.qualificationCriteria}`;
+    }
+
+    if (campaignConfig?.script) {
+      prompt += `\n\n---\n\n# Additional Context\n${campaignConfig.script}`;
+    }
+  }
+
+  // Add contact context (per-call personalization)
+  const contactContextSection = buildContactContextSection(contactInfo);
+  if (contactContextSection) {
+    prompt += `\n\n---\n\n${contactContextSection}`;
   }
 
   const finalPrompt = await buildAgentSystemPrompt(prompt);
   const tokenEstimate = estimateTokenCount(finalPrompt);
-  console.log(`${LOG_PREFIX} Using canonical system prompt structure (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+  console.log(`${LOG_PREFIX} Using canonical system prompt with layered architecture (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
   return finalPrompt;
 }
 

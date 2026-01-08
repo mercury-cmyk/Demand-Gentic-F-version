@@ -299,6 +299,8 @@ export default function AccountDetailPage() {
       variant: "default" as const,
     },
   ].filter(Boolean) as Array<{ label: string; variant?: any; className?: string }>;
+  const customFields = account.customFields as Record<string, unknown> | null;
+  const hasCustomFields = !!customFields && Object.keys(customFields).length > 0;
 
   return (
     <div className="h-full flex flex-col">
@@ -306,7 +308,7 @@ export default function AccountDetailPage() {
       <HeaderActionBar
         avatarFallback={initials}
         title={account.name}
-        subtitle={account.domain}
+        subtitle={account.domain || undefined}
         badges={badges as any}
         actions={headerActions}
         loading={accountLoading}
@@ -509,11 +511,11 @@ export default function AccountDetailPage() {
               )}
 
               {/* Custom Fields */}
-              {account.customFields && Object.keys(account.customFields).length > 0 && (
+              {hasCustomFields && (
                 <div className="mt-4 pt-4 border-t">
                   <p className="text-sm font-medium mb-3">Custom Fields</p>
                   <div className="grid grid-cols-2 gap-4">
-                    {Object.entries(account.customFields).map(([key, value]) => (
+                    {Object.entries(customFields || {}).map(([key, value]) => (
                       <div key={key}>
                         <p className="text-sm text-muted-foreground mb-1 capitalize">
                           {key.replace(/_/g, ' ')}
@@ -744,7 +746,7 @@ export default function AccountDetailPage() {
             </SectionCard>
 
             {/* Custom Fields */}
-            {account.customFields && Object.keys(account.customFields).length > 0 && (
+            {hasCustomFields && (
               <SectionCard
                 title="Custom Fields"
                 icon={FileText}
@@ -759,7 +761,7 @@ export default function AccountDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {Object.entries(account.customFields as Record<string, any>).map(([key, value]) => (
+                      {Object.entries(customFields || {}).map(([key, value]) => (
                         <TableRow key={key} data-testid={`row-custom-field-${key}`}>
                           <TableCell className="font-medium">{key}</TableCell>
                           <TableCell className="font-mono text-sm">{String(value)}</TableCell>
@@ -940,7 +942,7 @@ export default function AccountDetailPage() {
                         id: `filter-${Date.now()}`,
                         field: 'accountName',
                         operator: 'equals',
-                        value: account.name
+                        values: [account.name]
                       }]
                     };
                     // Store filter in sessionStorage for contacts page to pick up

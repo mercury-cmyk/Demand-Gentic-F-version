@@ -35,7 +35,12 @@
       "Bash(gcloud.cmd secrets versions access:*)",
       "Bash(gcloud.cmd run services logs read:*)",
       "Bash(cat:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(curl:*)",
+      "Bash(nslookup:*)",
+      "Bash(npx drizzle-kit:*)",
+      "Bash(gcloud builds submit:*)",
+      "Bash(\"C:\\\\Users\\\\Zahid\\\\AppData\\\\Local\\\\Google\\\\Cloud SDK\\\\google-cloud-sdk\\\\bin\\\\gcloud.cmd\" builds submit --config=cloudbuild.yaml)"
     ]
   }
 }

@@ -1200,6 +1200,16 @@ export const campaigns = pgTable("campaigns", {
   // Lead Delivery Template (custom field selection for client exports)
   deliveryTemplateId: varchar("delivery_template_id").references(() => exportTemplates.id, { onDelete: 'set null' }),
 
+  // AI Agent Campaign Context (Foundation + Campaign Layer Architecture)
+  // These fields are combined with the virtual agent's foundation prompt at runtime
+  campaignObjective: text("campaign_objective"), // e.g., "Book qualified meetings with IT decision makers"
+  productServiceInfo: text("product_service_info"), // Product/service details and value propositions
+  talkingPoints: jsonb("talking_points"), // Key points: ["Reduces costs by 40%", "SOC2 compliant", ...]
+  targetAudienceDescription: text("target_audience_description"), // e.g., "CISOs at mid-market companies (500-5000 employees)"
+  campaignObjections: jsonb("campaign_objections"), // [{objection: "We have a solution", response: "..."}]
+  successCriteria: text("success_criteria"), // e.g., "Meeting booked with decision maker"
+  campaignContextBrief: text("campaign_context_brief"), // Short summary for AI context injection
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   launchedAt: timestamp("launched_at"),
@@ -1230,6 +1240,9 @@ export const virtualAgents = pgTable("virtual_agents", {
   skillId: text("skill_id"), // e.g., 'whitepaper_distribution', 'appointment_setting'
   skillInputs: jsonb("skill_inputs"), // User-provided input values for the skill
   compiledPromptMetadata: jsonb("compiled_prompt_metadata"), // {sources, compiledAt, skillMetadata}
+  // Foundation Agent fields (reusable across campaigns)
+  isFoundationAgent: boolean("is_foundation_agent").notNull().default(false), // Marks agent as reusable foundation
+  foundationCapabilities: jsonb("foundation_capabilities"), // ["gatekeeper_handling", "right_party_verification", ...]
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -6326,4 +6339,104 @@ export type AgentInstanceContext = typeof agentInstanceContexts.$inferSelect;
 export type InsertAgentInstanceContext = z.infer<typeof insertAgentInstanceContextSchema>;
 
 export type OrgIntelligenceMode = 'use_existing' | 'fresh_research' | 'none';
+
+// ==================== CAMPAIGN TEST CALLS - Test AI Agent Calls with Monitoring ====================
+
+/**
+ * Test Call Status Enum
+ * - pending: Test call initiated but not yet answered
+ * - in_progress: Test call is active with AI agent
+ * - completed: Test call finished successfully
+ * - failed: Test call failed (network, timeout, etc.)
+ */
+export const testCallStatusEnum = pgEnum('test_call_status', [
+  'pending',
+  'in_progress',
+  'completed',
+  'failed'
+]);
+
+/**
+ * Campaign Test Calls - Track test calls for AI campaigns
+ * Used to validate AI agent behavior before launching live campaigns
+ */
+export const campaignTestCalls = pgTable('campaign_test_calls', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  virtualAgentId: varchar('virtual_agent_id').references(() => virtualAgents.id, { onDelete: 'set null' }),
+
+  // Test contact details
+  testPhoneNumber: text('test_phone_number').notNull(),
+  testContactName: text('test_contact_name').notNull(),
+  testCompanyName: text('test_company_name'),
+  testJobTitle: text('test_job_title'),
+  testContactEmail: text('test_contact_email'),
+  customVariables: jsonb('custom_variables'), // Any additional variables for the AI agent
+
+  // Call tracking
+  callControlId: text('call_control_id'),
+  callSessionId: varchar('call_session_id').references(() => callSessions.id, { onDelete: 'set null' }),
+  status: testCallStatusEnum('status').notNull().default('pending'),
+
+  // Call timing
+  initiatedAt: timestamp('initiated_at').notNull().defaultNow(),
+  answeredAt: timestamp('answered_at'),
+  endedAt: timestamp('ended_at'),
+  durationSeconds: integer('duration_seconds'),
+
+  // Transcript and analysis
+  fullTranscript: text('full_transcript'),
+  transcriptTurns: jsonb('transcript_turns'), // [{role: 'agent'|'contact', text: string, timestamp: Date}]
+
+  // AI Performance Metrics
+  aiPerformanceMetrics: jsonb('ai_performance_metrics'), // {
+  //   identityConfirmed: boolean,
+  //   gatekeeperHandled: boolean,
+  //   pitchDelivered: boolean,
+  //   objectionHandled: boolean,
+  //   closingAttempted: boolean,
+  //   conversationStatesReached: string[],
+  //   responseLatencyAvgMs: number,
+  //   tokensUsed: number,
+  //   estimatedCost: number
+  // }
+
+  // Detected Issues and Suggestions
+  detectedIssues: jsonb('detected_issues'), // [{type: string, severity: 'low'|'medium'|'high', description: string, suggestion: string}]
+  promptImprovementSuggestions: jsonb('prompt_improvement_suggestions'), // AI-generated suggestions for improving the agent prompt
+
+  // Outcome
+  disposition: canonicalDispositionEnum('disposition'),
+  callSummary: text('call_summary'),
+  testResult: text('test_result'), // 'success'|'needs_improvement'|'failed'
+  testNotes: text('test_notes'), // Tester's notes
+
+  // Recording
+  recordingUrl: text('recording_url'),
+
+  // Metadata
+  testedBy: varchar('tested_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index('campaign_test_calls_campaign_idx').on(table.campaignId),
+  virtualAgentIdx: index('campaign_test_calls_virtual_agent_idx').on(table.virtualAgentId),
+  statusIdx: index('campaign_test_calls_status_idx').on(table.status),
+  createdAtIdx: index('campaign_test_calls_created_at_idx').on(table.createdAt),
+}));
+
+// Insert schema for Campaign Test Calls
+export const insertCampaignTestCallSchema = createInsertSchema(campaignTestCalls).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Types for Campaign Test Calls
+export type CampaignTestCall = typeof campaignTestCalls.$inferSelect;
+export type InsertCampaignTestCall = z.infer<typeof insertCampaignTestCallSchema>;
+
+// Test Call Status type
+export type TestCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+export type TestCallResult = 'success' | 'needs_improvement' | 'failed';
 

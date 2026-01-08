@@ -802,26 +802,37 @@ export default function PhoneCampaignsPage() {
                           <UserPlus className="w-4 h-4 mr-2" />
                           Assign Agents
                         </DropdownMenuItem>
-                        {campaign.dialMode === 'ai_agent' && campaign.status === 'active' && (
-                          <DropdownMenuItem
-                            onClick={() => {
-                              if (confirm('Start AI calls for up to 10 contacts from the queue?')) {
-                                startAiCallsMutation.mutate({ 
-                                  campaignId: campaign.id.toString(), 
-                                  limit: 10 
-                                });
-                              }
-                            }}
-                            disabled={startAiCallsMutation.isPending}
-                            data-testid={`menu-start-ai-calls-${campaign.id}`}
-                          >
-                            {startAiCallsMutation.isPending ? (
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <PhoneOutgoing className="w-4 h-4 mr-2" />
+                        {campaign.dialMode === 'ai_agent' && (
+                          <>
+                            <DropdownMenuItem
+                              onClick={() => setLocation(`/campaigns/${campaign.id}/test`)}
+                              data-testid={`menu-test-ai-${campaign.id}`}
+                            >
+                              <Phone className="w-4 h-4 mr-2" />
+                              Test AI Agent
+                            </DropdownMenuItem>
+                            {campaign.status === 'active' && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (confirm('Start AI calls for up to 10 contacts from the queue?')) {
+                                    startAiCallsMutation.mutate({
+                                      campaignId: campaign.id.toString(),
+                                      limit: 10
+                                    });
+                                  }
+                                }}
+                                disabled={startAiCallsMutation.isPending}
+                                data-testid={`menu-start-ai-calls-${campaign.id}`}
+                              >
+                                {startAiCallsMutation.isPending ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <PhoneOutgoing className="w-4 h-4 mr-2" />
+                                )}
+                                Start AI Calls
+                              </DropdownMenuItem>
                             )}
-                            Start AI Calls
-                          </DropdownMenuItem>
+                          </>
                         )}
                         <DropdownMenuItem
                           onClick={() => duplicateMutation.mutate(campaign)}

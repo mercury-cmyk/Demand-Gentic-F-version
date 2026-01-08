@@ -197,7 +197,7 @@ export function KanbanBoard<T = any>({
                   >
                     {column.items.map((item) => {
                       const itemId = getItemId(item);
-                      const isDragging = draggedItem && getItemId(draggedItem.item) === itemId;
+                      const isDragging = !!draggedItem && getItemId(draggedItem.item) === itemId;
 
                       return (
                         <Reorder.Item
