@@ -57,7 +57,6 @@ type SystemToolsSettings = {
 
 type AdvancedSettings = {
   asr: {
-    textOnly: boolean;
     model: 'default' | 'scribe_realtime';
     inputFormat: 'pcm_16000';
     keywords: string;
@@ -108,7 +107,6 @@ const DEFAULT_SYSTEM_TOOLS: SystemToolsSettings = {
 
 const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
   asr: {
-    textOnly: false,
     model: 'default',
     inputFormat: 'pcm_16000',
     keywords: '',
@@ -118,7 +116,7 @@ const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     eagerness: 'high',  // OPTIMIZED: 'high' for faster turn-taking, reduces latency
     takeTurnAfterSilenceSeconds: 2,  // OPTIMIZED: reduced from 4s for faster responses
     endConversationAfterSilenceSeconds: 60,
-    maxConversationDurationSeconds: 200,
+    maxConversationDurationSeconds: 240,  // 4 minutes max call duration
   },
   softTimeout: {
     responseTimeoutSeconds: -1,
@@ -178,7 +176,6 @@ interface OpenAIRealtimeSession {
   responseStartTime: Date | null;
   responseTimeoutHandle: ReturnType<typeof setTimeout> | null;
   softTimeoutTriggered: boolean;
-  textOnlyWarningLogged: boolean;
   systemPromptOverride: string | null;
   firstMessageOverride: string | null;
   voiceOverride: string | null;
@@ -405,9 +402,13 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           const contactId = customParams.contact_id || urlParams.contact_id;
           const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
           const provider: 'openai' | 'google' = requestedProvider === 'google' ? 'google' : 'openai';
-          const isTestSession = (sessionId?.startsWith('openai-test-') || runId?.startsWith('run-test-'))
-            && queueItemId?.startsWith('queue-test-')
-            && callAttemptId?.startsWith('attempt-');
+          // Check for test session - either from explicit flag or from ID prefixes
+          // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
+          const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
+          const isTestIdPattern = (sessionId?.startsWith('openai-test-') || sessionId?.startsWith('test-') || runId?.startsWith('run-test-'))
+            && (queueItemId?.startsWith('queue-test-') || queueItemId?.startsWith('test-queue-'))
+            && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
+          const isTestSession = isTestCallFlag || isTestIdPattern;
 
           console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);
           console.log(`${LOG_PREFIX} ðŸ“‹ Session parameters:`, {
@@ -504,7 +505,6 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               responseStartTime: null,
               responseTimeoutHandle: null,
               softTimeoutTriggered: false,
-              textOnlyWarningLogged: false,
               systemPromptOverride,
               firstMessageOverride,
               voiceOverride,
@@ -565,7 +565,6 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               responseStartTime: null,
               responseTimeoutHandle: null,
               softTimeoutTriggered: false,
-              textOnlyWarningLogged: false,
               systemPromptOverride,
               firstMessageOverride,
               voiceOverride,
@@ -897,7 +896,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         voiceTemplateValues
       );
       const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "alloy";
-      const modalities = agentSettings.advanced.asr.textOnly ? ["text"] : ["text", "audio"];
+      const modalities = ["text", "audio"];
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
       // Transcription configuration - can be disabled to save ~$0.006/min
       const transcriptionEnabled = agentSettings.advanced.asr.transcriptionEnabled !== false;
@@ -915,10 +914,6 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
       if (agentSettings.advanced.asr.model === 'scribe_realtime') {
         console.log(`${LOG_PREFIX} Scribe Realtime ASR enabled for call: ${session.callId}`);
-      }
-
-      if (agentSettings.advanced.asr.textOnly) {
-        console.warn(`${LOG_PREFIX} Text-only agent enabled. Incoming Telnyx audio will be ignored for call: ${session.callId}`);
       }
 
       // Get cost optimization settings with defaults
@@ -940,7 +935,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           voice,
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-          input_audio_transcription: agentSettings.advanced.asr.textOnly ? undefined : transcriptionConfig,
+          input_audio_transcription: transcriptionConfig,
           turn_detection: turnDetection,
           tools: getAvailableTools(agentSettings.systemTools),
           tool_choice: "auto",
@@ -970,13 +965,16 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         || campaignConfig?.script;
       
       if (customFirstMessage) {
-        const disallowedVariables = findDisallowedVoiceVariables(customFirstMessage);
-        if (disallowedVariables.length > 0) {
-          console.error(
-            `${LOG_PREFIX} Call ${session.callId} blocked: disallowed variables in first message (${disallowedVariables.join(", ")})`
-          );
-          await endCall(session.callId, "error");
-          return;
+        // Skip variable validation for test sessions
+        if (!session.isTestSession) {
+          const disallowedVariables = findDisallowedVoiceVariables(customFirstMessage);
+          if (disallowedVariables.length > 0) {
+            console.error(
+              `${LOG_PREFIX} Call ${session.callId} blocked: disallowed variables in first message (${disallowedVariables.join(", ")})`
+            );
+            await endCall(session.callId, "error");
+            return;
+          }
         }
 
         const normalizedTokens = extractTemplateVariables(customFirstMessage)
@@ -988,8 +986,59 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
         // If it contains canonical variables (including aliases), validate and interpolate them
         if (usesCanonicalOpeningTokens) {
-          
-          // Validate required variables for canonical opening
+
+          // Validate required variables for canonical opening (skip for test sessions)
+          if (!session.isTestSession) {
+            const validation = validateOpeningMessageVariables(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+
+            if (!validation.valid) {
+              console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
+              console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
+              // BLOCK THE CALL - do not proceed with incomplete data
+              await endCall(session.callId, 'error');
+              return;
+            }
+          }
+
+          // For test sessions, use test contact data or a simple fallback
+          if (session.isTestSession) {
+            const testContactName = session.firstMessageOverride?.includes('{{')
+              ? 'there'
+              : (contactInfo?.fullName || contactInfo?.firstName || 'there');
+            openingScript = `Hello, may I speak with ${testContactName} please?`;
+            console.log(`${LOG_PREFIX} ✅ Test session - using simple opening message`);
+          } else {
+            // Interpolate the canonical opening with validated data
+            openingScript = interpolateCanonicalOpening(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+            console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
+          }
+        } else {
+          // Custom message without canonical variables - interpolate allowed tokens
+          openingScript = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
+        }
+      } else {
+        // No custom message - use canonical default with validation (skip for test sessions)
+        if (!session.isTestSession) {
           const validation = validateOpeningMessageVariables(
             {
               fullName: contactInfo?.fullName,
@@ -1001,7 +1050,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
               name: contactInfo?.companyName || contactInfo?.company,
             }
           );
-          
+
           if (!validation.valid) {
             console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
             console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
@@ -1009,8 +1058,15 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
             await endCall(session.callId, 'error');
             return;
           }
-          
-          // Interpolate the canonical opening with validated data
+        }
+
+        // For test sessions, use a simple fallback opening
+        if (session.isTestSession) {
+          const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+          openingScript = `Hello, may I speak with ${testContactName} please?`;
+          console.log(`${LOG_PREFIX} ✅ Test session - using simple opening message`);
+        } else {
+          // Use the canonical opening with interpolation
           openingScript = interpolateCanonicalOpening(
             {
               fullName: contactInfo?.fullName,
@@ -1022,46 +1078,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
               name: contactInfo?.companyName || contactInfo?.company,
             }
           );
-          console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
-        } else {
-          // Custom message without canonical variables - interpolate allowed tokens
-          openingScript = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
+          console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
         }
-      } else {
-        // No custom message - use canonical default with validation
-        const validation = validateOpeningMessageVariables(
-          {
-            fullName: contactInfo?.fullName,
-            firstName: contactInfo?.firstName,
-            lastName: contactInfo?.lastName,
-            jobTitle: contactInfo?.jobTitle,
-          },
-          {
-            name: contactInfo?.companyName || contactInfo?.company,
-          }
-        );
-        
-        if (!validation.valid) {
-          console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
-          console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
-          // BLOCK THE CALL - do not proceed with incomplete data
-          await endCall(session.callId, 'error');
-          return;
-        }
-        
-        // Use the canonical opening with interpolation
-        openingScript = interpolateCanonicalOpening(
-          {
-            fullName: contactInfo?.fullName,
-            firstName: contactInfo?.firstName,
-            lastName: contactInfo?.lastName,
-            jobTitle: contactInfo?.jobTitle,
-          },
-          {
-            name: contactInfo?.companyName || contactInfo?.company,
-          }
-        );
-        console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
       }
 
       // Wait longer before sending greeting to ensure Telnyx stream is fully established
@@ -1304,9 +1322,10 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           }
 
           try {
+            // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
+            // Including extra fields like stream_id causes silent audio!
             const mediaMessage = {
               event: "media",
-              stream_id: session.streamSid,
               media: {
                 payload: message.delta, // Keep as base64 - Telnyx expects base64 encoded audio
               },
@@ -2008,14 +2027,6 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
     return;
   }
 
-  if (session.agentSettings?.advanced.asr.textOnly) {
-    if (!session.textOnlyWarningLogged) {
-      console.warn(`${LOG_PREFIX} Text-only agent is enabled. Skipping Telnyx audio input for call: ${session.callId}`);
-      session.textOnlyWarningLogged = true;
-    }
-    return;
-  }
-
   if (message.media?.payload) {
     session.telnyxInboundFrames += 1;
     session.telnyxInboundLastTime = new Date();
@@ -2067,9 +2078,10 @@ function flushAudioBuffer(session: OpenAIRealtimeSession): void {
     const frame = session.audioFrameBuffer.shift();
     if (frame && session.telnyxWs?.readyState === WebSocket.OPEN) {
       try {
+        // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
+        // Including extra fields like stream_id causes silent audio!
         const mediaMessage = {
           event: "media",
-          stream_id: session.streamSid,
           media: {
             payload: frame.toString('base64'),
           },
@@ -2106,6 +2118,12 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // Close OpenAI WebSocket if still open (check state before closing)
   if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
     session.openaiWs.close();
+  }
+
+  // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
+  if (session.telnyxWs && session.telnyxWs.readyState === WebSocket.OPEN) {
+    console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId}`);
+    session.telnyxWs.close();
   }
 
   const disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
