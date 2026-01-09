@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -26,7 +27,9 @@ import {
   Trash2, 
   Users,
   Loader2,
-  Check
+  Check,
+  Phone,
+  PhoneCall
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -73,6 +76,9 @@ interface Props {
 
 export function HybridAgentAssignment({ campaignId }: Props) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isTestCallDialogOpen, setIsTestCallDialogOpen] = useState(false);
+  const [testPhoneNumber, setTestPhoneNumber] = useState("");
+  const [selectedTestAgent, setSelectedTestAgent] = useState<AIAgent | null>(null);
   const [selectedHumans, setSelectedHumans] = useState<string[]>([]);
   const [selectedAI, setSelectedAI] = useState<string[]>([]);
   const { toast } = useToast();
@@ -122,6 +128,59 @@ export function HybridAgentAssignment({ campaignId }: Props) {
       toast({ title: "Failed to remove agent", description: error.message, variant: "destructive" });
     },
   });
+
+  // Test AI Agent Call mutation
+  const testCallMutation = useMutation({
+    mutationFn: async (data: { phoneNumber: string; virtualAgentId: string; campaignId: string }) => {
+      const response = await apiRequest('POST', '/api/ai-calls/test-openai-realtime', data);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setIsTestCallDialogOpen(false);
+      setTestPhoneNumber("");
+      setSelectedTestAgent(null);
+      toast({ 
+        title: "Test Call Initiated", 
+        description: `Calling ${testPhoneNumber}... Your phone should ring shortly!` 
+      });
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: "Test Call Failed", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    },
+  });
+
+  const handleTestCall = () => {
+    if (!testPhoneNumber || testPhoneNumber.length < 10) {
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid phone number with country code",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!selectedTestAgent) {
+      toast({
+        title: "No Agent Selected",
+        description: "Please select an AI agent to test",
+        variant: "destructive",
+      });
+      return;
+    }
+    testCallMutation.mutate({
+      phoneNumber: testPhoneNumber.startsWith('+') ? testPhoneNumber : `+1${testPhoneNumber}`,
+      virtualAgentId: selectedTestAgent.id,
+      campaignId,
+    });
+  };
+
+  const openTestCallDialog = (agent: AIAgent) => {
+    setSelectedTestAgent(agent);
+    setIsTestCallDialogOpen(true);
+  };
 
   const handleAddAgents = () => {
     if (selectedHumans.length === 0 && selectedAI.length === 0) {
@@ -391,15 +450,27 @@ export function HybridAgentAssignment({ campaignId }: Props) {
                         </div>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeMutation.mutate({ agentId: agent.id, agentType: 'ai' })}
-                      disabled={removeMutation.isPending}
-                      data-testid={`remove-ai-${agent.id}`}
-                    >
-                      <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openTestCallDialog(agent)}
+                        disabled={testCallMutation.isPending}
+                        data-testid={`test-ai-${agent.id}`}
+                        title="Test AI Agent"
+                      >
+                        <PhoneCall className="h-4 w-4 text-primary" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeMutation.mutate({ agentId: agent.id, agentType: 'ai' })}
+                        disabled={removeMutation.isPending}
+                        data-testid={`remove-ai-${agent.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -407,6 +478,74 @@ export function HybridAgentAssignment({ campaignId }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Test AI Agent Call Dialog */}
+      <Dialog open={isTestCallDialogOpen} onOpenChange={setIsTestCallDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PhoneCall className="h-5 w-5 text-primary" />
+              Test AI Agent
+            </DialogTitle>
+            <DialogDescription>
+              Make a test call to verify AI agent scripts and voice quality
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTestAgent && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="h-10 w-10 rounded-full bg-chart-2/10 flex items-center justify-center">
+                  <Bot className="h-5 w-5 text-chart-2" />
+                </div>
+                <div>
+                  <div className="font-medium">{selectedTestAgent.name}</div>
+                  <div className="text-sm text-muted-foreground capitalize">
+                    {selectedTestAgent.provider} Provider
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="test-phone">Phone Number to Call</Label>
+                <Input
+                  id="test-phone"
+                  placeholder="+14175551234"
+                  value={testPhoneNumber}
+                  onChange={(e) => setTestPhoneNumber(e.target.value)}
+                  data-testid="input-test-phone"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter your phone number with country code. The AI agent will call you for testing.
+                </p>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTestCallDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleTestCall}
+              disabled={testCallMutation.isPending || !testPhoneNumber}
+              data-testid="button-make-test-call"
+            >
+              {testCallMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Calling...
+                </>
+              ) : (
+                <>
+                  <Phone className="h-4 w-4 mr-2" />
+                  Make Test Call
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

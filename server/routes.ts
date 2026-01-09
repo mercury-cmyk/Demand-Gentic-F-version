@@ -59,6 +59,7 @@ import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
+import healthRouter from './routes/health';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -619,6 +620,9 @@ async function ensureMailboxTokens(userId: string) {
 export function registerRoutes(app: Express) {
   // Apply general rate limiting to all API routes (100 req/15min)
   app.use('/api/', apiLimiter);
+
+  // Health Check Endpoint
+  app.use('/api', healthRouter);
   
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes

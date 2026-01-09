@@ -378,6 +378,12 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
         const message = typeof data === "string" ? JSON.parse(data) : JSON.parse(data.toString());
         
         if (message.event === "start") {
+          // Guard against multiple start events on the same connection
+          if (session) {
+            console.warn(`${LOG_PREFIX} âš ï¸  Received duplicate 'start' event for active session ${session.callId}. Ignoring to prevent session reset.`);
+            return;
+          }
+
           // Decode client_state from Telnyx (base64 encoded JSON with session parameters)
           let customParams: any = {};
           if (message.start?.client_state) {
