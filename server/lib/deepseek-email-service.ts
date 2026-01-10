@@ -4,6 +4,13 @@
  */
 
 import OpenAI from 'openai';
+import {
+  buildAccountContextSection,
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  type AccountIntelligencePayload,
+  type AccountMessagingBriefPayload,
+} from '../services/account-messaging-service';
 
 interface EmailContentRequest {
   currentHtml: string;
@@ -13,6 +20,8 @@ interface EmailContentRequest {
   companyName?: string;
   industry?: string;
   targetAudience?: string;
+  accountId?: string;
+  campaignId?: string;
 }
 
 interface GeneratedEmailContent {
@@ -55,6 +64,25 @@ function getDeepSeekClient(): OpenAI {
   return deepseekClient;
 }
 
+async function resolveAccountContext(
+  accountId?: string,
+  campaignId?: string | null
+): Promise<string | null> {
+  if (!accountId) return null;
+
+  const accountIntelligence = await getOrBuildAccountIntelligence(accountId);
+  const accountMessagingBrief = await getOrBuildAccountMessagingBrief({
+    accountId,
+    campaignId: campaignId || null,
+    intelligenceRecord: accountIntelligence,
+  });
+
+  return buildAccountContextSection(
+    accountIntelligence.payloadJson as AccountIntelligencePayload,
+    accountMessagingBrief.payloadJson as AccountMessagingBriefPayload
+  );
+}
+
 /**
  * Generate email content from a prompt while preserving the template structure
  */
@@ -66,25 +94,34 @@ export async function generateEmailContent(
     targetAudience?: string;
     tone?: 'professional' | 'friendly' | 'urgent' | 'casual';
     templateType?: string;
+    accountId?: string;
+    campaignId?: string;
   } = {}
 ): Promise<GeneratedEmailContent> {
-  const systemPrompt = `You are an expert B2B email copywriter who specializes in high-converting marketing emails.
+  const accountContextSection = await resolveAccountContext(
+    options.accountId,
+    options.campaignId || null
+  );
+  const systemPrompt = `You are an expert B2B demand generation strategist and copywriter.
 Your task is to generate email content that is:
-- Clear and concise
-- Action-oriented
-- Personalized and relevant
-- Compelling with strong value propositions
-- Professional yet engaging
+- Problem-led: Start with a real, account-relevant challenge or friction point.
+- Insight-driven: Offer a unique, non-obvious perspective or data point that demonstrates deep understanding of the account's reality.
+- Grounded in real demand-gen challenges: Address pipeline gaps, conversion friction, market shifts, or operational realities—never generic or promotional.
+- Account-aware and context-driven: Adapt tone, framing, and value to the specific account, referencing industry, recent events, or known pain points wherever possible.
+- Never promotional or pitch-oriented: Do NOT mention product features, company superiority, or calls to buy. The goal is to provoke thoughtful consideration and deliver relevance that feels earned.
+- Written as if by someone who deeply understands the account’s world—clear, reasoned, and unexpectedly insightful.
 
 You will generate content for a structured email template. Keep each section appropriately sized:
-- Subject: 40-60 characters, attention-grabbing
-- Preheader: 40-100 characters, complements subject
-- Hero Title: 5-10 words, bold headline
-- Hero Subtitle: 15-25 words, supporting message
-- Intro: 2-3 sentences, personal connection
-- Value Bullets: 3 points, benefit-focused
-- CTA Label: 2-4 words, action-oriented
-- Closing Line: 1 sentence, professional sign-off
+- Subject: 40-60 characters, problem/insight-led
+- Preheader: 40-100 characters, complements subject with context
+- Hero Title: 5-10 words, bold, challenge- or insight-focused
+- Hero Subtitle: 15-25 words, expands on the challenge or insight
+- Intro: 2-3 sentences, demonstrates understanding of the account’s situation and frames the problem
+- Value Bullets: 3 points, each a relevant, account-aware insight or consideration (not features or generic benefits)
+- CTA Label: 2-4 words, action-oriented but NOT salesy (e.g., 'See Analysis', 'Explore Insight')
+- Closing Line: 1 sentence, professional, thoughtful sign-off
+
+${accountContextSection ? `${accountContextSection}\n` : ''}
 
 Respond ONLY with valid JSON.`;
 
@@ -155,6 +192,10 @@ Generate the email content in this exact JSON format:
 export async function improveEmailContent(
   request: EmailContentRequest
 ): Promise<EmailImprovement> {
+  const accountContextSection = await resolveAccountContext(
+    request.accountId,
+    request.campaignId || null
+  );
   const systemPrompt = `You are an expert email marketing strategist and copywriter.
 Your task is to improve email content while PRESERVING the original:
 - HTML structure and layout
@@ -166,6 +207,8 @@ Only improve the TEXT CONTENT by making it:
 - Better targeted to the audience
 - More concise and scannable
 - Higher converting with stronger CTAs
+
+${accountContextSection ? `${accountContextSection}\n` : ''}
 
 You will analyze the current content and provide improved versions.
 Always respond with valid JSON.`;

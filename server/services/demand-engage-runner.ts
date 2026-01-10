@@ -13,10 +13,21 @@
  */
 
 import { db } from "../db";
-import { contacts, accounts, emailEvents, emailTemplates } from "@shared/schema";
+import { contacts, accounts, emailEvents, emailTemplates, campaignContentLinks, campaigns } from "@shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { DEMAND_ENGAGE_KNOWLEDGE } from "./demand-agent-knowledge";
+import { accountAssetFitReasoner } from "../../email_generation/accountAssetFitReasoner";
+import { contentEmailGenerator } from "../../email_generation/contentEmailGenerator";
+import { enforceGuardrails } from "../../email_generation/guardrails";
+import type { ContentContext } from "../../email_generation/contentContext";
+import {
+  buildAccountContextSection,
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  type AccountIntelligencePayload,
+  type AccountMessagingBriefPayload,
+} from "./account-messaging-service";
 
 // ==================== INTERFACES ====================
 
@@ -57,6 +68,7 @@ export interface PersonalizationContext {
 
 export interface PersonalizedEmailRequest {
   contactId: string;
+  campaignId?: string;
   sequenceType: 'cold' | 'warm' | 'reengagement';
   personalizationLevel: 1 | 2 | 3;
   templateId?: string;
@@ -83,12 +95,161 @@ export interface EngagementSignal {
   details?: any;
 }
 
+export interface ParticipantContext {
+  role: string;
+  seniority: string;
+  department: string;
+  relationshipState: string;
+  priorInteractionSignals: string[];
+  constraints: string[];
+}
+
 export interface SequenceOptimization {
   recommendedAction: 'accelerate' | 'maintain' | 'slow_down' | 'pause' | 'stop';
   reasoning: string;
   suggestedTiming?: string;
   suggestedContent?: string;
   confidenceScore: number;
+}
+
+type ContentEmailContext = {
+  contentContext: ContentContext;
+  assetMetadata: {
+    title: string;
+    format: string;
+    cta_url: string;
+  };
+};
+
+const DEFAULT_CONTENT_DO_NOT_CLAIM = [
+  "guaranteed pipeline",
+  "best practices",
+  "proprietary methods",
+];
+
+const EVENT_FORMAT_MAP: Record<string, string> = {
+  webinar: "live webinar",
+  forum: "forum",
+  executive_dinner: "executive dinner",
+  roundtable: "roundtable",
+  conference: "conference",
+};
+
+const RESOURCE_FORMAT_MAP: Record<string, string> = {
+  ebook: "ebook",
+  infographic: "infographic",
+  white_paper: "solution brief",
+  guide: "guide",
+  case_study: "case study",
+};
+
+async function resolveCampaignContentEmailContext(
+  campaignId: string,
+  brief: AccountMessagingBriefPayload
+): Promise<ContentEmailContext | null> {
+  const [link] = await db.select({
+    contentType: campaignContentLinks.contentType,
+    contentTitle: campaignContentLinks.contentTitle,
+    contentUrl: campaignContentLinks.contentUrl,
+    metadata: campaignContentLinks.metadata,
+  })
+    .from(campaignContentLinks)
+    .where(eq(campaignContentLinks.campaignId, campaignId))
+    .orderBy(desc(campaignContentLinks.createdAt))
+    .limit(1);
+
+  if (!link) return null;
+
+  const [campaign] = await db.select({
+    targetAudienceDescription: campaigns.targetAudienceDescription,
+  })
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  const metadata = (link.metadata || {}) as Record<string, any>;
+  const eventType = toStringOrEmpty(metadata.eventType || metadata.event_type);
+  const resourceType = toStringOrEmpty(metadata.resourceType || metadata.resource_type);
+  const assetType = toStringOrEmpty(
+    metadata.asset_type || eventType || resourceType || link.contentType
+  );
+
+  const assetFormat = resolveAssetFormat(link.contentType, eventType, resourceType);
+  const primaryTheme = firstNonEmpty(
+    metadata.primary_theme,
+    metadata.primaryTheme,
+    metadata.theme,
+    brief.problem,
+    brief.insight
+  ) || "demand engagement";
+  const whoItIsFor = firstNonEmpty(
+    metadata.who_it_is_for,
+    metadata.whoItIsFor,
+    metadata.target_audience,
+    metadata.targetAudience,
+    campaign?.targetAudienceDescription
+  ) || "B2B demand and revenue teams";
+  const problemExplores = firstNonEmpty(
+    metadata.what_problem_it_helps_explore,
+    metadata.problem,
+    metadata.problem_frame,
+    metadata.problemFrame,
+    brief.problem
+  ) || "how engagement is earned before pipeline";
+  const doNotClaim = Array.isArray(metadata.what_it_does_not_claim)
+    ? metadata.what_it_does_not_claim.filter((item) => typeof item === "string")
+    : DEFAULT_CONTENT_DO_NOT_CLAIM;
+
+  const contentContext: ContentContext = {
+    asset_type: assetType || link.contentType || "resource",
+    asset_title: link.contentTitle,
+    asset_format: assetFormat,
+    primary_theme: primaryTheme,
+    who_it_is_for: whoItIsFor,
+    what_problem_it_helps_explore: problemExplores,
+    what_it_does_not_claim: doNotClaim,
+  };
+
+  const assetMetadata = {
+    title: link.contentTitle,
+    format: assetFormat,
+    cta_url: link.contentUrl || "",
+  };
+
+  if (!assetMetadata.cta_url) return null;
+
+  return {
+    contentContext,
+    assetMetadata,
+  };
+}
+
+function resolveAssetFormat(contentType: string, eventType: string, resourceType: string): string {
+  if (contentType === "event") {
+    const key = eventType || "event";
+    return EVENT_FORMAT_MAP[key] || key.replace(/_/g, " ") || "event";
+  }
+
+  if (contentType === "resource") {
+    const key = resourceType || "resource";
+    return RESOURCE_FORMAT_MAP[key] || key.replace(/_/g, " ") || "resource";
+  }
+
+  return contentType || "resource";
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function toStringOrEmpty(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  return "";
 }
 
 // ==================== EMAIL GENERATION ====================
@@ -110,6 +271,23 @@ export async function generatePersonalizedEmail(
     throw new Error(`Contact ${contactId} not found`);
   }
 
+  const accountId = contactData.account?.id || contactData.contact?.accountId;
+  if (!accountId) {
+    throw new Error(`Account intelligence blocked: contact ${contactId} has no accountId.`);
+  }
+
+  const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+  const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+    accountId,
+    campaignId: request.campaignId || null,
+    intelligenceRecord: accountIntelligenceRecord,
+  });
+
+  const accountIntelligencePayload =
+    accountIntelligenceRecord.payloadJson as AccountIntelligencePayload;
+  const accountMessagingBriefPayload =
+    accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload;
+
   // Step 2: Build personalization context
   const personalizationContext = await buildPersonalizationContext(
     contactData,
@@ -117,20 +295,129 @@ export async function generatePersonalizedEmail(
     intelligence
   );
 
+  const participantContext = await buildParticipantContext(contactData);
+
   // Step 3: Get sequence strategy
   const sequenceStrategy = getSequenceStrategy(sequenceType, request.sequencePosition || 1);
+
+  const contentEmailContext = request.campaignId
+    ? await resolveCampaignContentEmailContext(request.campaignId, accountMessagingBriefPayload)
+    : null;
+
+  if (contentEmailContext) {
+    const contentEmail = buildContentPromotionEmail({
+      personalizationContext,
+      participantContext,
+      brief: accountMessagingBriefPayload,
+      contentEmailContext,
+      personalizationLevel,
+      strategy: sequenceStrategy,
+    });
+
+    if (contentEmail) {
+      console.log("[Demand Engage] Content email generated via account-aware content module.");
+      return contentEmail;
+    }
+
+    console.log("[Demand Engage] Content email guardrails failed; falling back to AI generator.");
+  }
 
   // Step 4: Generate email content using AI
   const email = await generateEmailWithAI(
     personalizationContext,
     sequenceStrategy,
     personalizationLevel,
-    customPrompt
+    customPrompt,
+    {
+      accountIntelligence: accountIntelligencePayload,
+      accountMessagingBrief: accountMessagingBriefPayload,
+      participantContext,
+    }
   );
 
   console.log(`[Demand Engage] Email generated with confidence ${email.confidence}`);
 
   return email;
+}
+
+function buildContentPromotionEmail(params: {
+  personalizationContext: PersonalizationContext;
+  participantContext: ParticipantContext;
+  brief: AccountMessagingBriefPayload;
+  contentEmailContext: ContentEmailContext;
+  personalizationLevel: number;
+  strategy: { focus: string; tone: string; cta: string };
+}): PersonalizedEmail | null {
+  const {
+    personalizationContext,
+    participantContext,
+    brief,
+    contentEmailContext,
+    personalizationLevel,
+    strategy,
+  } = params;
+
+  const contentBrief = {
+    problem: brief.problem || "",
+    insight: brief.insight || "",
+    posture: brief.posture || "explore",
+    outcome: brief.outcome || "conversation",
+    confidence: brief.confidence || 0.5,
+  };
+
+  const contentParticipant = {
+    name: personalizationContext.contact.firstName || personalizationContext.contact.fullName || "there",
+    company: personalizationContext.account.companyName || "your team",
+    role: personalizationContext.contact.jobTitle || "",
+    tone: resolveContentTone(strategy.tone),
+    depth: resolveContentDepth(personalizationLevel),
+    relationship_state: participantContext.relationshipState,
+    prior_touches: participantContext.priorInteractionSignals,
+  };
+
+  const contentAccountAngle = accountAssetFitReasoner({
+    account_messaging_brief: contentBrief,
+    content_context: contentEmailContext.contentContext,
+  });
+
+  const emailInput = {
+    account_messaging_brief: contentBrief,
+    participant_context: contentParticipant,
+    content_account_angle: contentAccountAngle,
+    asset_metadata: contentEmailContext.assetMetadata,
+  };
+
+  const emailOutput = contentEmailGenerator(emailInput);
+  if (!enforceGuardrails(emailInput, emailOutput)) {
+    return null;
+  }
+
+  return {
+    subject: emailOutput.subject,
+    preheader: emailOutput.preheader,
+    htmlContent: emailOutput.html,
+    textContent: emailOutput.text,
+    personalizationVariables: {
+      firstName: personalizationContext.contact.firstName || "",
+      companyName: personalizationContext.account.companyName || "",
+      jobTitle: personalizationContext.contact.jobTitle || "",
+    },
+    personalizationLevel,
+    confidence: contentAccountAngle.confidence || brief.confidence || 0.5,
+  };
+}
+
+function resolveContentDepth(level: number): "short" | "medium" | "deep" {
+  if (level >= 3) return "deep";
+  if (level <= 1) return "short";
+  return "medium";
+}
+
+function resolveContentTone(strategyTone: string): string {
+  const tone = strategyTone.toLowerCase();
+  if (tone.includes("direct")) return "direct";
+  if (tone.includes("friendly")) return "friendly";
+  return "thoughtful";
 }
 
 /**
@@ -264,12 +551,27 @@ async function generateEmailWithAI(
   context: PersonalizationContext,
   strategy: { focus: string; tone: string; cta: string },
   personalizationLevel: number,
-  customPrompt?: string
+  customPrompt?: string,
+  accountContext?: {
+    accountIntelligence: AccountIntelligencePayload;
+    accountMessagingBrief: AccountMessagingBriefPayload;
+    participantContext: ParticipantContext;
+  }
 ): Promise<PersonalizedEmail> {
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const accountContextSection = accountContext
+    ? buildAccountContextSection(accountContext.accountIntelligence, accountContext.accountMessagingBrief)
+    : '';
 
   const systemPrompt = await buildAgentSystemPrompt(`
-You are an expert B2B email copywriter. Generate highly personalized, effective outreach emails.
+You are a senior autonomous campaign intelligence engine generating a participant-level email.
+
+Non-negotiable rules:
+- Accounts determine the message; participants determine the expression.
+- Do not introduce ideas beyond the Account Messaging Brief.
+- No sales language, product pitching, or assumptive pain statements.
+- If account confidence < 0.7, ask a thoughtful question and avoid asserting a problem.
+- Every email must include: opening observation, problem hypothesis, insight, soft CTA.
 
 ${DEMAND_ENGAGE_KNOWLEDGE.emailBestPractices}
 
@@ -282,10 +584,12 @@ Current Strategy:
 - Focus: ${strategy.focus}
 - Tone: ${strategy.tone}
 - CTA: ${strategy.cta}
+
+${accountContextSection ? `\n${accountContextSection}\n` : ''}
 `);
 
   if (!openaiKey) {
-    return generateBasicEmail(context, strategy);
+    return generateBasicEmail(context, strategy, accountContext);
   }
 
   try {
@@ -313,6 +617,15 @@ Company:
 - Industry: ${context.account.industry}
 - Size: ${context.account.employeeSize || 'Unknown'}
 - Recent News: ${context.account.recentNews || 'None available'}
+
+Participant Context:
+${accountContext?.participantContext ? JSON.stringify(accountContext.participantContext, null, 2) : 'None'}
+
+Account Intelligence:
+${accountContext?.accountIntelligence ? JSON.stringify(accountContext.accountIntelligence, null, 2) : 'None'}
+
+Account Messaging Brief:
+${accountContext?.accountMessagingBrief ? JSON.stringify(accountContext.accountMessagingBrief, null, 2) : 'None'}
 
 ${context.intelligence ? `
 Intelligence:
@@ -351,7 +664,7 @@ Return JSON:
     };
   } catch (error) {
     console.error("[Demand Engage] AI email generation error:", error);
-    return generateBasicEmail(context, strategy);
+    return generateBasicEmail(context, strategy, accountContext);
   }
 }
 
@@ -360,19 +673,31 @@ Return JSON:
  */
 function generateBasicEmail(
   context: PersonalizationContext,
-  strategy: { focus: string; tone: string; cta: string }
+  strategy: { focus: string; tone: string; cta: string },
+  accountContext?: {
+    accountMessagingBrief: AccountMessagingBriefPayload;
+  }
 ): PersonalizedEmail {
   const firstName = context.contact.firstName || 'there';
   const companyName = context.account.companyName || 'your company';
+  const brief = accountContext?.accountMessagingBrief;
+  const observation = brief?.insight
+    ? `Noticed ${brief.insight.toLowerCase()}.`
+    : `Noticed ${companyName} and wanted to reach out.`;
+  const problem = brief?.problem
+    ? `${brief.problem}`
+    : 'Trying to understand whether this is on your radar this quarter.';
 
   const subject = `quick question about ${companyName}`;
   const body = `Hi ${firstName},
 
-I noticed ${companyName} and wanted to reach out.
+${observation}
+
+${problem}
 
 ${strategy.focus}
 
-Would you be open to a brief conversation?
+Would you be open to a brief conversation or a quick reply either way?
 
 Best,
 [Your Name]`;
@@ -409,6 +734,28 @@ export async function optimizeSequenceFromEngagement(
   const optimization = analyzeEngagementSignals(signals);
 
   return optimization;
+}
+
+async function buildParticipantContext(data: any): Promise<ParticipantContext> {
+  const contact = data?.contact;
+  const signals = contact?.id ? await getEngagementSignals(contact.id) : [];
+  const engagementTypes = new Set(signals.map((signal) => signal.type));
+
+  let relationshipState = 'cold';
+  if (engagementTypes.has('reply') || engagementTypes.has('click')) {
+    relationshipState = 'engaged';
+  } else if (engagementTypes.has('open')) {
+    relationshipState = 'aware';
+  }
+
+  return {
+    role: contact?.jobTitle || '',
+    seniority: contact?.seniorityLevel || '',
+    department: contact?.department || '',
+    relationshipState,
+    priorInteractionSignals: signals.map((signal) => `${signal.type}:${signal.count}`),
+    constraints: contact?.email ? [] : ['missing_email'],
+  };
 }
 
 /**

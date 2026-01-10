@@ -18,6 +18,8 @@ const generateContentSchema = z.object({
   targetAudience: z.string().optional(),
   tone: z.enum(['professional', 'friendly', 'urgent', 'casual']).optional(),
   templateType: z.string().optional(),
+  accountId: z.string().optional(),
+  campaignId: z.string().optional(),
 });
 
 // Schema for content improvement
@@ -29,6 +31,8 @@ const improveContentSchema = z.object({
   companyName: z.string().optional(),
   industry: z.string().optional(),
   targetAudience: z.string().optional(),
+  accountId: z.string().optional(),
+  campaignId: z.string().optional(),
 });
 
 // Schema for subject variants
@@ -58,6 +62,8 @@ router.post('/generate', requireAuth, async (req, res) => {
       targetAudience: data.targetAudience,
       tone: data.tone,
       templateType: data.templateType,
+      accountId: data.accountId,
+      campaignId: data.campaignId,
     });
 
     res.json({

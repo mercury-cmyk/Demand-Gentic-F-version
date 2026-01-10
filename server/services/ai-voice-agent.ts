@@ -3,6 +3,20 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { ensureVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+import {
+  buildAccountContextSection,
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  type AccountIntelligencePayload,
+  type AccountMessagingBriefPayload,
+} from "./account-messaging-service";
+import {
+  buildCallPlanContextSection,
+  buildParticipantCallContext,
+  getCallMemoryNotes,
+  getOrBuildAccountCallBrief,
+  getOrBuildParticipantCallPlan,
+} from "./account-call-service";
 
 let openai: OpenAI | null = null;
 
@@ -51,6 +65,7 @@ export interface CallContext {
   phoneNumber: string;
   campaignId: string;
   queueItemId: string;
+  accountId?: string;
   agentFullName?: string;
   agentFirstName?: string;
   contactId?: string;
@@ -97,6 +112,45 @@ export class AiVoiceAgent extends EventEmitter {
   }
 
   private async buildSystemPrompt(): Promise<string> {
+    if (!this.context.accountId) {
+      throw new Error("CALL BLOCKED: Missing accountId for account intelligence.");
+    }
+    if (!this.context.contactId) {
+      throw new Error("CALL BLOCKED: Missing contactId for call planning.");
+    }
+
+    const accountIntelligenceRecord = await getOrBuildAccountIntelligence(this.context.accountId);
+    const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+      accountId: this.context.accountId,
+      campaignId: this.context.campaignId || null,
+      intelligenceRecord: accountIntelligenceRecord,
+    });
+    const accountContextSection = buildAccountContextSection(
+      accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
+      accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+    );
+
+    const accountCallBriefRecord = await getOrBuildAccountCallBrief({
+      accountId: this.context.accountId,
+      campaignId: this.context.campaignId || null,
+    });
+    const participantContext = await buildParticipantCallContext(this.context.contactId);
+    const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
+      accountId: this.context.accountId,
+      contactId: this.context.contactId,
+      campaignId: this.context.campaignId || null,
+      attemptNumber: 1,
+      callAttemptId: null,
+      accountCallBrief: accountCallBriefRecord,
+    });
+    const memoryNotes = await getCallMemoryNotes(this.context.accountId, this.context.contactId);
+    const callPlanContextSection = buildCallPlanContextSection({
+      accountCallBrief: accountCallBriefRecord.payloadJson as any,
+      participantCallPlan: participantCallPlanRecord.payloadJson as any,
+      participantContext,
+      memoryNotes,
+    });
+
     const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}. 
 You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.`;
 
@@ -155,7 +209,9 @@ IMPORTANT:
 - Be truthful and don't make claims you can't back up
 - If you don't understand something, ask for clarification
 - Log any key information the prospect shares for follow-up`;
-    return ensureVoiceAgentControlLayer(prompt);
+    return ensureVoiceAgentControlLayer(
+      `${prompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
+    );
 
     // Build complete prompt with organization context from database
     const basePrompt = `${personaIntro}

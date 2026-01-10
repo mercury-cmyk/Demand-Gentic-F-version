@@ -1220,6 +1220,44 @@ export const campaigns = pgTable("campaigns", {
   deliveryTemplateIdx: index("campaigns_delivery_template_idx").on(table.deliveryTemplateId),
 }));
 
+// Account Messaging Briefs (per-account, optional campaign context)
+export const accountMessagingBriefs = pgTable('account_messaging_briefs', {
+  id: serial('id').primaryKey(),
+  workspaceId: varchar('workspace_id'),
+  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'set null' }),
+  intelligenceVersion: integer('intelligence_version').notNull(),
+  payloadJson: jsonb('payload_json').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  accountIdIdx: index('account_messaging_briefs_account_id_idx').on(table.accountId),
+  campaignIdIdx: index('account_messaging_briefs_campaign_id_idx').on(table.campaignId),
+  createdAtIdx: index('account_messaging_briefs_created_at_idx').on(table.createdAt),
+}));
+
+// Account Call Briefs (per-account, optional campaign context)
+export const accountCallBriefs = pgTable('account_call_briefs', {
+  id: serial('id').primaryKey(),
+  workspaceId: varchar('workspace_id'),
+  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'set null' }),
+  intelligenceVersion: integer('intelligence_version').notNull(),
+  campaignFingerprint: text('campaign_fingerprint').notNull(),
+  payloadJson: jsonb('payload_json').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  accountIdIdx: index('account_call_briefs_account_id_idx').on(table.accountId),
+  campaignIdIdx: index('account_call_briefs_campaign_id_idx').on(table.campaignId),
+  createdAtIdx: index('account_call_briefs_created_at_idx').on(table.createdAt),
+}));
+
+export const insertAccountMessagingBriefSchema = createInsertSchema(accountMessagingBriefs);
+export type AccountMessagingBrief = typeof accountMessagingBriefs.$inferSelect;
+export const insertAccountCallBriefSchema = createInsertSchema(accountCallBriefs);
+export type AccountCallBrief = typeof accountCallBriefs.$inferSelect;
+
 // Campaign Agent Assignments table (enforces one-campaign-per-agent rule)
 // Virtual Agents - AI agent personas that can be assigned to campaigns like human agents
 export const virtualAgents = pgTable("virtual_agents", {
@@ -6034,12 +6072,83 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
     .on(table.disposition, table.dispositionProcessed),
 }));
 
+// Participant Call Plans (per contact attempt, derived from account call brief)
+export const participantCallPlans = pgTable("participant_call_plans", {
+  id: serial("id").primaryKey(),
+  workspaceId: varchar("workspace_id"),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
+  attemptNumber: integer("attempt_number").notNull().default(1),
+  accountCallBriefId: integer("account_call_brief_id").references(() => accountCallBriefs.id, { onDelete: 'set null' }),
+  payloadJson: jsonb("payload_json").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  accountIdx: index("participant_call_plans_account_idx").on(table.accountId),
+  contactIdx: index("participant_call_plans_contact_idx").on(table.contactId),
+  campaignIdx: index("participant_call_plans_campaign_idx").on(table.campaignId),
+  callAttemptIdx: index("participant_call_plans_call_attempt_idx").on(table.callAttemptId),
+  createdAtIdx: index("participant_call_plans_created_at_idx").on(table.createdAt),
+}));
+
+// Call Memory Notes (account-level)
+export const accountCallMemoryNotes = pgTable("account_call_memory_notes", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
+  summary: text("summary"),
+  payloadJson: jsonb("payload_json"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  accountIdx: index("account_call_memory_notes_account_idx").on(table.accountId),
+  createdAtIdx: index("account_call_memory_notes_created_at_idx").on(table.createdAt),
+}));
+
+// Call Memory Notes (participant-level)
+export const participantCallMemoryNotes = pgTable("participant_call_memory_notes", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }).notNull(),
+  callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
+  summary: text("summary"),
+  payloadJson: jsonb("payload_json"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  contactIdx: index("participant_call_memory_notes_contact_idx").on(table.contactId),
+  accountIdx: index("participant_call_memory_notes_account_idx").on(table.accountId),
+  createdAtIdx: index("participant_call_memory_notes_created_at_idx").on(table.createdAt),
+}));
+
+// Call Follow-Up Emails (generated after call)
+export const callFollowupEmails = pgTable("call_followup_emails", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
+  payloadJson: jsonb("payload_json").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  contactIdx: index("call_followup_emails_contact_idx").on(table.contactId),
+  accountIdx: index("call_followup_emails_account_idx").on(table.accountId),
+  campaignIdx: index("call_followup_emails_campaign_idx").on(table.campaignId),
+  callAttemptIdx: index("call_followup_emails_call_attempt_idx").on(table.callAttemptId),
+  createdAtIdx: index("call_followup_emails_created_at_idx").on(table.createdAt),
+}));
+
 // Insert Schemas for Unified Console
 export const insertDispositionRuleSchema = createInsertSchema(dispositionRules).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertParticipantCallPlanSchema = createInsertSchema(participantCallPlans);
+export const insertAccountCallMemoryNoteSchema = createInsertSchema(accountCallMemoryNotes);
+export const insertParticipantCallMemoryNoteSchema = createInsertSchema(participantCallMemoryNotes);
+export const insertCallFollowupEmailSchema = createInsertSchema(callFollowupEmails);
 
 export const insertCallProducerTrackingSchema = createInsertSchema(callProducerTracking).omit({
   id: true,
@@ -6116,6 +6225,11 @@ export type InsertDialerRun = z.infer<typeof insertDialerRunSchema>;
 export type DialerCallAttempt = typeof dialerCallAttempts.$inferSelect;
 export type InsertDialerCallAttempt = z.infer<typeof insertDialerCallAttemptSchema>;
 
+export type ParticipantCallPlan = typeof participantCallPlans.$inferSelect;
+export type AccountCallMemoryNote = typeof accountCallMemoryNotes.$inferSelect;
+export type ParticipantCallMemoryNote = typeof participantCallMemoryNotes.$inferSelect;
+export type CallFollowupEmail = typeof callFollowupEmails.$inferSelect;
+
 // Canonical disposition type for type safety
 export type CanonicalDisposition = 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data';
 export type CampaignContactState = 'eligible' | 'locked' | 'waiting_retry' | 'qualified' | 'removed';
@@ -6125,7 +6239,7 @@ export type DialerRunStatus = 'pending' | 'active' | 'paused' | 'completed' | 'c
 // --- Account Intelligence & Agentic Command Center Schemas ---
 
 // Account Intelligence Results
-export const accountIntelligence = pgTable('account_intelligence', {
+export const accountIntelligence = pgTable('org_intelligence_profiles', {
   id: serial('id').primaryKey(),
   accountId: varchar('account_id').references(() => accounts.id),
   domain: text('domain').notNull(),
@@ -6151,6 +6265,23 @@ export const accountIntelligence = pgTable('account_intelligence', {
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
+
+// Account-Level Intelligence Records (per-target account, versioned)
+export const accountIntelligenceRecords = pgTable('account_intelligence', {
+  id: serial('id').primaryKey(),
+  workspaceId: varchar('workspace_id'),
+  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  version: integer('version').notNull().default(1),
+  sourceFingerprint: text('source_fingerprint').notNull(),
+  confidence: real('confidence'),
+  payloadJson: jsonb('payload_json').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  accountIdIdx: index('account_intelligence_account_id_idx').on(table.accountId),
+  accountVersionUniqueIdx: uniqueIndex('account_intelligence_account_version_idx').on(table.accountId, table.version),
+  createdAtIdx: index('account_intelligence_created_at_idx').on(table.createdAt),
+}));
 
 // Agent Runs (Sessions)
 export const agentRuns = pgTable('agent_runs', {
@@ -6178,10 +6309,12 @@ export const agentSteps = pgTable('agent_steps', {
 
 // Zod Schemas for Intelligence & Agents
 export const insertAccountIntelligenceSchema = createInsertSchema(accountIntelligence);
+export const insertAccountIntelligenceRecordSchema = createInsertSchema(accountIntelligenceRecords);
 export const insertAgentRunSchema = createInsertSchema(agentRuns);
 export const insertAgentStepSchema = createInsertSchema(agentSteps);
 
 export type AccountIntelligence = typeof accountIntelligence.$inferSelect;
+export type AccountIntelligenceRecord = typeof accountIntelligenceRecords.$inferSelect;
 export type AgentRun = typeof agentRuns.$inferSelect;
 export type AgentStep = typeof agentSteps.$inferSelect;
 
@@ -6439,4 +6572,182 @@ export type InsertCampaignTestCall = z.infer<typeof insertCampaignTestCallSchema
 // Test Call Status type
 export type TestCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 export type TestCallResult = 'success' | 'needs_improvement' | 'failed';
+
+// ==================== PREVIEW STUDIO - Preview and Test Campaign Content ====================
+
+/**
+ * Preview Session Type Enum
+ * - context: Viewing assembled context (intelligence, briefs)
+ * - email: Previewing generated email content
+ * - call_plan: Previewing call brief and participant plan
+ * - simulation: Live voice simulation session
+ */
+export const previewSessionTypeEnum = pgEnum('preview_session_type', [
+  'context',
+  'email',
+  'call_plan',
+  'simulation'
+]);
+
+/**
+ * Preview Session Status Enum
+ */
+export const previewSessionStatusEnum = pgEnum('preview_session_status', [
+  'active',
+  'completed',
+  'error'
+]);
+
+/**
+ * Preview Transcript Role Enum
+ */
+export const previewTranscriptRoleEnum = pgEnum('preview_transcript_role', [
+  'user',
+  'assistant',
+  'system'
+]);
+
+/**
+ * Preview Content Type Enum
+ */
+export const previewContentTypeEnum = pgEnum('preview_content_type', [
+  'email',
+  'call_plan',
+  'prompt',
+  'call_brief',
+  'participant_plan'
+]);
+
+/**
+ * Preview Studio Sessions - Track all preview activity
+ * Used for testing and validating campaign content before live execution
+ */
+export const previewStudioSessions = pgTable('preview_studio_sessions', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar('workspace_id'),
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }),
+  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }),
+  contactId: varchar('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+  userId: varchar('user_id').references(() => users.id, { onDelete: 'set null' }),
+  virtualAgentId: varchar('virtual_agent_id').references(() => virtualAgents.id, { onDelete: 'set null' }),
+  sessionType: previewSessionTypeEnum('session_type').notNull(),
+  status: previewSessionStatusEnum('status').notNull().default('active'),
+  metadata: jsonb('metadata'), // Additional session metadata
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  endedAt: timestamp('ended_at'),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index('preview_sessions_campaign_idx').on(table.campaignId),
+  accountIdx: index('preview_sessions_account_idx').on(table.accountId),
+  userIdx: index('preview_sessions_user_idx').on(table.userId),
+  typeIdx: index('preview_sessions_type_idx').on(table.sessionType),
+  statusIdx: index('preview_sessions_status_idx').on(table.status),
+  createdAtIdx: index('preview_sessions_created_at_idx').on(table.createdAt),
+}));
+
+/**
+ * Preview Simulation Transcripts - Store transcripts from voice simulations
+ */
+export const previewSimulationTranscripts = pgTable('preview_simulation_transcripts', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar('session_id').references(() => previewStudioSessions.id, { onDelete: 'cascade' }).notNull(),
+  role: previewTranscriptRoleEnum('role').notNull(),
+  content: text('content').notNull(),
+  timestampMs: integer('timestamp_ms').notNull(), // Milliseconds from session start
+  audioDurationMs: integer('audio_duration_ms'), // Duration of audio if applicable
+  metadata: jsonb('metadata'), // Additional metadata (e.g., confidence, tokens)
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  sessionIdx: index('preview_transcripts_session_idx').on(table.sessionId),
+  roleIdx: index('preview_transcripts_role_idx').on(table.role),
+  timestampIdx: index('preview_transcripts_timestamp_idx').on(table.timestampMs),
+}));
+
+/**
+ * Preview Generated Content - Store generated emails, call plans, prompts
+ */
+export const previewGeneratedContent = pgTable('preview_generated_content', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar('session_id').references(() => previewStudioSessions.id, { onDelete: 'cascade' }).notNull(),
+  contentType: previewContentTypeEnum('content_type').notNull(),
+  content: jsonb('content').notNull(), // The actual generated content
+  qualityScore: numeric('quality_score', { precision: 5, scale: 2 }), // 0-100 quality score
+  regenerationCount: integer('regeneration_count').notNull().default(0),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  sessionIdx: index('preview_content_session_idx').on(table.sessionId),
+  typeIdx: index('preview_content_type_idx').on(table.contentType),
+}));
+
+// Relations for Preview Studio
+export const previewStudioSessionsRelations = relations(previewStudioSessions, ({ one, many }) => ({
+  campaign: one(campaigns, {
+    fields: [previewStudioSessions.campaignId],
+    references: [campaigns.id],
+  }),
+  account: one(accounts, {
+    fields: [previewStudioSessions.accountId],
+    references: [accounts.id],
+  }),
+  contact: one(contacts, {
+    fields: [previewStudioSessions.contactId],
+    references: [contacts.id],
+  }),
+  user: one(users, {
+    fields: [previewStudioSessions.userId],
+    references: [users.id],
+  }),
+  virtualAgent: one(virtualAgents, {
+    fields: [previewStudioSessions.virtualAgentId],
+    references: [virtualAgents.id],
+  }),
+  transcripts: many(previewSimulationTranscripts),
+  generatedContent: many(previewGeneratedContent),
+}));
+
+export const previewSimulationTranscriptsRelations = relations(previewSimulationTranscripts, ({ one }) => ({
+  session: one(previewStudioSessions, {
+    fields: [previewSimulationTranscripts.sessionId],
+    references: [previewStudioSessions.id],
+  }),
+}));
+
+export const previewGeneratedContentRelations = relations(previewGeneratedContent, ({ one }) => ({
+  session: one(previewStudioSessions, {
+    fields: [previewGeneratedContent.sessionId],
+    references: [previewStudioSessions.id],
+  }),
+}));
+
+// Insert schemas for Preview Studio
+export const insertPreviewStudioSessionSchema = createInsertSchema(previewStudioSessions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPreviewSimulationTranscriptSchema = createInsertSchema(previewSimulationTranscripts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPreviewGeneratedContentSchema = createInsertSchema(previewGeneratedContent).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Types for Preview Studio
+export type PreviewStudioSession = typeof previewStudioSessions.$inferSelect;
+export type InsertPreviewStudioSession = z.infer<typeof insertPreviewStudioSessionSchema>;
+
+export type PreviewSimulationTranscript = typeof previewSimulationTranscripts.$inferSelect;
+export type InsertPreviewSimulationTranscript = z.infer<typeof insertPreviewSimulationTranscriptSchema>;
+
+export type PreviewGeneratedContent = typeof previewGeneratedContent.$inferSelect;
+export type InsertPreviewGeneratedContent = z.infer<typeof insertPreviewGeneratedContentSchema>;
+
+export type PreviewSessionType = 'context' | 'email' | 'call_plan' | 'simulation';
+export type PreviewSessionStatus = 'active' | 'completed' | 'error';
+export type PreviewTranscriptRole = 'user' | 'assistant' | 'system';
+export type PreviewContentType = 'email' | 'call_plan' | 'prompt' | 'call_brief' | 'participant_plan';
 

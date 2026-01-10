@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -65,6 +66,7 @@ const COLORS = {
 };
 
 export default function CampaignAnalyticsPage() {
+  const [, setLocation] = useLocation();
   const [selectedCampaignForQueue, setSelectedCampaignForQueue] = useState<string>('all');
 
   // Fetch call analytics
@@ -96,6 +98,10 @@ export default function CampaignAnalyticsPage() {
     if (denominator === 0) return '0%';
     return `${Math.round((numerator / denominator) * 100)}%`;
   };
+
+  // Example: accountsStats is an array of { accountId, accountName, opens, clicks, bounces }
+  const accountsStats = analytics?.byAccount || [];
+  const selectedCampaignId = analytics?.selectedCampaignId || '';
 
   return (
     <div className="space-y-6">
@@ -311,6 +317,64 @@ export default function CampaignAnalyticsPage() {
             <div className="text-center py-8 text-muted-foreground">No campaign data available</div>
           )}
         </TabsContent>
+
+        {/* ACCOUNT ENGAGEMENT TABLE (Drilldown) */}
+        {accountsStats.length > 0 && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>Account Engagement</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Opens</th>
+                    <th>Clicks</th>
+                    <th>Bounces</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accountsStats.map((account) => (
+                    <tr key={account.accountId}>
+                      <td>{account.accountName}</td>
+                      <td>
+                        <a
+                          className="text-blue-600 underline cursor-pointer"
+                          onClick={() =>
+                            setLocation(`/contacts?campaignId=${selectedCampaignId}&event=open&accountId=${account.accountId}`)
+                          }
+                        >
+                          {account.opens}
+                        </a>
+                      </td>
+                      <td>
+                        <a
+                          className="text-blue-600 underline cursor-pointer"
+                          onClick={() =>
+                            setLocation(`/contacts?campaignId=${selectedCampaignId}&event=click&accountId=${account.accountId}`)
+                          }
+                        >
+                          {account.clicks}
+                        </a>
+                      </td>
+                      <td>
+                        <a
+                          className="text-blue-600 underline cursor-pointer"
+                          onClick={() =>
+                            setLocation(`/contacts?campaignId=${selectedCampaignId}&event=bounce&accountId=${account.accountId}`)
+                          }
+                        >
+                          {account.bounces}
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
 
         {/* BY AGENT TAB */}
         <TabsContent value="agents" className="space-y-6 mt-6">

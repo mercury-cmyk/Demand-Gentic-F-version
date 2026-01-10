@@ -91,15 +91,23 @@ app.use((req, res, next) => {
   // Create server with Express app as the default handler
   // WebSocket upgrades will be handled separately via server.on('upgrade')
   const server = createServer(app);
-  
+
+  // === Telnyx Credentials Debug Logging ===
+  console.log('--- Telnyx Credentials Debug ---');
+  console.log('TELNYX_API_KEY:', process.env.TELNYX_API_KEY ? 'SET (' + process.env.TELNYX_API_KEY.slice(0, 8) + '...)' : 'NOT SET');
+  console.log('TELNYX_CONNECTION_ID:', process.env.TELNYX_CONNECTION_ID ? 'SET (' + process.env.TELNYX_CONNECTION_ID.slice(0, 8) + '...)' : 'NOT SET');
+  console.log('TELNYX_CALL_CONTROL_APP_ID:', process.env.TELNYX_CALL_CONTROL_APP_ID ? 'SET (' + process.env.TELNYX_CALL_CONTROL_APP_ID.slice(0, 8) + '...)' : 'NOT SET');
+  console.log('TELNYX_FROM_NUMBER:', process.env.TELNYX_FROM_NUMBER ? 'SET (' + process.env.TELNYX_FROM_NUMBER + ')' : 'NOT SET');
+  console.log('-------------------------------');
+
   // Initialize database with default admin if needed
   await initializeDatabase();
-  
+
   // Initialize WebSocket servers BEFORE starting server and Express middleware evaluation
   // This ensures upgrade requests bypass Express routing
   const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");
   const mediaWss = initializeAiMediaStreaming(server);
-  
+
   // Initialize OpenAI Realtime Dialer for AI calling with disposition detection
   // Note: WebSocketServer needs server reference but path-based routing won't work with
   // Express. We manually handle the upgrade event instead.

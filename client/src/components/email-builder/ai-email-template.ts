@@ -180,50 +180,65 @@ export { paletteMap };
 
 // Template presets for quick setup
 export const EMAIL_TEMPLATES = {
-  welcome: {
-    subject: "Welcome to Our Platform!",
-    preheader: "Get started today",
-    heroTitle: "Welcome Aboard!",
-    heroSubtitle: "We're excited to have you",
-    intro: "Thank you for joining our community. Here's what you can do right now to get the most out of your membership.",
+  pipeline_gap: {
+    subject: "Are Pipeline Gaps Slowing Growth?",
+    preheader: "A closer look at hidden friction in your funnel",
+    heroTitle: "Pipeline Friction: The Unseen Cost",
+    heroSubtitle: "Why top-of-funnel activity isn’t translating to revenue",
+    intro: "Many teams see strong lead volume but still miss revenue targets. The real issue often isn’t volume—it’s unseen friction points that stall progress. For organizations in [industry], this challenge is especially acute given recent [market trend or event].",
     valueBullets: [
-      "Access to premium features",
-      "24/7 customer support",
-      "Regular updates and improvements"
+      "Where are prospects stalling or disengaging?",
+      "What signals are you missing in early qualification?",
+      "How are handoffs between teams impacting velocity?"
     ],
-    ctaLabel: "Get Started",
-    ctaUrl: "https://example.com/onboard",
-    closingLine: "Questions? We're here to help."
+    ctaLabel: "See Analysis",
+    ctaUrl: "https://example.com/pipeline-gap-insight",
+    closingLine: "If this resonates, I’m happy to share more context from similar accounts."
   },
-  promotion: {
-    subject: "🎉 Exclusive Offer Inside - Limited Time!",
-    preheader: "Save up to 50% today",
-    heroTitle: "Special Limited Offer",
-    heroSubtitle: "Only for valued customers like you",
-    intro: "We're thrilled to offer you an exclusive deal. This special pricing is available only for a limited time.",
+  conversion_insight: {
+    subject: "Conversion Drop-Off: What’s Really Happening?",
+    preheader: "A data-driven look at your mid-funnel challenges",
+    heroTitle: "Conversion Blind Spots",
+    heroSubtitle: "What most teams overlook in B2B buying journeys",
+    intro: "Conversion rates often mask deeper issues—especially in complex B2B cycles. For [account], recent activity suggests there may be unseen blockers at key decision points. Here’s what we’re seeing across the market:",
     valueBullets: [
-      "50% off your first purchase",
-      "Free priority support for 1 year",
-      "Money-back guarantee"
+      "Decision group misalignment slows progress",
+      "Unaddressed risk factors stall deals late-stage",
+      "Generic messaging fails to provoke action"
     ],
-    ctaLabel: "Claim Your Discount",
-    ctaUrl: "https://example.com/promo",
-    closingLine: "Offer expires in 72 hours. Don't miss out!"
+    ctaLabel: "Explore Insight",
+    ctaUrl: "https://example.com/conversion-blindspots",
+    closingLine: "Let me know if you’d like a tailored breakdown for your team."
   },
-  announcement: {
-    subject: "📢 Important Announcement",
-    preheader: "Something new is coming",
-    heroTitle: "Exciting News!",
-    heroSubtitle: "We have something to share",
-    intro: "We're thrilled to announce a major update that will transform how you work.",
+  market_shift: {
+    subject: "How [Industry] Leaders Are Responding to [Market Shift]",
+    preheader: "Peer strategies for navigating uncertainty",
+    heroTitle: "Adapting to Market Change",
+    heroSubtitle: "What’s working (and what isn’t) for your peers",
+    intro: "With [market shift or event], many [industry] teams are rethinking their approach to demand generation. The most successful are focusing on [specific strategy or insight]. Here’s what’s emerging:",
     valueBullets: [
-      "New features you've requested",
-      "Improved performance and speed",
-      "Enhanced security and reliability"
+      "Doubling down on account-specific relevance",
+      "Reprioritizing channels based on real buyer behavior",
+      "Building feedback loops between sales and marketing"
     ],
-    ctaLabel: "Learn More",
-    ctaUrl: "https://example.com/announcement",
-    closingLine: "Rolling out this week to all users."
+    ctaLabel: "See Peer Data",
+    ctaUrl: "https://example.com/market-shift-insight",
+    closingLine: "Happy to share anonymized examples from similar organizations."
+  },
+  account_specific: {
+    subject: "[Account]: A Fresh Perspective on [Known Challenge]",
+    preheader: "Not a pitch—just a relevant observation",
+    heroTitle: "A Challenge Worth Rethinking",
+    heroSubtitle: "What’s unique about [account]’s current situation?",
+    intro: "Having followed [account]’s recent moves—especially [event or initiative]—I noticed a pattern that’s worth a second look. It’s not about solutions, but about framing the right questions:",
+    valueBullets: [
+      "What’s changed in your buying process this year?",
+      "Where are teams spending more time than expected?",
+      "What’s one metric that’s become harder to move?"
+    ],
+    ctaLabel: "Discuss Trends",
+    ctaUrl: "https://example.com/account-perspective",
+    closingLine: "If this sparks any thoughts, I’d welcome your perspective."
   },
   webinar: {
     subject: "Join Our Exclusive Webinar - Register Now",

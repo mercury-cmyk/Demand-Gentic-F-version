@@ -1,5 +1,6 @@
 import { Mail, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocation } from "wouter";
 
 type MetricValue = number | null | undefined;
 
@@ -42,12 +43,25 @@ const MetricItem = ({
   label,
   value,
   isLoading,
+  onClick,
+  clickable
 }: {
   label: string;
   value: MetricValue;
   isLoading?: boolean;
+  onClick?: () => void;
+  clickable?: boolean;
 }) => (
-  <div className="rounded-md border bg-background/70 px-3 py-2">
+  <div
+    className={cn(
+      "rounded-md border bg-background/70 px-3 py-2",
+      clickable ? "cursor-pointer hover:bg-accent/40 ring-1 ring-accent/30" : "cursor-default"
+    )}
+    onClick={clickable && onClick ? onClick : undefined}
+    style={clickable ? { textDecoration: 'underline', color: 'var(--accent)' } : {}}
+    role={clickable ? "button" : undefined}
+    tabIndex={clickable ? 0 : -1}
+  >
     <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
       {label}
     </div>
@@ -61,9 +75,17 @@ export function CampaignPerformanceSnapshot({
   data,
   isLoading,
   className,
-}: CampaignPerformanceSnapshotProps) {
+  campaignId
+}: CampaignPerformanceSnapshotProps & { campaignId?: string }) {
+  const [, setLocation] = useLocation();
   const email = data?.email ?? null;
   const call = data?.call ?? null;
+
+  // Helper to route to contacts filtered by campaign/event
+  const goToContacts = (eventType: string) => {
+    if (!campaignId) return;
+    setLocation(`/contacts?campaignId=${campaignId}&event=${eventType}`);
+  };
 
   return (
     <div className={cn("rounded-xl border bg-muted/20 p-4 space-y-4", className)}>
@@ -75,10 +97,10 @@ export function CampaignPerformanceSnapshot({
         <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
           <MetricItem label="Recipients" value={email?.totalRecipients} isLoading={isLoading} />
           <MetricItem label="Delivered" value={email?.delivered} isLoading={isLoading} />
-          <MetricItem label="Opens" value={email?.opens} isLoading={isLoading} />
-          <MetricItem label="Clicks" value={email?.clicks} isLoading={isLoading} />
+          <MetricItem label="Opens" value={email?.opens} isLoading={isLoading} clickable onClick={() => goToContacts('open')} />
+          <MetricItem label="Clicks" value={email?.clicks} isLoading={isLoading} clickable onClick={() => goToContacts('click')} />
           <MetricItem label="Unsubscribes" value={email?.unsubscribes} isLoading={isLoading} />
-          <MetricItem label="Spam Complaints" value={email?.spamComplaints} isLoading={isLoading} />
+          <MetricItem label="Spam Complaints" value={email?.spamComplaints} isLoading={isLoading} clickable onClick={() => goToContacts('complained')} />
         </div>
       </div>
 

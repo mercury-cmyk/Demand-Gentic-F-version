@@ -60,6 +60,7 @@ import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
+import previewStudioRouter from './routes/preview-studio';
 import healthRouter from './routes/health';
 import { z } from "zod";
 import {
@@ -12465,6 +12466,10 @@ Provide JSON response with:
   // ==================== DIALER RUNS (Manual/PowerDialer) ====================
 
   app.use("/api/dialer-runs", dialerRunsRouter);
+
+  // ==================== PREVIEW STUDIO ====================
+  // Preview and test campaign content (emails, call plans, live simulation)
+  app.use("/api/preview-studio", previewStudioRouter);
 
   // ==================== QUEUE MANAGEMENT ====================
 

@@ -1,10 +1,27 @@
 ﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, virtualAgents, CanonicalDisposition } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import {
+  buildAccountContextSection,
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  type AccountIntelligencePayload,
+  type AccountMessagingBriefPayload,
+} from "./account-messaging-service";
+import {
+  buildCallPlanContextSection,
+  buildParticipantCallContext,
+  generatePostCallFollowupEmail,
+  getCallMemoryNotes,
+  getOrBuildAccountCallBrief,
+  getOrBuildParticipantCallPlan,
+  recordCallMemoryNotes,
+  saveCallFollowupEmail,
+} from "./account-call-service";
 import { scheduleAutoRecordingSync } from "../lib/auto-recording-sync-queue";
 import {
   setCallSession,
@@ -51,103 +68,18 @@ import {
   buildCampaignContextSection,
   buildContactContextSection,
 } from "./foundation-capabilities";
+import {
+  DEFAULT_ADVANCED_SETTINGS,
+  DEFAULT_SYSTEM_TOOLS,
+  getVirtualAgentConfig,
+  mergeAgentSettings,
+  type AdvancedSettings,
+  type SystemToolsSettings,
+  type VirtualAgentSettings,
+} from "./virtual-agent-settings";
 
 type DispositionCode = CanonicalDisposition;
 
-type SystemToolsSettings = {
-  endConversation: boolean;
-  detectLanguage: boolean;
-  skipTurn: boolean;
-  transferToAgent: boolean;
-  transferToNumber: boolean;
-  playKeypadTouchTone: boolean;
-  voicemailDetection: boolean;
-};
-
-type AdvancedSettings = {
-  asr: {
-    model: 'default' | 'scribe_realtime';
-    inputFormat: 'pcm_16000';
-    keywords: string;
-    transcriptionEnabled: boolean; // Toggle transcription for cost savings
-  };
-  conversational: {
-    eagerness: 'low' | 'normal' | 'high';
-    takeTurnAfterSilenceSeconds: number;
-    endConversationAfterSilenceSeconds: number;
-    maxConversationDurationSeconds: number;
-  };
-  softTimeout: {
-    responseTimeoutSeconds: number;
-  };
-  clientEvents: {
-    audio: boolean;
-    interruption: boolean;
-    userTranscript: boolean;
-    agentResponse: boolean;
-    agentResponseCorrection: boolean;
-  };
-  privacy: {
-    noPiiLogging: boolean;
-    retentionDays: number;
-  };
-  // Cost optimization settings
-  costOptimization: {
-    maxResponseTokens: number;       // Max output tokens (default: 512, range: 256-1024)
-    useCondensedPrompt: boolean;     // Use condensed system prompt (saves ~60% tokens)
-    enableCostTracking: boolean;     // Enable detailed cost logging per call
-  };
-};
-
-type VirtualAgentSettings = {
-  systemTools: SystemToolsSettings;
-  advanced: AdvancedSettings;
-};
-
-const DEFAULT_SYSTEM_TOOLS: SystemToolsSettings = {
-  endConversation: true,
-  detectLanguage: false,
-  skipTurn: false,
-  transferToAgent: true,
-  transferToNumber: true,
-  playKeypadTouchTone: false,
-  voicemailDetection: false,
-};
-
-const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
-  asr: {
-    model: 'default',
-    inputFormat: 'pcm_16000',
-    keywords: '',
-    transcriptionEnabled: true, // Enable by default for visibility, disable for cost savings
-  },
-  conversational: {
-    eagerness: 'high',  // OPTIMIZED: 'high' for faster turn-taking, reduces latency
-    takeTurnAfterSilenceSeconds: 2,  // OPTIMIZED: reduced from 4s for faster responses
-    endConversationAfterSilenceSeconds: 60,
-    maxConversationDurationSeconds: 240,  // 4 minutes max call duration
-  },
-  softTimeout: {
-    responseTimeoutSeconds: -1,
-  },
-  clientEvents: {
-    audio: true,
-    interruption: true,
-    userTranscript: true,
-    agentResponse: true,
-    agentResponseCorrection: true,
-  },
-  privacy: {
-    noPiiLogging: false,
-    retentionDays: -1,
-  },
-  // COST OPTIMIZATION: Defaults optimized for low cost + high quality
-  costOptimization: {
-    maxResponseTokens: 512,       // Reduced from 1024 - sufficient for concise B2B responses
-    useCondensedPrompt: true,     // Uses ~2,500 token prompt instead of ~6,000
-    enableCostTracking: true,     // Enable cost visibility by default
-  },
-};
 
 const LOG_PREFIX = "[OpenAI-Realtime-Dialer]";
 
@@ -754,41 +686,6 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
   return wss;
 }
 
-function mergeAgentSettings(raw?: Partial<VirtualAgentSettings>): VirtualAgentSettings {
-  return {
-    systemTools: {
-      ...DEFAULT_SYSTEM_TOOLS,
-      ...(raw?.systemTools ?? {}),
-    },
-    advanced: {
-      asr: {
-        ...DEFAULT_ADVANCED_SETTINGS.asr,
-        ...(raw?.advanced?.asr ?? {}),
-      },
-      conversational: {
-        ...DEFAULT_ADVANCED_SETTINGS.conversational,
-        ...(raw?.advanced?.conversational ?? {}),
-      },
-      softTimeout: {
-        ...DEFAULT_ADVANCED_SETTINGS.softTimeout,
-        ...(raw?.advanced?.softTimeout ?? {}),
-      },
-      clientEvents: {
-        ...DEFAULT_ADVANCED_SETTINGS.clientEvents,
-        ...(raw?.advanced?.clientEvents ?? {}),
-      },
-      privacy: {
-        ...DEFAULT_ADVANCED_SETTINGS.privacy,
-        ...(raw?.advanced?.privacy ?? {}),
-      },
-      costOptimization: {
-        ...DEFAULT_ADVANCED_SETTINGS.costOptimization,
-        ...(raw?.advanced?.costOptimization ?? {}),
-      },
-    },
-  };
-}
-
 function mapAsrModel(model: AdvancedSettings['asr']['model']): string {
   return model === 'scribe_realtime' ? 'gpt-4o-mini-transcribe' : 'whisper-1';
 }
@@ -825,40 +722,6 @@ function getAvailableTools(systemTools: SystemToolsSettings) {
   });
 }
 
-async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
-  systemPrompt: string | null;
-  firstMessage: string | null;
-  voice: string | null;
-  settings: Partial<VirtualAgentSettings> | null;
-} | null> {
-  if (!virtualAgentId) return null;
-
-  try {
-    const [agent] = await db
-      .select({
-        systemPrompt: virtualAgents.systemPrompt,
-        firstMessage: virtualAgents.firstMessage,
-        voice: virtualAgents.voice,
-        settings: virtualAgents.settings,
-      })
-      .from(virtualAgents)
-      .where(eq(virtualAgents.id, virtualAgentId))
-      .limit(1);
-
-    if (!agent) return null;
-
-    return {
-      systemPrompt: agent.systemPrompt,
-      firstMessage: agent.firstMessage,
-      voice: agent.voice,
-      settings: (agent.settings as Partial<VirtualAgentSettings> | null) ?? null,
-    };
-  } catch (error) {
-    console.error(`${LOG_PREFIX} Error fetching virtual agent config:`, error);
-    return null;
-  }
-}
-
 async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<void> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -878,6 +741,22 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
     const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
     session.agentSettings = agentSettings;
+
+    let attemptNumber = 1;
+    if (session.callAttemptId) {
+      try {
+        const [attempt] = await db
+          .select({ attemptNumber: dialerCallAttempts.attemptNumber })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, session.callAttemptId))
+          .limit(1);
+        if (attempt?.attemptNumber) {
+          attemptNumber = attempt.attemptNumber;
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
+      }
+    }
 
     if (!session.isTestSession) {
       const preflight = await preflightVoiceVariableContract({
@@ -944,7 +823,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
         useCondensedPrompt,
         undefined, // foundationCapabilities
-        agentConfig?.settings as VoiceAgentSettings | null // Pass agent settings for personality config
+        agentConfig?.settings as VoiceAgentSettings | null, // Pass agent settings for personality config
+        session.callAttemptId,
+        attemptNumber
       );
       const systemPrompt = interpolateVoiceTemplate(
         baseSystemPrompt,
@@ -2246,6 +2127,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           leadId: dispositionResult?.leadId ?? null,
         });
       }
+
+      await handlePostCallArtifacts({
+        callAttemptId: session.callAttemptId,
+        campaignId: session.campaignId,
+        contactId: session.contactId,
+        disposition,
+        callSummary: session.callSummary,
+      });
     } catch (error) {
       console.error(`${LOG_PREFIX} Error processing disposition:`, error);
     }
@@ -2328,6 +2217,90 @@ async function scheduleEngagedCallTranscription(options: {
   } catch (error) {
     console.error(`${LOG_PREFIX} Error scheduling call transcription:`, error);
   }
+}
+
+async function handlePostCallArtifacts(params: {
+  callAttemptId: string;
+  campaignId: string;
+  contactId: string;
+  disposition: DispositionCode;
+  callSummary: CallSummary | null;
+}): Promise<void> {
+  try {
+    const [contact] = await db
+      .select({
+        accountId: contacts.accountId,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        jobTitle: contacts.jobTitle,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, params.contactId))
+      .limit(1);
+
+    if (!contact?.accountId) {
+      return;
+    }
+
+    const summaryText = params.callSummary?.summary || `Call completed with disposition ${params.disposition}.`;
+    const keyNotes = [
+      params.callSummary?.summary,
+      params.callSummary?.primary_challenge,
+      params.callSummary?.next_step,
+    ].filter((note): note is string => Boolean(note && note.trim()));
+
+    await recordCallMemoryNotes({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      callAttemptId: params.callAttemptId,
+      summary: summaryText,
+      payload: {
+        disposition: params.disposition,
+        call_summary: params.callSummary,
+      },
+    });
+
+    if (params.disposition === "do_not_call" || params.disposition === "invalid_data") {
+      return;
+    }
+
+    if (params.disposition === "not_interested" && params.callSummary?.follow_up_consent !== "yes") {
+      return;
+    }
+
+    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
+    const followupEmail = await generatePostCallFollowupEmail({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      campaignId: params.campaignId,
+      callOutcome,
+      keyNotes,
+      recipient: {
+        name: contact.fullName || contact.firstName || "there",
+        role: contact.jobTitle || "",
+      },
+    });
+
+    await saveCallFollowupEmail({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      campaignId: params.campaignId,
+      callAttemptId: params.callAttemptId,
+      payload: followupEmail,
+    });
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to create post-call artifacts:`, error);
+  }
+}
+
+function mapDispositionToCallOutcome(
+  disposition: DispositionCode,
+  summary: CallSummary | null
+): string {
+  if (disposition === "voicemail") return "left_voicemail";
+  if (disposition === "not_interested") return "not_interested";
+  if (summary?.follow_up_consent === "yes") return "requested_email";
+  return "spoke_briefly";
 }
 
 /**
@@ -2461,6 +2434,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     if (!campaign) return null;
 
     return {
+      id: campaign.id,
       script: campaign.callScript,
       voice: (campaign.aiAgentSettings as any)?.persona?.voice || 'alloy',
       openingScript: (campaign.aiAgentSettings as any)?.scripts?.opening,
@@ -2587,8 +2561,52 @@ async function buildSystemPrompt(
   agentPrompt?: string,
   useCondensedPrompt: boolean = true,  // Default to condensed for cost optimization
   foundationCapabilities?: string[],    // Foundation agent capabilities
-  agentSettings?: VoiceAgentSettings | null  // Voice agent personality/conversation config
+  agentSettings?: VoiceAgentSettings | null,  // Voice agent personality/conversation config
+  callAttemptId?: string | null,
+  attemptNumber?: number
 ): Promise<string> {
+  const accountId = contactInfo?.accountId;
+  if (!accountId) {
+    throw new Error("CALL BLOCKED: Missing accountId for account intelligence.");
+  }
+  const contactId = contactInfo?.id;
+  if (!contactId) {
+    throw new Error("CALL BLOCKED: Missing contactId for call planning.");
+  }
+
+  const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+  const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+    accountId,
+    campaignId: campaignConfig?.id || null,
+    intelligenceRecord: accountIntelligenceRecord,
+  });
+
+  const accountContextSection = buildAccountContextSection(
+    accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
+    accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+  );
+
+  const accountCallBriefRecord = await getOrBuildAccountCallBrief({
+    accountId,
+    campaignId: campaignConfig?.id || null,
+  });
+  const participantContext = await buildParticipantCallContext(contactId);
+  const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
+    accountId,
+    contactId,
+    campaignId: campaignConfig?.id || null,
+    attemptNumber: attemptNumber || 1,
+    callAttemptId: callAttemptId || null,
+    accountCallBrief: accountCallBriefRecord,
+  });
+  const memoryNotes = await getCallMemoryNotes(accountId, contactId);
+  const callPlanContextSection = buildCallPlanContextSection({
+    accountCallBrief: accountCallBriefRecord.payloadJson as any,
+    participantCallPlan: participantCallPlanRecord.payloadJson as any,
+    participantContext,
+    memoryNotes,
+  });
+
   // =====================================================================
   // FOUNDATION + CAMPAIGN + CONTACT LAYER ARCHITECTURE
   // =====================================================================
@@ -2623,6 +2641,13 @@ async function buildSystemPrompt(
 
     if (campaignContextSection) {
       prompt += `\n\n---\n\n${campaignContextSection}`;
+    }
+
+    if (accountContextSection) {
+      prompt += `\n\n---\n\n${accountContextSection}`;
+    }
+    if (callPlanContextSection) {
+      prompt += `\n\n---\n\n${callPlanContextSection}`;
     }
 
     // Layer contact context
@@ -2835,6 +2860,13 @@ Before calling: say "I understand. Let me connect you with someone who can help.
     if (campaignConfig?.script) {
       prompt += `\n\n---\n\n# Additional Context\n${campaignConfig.script}`;
     }
+  }
+
+  if (accountContextSection) {
+    prompt += `\n\n---\n\n${accountContextSection}`;
+  }
+  if (callPlanContextSection) {
+    prompt += `\n\n---\n\n${callPlanContextSection}`;
   }
 
   // Add contact context (per-call personalization)

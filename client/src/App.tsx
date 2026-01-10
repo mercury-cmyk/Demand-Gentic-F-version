@@ -89,6 +89,7 @@ import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
 import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
+import PreviewStudioPage from "@/pages/preview-studio";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -230,6 +231,7 @@ function AuthenticatedApp() {
               <Route path="/content-studio/ai-generator" component={AIContentGeneratorPage} />
               <Route path="/content-studio/social-publisher" component={SocialMediaPublisherPage} />
               <Route path="/content-studio" component={ContentStudioPage} />
+              <Route path="/preview-studio" component={PreviewStudioPage} />
               <Route path="/events" component={EventsPage} />
               <Route path="/resources" component={ResourcesPage} />
               <Route path="/news" component={NewsPage} />

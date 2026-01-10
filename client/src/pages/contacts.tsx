@@ -56,10 +56,41 @@ import {
   type SuppressionEmail,
   type SuppressionPhone 
 } from "@shared/schema";
+
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 
-export default function ContactsPage() {
+function ContactsPage() {
+
   const [searchQuery, setSearchQuery] = useState("");
+  const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [eventType, setEventType] = useState<string | null>(null);
+  const [filteredContacts, setFilteredContacts] = useState<Contact[] | null>(null);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [location, setLocation] = useLocation();
+    // Parse query params for campaignId and event
+    React.useEffect(() => {
+      const params = new URLSearchParams(window.location.search);
+      const cid = params.get('campaignId');
+      const evt = params.get('event');
+      setCampaignId(cid);
+      setEventType(evt);
+    }, [location]);
+
+    // Fetch contacts by campaign/event if params present
+    React.useEffect(() => {
+      if (campaignId && eventType) {
+        setContactsLoading(true);
+        fetch(`/api/campaigns/${campaignId}/contacts-by-event?event=${eventType}`)
+          .then(res => res.json())
+          .then(data => {
+            setFilteredContacts(data.contacts || []);
+            setContactsLoading(false);
+          })
+          .catch(() => setContactsLoading(false));
+      } else {
+        setFilteredContacts(null);
+      }
+    }, [campaignId, eventType]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
@@ -80,7 +111,7 @@ export default function ContactsPage() {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [selectAllPages, setSelectAllPages] = useState(false);
-  const [, setLocation] = useLocation();
+  // Removed duplicate setLocation declaration
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -92,7 +123,7 @@ export default function ContactsPage() {
     return (normalized as UserRole) || "Agent";
   };
 
-  const { data: contacts, isLoading: contactsLoading, refetch: refetchContacts } = useQuery<Contact[]>({
+  const { data: contacts, isLoading: contactsLoadingQuery, refetch: refetchContacts } = useQuery<Contact[]>({
     queryKey: ['/api/contacts', JSON.stringify(filterGroup), JSON.stringify(appliedFilters)],
     queryFn: async () => {
       const token = localStorage.getItem('authToken');
@@ -229,19 +260,20 @@ export default function ContactsPage() {
     },
   });
 
-  const filteredContacts = contacts?.filter(contact =>
+  const filteredContactsDefault = contacts?.filter(contact =>
     searchQuery === "" ||
     contact.firstName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     contact.lastName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     contact.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
     contact.jobTitle?.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
+  const filteredContactsToShow = filteredContacts !== null ? filteredContacts : filteredContactsDefault;
 
   // Pagination calculations
-  const totalPages = Math.ceil(filteredContacts.length / ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredContactsToShow.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedContacts = filteredContacts.slice(startIndex, endIndex);
+  const paginatedContacts = filteredContactsToShow.slice(startIndex, endIndex);
 
   // Reset to page 1 when search or filter changes
   React.useEffect(() => {
@@ -496,6 +528,17 @@ export default function ContactsPage() {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {/* Filter banner for campaign/event */}
+      {campaignId && eventType && (
+        <div className="w-full p-3 bg-accent/10 border-b text-accent-foreground flex items-center justify-between">
+          <span>
+            Showing contacts for campaign <b>{campaignId}</b> with event <b>{eventType}</b>.
+          </span>
+          <Button variant="link" onClick={() => {
+            setCampaignId(null); setEventType(null); setFilteredContacts(null); setLocation('/contacts');
+          }}>Clear filter</Button>
+        </div>
+      )}
       {/* Left Sidebar - Filters */}
       <SidebarFilters
         entityType="contact"
@@ -521,11 +564,11 @@ export default function ContactsPage() {
             <Button 
               variant="outline" 
               onClick={() => {
-                const csv = exportContactsToCSV(filteredContacts);
+                const csv = exportContactsToCSV(filteredContactsToShow);
                 downloadCSV(csv, `contacts_export_${new Date().toISOString().split('T')[0]}.csv`);
                 toast({
                   title: "Export Complete",
-                  description: `Exported ${filteredContacts.length} contacts to CSV`,
+                  description: `Exported ${filteredContactsToShow.length} contacts to CSV`,
                 });
               }}
               data-testid="button-export-contacts"
@@ -813,13 +856,9 @@ export default function ContactsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[1, 2, 3].map((i) => (
-                <TableRow key={i}>
-                  <TableCell><Skeleton className="h-10 w-48" /></TableCell>
-                  <TableCell><Skeleton className="h-6 w-32" /></TableCell>
-                  <TableCell><Skeleton className="h-6 w-32" /></TableCell>
-                  <TableCell><Skeleton className="h-6 w-28" /></TableCell>
-                  <TableCell><Skeleton className="h-8 w-16" /></TableCell>
+              {(contactsLoading ? Array.from({ length: ITEMS_PER_PAGE }) : paginatedContacts).map((contact: any, idx: number) => (
+                <TableRow key={contact?.id || idx}>
+                  {/* ...existing code... */}
                 </TableRow>
               ))}
             </TableBody>
@@ -1070,3 +1109,5 @@ export default function ContactsPage() {
     </div>
   );
 }
+
+export default ContactsPage;

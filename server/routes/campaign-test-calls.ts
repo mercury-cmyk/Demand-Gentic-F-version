@@ -96,8 +96,8 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
 
-    if (!telnyxApiKey || !fromNumber) {
-      return res.status(500).json({ message: "Telnyx not configured (missing API key or from number)" });
+    if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
     }
     if (!openaiApiKey) {
       return res.status(500).json({ message: "OpenAI API key not configured" });
@@ -592,13 +592,19 @@ router.post("/webhook", async (req, res) => {
     const eventType = eventData.event_type || (event as any).event_type;
     const payload = eventData.payload || eventData;
 
-    console.log(`[Test Call Webhook] Event: ${eventType}`);
+    // Log the full incoming payload for traceability
+    console.log(`[Test Call Webhook] Raw event payload:`, JSON.stringify(event, null, 2));
+    console.log(`[Test Call Webhook] EventType: ${eventType}`);
+    if (payload) {
+      console.log(`[Test Call Webhook] Payload:`, JSON.stringify(payload, null, 2));
+    }
 
     // Decode client_state to get test call ID
     let clientState: any = null;
     if (payload?.client_state) {
       try {
         clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+        console.log(`[Test Call Webhook] Decoded client_state:`, clientState);
       } catch (e) {
         console.log(`[Test Call Webhook] Could not decode client_state`);
       }
@@ -606,6 +612,7 @@ router.post("/webhook", async (req, res) => {
 
     if (!clientState?.is_test_call || !clientState?.test_call_id) {
       // Not a test call or missing test call ID - skip
+      console.log(`[Test Call Webhook] Not a test call or missing test_call_id. Skipping.`);
       return;
     }
 
@@ -664,6 +671,10 @@ router.post("/webhook", async (req, res) => {
             })
             .where(eq(campaignTestCalls.id, testCallId));
         }
+        break;
+      default:
+        // Log all other event types for traceability
+        console.log(`[Test Call Webhook] Unhandled event type: ${eventType}`);
         break;
     }
   } catch (error) {
