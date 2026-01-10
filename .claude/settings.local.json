@@ -105,7 +105,9 @@
       "Bash(git add:*)",
       "Bash(git push:*)",
       "Bash(npx tsx:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(docker tag:*)",
+      "Bash(docker push:*)"
     ]
   }
 }
