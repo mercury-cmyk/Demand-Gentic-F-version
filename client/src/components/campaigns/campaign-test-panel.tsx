@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
   Dialog,
   DialogContent,
@@ -90,6 +92,34 @@ interface CampaignTestPanelProps {
   campaignId: string;
   campaignName: string;
   dialMode?: string;
+}
+
+type SipConfig = {
+  sipUsername: string;
+  sipPassword: string;
+  sipDomain?: string;
+  callerIdNumber?: string;
+};
+
+function normalizePhoneToE164(phone: string | null, country: string = 'US'): string | null {
+  if (!phone) return null;
+
+  let cleanedPhone = phone.trim();
+
+  if (cleanedPhone.match(/^\+440\d{10,}$/)) {
+    cleanedPhone = '+44' + cleanedPhone.substring(4);
+  }
+
+  try {
+    const phoneNumber = parsePhoneNumberFromString(cleanedPhone, country as any);
+    if (phoneNumber && phoneNumber.isValid()) {
+      return phoneNumber.number;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export function CampaignTestPanel({ campaignId, campaignName, dialMode }: CampaignTestPanelProps) {
