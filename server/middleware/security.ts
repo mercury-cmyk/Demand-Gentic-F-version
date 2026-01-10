@@ -234,7 +234,7 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   // Content Security Policy (basic - adjust based on your needs)
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self' wss://sip.telnyx.com:7443 https://sip.telnyx.com wss://*.telnyx.com https://*.telnyx.com"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob:; connect-src 'self' https: wss:"
   );
   
   next();

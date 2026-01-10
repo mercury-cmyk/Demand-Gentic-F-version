@@ -37,7 +37,8 @@ import {
   Loader2,
   CalendarClock,
   SlidersHorizontal,
-  Lock
+  Lock,
+  Gauge
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -90,6 +91,7 @@ interface LaunchData {
   scheduledDate?: string;
   scheduledTime?: string;
   timezone?: string;
+  throttlingLimit?: number;
 }
 
 export function AudienceSendPage({
@@ -118,6 +120,7 @@ export function AudienceSendPage({
   const [scheduledDate, setScheduledDate] = useState<string>("");
   const [scheduledTime, setScheduledTime] = useState<string>("09:00");
   const [timezone, setTimezone] = useState<string>(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [throttlingLimit, setThrottlingLimit] = useState<number | undefined>(undefined);
   
   // UI state
   const [showPreview, setShowPreview] = useState(false);
@@ -260,9 +263,10 @@ export function AudienceSendPage({
     if (audienceType === "list" && !selectedList) return false;
     if (audienceType === "filters" && (!appliedFilterGroup || (appliedFilterGroup.conditions?.length ?? 0) === 0)) return false;
     if (sendType === "scheduled" && (!scheduledDate || !scheduledTime)) return false;
+    if (throttlingLimit !== undefined && throttlingLimit > 1000) return false;
     // Allow -1 (large audience estimate) or any positive count
     return audienceCount > 0 || audienceCount === -1;
-  }, [audienceType, selectedSegment, selectedList, appliedFilterGroup, sendType, scheduledDate, scheduledTime, audienceCount]);
+  }, [audienceType, selectedSegment, selectedList, appliedFilterGroup, sendType, scheduledDate, scheduledTime, audienceCount, throttlingLimit]);
   
   // Get selected audience name
   const audienceName = useMemo(() => {
@@ -292,7 +296,8 @@ export function AudienceSendPage({
         sendType,
         scheduledDate: sendType === "scheduled" ? scheduledDate : undefined,
         scheduledTime: sendType === "scheduled" ? scheduledTime : undefined,
-        timezone: sendType === "scheduled" ? timezone : undefined
+        timezone: sendType === "scheduled" ? timezone : undefined,
+        throttlingLimit
       });
     } catch (error) {
       toast({
@@ -590,6 +595,43 @@ export function AudienceSendPage({
                 </div>
               </div>
             </RadioGroup>
+
+            <div className="pt-4 border-t mt-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Gauge className="w-4 h-4 text-orange-500" />
+                <Label className="text-sm font-medium">Throttling / Warm-up</Label>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="text-xs text-slate-500 mb-2">
+                    Limit sending speed to protect domain reputation. Leave empty for max speed.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      placeholder="e.g. 50"
+                      value={throttlingLimit || ""}
+                      onChange={(e) => setThrottlingLimit(e.target.value ? parseInt(e.target.value) : undefined)}
+                      className="w-32 h-9 text-sm"
+                      min={1}
+                    />
+                    <span className="text-sm text-slate-600">emails per hour</span>
+                  </div>
+                  {throttlingLimit !== undefined && throttlingLimit < 10 && (
+                    <div className="flex items-center gap-1 text-yellow-600 mt-1">
+                      <AlertCircle className="w-3 h-3" />
+                      <span className="text-xs">Low sending speed might impact performance.</span>
+                    </div>
+                  )}
+                  {throttlingLimit !== undefined && throttlingLimit > 1000 && (
+                    <div className="flex items-center gap-1 text-red-600 mt-1">
+                      <AlertCircle className="w-3 h-3" />
+                      <span className="text-xs">Limit cannot be higher than 1000/hr.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
         
@@ -636,6 +678,14 @@ export function AudienceSendPage({
                   {sendType === "scheduled" && (
                     <p className="text-xs text-slate-500">{timezone}</p>
                   )}
+                  {throttlingLimit && (
+                    <div className="mt-2 pt-2 border-t border-slate-200">
+                      <div className="flex items-center gap-1 text-orange-600">
+                        <Gauge className="w-3 h-3" />
+                        <span className="text-xs font-medium">Throttled: {throttlingLimit}/hr</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               
@@ -669,6 +719,7 @@ export function AudienceSendPage({
                   <span className="text-sm">
                     {audienceCount === 0 && "Select an audience"}
                     {sendType === "scheduled" && !scheduledDate && "Set a schedule date"}
+                    {throttlingLimit !== undefined && throttlingLimit > 1000 && "Throttling limit too high"}
                   </span>
                 </div>
               )}

@@ -101,7 +101,9 @@
       "Bash(del temp_secret.txt)",
       "Bash(printf:*)",
       "Bash(\"C:\\\\Users\\\\Zahid\\\\AppData\\\\Local\\\\Google\\\\Cloud SDK\\\\google-cloud-sdk\\\\bin\\\\gcloud.cmd\" secrets versions access latest --secret=TELNYX_CALL_CONTROL_APP_ID)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)"
     ]
   }
 }

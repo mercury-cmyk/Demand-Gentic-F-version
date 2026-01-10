@@ -2150,7 +2150,7 @@ export const softphoneProfiles = pgTable("softphone_profiles", {
   userIdx: index("softphone_profiles_user_idx").on(table.userId),
 }));
 
-// SIP Trunk Configuration - Telnyx WebRTC connection credentials
+// SIP Trunk Configuration - WebRTC connection credentials
 export const sipTrunkConfigs = pgTable("sip_trunk_configs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(), // Friendly name for this SIP connection
@@ -2158,7 +2158,7 @@ export const sipTrunkConfigs = pgTable("sip_trunk_configs", {
   sipUsername: text("sip_username").notNull(), // SIP username for WebRTC authentication
   sipPassword: text("sip_password").notNull(), // SIP password (encrypted in production)
   sipDomain: text("sip_domain").notNull().default('sip.telnyx.com'), // SIP domain/proxy
-  connectionId: text("connection_id"), // Telnyx connection ID (optional)
+  connectionId: text("connection_id"), // Provider connection ID (optional)
   outboundVoiceProfileId: text("outbound_voice_profile_id"), // For outbound calls
   callerIdNumber: text("caller_id_number"), // Phone number to use as caller ID
   isActive: boolean("is_active").default(true), // Enable/disable this trunk

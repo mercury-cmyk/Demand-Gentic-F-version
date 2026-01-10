@@ -895,20 +895,37 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
       settings: settingsOverride,
     } = testOpenAIRealtimeSchema.parse(req.body);
 
+    // Load SIP trunk config from UI (default trunk), fallback to env vars
+    const sipConfig = await storage.getDefaultSipTrunkConfig();
+    const sipProvider = (sipConfig?.provider || process.env.SIP_TRUNK_PROVIDER || "telnyx").toLowerCase();
+
+    if (sipProvider !== "telnyx") {
+      return res.status(400).json({
+        message: "AI Call Test currently supports Telnyx call control only.",
+        recommendation: "Set the default SIP trunk provider to telnyx or use TELNYX_* environment variables."
+      });
+    }
+
     // Check required environment variables
     const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = process.env.TELNYX_FROM_NUMBER;
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+    const fromNumber = sipConfig?.callerIdNumber || process.env.TELNYX_FROM_NUMBER;
+    const openaiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    const connectionId =
+      sipConfig?.connectionId ||
+      process.env.TELNYX_CALL_CONTROL_APP_ID ||
+      process.env.TELNYX_CONNECTION_ID;
 
     if (!telnyxApiKey) {
       return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
     }
     if (!fromNumber) {
-      return res.status(500).json({ message: "TELNYX_FROM_NUMBER not configured" });
+      return res.status(500).json({ message: "Caller ID not configured (set in SIP trunk or TELNYX_FROM_NUMBER)" });
     }
     if (!openaiApiKey) {
       return res.status(500).json({ message: "OPENAI_API_KEY not configured" });
+    }
+    if (!connectionId) {
+      return res.status(500).json({ message: "TELNYX call control connection ID not configured" });
     }
 
     // Get virtual agent settings if provided

@@ -557,6 +557,23 @@ type AdvancedSettings = {
     endConversationAfterSilenceSeconds: number;
     maxConversationDurationSeconds: number;
   };
+  realtime: {
+    turnDetection: {
+      mode: 'normal' | 'semantic' | 'disabled';
+      threshold: number;
+      prefixPaddingMs: number;
+      silenceDurationMs: number;
+      idleTimeoutMs: number;
+    };
+    functions: string[];
+    mcpServers: string[];
+    model: string;
+    userTranscriptModel: string;
+    noiseReduction: 'enabled' | 'disabled';
+    modelConfig: string;
+    maxTokens: number;
+    toolChoice: 'auto' | 'required' | 'none';
+  };
   softTimeout: {
     responseTimeoutSeconds: number;
   };
@@ -616,6 +633,28 @@ const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
       endConversationAfterSilenceSeconds: 60,
       maxConversationDurationSeconds: 200,
     },
+  realtime: {
+    turnDetection: {
+      mode: 'normal',
+      threshold: 0.5,
+      prefixPaddingMs: 300,
+      silenceDurationMs: 500,
+      idleTimeoutMs: 0,
+    },
+    functions: [
+      'detect_voicemail_and_hangup',
+      'enforce_max_call_duration',
+      'navigate_and_dial',
+      'connect_to_operator',
+    ],
+    mcpServers: [],
+    model: 'gpt-realtime',
+    userTranscriptModel: 'whisper-1',
+    noiseReduction: 'enabled',
+    modelConfig: '',
+    maxTokens: 4096,
+    toolChoice: 'auto',
+  },
   softTimeout: {
     responseTimeoutSeconds: -1,
   },
@@ -815,6 +854,12 @@ export default function VirtualAgentsPage() {
   const [testCallAgentCampaigns, setTestCallAgentCampaigns] = useState<Array<{ campaignId: string; campaignName: string; isActive: boolean }>>([]);
   const [previewTokens, setPreviewTokens] = useState<string[]>([]);
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
+  // Prompt management for preview
+  const [previewPromptId, setPreviewPromptId] = useState<string>('');
+  const [previewPromptVersion, setPreviewPromptVersion] = useState<string>('');
+  const [previewPromptVariables, setPreviewPromptVariables] = useState<Record<string, string>>({});
+  // Tool management for preview
+  const [previewTools, setPreviewTools] = useState<string[]>(['detect_voicemail_and_hangup']);
   const [previewMessages, setPreviewMessages] = useState<PreviewMessage[]>([]);
   const [previewInput, setPreviewInput] = useState('');
   const [previewSessionId, setPreviewSessionId] = useState<string | undefined>(undefined); // Session ID for persistent conversation state
@@ -1177,6 +1222,12 @@ export default function VirtualAgentsPage() {
       systemPrompt,
       firstMessage,
       messages,
+      voice,
+      settings,
+      promptId,
+      promptVersion,
+      promptVariables,
+      tools,
     }: {
       sessionId?: string;
       virtualAgentId?: string;
@@ -1184,7 +1235,55 @@ export default function VirtualAgentsPage() {
       systemPrompt?: string;
       firstMessage?: string;
       messages: PreviewMessage[];
+      voice?: string;
+      settings?: any;
+      promptId?: string;
+      promptVersion?: string;
+      promptVariables?: Record<string, any>;
+      tools?: string[];
     }) => {
+      // Always send required settings for preview session
+      const requiredSettings = {
+        voice: voice ?? testCallAgent?.voice ?? 'nova',
+        settings: {
+          systemTools: {
+            ...DEFAULT_SYSTEM_TOOLS,
+            ...(testCallAgent?.settings?.systemTools ?? {}),
+          },
+          advanced: {
+            ...DEFAULT_ADVANCED_SETTINGS,
+            ...(testCallAgent?.settings?.advanced ?? {}),
+            conversational: {
+              ...DEFAULT_ADVANCED_SETTINGS.conversational,
+              ...(testCallAgent?.settings?.advanced?.conversational ?? {}),
+              eagerness: 'normal',
+              takeTurnAfterSilenceSeconds: 0.5, // 0.50 seconds
+              endConversationAfterSilenceSeconds: 60,
+              maxConversationDurationSeconds: 240,
+            },
+            asr: {
+              ...DEFAULT_ADVANCED_SETTINGS.asr,
+              model: 'default',
+              inputFormat: 'pcm_16000',
+              keywords: '',
+            },
+            noiseReduction: { enabled: true },
+            maxTokens: 4096,
+            prefixPadding: 300,
+            silenceDuration: 500,
+            idleTimeout: 0,
+            semantic: false,
+            threshold: 0.5,
+            model: 'user-transcript-model',
+            functions: tools ?? previewTools,
+          },
+        },
+        prompt: promptId ? {
+          id: promptId,
+          version: promptVersion,
+          variables: promptVariables,
+        } : undefined,
+      };
       const response = await apiRequest('POST', '/api/virtual-agents/preview-conversation', {
         sessionId,
         virtualAgentId,
@@ -1192,6 +1291,7 @@ export default function VirtualAgentsPage() {
         systemPrompt,
         firstMessage,
         messages,
+        ...requiredSettings,
       });
       return response.json() as Promise<{ reply: string; sessionId?: string; conversationState?: any }>;
     },
@@ -4401,10 +4501,18 @@ function AgentForm({
   const baseSettings = formData.settings ?? defaultFormData.settings;
   const systemTools = baseSettings.systemTools;
   const advanced = baseSettings.advanced;
+  const realtimeConfig = advanced.realtime ?? DEFAULT_ADVANCED_SETTINGS.realtime;
   const trainingDefaults = trainingCenter[activeTrainingType] ?? [];
   const trainingLabel =
     AGENT_TYPE_OPTIONS.find((opt) => opt.value === activeTrainingType)?.label || 'Generic Agent';
   const activeToolCount = Object.values(systemTools).filter((v) => typeof v === 'boolean' && v).length;
+
+  const formatCsv = (values: string[]) => values.join(', ');
+  const parseCsv = (value: string) =>
+    value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
 
     const handleGeneratePrompt = () => {
       if (!agentGoal.trim()) {
@@ -4595,6 +4703,85 @@ If the person expresses discomfort or asks to stop:
           </TabsList>
 
         <TabsContent value="essentials" className="space-y-3 mt-0">
+          {/* Prompt selection for preview session */}
+          <div className="space-y-2 rounded-lg border p-4 mb-4">
+            <Label className="font-semibold">Prompt Management (Preview Only)</Label>
+            <div className="grid md:grid-cols-3 gap-2">
+              <div>
+                <Label htmlFor="previewPromptId">Prompt ID</Label>
+                <Input
+                  id="previewPromptId"
+                  value={previewPromptId}
+                  onChange={e => setPreviewPromptId(e.target.value)}
+                  placeholder="e.g. pmpt_123"
+                />
+              </div>
+              <div>
+                <Label htmlFor="previewPromptVersion">Prompt Version</Label>
+                <Input
+                  id="previewPromptVersion"
+                  value={previewPromptVersion}
+                  onChange={e => setPreviewPromptVersion(e.target.value)}
+                  placeholder="e.g. 89"
+                />
+              </div>
+              <div>
+                <Label>Prompt Variables</Label>
+                <div className="flex flex-col gap-1">
+                  {Object.entries(previewPromptVariables).map(([key, value]) => (
+                    <div key={key} className="flex gap-1 items-center">
+                      <Input
+                        value={key}
+                        onChange={e => {
+                          const newKey = e.target.value;
+                          setPreviewPromptVariables(vars => {
+                            const updated = { ...vars };
+                            updated[newKey] = updated[key];
+                            delete updated[key];
+                            return updated;
+                          });
+                        }}
+                        placeholder="Variable name"
+                        className="w-1/2"
+                      />
+                      <Input
+                        value={value}
+                        onChange={e => {
+                          const newValue = e.target.value;
+                          setPreviewPromptVariables(vars => ({ ...vars, [key]: newValue }));
+                        }}
+                        placeholder="Value"
+                        className="w-1/2"
+                      />
+                      <Button size="icon" variant="ghost" onClick={() => setPreviewPromptVariables(vars => { const updated = { ...vars }; delete updated[key]; return updated; })}>
+                        ×
+                      </Button>
+                    </div>
+                  ))}
+                  <Button size="sm" variant="outline" onClick={() => setPreviewPromptVariables(vars => ({ ...vars, '': '' }))}>
+                    + Add Variable
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* Tool selection for preview session */}
+          <div className="space-y-2 rounded-lg border p-4 mb-4">
+            <Label className="font-semibold">Function Tools (Preview Only)</Label>
+            <div className="flex flex-wrap gap-2">
+              {['detect_voicemail_and_hangup', 'enforce_max_call_duration', 'navigate_and_dial', 'connect_to_operator'].map(tool => (
+                <Button
+                  key={tool}
+                  size="sm"
+                  variant={previewTools.includes(tool) ? 'default' : 'outline'}
+                  onClick={() => setPreviewTools(tools => tools.includes(tool) ? tools.filter(t => t !== tool) : [...tools, tool])}
+                >
+                  {tool}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">Select which function tools are available for this preview session.</p>
+          </div>
           <Accordion type="multiple" defaultValue={['details', 'voice', 'prompt', ...(formData.systemPrompt ? ['prompt-preview'] : [])]} className="space-y-2">
             <AccordionItem value="details" className="rounded-lg border px-3">
               <AccordionTrigger>Agent details</AccordionTrigger>
@@ -5261,6 +5448,399 @@ If the person expresses discomfort or asks to stop:
                 />
                 <p className="text-xs text-muted-foreground">Default: 200 seconds</p>
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-lg border p-4">
+            <div>
+              <Label className="text-base font-semibold">Turn Detection</Label>
+              <p className="text-xs text-muted-foreground">
+                Control automatic turn detection and voice activity thresholds.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="turnDetectionMode">Automatic turn detection</Label>
+              <Select
+                value={realtimeConfig.turnDetection.mode}
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    settings: {
+                      ...baseSettings,
+                      advanced: {
+                        ...advanced,
+                        realtime: {
+                          ...realtimeConfig,
+                          turnDetection: {
+                            ...realtimeConfig.turnDetection,
+                            mode: value as AdvancedSettings['realtime']['turnDetection']['mode'],
+                          },
+                        },
+                      },
+                    },
+                  })
+                }
+              >
+                <SelectTrigger id="turnDetectionMode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="semantic">Semantic</SelectItem>
+                  <SelectItem value="disabled">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Normal uses server VAD, Semantic uses intent-aware detection, Disabled requires manual response.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="turnThreshold">Threshold</Label>
+                <Input
+                  id="turnThreshold"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={realtimeConfig.turnDetection.threshold}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            turnDetection: {
+                              ...realtimeConfig.turnDetection,
+                              threshold: Number.isNaN(value) ? 0.5 : Math.max(0, Math.min(1, value)),
+                            },
+                          },
+                        },
+                      },
+                    });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Default: 0.50</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="prefixPadding">Prefix padding (ms)</Label>
+                <Input
+                  id="prefixPadding"
+                  type="number"
+                  min={0}
+                  max={2000}
+                  step={10}
+                  value={realtimeConfig.turnDetection.prefixPaddingMs}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            turnDetection: {
+                              ...realtimeConfig.turnDetection,
+                              prefixPaddingMs: Number.isNaN(value) ? 300 : Math.max(0, Math.min(2000, value)),
+                            },
+                          },
+                        },
+                      },
+                    });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Default: 300</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="silenceDuration">Silence duration (ms)</Label>
+                <Input
+                  id="silenceDuration"
+                  type="number"
+                  min={0}
+                  max={5000}
+                  step={50}
+                  value={realtimeConfig.turnDetection.silenceDurationMs}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            turnDetection: {
+                              ...realtimeConfig.turnDetection,
+                              silenceDurationMs: Number.isNaN(value) ? 500 : Math.max(0, Math.min(5000, value)),
+                            },
+                          },
+                        },
+                      },
+                    });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">Default: 500</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="idleTimeout">Idle timeout (ms)</Label>
+                <Input
+                  id="idleTimeout"
+                  type="number"
+                  min={0}
+                  max={120000}
+                  step={1000}
+                  value={realtimeConfig.turnDetection.idleTimeoutMs}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            turnDetection: {
+                              ...realtimeConfig.turnDetection,
+                              idleTimeoutMs: Number.isNaN(value) ? 0 : Math.max(0, Math.min(120000, value)),
+                            },
+                          },
+                        },
+                      },
+                    });
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">0 disables idle timeout</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-lg border p-4">
+            <div>
+              <Label className="text-base font-semibold">Realtime Model & Tools</Label>
+              <p className="text-xs text-muted-foreground">
+                Configure model routing, tools, and transcript preferences.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="realtimeModel">Model</Label>
+                <Input
+                  id="realtimeModel"
+                  value={realtimeConfig.model}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            model: e.target.value,
+                          },
+                        },
+                      },
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="userTranscriptModel">User transcript model</Label>
+                <Input
+                  id="userTranscriptModel"
+                  value={realtimeConfig.userTranscriptModel}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            userTranscriptModel: e.target.value,
+                          },
+                        },
+                      },
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="noiseReduction">Noise reduction</Label>
+                <Select
+                  value={realtimeConfig.noiseReduction}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            noiseReduction: value as AdvancedSettings['realtime']['noiseReduction'],
+                          },
+                        },
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger id="noiseReduction">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="enabled">Enabled</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxTokens">Max tokens</Label>
+                <Input
+                  id="maxTokens"
+                  type="number"
+                  min={1}
+                  max={4096}
+                  step={1}
+                  value={realtimeConfig.maxTokens}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            maxTokens: Number.isNaN(value) ? 4096 : Math.max(1, Math.min(4096, value)),
+                          },
+                        },
+                      },
+                    });
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="toolChoice">Tool choice</Label>
+                <Select
+                  value={realtimeConfig.toolChoice}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      settings: {
+                        ...baseSettings,
+                        advanced: {
+                          ...advanced,
+                          realtime: {
+                            ...realtimeConfig,
+                            toolChoice: value as AdvancedSettings['realtime']['toolChoice'],
+                          },
+                        },
+                      },
+                    })
+                  }
+                >
+                  <SelectTrigger id="toolChoice">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    <SelectItem value="required">Required</SelectItem>
+                    <SelectItem value="none">Disabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="functions">Functions</Label>
+              <Input
+                id="functions"
+                value={formatCsv(realtimeConfig.functions)}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    settings: {
+                      ...baseSettings,
+                      advanced: {
+                        ...advanced,
+                        realtime: {
+                          ...realtimeConfig,
+                          functions: parseCsv(e.target.value),
+                        },
+                      },
+                    },
+                  })
+                }
+                placeholder="detect_voicemail_and_hangup, enforce_max_call_duration, navigate_and_dial, connect_to_operator"
+              />
+              <p className="text-xs text-muted-foreground">Comma-separated list of allowed function names.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mcpServers">MCP servers</Label>
+              <Input
+                id="mcpServers"
+                value={formatCsv(realtimeConfig.mcpServers)}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    settings: {
+                      ...baseSettings,
+                      advanced: {
+                        ...advanced,
+                        realtime: {
+                          ...realtimeConfig,
+                          mcpServers: parseCsv(e.target.value),
+                        },
+                      },
+                    },
+                  })
+                }
+                placeholder="crm, docs, calendar"
+              />
+              <p className="text-xs text-muted-foreground">Comma-separated MCP server identifiers.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="modelConfig">Model configuration</Label>
+              <Textarea
+                id="modelConfig"
+                value={realtimeConfig.modelConfig}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    settings: {
+                      ...baseSettings,
+                      advanced: {
+                        ...advanced,
+                        realtime: {
+                          ...realtimeConfig,
+                          modelConfig: e.target.value,
+                        },
+                      },
+                    },
+                  })
+                }
+                placeholder='{"temperature":0.7,"top_p":0.95}'
+                rows={4}
+              />
             </div>
           </div>
         </TabsContent>

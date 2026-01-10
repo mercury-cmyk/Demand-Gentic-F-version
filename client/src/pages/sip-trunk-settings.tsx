@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +51,7 @@ import {
 type SipTrunkConfig = {
   id: string;
   name: string;
+  provider: string;
   sipUsername: string;
   sipPassword: string;
   sipDomain?: string;
@@ -92,6 +93,17 @@ export default function SipTrunkSettingsPage() {
       isDefault: false,
     },
   });
+
+  const providerValue = form.watch("provider");
+  const sipDomainValue = form.watch("sipDomain");
+  const isTelnyx = providerValue?.trim().toLowerCase() === "telnyx";
+
+  useEffect(() => {
+    if (!isTelnyx) return;
+    if (!sipDomainValue || sipDomainValue === "sip.provider.com") {
+      form.setValue("sipDomain", "sip.telnyx.com");
+    }
+  }, [form, isTelnyx, sipDomainValue]);
 
   // Create/Update mutation
   const saveMutation = useMutation({
@@ -185,10 +197,31 @@ export default function SipTrunkSettingsPage() {
     },
   });
 
+  const importEnvMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest('POST', '/api/sip-trunks/import-env', {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/sip-trunks'] });
+      toast({
+        title: "Imported from environment",
+        description: "Telnyx credentials were copied into the SIP Trunk list.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Import failed",
+        description: error.message || "Failed to import Telnyx credentials",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleEdit = (config: SipTrunkConfig) => {
     setEditingConfig(config);
     form.reset({
       name: config.name,
+      provider: config.provider,
       sipUsername: config.sipUsername,
       sipPassword: config.sipPassword,
       sipDomain: config.sipDomain || "sip.telnyx.com",
@@ -203,6 +236,7 @@ export default function SipTrunkSettingsPage() {
     setEditingConfig(null);
     form.reset({
       name: "",
+      provider: "telnyx",
       sipUsername: "",
       sipPassword: "",
       sipDomain: "sip.telnyx.com",
@@ -230,7 +264,7 @@ export default function SipTrunkSettingsPage() {
             Telephony Settings
           </h1>
           <p className="text-muted-foreground mt-2">
-            Manage SIP trunk configurations for Telnyx WebRTC telephony integration
+            Manage SIP trunk configurations for WebRTC telephony integration
           </p>
         </div>
         <Button onClick={handleCreate} data-testid="button-add-trunk">
@@ -243,10 +277,23 @@ export default function SipTrunkSettingsPage() {
         <CardHeader>
           <CardTitle>SIP Trunk Configurations</CardTitle>
           <CardDescription>
-            Configure Telnyx SIP trunks for browser-based calling in the Agent Console
+            Configure SIP trunks for browser-based calling in the Agent Console
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
+            <p className="text-sm text-muted-foreground">
+              Import existing Telnyx credentials from environment variables.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => importEnvMutation.mutate()}
+              disabled={importEnvMutation.isPending}
+              data-testid="button-import-telnyx"
+            >
+              {importEnvMutation.isPending ? "Importing..." : "Import Telnyx from Env"}
+            </Button>
+          </div>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
               Loading configurations...
@@ -255,13 +302,14 @@ export default function SipTrunkSettingsPage() {
             <div className="text-center py-8 text-muted-foreground">
               <Phone className="h-12 w-12 mx-auto mb-4 opacity-20" />
               <p>No SIP trunk configurations found</p>
-              <p className="text-sm mt-2">Add your first Telnyx SIP trunk to enable calling</p>
+              <p className="text-sm mt-2">Add your first SIP trunk to enable calling</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Connection Name</TableHead>
+                  <TableHead>Provider</TableHead>
                   <TableHead>SIP Username</TableHead>
                   <TableHead>Connection ID</TableHead>
                   <TableHead>Status</TableHead>
@@ -273,6 +321,7 @@ export default function SipTrunkSettingsPage() {
                 {configs.map((config) => (
                   <TableRow key={config.id} data-testid={`row-trunk-${config.id}`}>
                     <TableCell className="font-medium">{config.name}</TableCell>
+                    <TableCell className="capitalize">{config.provider || "default"}</TableCell>
                     <TableCell className="font-mono text-sm">{config.sipUsername}</TableCell>
                     <TableCell className="font-mono text-sm text-muted-foreground">
                       {config.connectionId ? config.connectionId.slice(0, 10) + '...' : '-'}
@@ -345,7 +394,7 @@ export default function SipTrunkSettingsPage() {
               {editingConfig ? "Edit SIP Trunk Configuration" : "Add SIP Trunk Configuration"}
             </DialogTitle>
             <DialogDescription>
-              Configure Telnyx SIP credentials for WebRTC calling
+              Configure SIP credentials for WebRTC calling
             </DialogDescription>
           </DialogHeader>
 
@@ -360,13 +409,46 @@ export default function SipTrunkSettingsPage() {
                     <FormControl>
                       <Input
                         {...field}
-                        placeholder="e.g., Telnyx Primary Trunk"
+                        placeholder="e.g., Primary SIP Trunk"
                         data-testid="input-connection-name"
                       />
                     </FormControl>
                     <FormDescription>
                       A friendly name to identify this SIP trunk configuration
                     </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="provider"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Provider</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder="e.g., telnyx, twilio, generic"
+                        list="sip-provider-options"
+                        data-testid="input-provider"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Popular providers include Telnyx, Twilio, Bandwidth, Plivo, Vonage, SignalWire, Flowroute, and Skyetel
+                    </FormDescription>
+                    <datalist id="sip-provider-options">
+                      <option value="telnyx" />
+                      <option value="twilio" />
+                      <option value="bandwidth" />
+                      <option value="plivo" />
+                      <option value="vonage" />
+                      <option value="signalwire" />
+                      <option value="flowroute" />
+                      <option value="skyetel" />
+                      <option value="other" />
+                    </datalist>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -381,13 +463,13 @@ export default function SipTrunkSettingsPage() {
                     <FormControl>
                       <Input
                         {...field}
-                        placeholder="Your Telnyx SIP username"
+                        placeholder="Your SIP username"
                         className="font-mono"
                         data-testid="input-sip-username"
                       />
                     </FormControl>
                     <FormDescription>
-                      The SIP username from your Telnyx account
+                      The SIP username from your provider
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -404,13 +486,13 @@ export default function SipTrunkSettingsPage() {
                       <Input
                         {...field}
                         type="password"
-                        placeholder="Your Telnyx SIP password"
+                        placeholder="Your SIP password"
                         className="font-mono"
                         data-testid="input-sip-password"
                       />
                     </FormControl>
                     <FormDescription>
-                      The SIP password from your Telnyx account
+                      The SIP password from your provider
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -426,13 +508,13 @@ export default function SipTrunkSettingsPage() {
                     <FormControl>
                       <Input
                         {...field}
-                        placeholder="sip.telnyx.com"
+                        placeholder="sip.provider.com"
                         className="font-mono"
                         data-testid="input-sip-domain"
                       />
                     </FormControl>
                     <FormDescription>
-                      The Telnyx SIP domain (usually sip.telnyx.com)
+                      {isTelnyx ? "Telnyx uses sip.telnyx.com." : "The SIP domain/proxy from your provider"}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -444,7 +526,7 @@ export default function SipTrunkSettingsPage() {
                 name="connectionId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Credential Connection ID</FormLabel>
+                    <FormLabel>Connection ID (Optional)</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
@@ -454,7 +536,9 @@ export default function SipTrunkSettingsPage() {
                       />
                     </FormControl>
                     <FormDescription>
-                      The Credential Connection ID from Telnyx Portal (Voice → Credentials). Required for WebRTC authentication.
+                      {isTelnyx
+                        ? "Telnyx Credential Connection ID (Voice → Credentials)."
+                        : "Provider-specific connection identifier used for WebRTC authentication"}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

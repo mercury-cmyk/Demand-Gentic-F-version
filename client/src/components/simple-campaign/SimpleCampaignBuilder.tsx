@@ -46,6 +46,7 @@ interface LaunchData {
   scheduledDate?: string;
   scheduledTime?: string;
   timezone?: string;
+  throttlingLimit?: number; // Max emails per hour for throttling (Demand Gen)
 }
 
 type BuilderPage = "intent" | "template" | "audience";
@@ -197,7 +198,9 @@ export function SimpleCampaignBuilder({
         timezone: launchData.timezone
       } : undefined;
       
-      // Campaign payload for create or update
+      // Build throttling config for Demand Gen (warm-up/safety)
+      // Pass throttlingLimit directly for API consumption
+      // Demand Gen: Explicit overrides for identity & reply management
       const campaignPayload = {
         name: campaignIntent.campaignName,
         type: "email",
@@ -207,7 +210,10 @@ export function SimpleCampaignBuilder({
         emailHtmlContent: template.htmlContent,
         emailPreheader: template.preheader,
         senderProfileId: campaignIntent.senderProfileId,
-        scheduleJson
+        senderName: campaignIntent.senderName,
+        replyToEmail: campaignIntent.replyToEmail,
+        scheduleJson,
+        throttlingLimit: launchData.throttlingLimit || undefined
       };
       
       let campaign;
