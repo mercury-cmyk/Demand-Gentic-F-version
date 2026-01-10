@@ -30,8 +30,8 @@ async function testOpenAIRealtimeCall() {
 
   const telnyxApiKey = process.env.TELNYX_API_KEY!;
   const fromNumber = process.env.TELNYX_FROM_NUMBER!;
-  // Use the Call Control App ID with media streaming configured
-  const connectionId = '2853482451592807572';
+  // Use the Call Control App ID (required for Call Control API)
+  const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || '2853482451592807572';
 
   // Generate unique call identifiers
   const callId = `openai-test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -41,8 +41,8 @@ async function testOpenAIRealtimeCall() {
   const contactId = 'b39f3618-f170-4c49-bf2b-3664202ce4ce';
   const campaignId = 'ae5b353d-64a9-44d8-92cf-69d4726ca121';
   
-  // Use the deployed URL
-  const host = 'pivotalcrm-service-476094933916.us-central1.run.app';
+  // Use demangent.ai for production testing
+  const host = 'demangent.ai';
 
   // Quick reachability check over HTTPS (WSS must also be reachable from Telnyx)
   const checkUrl = `https://${host}/openai-realtime-dialer`;

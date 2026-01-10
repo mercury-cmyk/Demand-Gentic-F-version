@@ -64,6 +64,14 @@ type SipTrunkConfig = {
 
 const formSchema = insertSipTrunkConfigSchema.extend({
   id: z.string().optional(),
+  sipDomain: z
+    .string()
+    .trim()
+    .min(1, "SIP domain is required")
+    .refine(
+      (value) => !value.includes("://") && !value.includes("/") && value.includes("."),
+      "Enter a valid SIP domain (FQDN), e.g. sip.telnyx.com"
+    ),
 });
 
 type FormData = z.infer<typeof formSchema>;

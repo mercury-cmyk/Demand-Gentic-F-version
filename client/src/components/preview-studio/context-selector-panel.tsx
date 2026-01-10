@@ -319,6 +319,49 @@ export function ContextSelectorPanel({
           </div>
         ) : previewContext ? (
           <div className="space-y-3">
+            {/* Campaign Context */}
+            <Card className="bg-muted/50">
+              <CardHeader className="py-2 px-3">
+                <CardTitle className="text-xs font-medium flex items-center gap-1">
+                  <Megaphone className="h-3 w-3" />
+                  Campaign Context
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="py-2 px-3">
+                {previewContext.campaign && (
+                  <div className="space-y-1 text-xs">
+                    <div><span className="font-semibold">Name:</span> {previewContext.campaign.name || 'N/A'}</div>
+                    <div><span className="font-semibold">Type:</span> {previewContext.campaign.type || 'N/A'}</div>
+                  </div>
+                )}
+                {!previewContext.campaign && (
+                  <p className="text-xs text-muted-foreground">Not available</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Contact Context */}
+            <Card className="bg-muted/50">
+              <CardHeader className="py-2 px-3">
+                <CardTitle className="text-xs font-medium flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  Contact Context
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="py-2 px-3">
+                {previewContext.contact && (
+                  <div className="space-y-1 text-xs">
+                    <div><span className="font-semibold">Name:</span> {previewContext.contact.fullName || 'N/A'}</div>
+                    <div><span className="font-semibold">Title:</span> {previewContext.contact.jobTitle || 'N/A'}</div>
+                    <div><span className="font-semibold">Email:</span> {previewContext.contact.email || 'N/A'}</div>
+                  </div>
+                )}
+                {!previewContext.contact && (
+                  <p className="text-xs text-muted-foreground">Not available</p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Account Intelligence */}
             <Card className="bg-muted/50">
               <CardHeader className="py-2 px-3">

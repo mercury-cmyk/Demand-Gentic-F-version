@@ -24,7 +24,7 @@ import {
 import {
   getOrBuildAccountCallBrief,
   getOrBuildParticipantCallPlan,
-  buildParticipantCallContext as buildParticipantCallContextById,
+  buildParticipantCallContext,
   type AccountCallBriefPayload,
   type ParticipantCallPlanPayload,
   type ParticipantCallContext,
@@ -35,15 +35,6 @@ import {
   mergeAgentSettings,
   type VirtualAgentSettings,
 } from "../services/virtual-agent-settings";
-
-// Wrapper to match our API interface
-async function buildParticipantCallContext(params: {
-  contactId: string;
-  accountId: string;
-  campaignId: string;
-}): Promise<ParticipantCallContext> {
-  return buildParticipantCallContextById(params.contactId);
-}
 
 type AgentSettingsSource = 'agent' | 'default';
 
@@ -310,11 +301,7 @@ router.get("/context", requireAuth, async (req, res) => {
 
       if (contactId) {
         try {
-          participantContext = await buildParticipantCallContext({
-            contactId,
-            accountId,
-            campaignId,
-          });
+          participantContext = await buildParticipantCallContext(contactId);
         } catch (e) {
           console.warn("Failed to build participant context:", e);
         }
@@ -387,11 +374,7 @@ router.post("/generate-call-plan", requireAuth, async (req, res) => {
     });
     const accountCallBrief = callBriefRecord?.payloadJson as AccountCallBriefPayload;
 
-    const participantContext = await buildParticipantCallContext({
-      contactId,
-      accountId,
-      campaignId,
-    });
+    const participantContext = await buildParticipantCallContext(contactId);
 
     const planRecord = await getOrBuildParticipantCallPlan({
       contactId,
@@ -615,102 +598,22 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
       agentSettings: mergedSettings,
     });
 
+    // ...existing code...
+
     const response: SimulationStartResponse = {
       sessionId: session.id,
-      try {
-        const userId = (req as any).user?.id;
-        const body = startSimulationSchema.parse(req.body);
-        const { campaignId, accountId, contactId, virtualAgentId } = body;
-
-        // Fetch virtual agent settings
-        let agentSettings = null;
-        if (virtualAgentId) {
-          const [agent] = await db
-            .select({ settings: virtualAgents.settings })
-            .from(virtualAgents)
-            .where(eq(virtualAgents.id, virtualAgentId))
-            .limit(1);
-          agentSettings = agent?.settings || null;
-        }
-
-        // Create preview session with agentSettings in metadata
-        const [session] = await db.insert(previewStudioSessions).values({
-          campaignId,
-          accountId,
-          contactId,
-          userId,
-          virtualAgentId: virtualAgentId || null,
-          sessionType: 'simulation',
-          status: 'active',
-          metadata: { startedAt: new Date().toISOString(), agentSettings },
-        }).returning();
-
-        // Build WebSocket URL
-        const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] ||
-                       process.env.REPLIT_DEV_DOMAIN ||
-                       req.get('X-Public-Host') ||
-                       req.get('host') ||
-                       'localhost:5000';
-
-        const wsUrl = wsHost.startsWith('wss://') || wsHost.startsWith('ws://')
-          ? `${wsHost}/preview-simulation?sessionId=${session.id}`
-          : `wss://${wsHost}/preview-simulation?sessionId=${session.id}`;
-
-        // Get assembled prompt for reference, pass agentSettings if needed
-        const promptResponse = await buildAssembledPrompt({
-          campaignId,
-          accountId,
-          contactId,
-          virtualAgentId,
-          agentSettings,
-        });
-
-        const response: SimulationStartResponse = {
-          sessionId: session.id,
-          websocketUrl: wsUrl,
-          assembledPrompt: promptResponse.systemPrompt,
-          agentSettings,
-        };
-
-        res.json(response);
-      } catch (error) {
-        console.error("Error starting simulation:", error);
-        if (error instanceof z.ZodError) {
-          return res.status(400).json({ message: "Invalid request", errors: error.errors });
-        }
-        res.status(500).json({ message: "Failed to start simulation" });
-      }
-    await db.update(previewStudioSessions)
-      .set({
-        status: 'completed',
-        endedAt: endTime,
-        metadata: {
-          ...session.metadata as object,
-          duration,
-          transcriptCount: transcripts.length,
-        },
-      })
-      .where(eq(previewStudioSessions.id, sessionId));
-
-    // Basic analysis (can be enhanced with AI analysis later)
-    const analysis = {
-      statesVisited: [] as string[],
-      objectionsHandled: [] as string[],
-      dispositionReached: null as string | null,
+      websocketUrl: wsUrl,
+      assembledPrompt: promptResponse.systemPrompt,
+      firstMessage: promptResponse.firstMessage,
+      virtualAgentId: resolvedVirtualAgentId,
+      agentSettings: mergedSettings,
+      agentSettingsSource: settingsSource,
     };
 
-    res.json({
-      duration,
-      transcripts: transcripts.map(t => ({
-        role: t.role,
-        content: t.content,
-        timestampMs: t.timestampMs,
-      })),
-      analysis,
-    });
+    res.json(response);
   } catch (error) {
-    console.error("Error ending simulation:", error);
-    res.status(500).json({ message: "Failed to end simulation" });
+    console.error("Error starting simulation:", error);
+    res.status(500).json({ message: "Failed to start simulation" });
   }
 });
 
@@ -1001,11 +904,7 @@ async function buildAssembledPrompt(params: {
         sections.push(buildContactContextSection(contact));
       }
 
-      const participantContext = await buildParticipantCallContext({
-        contactId,
-        accountId,
-        campaignId,
-      });
+      const participantContext = await buildParticipantCallContext(contactId);
       const planRecord = await getOrBuildParticipantCallPlan({
         contactId,
         accountId,

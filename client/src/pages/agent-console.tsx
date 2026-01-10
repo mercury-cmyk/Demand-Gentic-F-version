@@ -1914,7 +1914,7 @@ export default function AgentConsolePage() {
       </div>
 
       {/* Hidden audio element for Telnyx */}
-      <audio id="remoteAudio" autoPlay playsInline style={{ display: 'none' }} />
+      <audio id="remoteAudio" autoPlay playsInline style={{ position: 'absolute', left: '-9999px' }} />
 
       {/* Audio Device Settings Dialog */}
       <AudioDeviceSettings

@@ -135,50 +135,48 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
     testContactEmail: "",
   });
 
+  const { data: sipConfig } = useQuery<SipConfig | null>({
+    queryKey: ['/api/sip-trunks/default'],
+    queryFn: async () => {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch('/api/sip-trunks/default', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        const text = (await response.text()) || response.statusText;
+        throw new Error(`${response.status}: ${text}`);
+      }
+
+      return response.json();
+    },
+  });
+
+  const { callState, isConnected, makeCall, hangup } = useTelnyxWebRTC({
+    sipUsername: sipConfig?.sipUsername,
+    sipPassword: sipConfig?.sipPassword,
+    sipDomain: sipConfig?.sipDomain || 'sip.telnyx.com',
+  });
+  const sipConfigured = Boolean(sipConfig?.sipUsername && sipConfig?.sipPassword);
+  const showLoggedTests = !sipConfigured;
+
   // Fetch test calls for this campaign
   const { data: testCallsData, isLoading: testCallsLoading } = useQuery<{
     testCalls: TestCall[];
     total: number;
   }>({
     queryKey: [`/api/campaigns/${campaignId}/test-calls`],
-    enabled: dialMode === "ai_agent",
+    enabled: dialMode === "ai_agent" && showLoggedTests,
   });
 
   // Fetch test calls summary
   const { data: summary, isLoading: summaryLoading } = useQuery<TestCallSummary>({
     queryKey: [`/api/campaigns/${campaignId}/test-calls-summary`],
-    enabled: dialMode === "ai_agent",
-  });
-
-  // Initiate test call mutation
-  const initiateTestMutation = useMutation({
-    mutationFn: async (data: typeof testFormData) => {
-      const response = await apiRequest("POST", `/api/campaigns/${campaignId}/test-call`, data);
-      return response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Test Call Initiated",
-        description: `Calling ${testFormData.testPhoneNumber}... Your phone should ring shortly!`,
-      });
-      setIsTestDialogOpen(false);
-      setTestFormData({
-        testPhoneNumber: "",
-        testContactName: "",
-        testCompanyName: "",
-        testJobTitle: "",
-        testContactEmail: "",
-      });
-      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}/test-calls`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}/test-calls-summary`] });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Test Call Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
+    enabled: dialMode === "ai_agent" && showLoggedTests,
   });
 
   // Analyze test call mutation
@@ -212,7 +210,36 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
       });
       return;
     }
-    initiateTestMutation.mutate(testFormData);
+
+    if (!sipConfig?.sipUsername || !sipConfig?.sipPassword) {
+      toast({
+        title: "SIP Trunk Required",
+        description: "Configure your SIP trunk (FQDN-based) before placing a test call.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const normalizedPhone = normalizePhoneToE164(testFormData.testPhoneNumber);
+    if (!normalizedPhone) {
+      toast({
+        title: "Invalid phone number",
+        description: "Enter a valid phone number in E.164 format (e.g., +14155552671).",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    makeCall(normalizedPhone, sipConfig.callerIdNumber || undefined);
+
+    toast({
+      title: "SIP Test Call Started",
+      description: `Calling ${normalizedPhone} via SIP trunk...`,
+    });
+  };
+
+  const handleHangup = () => {
+    hangup();
   };
 
   const getStatusBadge = (status: string) => {
@@ -255,10 +282,10 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
           <div>
             <CardTitle className="flex items-center gap-2">
               <Phone className="h-5 w-5" />
-              AI Agent Test Calls
+              SIP Test Calls
             </CardTitle>
             <CardDescription>
-              Test your AI agent with real calls before launching the campaign
+              Preview Studio is for AI simulation. Test calls use SIP trunk dialing.
             </CardDescription>
           </div>
           <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
@@ -272,7 +299,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
               <DialogHeader>
                 <DialogTitle>Initiate Test Call</DialogTitle>
                 <DialogDescription>
-                  Enter test contact details to validate your AI agent's behavior
+                  Use SIP trunk dialing to validate call flow. AI prompt rehearsal happens in Preview Studio.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -343,6 +370,18 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                   />
                 </div>
               </div>
+              <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between">
+                  <span>SIP status</span>
+                  <span>
+                    {!sipConfig ? "Not configured" : (isConnected ? "Connected" : "Connecting...")}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Call state</span>
+                  <span className="uppercase">{callState}</span>
+                </div>
+              </div>
               <DialogFooter>
                 <Button
                   variant="outline"
@@ -352,36 +391,33 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleInitiateTest}
-                  disabled={initiateTestMutation.isPending}
+                  onClick={callState === 'idle' ? handleInitiateTest : handleHangup}
+                  disabled={!sipConfig?.sipUsername || !sipConfig?.sipPassword}
                   data-testid="button-start-test"
                 >
-                  {initiateTestMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Initiating...
-                    </>
-                  ) : (
-                    <>
-                      <Phone className="mr-2 h-4 w-4" />
-                      Start Test Call
-                    </>
-                  )}
+                  <Phone className="mr-2 h-4 w-4" />
+                  {callState === 'idle' ? "Start SIP Test Call" : "Hang Up"}
                 </Button>
               </DialogFooter>
+              <audio id="remoteAudio" autoPlay playsInline style={{ display: 'none' }} />
             </DialogContent>
           </Dialog>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
+        {sipConfigured && (
+          <div className="rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
+            SIP test calls are not logged here. Use Preview Studio for AI prompt rehearsal.
+          </div>
+        )}
         {/* Summary Stats */}
-        {summaryLoading ? (
+        {showLoggedTests && summaryLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-20" />
             ))}
           </div>
-        ) : summary ? (
+        ) : showLoggedTests && summary ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-muted/50 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold">{summary.stats.total}</div>
@@ -409,7 +445,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
         ) : null}
 
         {/* Common Issues */}
-        {summary?.commonIssues && summary.commonIssues.length > 0 && (
+        {showLoggedTests && summary?.commonIssues && summary.commonIssues.length > 0 && (
           <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-4">
             <h4 className="font-medium flex items-center gap-2 mb-3">
               <AlertTriangle className="h-4 w-4 text-yellow-600" />
@@ -426,79 +462,81 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
         )}
 
         {/* Test Calls Table */}
-        {testCallsLoading ? (
-          <Skeleton className="h-64" />
-        ) : testCallsData?.testCalls && testCallsData.testCalls.length > 0 ? (
-          <div className="border rounded-lg">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Result</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {testCallsData.testCalls.map((testCall) => (
-                  <TableRow key={testCall.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{testCall.testContactName}</div>
-                        {testCall.testCompanyName && (
-                          <div className="text-xs text-muted-foreground">{testCall.testCompanyName}</div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">{testCall.testPhoneNumber}</TableCell>
-                    <TableCell>{getStatusBadge(testCall.status)}</TableCell>
-                    <TableCell>{getResultBadge(testCall.testResult)}</TableCell>
-                    <TableCell>
-                      {testCall.durationSeconds ? `${testCall.durationSeconds}s` : '-'}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDistanceToNow(new Date(testCall.createdAt), { addSuffix: true })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {testCall.status === 'completed' && !testCall.testResult && (
+        {showLoggedTests ? (
+          testCallsLoading ? (
+            <Skeleton className="h-64" />
+          ) : testCallsData?.testCalls && testCallsData.testCalls.length > 0 ? (
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Phone</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Result</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {testCallsData.testCalls.map((testCall) => (
+                    <TableRow key={testCall.id}>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{testCall.testContactName}</div>
+                          {testCall.testCompanyName && (
+                            <div className="text-xs text-muted-foreground">{testCall.testCompanyName}</div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{testCall.testPhoneNumber}</TableCell>
+                      <TableCell>{getStatusBadge(testCall.status)}</TableCell>
+                      <TableCell>{getResultBadge(testCall.testResult)}</TableCell>
+                      <TableCell>
+                        {testCall.durationSeconds ? `${testCall.durationSeconds}s` : '-'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDistanceToNow(new Date(testCall.createdAt), { addSuffix: true })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          {testCall.status === 'completed' && !testCall.testResult && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => analyzeTestMutation.mutate(testCall.id)}
+                              disabled={analyzeTestMutation.isPending}
+                            >
+                              {analyzeTestMutation.isPending ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <BarChart3 className="h-3 w-3" />
+                              )}
+                            </Button>
+                          )}
                           <Button
                             size="sm"
-                            variant="outline"
-                            onClick={() => analyzeTestMutation.mutate(testCall.id)}
-                            disabled={analyzeTestMutation.isPending}
+                            variant="ghost"
+                            onClick={() => setSelectedTestCall(testCall)}
                           >
-                            {analyzeTestMutation.isPending ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <BarChart3 className="h-3 w-3" />
-                            )}
+                            <MessageSquare className="h-3 w-3" />
                           </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setSelectedTestCall(testCall)}
-                        >
-                          <MessageSquare className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ) : (
-          <div className="text-center py-8 text-muted-foreground">
-            <Phone className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>No test calls yet</p>
-            <p className="text-sm mt-2">Run a test call to validate your AI agent before launching</p>
-          </div>
-        )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Phone className="h-12 w-12 mx-auto mb-4 opacity-20" />
+              <p>No test calls yet</p>
+              <p className="text-sm mt-2">Run a test call to validate your AI agent before launching</p>
+            </div>
+          )
+        ) : null}
 
         {/* Test Call Details Dialog */}
         <Dialog open={!!selectedTestCall} onOpenChange={() => setSelectedTestCall(null)}>

@@ -5869,6 +5869,8 @@ export function registerRoutes(app: Express) {
             )
             .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
 
+          console.log('[AGENT QUEUE] Raw manualQueue from DB:', JSON.stringify(manualQueue, null, 2));
+
           // Process each queue item to get best phone
           const processedQueue = manualQueue.map(item => {
             const bestPhone = getBestPhoneForContact({
@@ -5940,6 +5942,8 @@ export function registerRoutes(app: Express) {
               )
             )
             .orderBy(desc(campaignQueue.priority), campaignQueue.createdAt);
+
+          console.log('[AGENT QUEUE] Raw sharedQueue from DB:', JSON.stringify(sharedQueue, null, 2));
 
           // Process each queue item to get best phone
           const processedQueue = sharedQueue.map(item => {

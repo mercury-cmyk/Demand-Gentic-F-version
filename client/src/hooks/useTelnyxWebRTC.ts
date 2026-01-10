@@ -57,12 +57,20 @@ export function useTelnyxWebRTC({
    * This is the critical function for audio playback
    */
   const attachRemoteStream = useCallback((call: Call) => {
+    console.log('[AUDIO-DEBUG] attachRemoteStream called.');
     try {
       const audioElement = document.getElementById('remoteAudio') as HTMLAudioElement;
       if (!audioElement) {
-        console.error('[AUDIO] Remote audio element not found');
+        console.error('[AUDIO-DEBUG] Remote audio element with ID "remoteAudio" not found in the DOM.');
         return false;
       }
+      console.log('[AUDIO-DEBUG] Audio element found:', {
+        id: audioElement.id,
+        paused: audioElement.paused,
+        muted: audioElement.muted,
+        volume: audioElement.volume,
+        srcObject: audioElement.srcObject ? 'EXISTS' : 'NULL',
+      });
 
       // Try multiple ways to get the remote stream from the call object
       let remoteStream: MediaStream | null = null;
@@ -70,7 +78,7 @@ export function useTelnyxWebRTC({
       // Method 1: Direct remoteStream property
       if ((call as any).remoteStream) {
         remoteStream = (call as any).remoteStream;
-        console.log('[AUDIO] Got remoteStream from call.remoteStream');
+        console.log('[AUDIO-DEBUG] Got remoteStream from call.remoteStream');
       }
 
       // Method 2: From peer connection
@@ -81,7 +89,7 @@ export function useTelnyxWebRTC({
           const audioReceiver = receivers.find((r: RTCRtpReceiver) => r.track?.kind === 'audio');
           if (audioReceiver?.track) {
             remoteStream = new MediaStream([audioReceiver.track]);
-            console.log('[AUDIO] Created stream from peer receiver');
+            console.log('[AUDIO-DEBUG] Created stream from peer receiver');
           }
         }
       }
@@ -95,44 +103,47 @@ export function useTelnyxWebRTC({
           const audioReceiver = receivers.find((r: RTCRtpReceiver) => r.track?.kind === 'audio');
           if (audioReceiver?.track) {
             remoteStream = new MediaStream([audioReceiver.track]);
-            console.log('[AUDIO] Created stream from session SDH');
+            console.log('[AUDIO-DEBUG] Created stream from session SDH');
           }
         }
       }
 
       if (!remoteStream) {
-        console.warn('[AUDIO] No remote stream available yet');
+        console.warn('[AUDIO-DEBUG] No remote stream available yet.');
         return false;
       }
+      console.log('[AUDIO-DEBUG] Remote stream object:', remoteStream);
 
       // Check if stream has active audio tracks
       const audioTracks = remoteStream.getAudioTracks();
-      console.log('[AUDIO] Remote stream audio tracks:', audioTracks.length);
+      console.log('[AUDIO-DEBUG] Remote stream audio tracks:', audioTracks.length);
 
       if (audioTracks.length === 0) {
-        console.warn('[AUDIO] Remote stream has no audio tracks');
+        console.warn('[AUDIO-DEBUG] Remote stream has no audio tracks.');
         return false;
       }
 
       // Log track details
       audioTracks.forEach((track, i) => {
-        console.log(`[AUDIO] Track ${i}: enabled=${track.enabled}, muted=${track.muted}, readyState=${track.readyState}`);
+        console.log(`[AUDIO-DEBUG] Track ${i}: enabled=${track.enabled}, muted=${track.muted}, readyState=${track.readyState}`);
       });
 
       // Attach stream to audio element
+      console.log('[AUDIO-DEBUG] Attaching stream to audio element.');
       audioElement.srcObject = remoteStream;
       audioElement.volume = 1.0;
       audioElement.muted = false;
 
       // Try to play
+      console.log('[AUDIO-DEBUG] Calling audioElement.play()...');
       const playPromise = audioElement.play();
       if (playPromise) {
         playPromise
           .then(() => {
-            console.log('[AUDIO] ✅ Audio playback started successfully');
+            console.log('[AUDIO-DEBUG] ✅ Audio playback promise resolved successfully.');
           })
           .catch((err) => {
-            console.error('[AUDIO] Playback failed:', err);
+            console.error('[AUDIO-DEBUG] ❌ Audio playback promise rejected:', err);
             // User interaction may be required
             toast({
               variant: "destructive",
@@ -140,11 +151,13 @@ export function useTelnyxWebRTC({
               description: "Click anywhere on the page to enable audio",
             });
           });
+      } else {
+        console.warn('[AUDIO-DEBUG] audioElement.play() did not return a promise.');
       }
 
       return true;
     } catch (error) {
-      console.error('[AUDIO] Error attaching remote stream:', error);
+      console.error('[AUDIO-DEBUG] Error in attachRemoteStream:', error);
       return false;
     }
   }, [toast]);
