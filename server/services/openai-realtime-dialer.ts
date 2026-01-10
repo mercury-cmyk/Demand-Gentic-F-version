@@ -38,6 +38,15 @@ import {
   type CallCostMetrics,
 } from "./call-cost-tracker";
 import {
+  type VoiceAgentSettings,
+  type VoicePersonalityConfig,
+  type ConversationState,
+  type FillerWordsConfig,
+  buildPersonalityPromptSection,
+  buildConversationStatesSection,
+  buildFillerWordsInstructions,
+} from "@shared/voice-agent-config";
+import {
   buildFoundationPromptSections,
   buildCampaignContextSection,
   buildContactContextSection,
@@ -230,6 +239,21 @@ const activeSessions = new Map<string, OpenAIRealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
 
 const DISPOSITION_FUNCTION_TOOLS = [
+    {
+      type: "function",
+      name: "detect_voicemail_and_hangup",
+      description: "Detect voice mail on a call and hang up if it is detected, ensuring the process appears authentic.",
+      strict: false,
+      parameters: {
+        type: "object",
+        properties: {
+          call_id: {
+            type: "string",
+            description: "Unique identifier of the call to monitor for voicemail."
+          }
+        }
+      }
+    },
   {
     type: "function",
     name: "submit_disposition",
@@ -320,16 +344,39 @@ const DISPOSITION_FUNCTION_TOOLS = [
   {
     type: "function",
     name: "transfer_to_human",
-    description: "Request transfer to a human agent when the prospect requests to speak with a person",
+    description: "Request transfer to a human agent when the prospect requests to speak with a person. Always capture comprehensive context to ensure smooth handoff.",
     parameters: {
       type: "object",
       properties: {
-        reason: {
+        rationale_for_transfer: {
           type: "string",
-          description: "Reason for the transfer request"
+          description: "The reasoning why this transfer is needed (e.g., user requested human, complex technical question, escalation needed)"
+        },
+        conversation_summary: {
+          type: "string",
+          description: "Brief summary of the conversation so far, including key points discussed and any information already collected"
+        },
+        prospect_sentiment: {
+          type: "string",
+          enum: ["positive", "neutral", "guarded", "frustrated", "angry"],
+          description: "Current emotional state and sentiment of the prospect"
+        },
+        urgency: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          description: "How urgent is this transfer request"
+        },
+        key_topics: {
+          type: "array",
+          items: { type: "string" },
+          description: "Key topics or concerns mentioned by the prospect that the human agent should be aware of"
+        },
+        attempted_resolution: {
+          type: "string",
+          description: "What you attempted to resolve before requesting transfer, if applicable"
         }
       },
-      required: ["reason"]
+      required: ["rationale_for_transfer", "conversation_summary", "prospect_sentiment", "urgency"]
     }
   }
 ];
@@ -895,13 +942,15 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         campaignConfig,
         contactInfo,
         session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
-        useCondensedPrompt
+        useCondensedPrompt,
+        undefined, // foundationCapabilities
+        agentConfig?.settings as VoiceAgentSettings | null // Pass agent settings for personality config
       );
       const systemPrompt = interpolateVoiceTemplate(
         baseSystemPrompt,
         voiceTemplateValues
       );
-      const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "alloy";
+      const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
       const modalities = ["text", "audio"];
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
       // Transcription configuration - can be disabled to save ~$0.006/min
@@ -932,29 +981,27 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         console.log(`${LOG_PREFIX} Cost tracking enabled for call: ${session.callId}`);
       }
 
-      // OpenAI Realtime best practices: Configure session with proper parameters
+      // Configure OpenAI Realtime session aligned with official API documentation
       const configMessage = {
         type: "session.update",
         session: {
           modalities,
-          instructions: systemPrompt,
-          voice,
+          instructions: systemPrompt, // Use the fully interpolated system prompt
+          voice: voice, // Voice from config (defaults to marin)
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
           input_audio_transcription: transcriptionConfig,
-          turn_detection: turnDetection,
+          turn_detection: turnDetection, // Use semantic_vad with eagerness from buildTurnDetection()
           tools: getAvailableTools(agentSettings.systemTools),
           tool_choice: "auto",
-          // Best practice: Set temperature for controlled variability (0.6-0.8 recommended for voice)
           temperature: 0.7,
-          // Cost optimization: Configurable max tokens (default 512, range 256-1024)
-          max_response_output_tokens: maxResponseTokens,
+          max_response_output_tokens: maxResponseTokens, // Use the cost-optimized max tokens
         },
       };
 
       openaiWs.send(JSON.stringify(configMessage));
-      console.log(`${LOG_PREFIX} OpenAI session configured with g711_ulaw audio format`);
-      console.log(`${LOG_PREFIX} Cost settings: maxTokens=${maxResponseTokens}, transcription=${transcriptionEnabled}, condensedPrompt=${costSettings.useCondensedPrompt}`);
+      console.log(`${LOG_PREFIX} OpenAI session configured with dynamic system instructions and voice`);
+      console.log(`${LOG_PREFIX} Voice config:`, JSON.stringify(configMessage, null, 2));
       
       // Start audio health monitoring
       startAudioHealthMonitor(session);
@@ -1964,18 +2011,55 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
         break;
 
       case "transfer_to_human":
-        console.log(`${LOG_PREFIX} Transfer to human requested: ${args.reason}`);
-        session.detectedDisposition = 'qualified_lead';
-        if (session.openaiWs?.readyState === WebSocket.OPEN) {
-          session.openaiWs.send(JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id,
-              output: JSON.stringify({ success: true, message: "Transfer initiated" })
-            }
-          }));
-          session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+        {
+          const rationale = args.rationale_for_transfer || args.reason || 'Not specified';
+          const summary = args.conversation_summary || 'No summary provided';
+          const sentiment = args.prospect_sentiment || 'neutral';
+          const urgency = args.urgency || 'medium';
+          const keyTopics = args.key_topics || [];
+          const attempted = args.attempted_resolution || 'None';
+
+          console.log(`${LOG_PREFIX} Transfer to human requested for call ${session.callId}`);
+          console.log(`${LOG_PREFIX}   Rationale: ${rationale}`);
+          console.log(`${LOG_PREFIX}   Sentiment: ${sentiment}, Urgency: ${urgency}`);
+          console.log(`${LOG_PREFIX}   Summary: ${summary}`);
+          if (keyTopics.length > 0) {
+            console.log(`${LOG_PREFIX}   Key Topics: ${keyTopics.join(', ')}`);
+          }
+
+          // Store handoff context in session for potential UI display
+          (session as any).handoffContext = {
+            rationale,
+            summary,
+            sentiment,
+            urgency,
+            keyTopics,
+            attemptedResolution: attempted,
+            timestamp: new Date().toISOString(),
+          };
+
+          session.detectedDisposition = 'qualified_lead';
+
+          if (session.openaiWs?.readyState === WebSocket.OPEN) {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id,
+                output: JSON.stringify({
+                  success: true,
+                  message: "Transfer initiated. Human agent will be briefed with conversation context.",
+                  handoff_context: {
+                    rationale,
+                    summary,
+                    sentiment,
+                    urgency,
+                  }
+                })
+              }
+            }));
+            session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+          }
         }
         break;
     }
@@ -2456,12 +2540,54 @@ function buildVoiceTemplateValues({
   return values;
 }
 
+/**
+ * Apply voice agent personality configuration to a prompt
+ * Based on OpenAI Voice Agents Guide best practices
+ */
+function applyPersonalityConfiguration(
+  basePrompt: string,
+  agentSettings: VoiceAgentSettings | null
+): string {
+  if (!agentSettings) return basePrompt;
+
+  const sections: string[] = [];
+
+  // Add personality section if configured
+  if (agentSettings.personality) {
+    const personalitySection = buildPersonalityPromptSection(agentSettings.personality);
+    sections.push(personalitySection);
+    sections.push('---\n');
+  }
+
+  // Add conversation states if configured
+  if (agentSettings.conversationStates && agentSettings.conversationStates.length > 0) {
+    const statesSection = buildConversationStatesSection(agentSettings.conversationStates);
+    sections.push(statesSection);
+    sections.push('\n---\n');
+  }
+
+  // Add filler words instructions if configured
+  if (agentSettings.fillerWords) {
+    const fillerSection = buildFillerWordsInstructions(agentSettings.fillerWords);
+    sections.push(fillerSection);
+    sections.push('\n---\n');
+  }
+
+  // If we have personality config, prepend it to the base prompt
+  if (sections.length > 0) {
+    return sections.join('\n') + '\n' + basePrompt;
+  }
+
+  return basePrompt;
+}
+
 async function buildSystemPrompt(
   campaignConfig: any,
   contactInfo: any,
   agentPrompt?: string,
   useCondensedPrompt: boolean = true,  // Default to condensed for cost optimization
-  foundationCapabilities?: string[]    // Foundation agent capabilities
+  foundationCapabilities?: string[],    // Foundation agent capabilities
+  agentSettings?: VoiceAgentSettings | null  // Voice agent personality/conversation config
 ): Promise<string> {
   // =====================================================================
   // FOUNDATION + CAMPAIGN + CONTACT LAYER ARCHITECTURE
@@ -2504,6 +2630,9 @@ async function buildSystemPrompt(
     if (contactContextSection) {
       prompt += `\n\n---\n\n${contactContextSection}`;
     }
+
+    // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+    prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
     // Apply control layer based on useCondensedPrompt setting
     // This ensures proper call handling even with custom prompts
@@ -2660,8 +2789,17 @@ Call this when prospect requests a specific callback time.
 Before calling: confirm the date/time with the prospect.
 
 ## transfer_to_human
-Call this when prospect explicitly asks to speak with a human.
-Before calling: say "Thanks for your patience—I'm connecting you with someone who can help."`;
+Call this when prospect explicitly asks to speak with a human OR when the situation requires human intervention.
+
+IMPORTANT: Capture comprehensive context for smooth handoff:
+- rationale_for_transfer: Why this transfer is needed
+- conversation_summary: Brief summary of what's been discussed and any info collected
+- prospect_sentiment: Their emotional state (positive, neutral, guarded, frustrated, angry)
+- urgency: How urgent is this (low, medium, high, critical)
+- key_topics: Main topics or concerns they mentioned
+- attempted_resolution: What you tried before requesting transfer
+
+Before calling: say "I understand. Let me connect you with someone who can help. Just a moment please."`;
 
   let prompt = basePrompt;
 
@@ -2704,6 +2842,9 @@ Before calling: say "Thanks for your patience—I'm connecting you with someone 
   if (contactContextSection) {
     prompt += `\n\n---\n\n${contactContextSection}`;
   }
+
+  // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+  prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
   const finalPrompt = await buildAgentSystemPrompt(prompt);
   const tokenEstimate = estimateTokenCount(finalPrompt);

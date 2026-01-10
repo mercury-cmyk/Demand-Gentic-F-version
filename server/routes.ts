@@ -50,6 +50,7 @@ import campaignSendRouter from './routes/campaign-send-routes';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
+import openaiSipRouter from './routes/openai-sip';
 import virtualAgentsRouter from './routes/virtual-agents';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
@@ -6614,19 +6615,41 @@ export function registerRoutes(app: Express) {
       }
 
       // FALLBACK: Use environment variables if no database config exists
-      const envUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
-      const envPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+      const envProvider = process.env.SIP_TRUNK_PROVIDER || "telnyx";
+      const envUsername =
+        process.env.SIP_TRUNK_USERNAME ||
+        process.env.TELNYX_WEBRTC_USERNAME ||
+        process.env.TELNYX_SIP_USERNAME;
+      const envPassword =
+        process.env.SIP_TRUNK_PASSWORD ||
+        process.env.TELNYX_WEBRTC_PASSWORD ||
+        process.env.TELNYX_SIP_PASSWORD;
+      const envDomain =
+        process.env.SIP_TRUNK_DOMAIN ||
+        process.env.TELNYX_SIP_DOMAIN ||
+        (envProvider.toLowerCase() === "telnyx" ? "sip.telnyx.com" : "");
+      const envCallerId =
+        process.env.SIP_TRUNK_CALLER_ID ||
+        process.env.TELNYX_FROM_NUMBER ||
+        "";
+      const envConnectionId =
+        process.env.SIP_TRUNK_CONNECTION_ID ||
+        process.env.TELNYX_SIP_CONNECTION_ID ||
+        process.env.TELNYX_CONNECTION_ID ||
+        process.env.TELNYX_CALL_CONTROL_APP_ID ||
+        "";
 
       if (envUsername && envPassword) {
         console.log('[SIP-TRUNK] No database config, using environment variables');
         return res.json({
           id: 'env-default',
-          name: 'Telnyx (Environment)',
-          provider: 'telnyx',
+          name: `${envProvider} (Environment)`,
+          provider: envProvider,
           sipUsername: envUsername,
           sipPassword: envPassword,
-          sipDomain: 'sip.telnyx.com',
-          callerIdNumber: process.env.TELNYX_FROM_NUMBER || '',
+          sipDomain: envDomain,
+          connectionId: envConnectionId || null,
+          callerIdNumber: envCallerId,
           isActive: true,
           isDefault: true,
         });
@@ -6648,7 +6671,7 @@ export function registerRoutes(app: Express) {
         return res.json({
           success: false,
           message: "No SIP trunk configured",
-          recommendation: "Go to Telephony Settings and add a Credential Connection from Telnyx Portal"
+          recommendation: "Go to Telephony Settings and add your SIP credentials"
         });
       }
 
@@ -6663,15 +6686,9 @@ export function registerRoutes(app: Express) {
         issues.push("SIP password appears invalid (too short)");
       }
 
-      // Check if username looks like a Credential Connection format
-      // Telnyx Credential Connection usernames are typically in format: user123456789
-      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9_-]+$/)) {
-        issues.push("SIP username contains invalid characters - should be alphanumeric");
-      }
-
-      // Check domain
-      if (config.sipDomain && !config.sipDomain.includes('telnyx')) {
-        issues.push("SIP domain doesn't look like Telnyx - ensure you're using sip.telnyx.com");
+      // Check basic username format
+      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9@._-]+$/)) {
+        issues.push("SIP username contains unexpected characters");
       }
 
       console.log('[SIP-TRUNK-TEST] Config:', {
@@ -6690,6 +6707,7 @@ export function registerRoutes(app: Express) {
         config: {
           id: config.id,
           name: config.name,
+          provider: config.provider,
           sipUsername: config.sipUsername,
           sipDomain: config.sipDomain,
           connectionId: config.connectionId,
@@ -6700,7 +6718,7 @@ export function registerRoutes(app: Express) {
         },
         issues,
         recommendation: issues.length > 0
-          ? "Please verify your Credential Connection credentials in Telnyx Portal"
+          ? "Please verify your SIP credentials with your provider"
           : "Credentials look valid. If WebRTC still fails, check browser console for socket errors."
       });
     } catch (error) {
@@ -6733,6 +6751,46 @@ export function registerRoutes(app: Express) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation failed", errors: error.errors });
       } res.status(500).json({ message: "Failed to create SIP trunk configuration", error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  });
+
+  // Import Telnyx SIP trunk from environment variables
+  app.post("/api/sip-trunks/import-env", requireAuth, requireRole('admin'), async (req, res) => {
+    try {
+      const existing = await storage.getSipTrunkConfigs();
+      const telnyxUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const telnyxPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+      const telnyxDomain = process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com";
+      const telnyxConnectionId = process.env.TELNYX_SIP_CONNECTION_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
+      const telnyxCallerId = process.env.TELNYX_FROM_NUMBER || "";
+
+      if (!telnyxUsername || !telnyxPassword) {
+        return res.status(400).json({ message: "TELNYX_SIP_USERNAME and TELNYX_SIP_PASSWORD are required" });
+      }
+
+      const duplicate = existing.find((config) =>
+        config.provider === "telnyx" && config.sipUsername === telnyxUsername
+      );
+      if (duplicate) {
+        return res.json(duplicate);
+      }
+
+      const created = await storage.createSipTrunkConfig({
+        name: "Telnyx (Environment)",
+        provider: "telnyx",
+        sipUsername: telnyxUsername,
+        sipPassword: telnyxPassword,
+        sipDomain: telnyxDomain,
+        connectionId: telnyxConnectionId,
+        callerIdNumber: telnyxCallerId,
+        isActive: true,
+        isDefault: existing.length === 0,
+      });
+
+      res.json(created);
+    } catch (error) {
+      console.error('[SIP-TRUNK] Error importing env config:', error);
+      res.status(500).json({ message: "Failed to import SIP trunk configuration" });
     }
   });
 
@@ -12369,6 +12427,10 @@ Provide JSON response with:
   // ==================== AI VOICE AGENT CALLS ====================
 
   app.use("/api/ai-calls", aiCallsRouter);
+
+  // ==================== OPENAI SIP REALTIME (Inbound) ====================
+
+  app.use("/api/openai/sip", openaiSipRouter);
 
   // ==================== CAMPAIGN TEST CALLS (AI Agent Testing) ====================
 
