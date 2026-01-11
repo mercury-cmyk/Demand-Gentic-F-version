@@ -21,6 +21,16 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+const DEFAULT_SIMULATION_GREETING = "Hello, may I speak with the person in charge of your technology decisions?";
+
+const resolvePreviewVoiceProvider = (provider?: string | null) => {
+  if (!provider) return "openai";
+  const normalized = provider.toLowerCase();
+  if (normalized.includes("google")) return "google";
+  return "openai";
+};
 
 interface TranscriptEntry {
   role: 'user' | 'assistant' | 'system';
@@ -32,6 +42,9 @@ interface SimulationSession {
   sessionId: string;
   websocketUrl: string;
   assembledPrompt: string;
+  firstMessage: string;
+  agentVoice: string | null;
+  agentProvider: string | null;
 }
 
 interface LiveSimulationPanelProps {
@@ -53,6 +66,9 @@ export function LiveSimulationPanel({
   const [error, setError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [agentVoice, setAgentVoice] = useState<string | null>(null);
+  const [agentProvider, setAgentProvider] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -60,6 +76,8 @@ export function LiveSimulationPanel({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioUrlRef = useRef<string | null>(null);
 
   // Auto-scroll transcripts
   useEffect(() => {
@@ -75,6 +93,63 @@ export function LiveSimulationPanel({
     };
   }, []);
 
+  const stopPreviewAudio = useCallback(() => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewAudioUrlRef.current) {
+      URL.revokeObjectURL(previewAudioUrlRef.current);
+      previewAudioUrlRef.current = null;
+    }
+  }, []);
+
+  const playAgentVoice = useCallback(
+    async (text: string, voiceOverride?: string, providerOverride?: string) => {
+      const message = text?.trim();
+      if (!message) return;
+      const voiceToUse = voiceOverride ?? agentVoice ?? "nova";
+      if (!voiceToUse) return;
+
+      stopPreviewAudio();
+
+      const resolvedProvider = resolvePreviewVoiceProvider(providerOverride ?? agentProvider);
+
+      try {
+        const response = await apiRequest(
+          "GET",
+          `/api/virtual-agents/preview-voice?voice=${encodeURIComponent(voiceToUse)}&provider=${resolvedProvider}&text=${encodeURIComponent(message)}`
+        );
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        previewAudioUrlRef.current = audioUrl;
+        const audio = new Audio(audioUrl);
+        previewAudioRef.current = audio;
+        const cleanupPlayback = () => {
+          if (previewAudioRef.current === audio) {
+            previewAudioRef.current = null;
+          }
+          if (previewAudioUrlRef.current === audioUrl) {
+            URL.revokeObjectURL(audioUrl);
+            previewAudioUrlRef.current = null;
+          }
+        };
+        audio.onended = cleanupPlayback;
+        audio.onerror = cleanupPlayback;
+        await audio.play();
+      } catch (playError) {
+        stopPreviewAudio();
+        console.error("[Voice Preview] Playback error:", playError);
+        toast({
+          variant: "destructive",
+          title: "Voice preview failed",
+          description: playError instanceof Error ? playError.message : "Could not play preview voice",
+        });
+      }
+    },
+    [agentVoice, agentProvider, stopPreviewAudio, toast]
+  );
+
   const startSimulation = async () => {
     if (!campaignId || !accountId) {
       setError('Campaign and account are required');
@@ -84,6 +159,9 @@ export function LiveSimulationPanel({
     setStatus('connecting');
     setError(null);
     setTranscripts([]);
+    setAgentVoice(null);
+    setAgentProvider(null);
+    stopPreviewAudio();
 
     try {
       // Request microphone access
@@ -127,31 +205,38 @@ export function LiveSimulationPanel({
       const session: SimulationSession = await response.json();
       setSessionId(session.sessionId);
 
-      // Add system message
-      setTranscripts(prev => [...prev, {
+      const systemEntry: TranscriptEntry = {
         role: 'system',
         content: 'Simulation started. Speak into your microphone to test the AI agent.',
         timestamp: new Date(),
-      }]);
+      };
 
-      // Note: Full WebSocket audio streaming would be implemented here
-      // For now, we show a placeholder that the infrastructure is ready
+      const assistantMessage =
+        session.firstMessage?.trim() || DEFAULT_SIMULATION_GREETING;
+
+      const assistantEntry: TranscriptEntry = {
+        role: 'assistant',
+        content: assistantMessage,
+        timestamp: new Date(),
+      };
+
+      setTranscripts([systemEntry, assistantEntry]);
       setStatus('active');
-
-      // Simulate AI greeting after a short delay
-      setTimeout(() => {
-        setTranscripts(prev => [...prev, {
-          role: 'assistant',
-          content: 'Hello, may I speak with the person in charge of your technology decisions?',
-          timestamp: new Date(),
-        }]);
-      }, 1000);
+      setAgentVoice(session.agentVoice ?? null);
+      setAgentProvider(session.agentProvider ?? null);
+      void playAgentVoice(
+        assistantMessage,
+        session.agentVoice ?? undefined,
+        session.agentProvider ?? undefined
+      );
 
     } catch (err) {
       console.error('Failed to start simulation:', err);
       setError(err instanceof Error ? err.message : 'Failed to start simulation');
       setStatus('error');
       cleanup();
+      setAgentVoice(null);
+      setAgentProvider(null);
     }
   };
 
@@ -180,8 +265,9 @@ export function LiveSimulationPanel({
       audioContextRef.current = null;
     }
 
+    stopPreviewAudio();
     setAudioLevel(0);
-  }, []);
+  }, [stopPreviewAudio]);
 
   const endSimulation = async () => {
     cleanup();
@@ -202,6 +288,8 @@ export function LiveSimulationPanel({
 
     setStatus('ended');
     setSessionId(null);
+    setAgentVoice(null);
+    setAgentProvider(null);
   };
 
   const toggleMute = () => {

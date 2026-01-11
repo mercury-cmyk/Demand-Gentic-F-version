@@ -134,6 +134,7 @@ export async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
   systemPrompt: string | null;
   firstMessage: string | null;
   voice: string | null;
+  provider: string | null;
   settings: Partial<VirtualAgentSettings> | null;
 } | null> {
   if (!virtualAgentId) return null;
@@ -144,6 +145,7 @@ export async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
         systemPrompt: virtualAgents.systemPrompt,
         firstMessage: virtualAgents.firstMessage,
         voice: virtualAgents.voice,
+        provider: virtualAgents.provider,
         settings: virtualAgents.settings,
       })
       .from(virtualAgents)
@@ -156,6 +158,7 @@ export async function getVirtualAgentConfig(virtualAgentId: string): Promise<{
       systemPrompt: agent.systemPrompt,
       firstMessage: agent.firstMessage,
       voice: agent.voice,
+      provider: agent.provider || null,
       settings: (agent.settings as Partial<VirtualAgentSettings> | null) ?? null,
     };
   } catch (error) {

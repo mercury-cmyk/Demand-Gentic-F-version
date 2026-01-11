@@ -51,6 +51,8 @@ import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
 import openaiSipRouter from './routes/openai-sip';
+import openaiWebrtcRouter from './routes/openai-webrtc';
+import telnyxWebrtcRouter from './routes/telnyx-webrtc';
 import virtualAgentsRouter from './routes/virtual-agents';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
@@ -12436,6 +12438,14 @@ Provide JSON response with:
   // ==================== OPENAI SIP REALTIME (Inbound) ====================
 
   app.use("/api/openai/sip", openaiSipRouter);
+
+  // ==================== OPENAI WEBRTC REALTIME ====================
+
+  app.use("/api/openai/webrtc", openaiWebrtcRouter);
+
+  // ==================== TELNYX WEBRTC ====================
+
+  app.use("/api/telnyx/webrtc", telnyxWebrtcRouter);
 
   // ==================== CAMPAIGN TEST CALLS (AI Agent Testing) ====================
 

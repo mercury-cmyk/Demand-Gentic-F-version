@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
   Dialog,
@@ -156,13 +156,11 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
     },
   });
 
-  const { callState, isConnected, makeCall, hangup } = useTelnyxWebRTC({
-    sipUsername: sipConfig?.sipUsername,
-    sipPassword: sipConfig?.sipPassword,
-    sipDomain: sipConfig?.sipDomain || 'sip.telnyx.com',
+  const { callState, makeCall, hangup, remoteAudioRef } = useSIPWebRTC({
+    // ...existing code...
   });
-  const sipConfigured = Boolean(sipConfig?.sipUsername && sipConfig?.sipPassword);
-  const showLoggedTests = !sipConfigured;
+  const sipConfigured = false;
+  const showLoggedTests = true;
 
   // Fetch test calls for this campaign
   const { data: testCallsData, isLoading: testCallsLoading } = useQuery<{

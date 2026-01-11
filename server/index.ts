@@ -116,6 +116,13 @@ app.use((req, res, next) => {
   realtimeWss.on('error', (err) => {
     console.error('[WebSocket Upgrade] Realtime WSS error:', err);
   });
+
+  // Initialize Campaign Runner WebSocket for browser-based WebRTC calling
+  const { initializeCampaignRunnerWS } = await import("./services/campaign-runner-ws");
+  const campaignRunnerWss = initializeCampaignRunnerWS(server);
+  campaignRunnerWss.on('error', (err) => {
+    console.error('[WebSocket Upgrade] Campaign Runner WSS error:', err);
+  });
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
@@ -152,6 +159,13 @@ app.use((req, res, next) => {
       mediaWss.handleUpgrade(req, socket as any, head, (ws) => {
         console.log('[WebSocket Upgrade] ✅ AI Media Stream connection established');
         mediaWss.emit('connection', ws, req);
+      });
+    } else if (pathname === '/campaign-runner') {
+      console.log('[WebSocket Upgrade] Handling Campaign Runner connection');
+      
+      campaignRunnerWss.handleUpgrade(req, socket as any, head, (ws) => {
+        console.log('[WebSocket Upgrade] ✅ Campaign Runner connection established');
+        campaignRunnerWss.emit('connection', ws, req);
       });
     } else {
       // Let Vite HMR handle its own WebSocket connections (protocol: vite-hmr)
@@ -358,7 +372,7 @@ app.use((req, res, next) => {
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Cloud Run automatically sets PORT=8080
-  // For local dev, default to 5000
+  // For local dev, default to 8080
   const port = parseInt(process.env.PORT || '8080', 10);
   const host = process.env.HOST || '0.0.0.0';
   server.listen({

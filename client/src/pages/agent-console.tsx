@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useAuth } from "@/contexts/AuthContext";
 import type { CallState } from "@/hooks/useTelnyxWebRTC";
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
@@ -161,6 +161,7 @@ export default function AgentConsolePage() {
   const [showContactMismatch, setShowContactMismatch] = useState(false);
   const [switchedContact, setSwitchedContact] = useState<{ id: string; fullName: string } | null>(null);
   const [activeCallAttemptId, setActiveCallAttemptId] = useState<string | null>(null);
+  const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
 
   // Lead Verification Modal state
   const [showVerificationModal, setShowVerificationModal] = useState(false);
@@ -212,35 +213,24 @@ export default function AgentConsolePage() {
   }, [selectedCampaignId]);
 
   // Initialize Telnyx WebRTC
+  // Initialize JsSIP SIP/WebRTC
+  const sipUri = sipConfig?.sipUsername && sipConfig?.sipDomain
+    ? `sip:${sipConfig.sipUsername}@${sipConfig.sipDomain}`
+    : "sip:username@sip.example.com";
+  const sipPassword = sipConfig?.sipPassword || "password";
+  const sipWebSocket = import.meta.env.VITE_REACT_APP_SIP_WEBSOCKET || "wss://rtc.telnyx.com:443";
+
   const {
     callState,
-    isConnected,
-    isMuted,
-    callDuration,
-    lastError,
-    telnyxCallId,
-    selectedMicId,
-    selectedSpeakerId,
-    formatDuration,
     makeCall,
     hangup,
-    toggleMute,
-    sendDTMF,
-    setAudioDevices,
-  } = useTelnyxWebRTC({
-    sipUsername: sipConfig?.sipUsername,
-    sipPassword: sipConfig?.sipPassword,
-    sipDomain: sipConfig?.sipDomain || 'sip.telnyx.com',
-    onCallStateChange: (state) => {
-      if (state === 'hangup') {
-        setCallStatus('wrap-up');
-      } else {
-        setCallStatus(state as CallStatus);
-      }
-    },
-    onCallEnd: () => {
-      setCallStatus('wrap-up');
-    },
+    remoteAudioRef,
+  } = useSIPWebRTC({
+    sipUri,
+    sipPassword,
+    sipWebSocket,
+    onCallStateChange: (state) => setCallStatus(state),
+    onCallEnd: () => setCallStatus('idle'),
   });
 
   // Fetch agent queue data

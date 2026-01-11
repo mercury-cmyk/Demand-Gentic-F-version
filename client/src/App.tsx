@@ -59,6 +59,7 @@ import NewsPage from "@/pages/news";
 import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
+import { useSIPWebRTC } from "./hooks/useTelnyxWebRTC";
 import ResourcesCentrePage from "@/pages/resources-centre";
 import CampaignQueuePage from "@/pages/campaign-queue";
 import VerificationCampaignsPage from "@/pages/verification-campaigns";
@@ -90,6 +91,8 @@ import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
 import PreviewStudioPage from "@/pages/preview-studio";
+import WebRTCTestPage from "@/pages/webrtc-test";
+import CampaignRunnerPage from "@/pages/campaign-runner";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -159,6 +162,24 @@ const parseJwtPayload = (token: string): Record<string, unknown> | null => {
 function AuthenticatedApp() {
   const { user, token, getToken } = useAuth();
 
+  // Example SIP credentials (replace with env/config)
+  const sipUri = import.meta.env.VITE_SIP_URI || "sip:your-username@sip.example.com";
+  const sipPassword = import.meta.env.VITE_SIP_PASSWORD || "yourpassword";
+  const sipWebSocket = import.meta.env.VITE_SIP_WEBSOCKET || "wss://sip.example.com:7443";
+
+  // JsSIP hook
+  const sip = useSIPWebRTC({
+    sipUri,
+    sipPassword,
+    sipWebSocket,
+    onCallStateChange: (state) => {
+      console.log("SIP Call State:", state);
+    },
+    onCallEnd: () => {
+      console.log("SIP Call Ended");
+    },
+  });
+
   // Custom sidebar width for enterprise CRM
   const style = {
     "--sidebar-width": "18rem",       // 288px standard sidebar
@@ -199,85 +220,128 @@ function AuthenticatedApp() {
             userRoles={resolvedUserRoles}
           />
           <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
+            {/* JsSIP SIP/WebRTC Example UI */}
+            <div style={{ marginBottom: 16 }}>
+              <h3>SIP Call (JsSIP)</h3>
+              <button onClick={() => sip.makeCall("sip:destination@sip.example.com")}>Call Destination</button>
+              <button onClick={sip.hangup} style={{ marginLeft: 8 }}>Hangup</button>
+              <div>Call State: {sip.callState}</div>
+              <audio ref={sip.remoteAudioRef} id="remoteAudio" autoPlay />
+            </div>
             <Switch>
               <Route path="/" component={Dashboard} />
-              <Route path="/accounts/:id" component={AccountDetailPage} />
+              
+              {/* Accounts & Contacts */}
               <Route path="/accounts" component={AccountsPage} />
-              <Route path="/contacts/:id" component={ContactDetailPage} />
+              <Route path="/accounts/:id" component={AccountDetailPage} />
+              <Route path="/accounts-list/:id" component={AccountsListDetail} />
               <Route path="/contacts" component={ContactsPage} />
-              <Route path="/segments/lists/:id" component={ListDetailPage} />
-              <Route path="/segments/:id" component={SegmentDetailPage} />
+              <Route path="/contacts/:id" component={ContactDetailPage} />
               <Route path="/segments" component={SegmentsPage} />
+              <Route path="/segments/:id" component={SegmentDetailPage} />
+              <Route path="/lists/:id" component={ListDetailPage} />
               <Route path="/domain-sets" component={DomainSetsPage} />
-              <Route path="/domain-sets/:id" component={AccountsListDetail} />
+              
+              {/* Campaigns */}
               <Route path="/campaigns" component={CampaignsPage} />
-              <Route path="/campaigns/email/create" component={SimpleEmailCampaignCreatePage} />
-              <Route path="/campaigns/email/create-legacy" component={EmailCampaignCreatePage} />
-              <Route path="/campaigns/email/:id/edit" component={SimpleEmailCampaignEditPage} />
-              <Route path="/campaigns/email/:id/reports" component={EmailCampaignReportsPage} />
-              <Route path="/campaigns/email" component={EmailCampaignsPage} />
-              <Route path="/campaigns/email-templates" component={EmailTemplatesPage} />
-              <Route path="/campaigns/telemarketing/create" component={TelemarketingCreatePage} />
-              <Route path="/campaigns/telemarketing" component={PhoneCampaignsPage} />
-              <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
+              <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />
               <Route path="/campaigns/:id/queue" component={CampaignQueuePage} />
-              <Route path="/campaigns/config" component={CampaignConfigPage} />
-              <Route path="/leads/:id" component={LeadDetailPage} />
-              <Route path="/leads" component={LeadsPage} />
-              <Route path="/suppressions" component={SuppressionsPage} />
-              <Route path="/telemarketing/suppressions" component={TelemarketingSuppressionListPage} />
-              <Route path="/content-studio/ai-generator" component={AIContentGeneratorPage} />
-              <Route path="/content-studio/social-publisher" component={SocialMediaPublisherPage} />
-              <Route path="/content-studio" component={ContentStudioPage} />
-              <Route path="/preview-studio" component={PreviewStudioPage} />
-              <Route path="/events" component={EventsPage} />
-              <Route path="/resources" component={ResourcesPage} />
-              <Route path="/news" component={NewsPage} />
-              <Route path="/resources-centre" component={ResourcesCentrePage} />
-              <Route path="/pipeline" component={PipelineManagementPage} />
-              <Route path="/pipeline/pivotal" component={PivotalPipelineManagementPage} />
-              <Route path="/pipeline/import" component={PipelineImportPage} />
-              <Route path="/pipeline/lead-forms" component={LeadFormsPage} />
-              <Route path="/opportunities/:id" component={OpportunityDetailPage} />
+              
+              {/* Email Campaigns */}
+              <Route path="/email-campaigns" component={EmailCampaignsPage} />
+              <Route path="/email-campaigns/create" component={EmailCampaignCreatePage} />
+              <Route path="/simple-email-campaigns/create" component={SimpleEmailCampaignCreatePage} />
+              <Route path="/simple-email-campaigns/:id/edit" component={SimpleEmailCampaignEditPage} />
+              <Route path="/email-campaigns/:id/reports" component={EmailCampaignReportsPage} />
+              <Route path="/email-templates" component={EmailTemplatesPage} />
               <Route path="/email-sequences" component={EmailSequencesPage} />
-              <Route path="/inbox" component={InboxPage} />
-              <Route path="/agent-console" component={AgentConsolePage} />
-              <Route path="/agent-reports" component={AgentReportsDashboard} />
-              <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
-              <Route path="/telephony/sip-trunks" component={SipTrunkSettingsPage} />
+              
+              {/* Phone Campaigns */}
+              <Route path="/phone-campaigns" component={PhoneCampaignsPage} />
+              <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
+              <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
+              
+              {/* Leads */}
+              <Route path="/leads" component={LeadsPage} />
+              <Route path="/leads/:id" component={LeadDetailPage} />
+              <Route path="/lead-forms" component={LeadFormsPage} />
+              
+              {/* Content & Marketing */}
+              <Route path="/content-studio" component={ContentStudioPage} />
+              <Route path="/ai-content-generator" component={AIContentGeneratorPage} />
+              <Route path="/social-media-publisher" component={SocialMediaPublisherPage} />
+              
+              {/* Suppressions */}
+              <Route path="/suppressions" component={SuppressionsPage} />
+              <Route path="/telemarketing-suppression-list" component={TelemarketingSuppressionListPage} />
+              
+              {/* Orders & Imports */}
               <Route path="/orders" component={OrdersPage} />
               <Route path="/imports" component={ImportsPage} />
+              
+              {/* Reports & Analytics */}
               <Route path="/reports" component={ReportsPage} />
               <Route path="/call-reports" component={CallReportsPage} />
-              <Route path="/call-reports/details" component={CallReportsDetailsPage} />
+              <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
               <Route path="/ai-call-analytics" component={AiCallAnalyticsPage} />
-              <Route path="/virtual-agents" component={VirtualAgentsPage} />
-              <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
+              <Route path="/agent-reports-dashboard" component={AgentReportsDashboard} />
+              
+              {/* Agent Console & Virtual Agents */}
+              <Route path="/agent-console" component={AgentConsolePage} />
               <Route path="/unified-agent-console" component={UnifiedAgentConsolePage} />
-              <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
-              <Route path="/settings/users" component={UserManagementPage} />
-              <Route path="/settings/compliance" component={SettingsPage} />
-              <Route path="/settings/integrations" component={SettingsPage} />
+              <Route path="/agent-command-center" component={AgentCommandCenter} />
+              <Route path="/campaign-runner" component={CampaignRunnerPage} />
+              <Route path="/virtual-agents" component={VirtualAgentsPage} />
+              
+              {/* Settings & Administration */}
               <Route path="/settings" component={SettingsPage} />
-              <Route path="/ai/project-creator" component={AIProjectCreatorPage} />
-              <Route path="/verification/:campaignId/stats" component={VerificationCampaignStatsPage} />
-              <Route path="/verification/:campaignId/console" component={VerificationConsolePage} />
-              <Route path="/verification/:campaignId/upload" component={VerificationUploadPage} />
-              <Route path="/verification/:campaignId/suppression-upload" component={VerificationSuppressionUploadPage} />
-              <Route path="/verification/suppression-upload" component={VerificationSuppressionUploadPage} />
-              <Route path="/verification/campaigns/:id" component={VerificationCampaignConfigPage} />
-              <Route path="/verification/campaigns" component={VerificationCampaignsPage} />
-              <Route path="/client-portal/admin" component={ClientPortalAdmin} />
-              <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
+              <Route path="/settings/telephony" component={SipTrunkSettingsPage} />
+              <Route path="/user-management" component={UserManagementPage} />
+              <Route path="/sender-profiles" component={SenderProfilesPage} />
+              
+              {/* Resources */}
+              <Route path="/events" component={EventsPage} />
+              <Route path="/resources" component={ResourcesPage} />
+              <Route path="/resources-centre" component={ResourcesCentrePage} />
+              <Route path="/news" component={NewsPage} />
+              
+              {/* Verification */}
+              <Route path="/verification-campaigns" component={VerificationCampaignsPage} />
+              <Route path="/verification-campaigns/:id/config" component={VerificationCampaignConfigPage} />
+              <Route path="/verification-campaigns/:id/stats" component={VerificationCampaignStatsPage} />
+              <Route path="/verification-console" component={VerificationConsolePage} />
+              <Route path="/verification-upload" component={VerificationUploadPage} />
+              <Route path="/verification-suppression-upload" component={VerificationSuppressionUploadPage} />
               <Route path="/email-validation-test" component={EmailValidationTest} />
+              
+              {/* Pipeline & CRM */}
+              <Route path="/pipeline" component={PipelineManagementPage} />
+              <Route path="/pivotal-pipeline-management" component={PivotalPipelineManagementPage} />
+              <Route path="/pipeline-import" component={PipelineImportPage} />
+              <Route path="/opportunities/:id" component={OpportunityDetailPage} />
+              <Route path="/inbox" component={InboxPage} />
+              
+              {/* AI Studio */}
+              <Route path="/ai-project-creator" component={AIProjectCreatorPage} />
               <Route path="/ai-studio/intelligence" component={OrganizationIntelligencePage} />
               <Route path="/ai-studio/agents" component={AIAgentsPage} />
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
-              <Route path="/agent-command-center" component={AgentCommandCenter} />
+              <Route path="/create-ai-agent" component={CreateAIAgentPage} />
+              
+              {/* Client Portal */}
+              <Route path="/client-portal-admin" component={ClientPortalAdmin} />
+              <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
+              
+              {/* Testing & Development */}
+              <Route path="/campaign-test" component={CampaignTestPage} />
+              <Route path="/preview-studio" component={PreviewStudioPage} />
+              <Route path="/webrtc-test" component={WebRTCTestPage} />
+              
+              {/* 404 */}
               <Route component={NotFound} />
             </Switch>
           </main>

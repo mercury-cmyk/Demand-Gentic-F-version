@@ -42,6 +42,7 @@ type VirtualAgentConfig = {
   systemPrompt: string | null;
   firstMessage: string | null;
   voice: string | null;
+  provider: string | null;
   settings: Partial<VirtualAgentSettings> | null;
 };
 
@@ -191,6 +192,8 @@ export interface SimulationStartResponse {
   virtualAgentId: string | null;
   agentSettings: VirtualAgentSettings;
   agentSettingsSource: AgentSettingsSource;
+  agentVoice: string | null;
+  agentProvider: string | null;
 }
 
 // ==================== ENDPOINTS ====================
@@ -558,24 +561,25 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
     const { agentConfig, mergedSettings, settingsSource } =
       await getAgentSimulationSettings(resolvedVirtualAgentId);
 
-    // Create preview session
-    const [session] = await db.insert(previewStudioSessions).values({
-      campaignId,
-      accountId,
-      contactId,
-      userId,
-      virtualAgentId: resolvedVirtualAgentId,
-      sessionType: 'simulation',
-      status: 'active',
-      metadata: {
-        startedAt: new Date().toISOString(),
-        agentSettings: mergedSettings,
-        agentSettingsSource: settingsSource,
-        agentSystemPrompt: agentConfig?.systemPrompt || null,
-        agentFirstMessage: agentConfig?.firstMessage || null,
-        agentVoice: agentConfig?.voice || null,
-      },
-    }).returning();
+  // Create preview session
+  const [session] = await db.insert(previewStudioSessions).values({
+    campaignId,
+    accountId,
+    contactId,
+    userId,
+    virtualAgentId: resolvedVirtualAgentId,
+    sessionType: 'simulation',
+    status: 'active',
+    metadata: {
+      startedAt: new Date().toISOString(),
+      agentSettings: mergedSettings,
+      agentSettingsSource: settingsSource,
+      agentSystemPrompt: agentConfig?.systemPrompt || null,
+      agentFirstMessage: agentConfig?.firstMessage || null,
+      agentVoice: agentConfig?.voice || null,
+      agentProvider: agentConfig?.provider || null,
+    },
+  }).returning();
 
     // Build WebSocket URL
     const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] ||
@@ -608,6 +612,8 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
       virtualAgentId: resolvedVirtualAgentId,
       agentSettings: mergedSettings,
       agentSettingsSource: settingsSource,
+      agentVoice: agentConfig?.voice || null,
+      agentProvider: agentConfig?.provider || null,
     };
 
     res.json(response);

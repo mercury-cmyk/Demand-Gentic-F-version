@@ -96,6 +96,8 @@ interface OpenAIRealtimeSession {
   telnyxWs: WebSocket;
   openaiWs: WebSocket | null;
   streamSid: string | null;
+  audioFormat: 'g711_ulaw' | 'g711_alaw';
+  audioFormatSource: 'env' | 'telnyx' | 'default';
   isActive: boolean;
   isEnding: boolean; // Idempotent guard to prevent double execution
   startTime: Date;
@@ -169,6 +171,45 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
 
 const activeSessions = new Map<string, OpenAIRealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
+
+function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' | null {
+  if (!value) return null;
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'g711_ulaw' || normalized === 'ulaw' || normalized === 'mulaw' || normalized === 'pcmu' || normalized.includes('g711u')) {
+    return 'g711_ulaw';
+  }
+  if (normalized === 'g711_alaw' || normalized === 'alaw' || normalized === 'pcma' || normalized.includes('g711a')) {
+    return 'g711_alaw';
+  }
+  return null;
+}
+
+function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' } {
+  const envOverride = normalizeG711Format(
+    process.env.OPENAI_REALTIME_AUDIO_FORMAT || process.env.TELNYX_AUDIO_FORMAT
+  );
+
+  if (envOverride) {
+    return { format: envOverride, source: 'env' };
+  }
+
+  const startFormat = message?.start?.media_format;
+  const rawFormat = typeof startFormat === 'string'
+    ? startFormat
+    : startFormat?.encoding
+      || startFormat?.format
+      || startFormat?.codec
+      || startFormat?.name
+      || startFormat?.media_type;
+
+  const telnyxFormat = normalizeG711Format(rawFormat);
+  if (telnyxFormat) {
+    return { format: telnyxFormat, source: 'telnyx' };
+  }
+
+  return { format: 'g711_ulaw', source: 'default' };
+}
 
 const DISPOSITION_FUNCTION_TOOLS = [
     {
@@ -387,6 +428,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           const contactId = customParams.contact_id || urlParams.contact_id;
           const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
           const provider: 'openai' | 'google' = requestedProvider === 'google' ? 'google' : 'openai';
+          const { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
           const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
@@ -402,6 +444,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             campaign_id: campaignId,
             stream_id: message.stream_id,
             provider,
+            audio_format: audioFormat,
+            audio_format_source: audioFormatSource,
             has_custom_params: Object.keys(customParams).length > 0,
             has_url_params: Object.keys(urlParams).filter(k => (urlParams as any)[k]).length > 0
           });
@@ -466,6 +510,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               telnyxWs: ws,
               openaiWs: null,
               streamSid: message.stream_id || null,
+              audioFormat,
+              audioFormatSource,
               isActive: true,
               isEnding: false,
               startTime: new Date(),
@@ -526,6 +572,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               telnyxWs: ws,
               openaiWs: null,
               streamSid: message.stream_id || null,
+              audioFormat,
+              audioFormatSource,
               isActive: true,
               isEnding: false,
               startTime: new Date(),
@@ -834,6 +882,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
       const modalities = ["text", "audio"];
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
+      const audioFormat = session.audioFormat || 'g711_ulaw';
       // Transcription configuration - can be disabled to save ~$0.006/min
       const transcriptionEnabled = agentSettings.advanced.asr.transcriptionEnabled !== false;
       const transcriptionConfig: Record<string, unknown> = transcriptionEnabled ? {
@@ -869,8 +918,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           modalities,
           instructions: systemPrompt, // Use the fully interpolated system prompt
           voice: voice, // Voice from config (defaults to marin)
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
+          input_audio_format: audioFormat,
+          output_audio_format: audioFormat,
           input_audio_transcription: transcriptionConfig,
           turn_detection: turnDetection, // Use semantic_vad with eagerness from buildTurnDetection()
           tools: getAvailableTools(agentSettings.systemTools),

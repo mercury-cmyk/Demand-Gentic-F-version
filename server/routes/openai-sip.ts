@@ -4,6 +4,15 @@ import WebSocket from "ws";
 import { db } from "../db";
 import { virtualAgents } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import {
+  initiateOpenAISipCall,
+  handleCallAnswered,
+  endCall,
+  handleTelnyxWebhookEvent,
+  getSession,
+  getSessionByTelnyxId,
+  getActiveSessionsCount,
+} from "../services/openai-sip-dialer";
 
 const router = Router();
 
@@ -367,6 +376,145 @@ router.post("/webhook", async (req, res) => {
   }
 
   return res.status(200).json({ status: "accepted" });
+});
+
+/**
+ * POST /api/openai/sip/call
+ * Initiate an outbound call via OpenAI SIP
+ */
+router.post("/call", async (req, res) => {
+  try {
+    const {
+      toNumber,
+      fromNumber,
+      runId,
+      campaignId,
+      queueItemId,
+      callAttemptId,
+      contactId,
+      virtualAgentId,
+      isTestSession,
+      systemPromptOverride,
+      firstMessageOverride,
+      voiceOverride,
+      agentSettingsOverride,
+    } = req.body;
+
+    if (!toNumber || !fromNumber) {
+      return res.status(400).json({ error: "toNumber and fromNumber are required" });
+    }
+
+    const result = await initiateOpenAISipCall({
+      toNumber,
+      fromNumber: fromNumber || process.env.TELNYX_FROM_NUMBER,
+      runId: runId || `run-${Date.now()}`,
+      campaignId: campaignId || "",
+      queueItemId: queueItemId || "",
+      callAttemptId: callAttemptId || "",
+      contactId: contactId || "",
+      virtualAgentId,
+      isTestSession: isTestSession || false,
+      systemPromptOverride,
+      firstMessageOverride,
+      voiceOverride,
+      agentSettingsOverride,
+    });
+
+    console.log(`${LOG_PREFIX} Outbound SIP call initiated: ${result.callId}`);
+
+    res.json({
+      success: true,
+      callId: result.callId,
+      telnyxCallControlId: result.telnyxCallControlId,
+    });
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to initiate outbound call:`, error);
+    res.status(500).json({
+      error: "Failed to initiate call",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+/**
+ * POST /api/openai/sip/call-events
+ * Handle Telnyx webhook events for SIP calls
+ */
+router.post("/call-events", async (req, res) => {
+  try {
+    const event = req.body;
+    const eventType = event?.data?.event_type || event?.event_type;
+
+    console.log(`${LOG_PREFIX} Telnyx event received: ${eventType}`);
+
+    await handleTelnyxWebhookEvent(event);
+
+    res.status(200).json({ status: "processed" });
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to process Telnyx event:`, error);
+    res.status(500).json({ error: "Failed to process event" });
+  }
+});
+
+/**
+ * POST /api/openai/sip/hangup
+ * Hang up an active SIP call
+ */
+router.post("/hangup", async (req, res) => {
+  try {
+    const { callId } = req.body;
+
+    if (!callId) {
+      return res.status(400).json({ error: "callId is required" });
+    }
+
+    const session = getSession(callId);
+    if (!session) {
+      return res.status(404).json({ error: "Call not found" });
+    }
+
+    await endCall(callId, "user_hangup");
+
+    res.json({ success: true, callId });
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to hangup call:`, error);
+    res.status(500).json({ error: "Failed to hangup call" });
+  }
+});
+
+/**
+ * GET /api/openai/sip/status
+ * Get status of SIP dialer
+ */
+router.get("/status", (req, res) => {
+  res.json({
+    activeCalls: getActiveSessionsCount(),
+    sipEndpoint: `sip:${process.env.OPENAI_PROJECT_ID || "YOUR_PROJECT_ID"}@sip.api.openai.com;transport=tls`,
+    configured: !!process.env.OPENAI_PROJECT_ID,
+  });
+});
+
+/**
+ * GET /api/openai/sip/call/:callId
+ * Get status of a specific call
+ */
+router.get("/call/:callId", (req, res) => {
+  const { callId } = req.params;
+  const session = getSession(callId);
+
+  if (!session) {
+    return res.status(404).json({ error: "Call not found" });
+  }
+
+  res.json({
+    callId: session.callId,
+    telnyxCallControlId: session.telnyxCallControlId,
+    isActive: session.isActive,
+    startTime: session.startTime,
+    transcripts: session.transcripts,
+    disposition: session.detectedDisposition,
+    callSummary: session.callSummary,
+  });
 });
 
 export default router;
