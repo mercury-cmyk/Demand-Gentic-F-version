@@ -109,7 +109,8 @@
       "Bash(docker tag:*)",
       "Bash(docker push:*)",
       "Bash(ipconfig:*)",
-      "Bash(cmd.exe /c \"ipconfig /flushdns\")"
+      "Bash(cmd.exe /c \"ipconfig /flushdns\")",
+      "Bash(wmic process:*)"
     ],
     "additionalDirectories": [
       "C:\\Windows\\System32\\drivers\\etc"

@@ -310,7 +310,7 @@ export class TelnyxAiBridge extends EventEmitter {
         virtual_agent_id: (context as any).virtualAgentId || '',
         provider: provider,
         // Include agent configuration for WebSocket session
-        system_prompt: settings.persona?.systemPrompt || '',
+        // system_prompt is built by OpenAI Realtime Dialer from agent_settings
         first_message: settings.scripts?.opening || '',
         voice: settings.persona?.voice || 'nova',
         agent_name: settings.persona?.name || '',
