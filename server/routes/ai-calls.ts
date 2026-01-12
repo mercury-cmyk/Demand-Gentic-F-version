@@ -867,6 +867,7 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     const fromNumber = sipConfig?.callerIdNumber || process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     const connectionId =
+      process.env.TELNYX_TEXML_APP_ID ||
       sipConfig?.connectionId ||
       process.env.TELNYX_CALL_CONTROL_APP_ID ||
       process.env.TELNYX_CONNECTION_ID;
@@ -996,7 +997,7 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
         "Authorization": `Bearer ${telnyxApiKey}`,
       },
       body: JSON.stringify({
-        connection_id: connectionId,
+        application_id: connectionId, // Use application_id for TeXML calls
         to: normalizedPhone,
         from: fromNumber,
         url: texmlUrl, // Point to our TeXML endpoint

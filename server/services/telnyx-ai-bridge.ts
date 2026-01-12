@@ -291,8 +291,8 @@ export class TelnyxAiBridge extends EventEmitter {
     });
 
     try {
-      // Use TeXML App ID for TeXML calls (preferred), fallback to Call Control App ID
-      const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+      // For TeXML outbound calls, prioritize TeXML App ID
+      const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
 
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
       const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || this.webhookUrl.replace('https://', '').replace('http://', '');
@@ -336,7 +336,7 @@ export class TelnyxAiBridge extends EventEmitter {
           Authorization: `Bearer ${this.telnyxApiKey}`,
         },
         body: JSON.stringify({
-          connection_id: connectionId,
+          application_id: connectionId, // Use application_id for TeXML calls
           to: phoneNumber,
           from: fromNumber,
           url: texmlUrl,

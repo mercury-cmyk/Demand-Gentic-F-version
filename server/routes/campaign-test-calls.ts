@@ -94,13 +94,17 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
     const telnyxApiKey = process.env.TELNYX_API_KEY;
     const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.OPENAI_API_KEY;
-    const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+    // For TeXML outbound calls, prioritize TeXML App ID, then fallbacks
+    const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
 
     if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
       return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
     }
     if (!openaiApiKey) {
       return res.status(500).json({ message: "OpenAI API key not configured" });
+    }
+    if (!connectionId) {
+      return res.status(500).json({ message: "Telnyx Connection or Application ID not configured. Please set TELNYX_TEXML_APP_ID or TELNYX_CONNECTION_ID in your .env.local file." });
     }
 
     // Normalize phone number to E.164
@@ -199,7 +203,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
     const payload = {
-      connection_id: connectionId,
+      application_id: connectionId, // Use application_id for TeXML calls
       to: normalizedPhone,
       from: fromNumber,
       url: texmlUrl, // Point to our TeXML endpoint

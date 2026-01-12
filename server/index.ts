@@ -135,9 +135,6 @@ app.use((req, res, next) => {
     console.log(`[WebSocket Upgrade] Headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`[WebSocket Upgrade] Socket state: { readable: ${socket.readable}, writable: ${socket.writable}, destroyed: ${socket.destroyed}, readyState: ${socket.readyState} }`);
     
-    // Ensure socket is active
-    socket.resume();
-
     socket.on('error', (err) => {
       console.error('[WebSocket Upgrade] Socket error:', err);
     });
