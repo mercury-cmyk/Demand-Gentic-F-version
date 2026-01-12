@@ -87,6 +87,18 @@ export class TelnyxWebRTCClient {
    */
   async connect(): Promise<void> {
     try {
+      // Check if TelnyxRTC is available
+      if (typeof TelnyxRTC === 'undefined') {
+        throw new Error('[TelnyxWebRTC] Telnyx WebRTC SDK not loaded. Make sure @telnyx/webrtc is installed.');
+      }
+
+      console.log('[TelnyxWebRTC] Starting connection process...');
+      console.log('[TelnyxWebRTC] Credentials check:', {
+        hasToken: !!this.config.credentials.token,
+        hasUsername: !!this.config.credentials.username,
+        hasPassword: !!this.config.credentials.password,
+      });
+
       const clientOptions: any = {
         // WebRTC-only configuration
         useMicrophone: true,
@@ -99,24 +111,33 @@ export class TelnyxWebRTCClient {
       // Set credentials
       if (this.config.credentials.token) {
         clientOptions.login_token = this.config.credentials.token;
+        console.log('[TelnyxWebRTC] Using token authentication');
       } else if (this.config.credentials.username && this.config.credentials.password) {
         clientOptions.login = this.config.credentials.username;
         clientOptions.password = this.config.credentials.password;
+        console.log('[TelnyxWebRTC] Using username/password authentication for user:', this.config.credentials.username);
       } else {
         throw new Error('[TelnyxWebRTC] No valid credentials provided');
       }
 
-      console.log('[TelnyxWebRTC] Initializing client...');
+      console.log('[TelnyxWebRTC] Initializing client with options:', { 
+        ...clientOptions, 
+        password: clientOptions.password ? '[REDACTED]' : undefined,
+        login_token: clientOptions.login_token ? '[REDACTED]' : undefined 
+      });
+      
       this.client = new TelnyxRTC(clientOptions);
 
-      // Set up event handlers
+      // Set up event handlers BEFORE connecting
       this.setupEventHandlers();
 
+      console.log('[TelnyxWebRTC] Starting connection...');
       // Connect to Telnyx
       await this.client.connect();
-      console.log('[TelnyxWebRTC] Client connected');
+      console.log('[TelnyxWebRTC] Client connected successfully');
     } catch (error) {
       console.error('[TelnyxWebRTC] Connection error:', error);
+      console.error('[TelnyxWebRTC] Error stack:', (error as Error).stack);
       this.config.onError?.(error as Error);
       throw error;
     }
@@ -139,6 +160,32 @@ export class TelnyxWebRTCClient {
     this.client.on('telnyx.error', (error: Error) => {
       console.error('[TelnyxWebRTC] Error:', error);
       this.config.onError?.(error);
+    });
+
+    // Socket connect event
+    this.client.on('telnyx.socket.open', () => {
+      console.log('[TelnyxWebRTC] Socket opened - connection established');
+    });
+
+    // Socket disconnect event  
+    this.client.on('telnyx.socket.close', (event: any) => {
+      console.log('[TelnyxWebRTC] Socket closed:', event);
+      this.isConnected = false;
+    });
+
+    // Registration events
+    this.client.on('telnyx.socket.message', (message: any) => {
+      console.log('[TelnyxWebRTC] Socket message:', message?.method || 'unknown');
+      
+      // Detect authentication failures
+      if (message?.error) {
+        const errorMsg = message.error.message || message.error;
+        console.error('[TelnyxWebRTC] Server error:', errorMsg);
+        
+        if (errorMsg.includes('Unauthorized') || errorMsg.includes('credentials')) {
+          this.config.onError?.(new Error('Authentication failed - check your Telnyx WebRTC credentials'));
+        }
+      }
     });
 
     // Incoming notification (includes calls)

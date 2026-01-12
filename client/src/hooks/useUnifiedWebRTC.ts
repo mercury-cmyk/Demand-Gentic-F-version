@@ -160,16 +160,24 @@ export function useUnifiedWebRTC(config: UnifiedWebRTCConfig): [UnifiedWebRTCSta
     try {
       console.log('[useUnifiedWebRTC] Connecting...');
       setError(null);
+      setIsReady(false);
+
+      // Add connection timeout
+      const connectionTimeout = setTimeout(() => {
+        setError(new Error('WebRTC connection timeout after 30 seconds. Check network/firewall or try refreshing the page.'));
+      }, 30000);
 
       const telnyxClient = new TelnyxWebRTCClient({
         credentials: config.telnyxCredentials,
         callerIdName: config.callerIdName,
         callerIdNumber: config.callerIdNumber,
         onReady: () => {
+          clearTimeout(connectionTimeout);
           console.log('[useUnifiedWebRTC] Telnyx ready');
           setIsReady(true);
         },
         onError: (err) => {
+          clearTimeout(connectionTimeout);
           console.error('[useUnifiedWebRTC] Telnyx error:', err);
           setError(err);
         },

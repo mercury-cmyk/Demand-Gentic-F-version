@@ -22,8 +22,13 @@ router.get("/health", async (req, res) => {
       environment: process.env.NODE_ENV || "development",
     };
 
+    // Log health check for Cloud Run log validation
+    console.log(`[Health Check] ${health.timestamp} - Status: ${health.status}, Uptime: ${Math.floor(health.uptime)}s`);
+
     res.status(200).json(health);
   } catch (error) {
+    // Log errors for Cloud Run error tracking
+    console.error(`[Health Check Error] ${new Date().toISOString()} - ${error instanceof Error ? error.message : 'Unknown error'}`);
     res.status(503).json({
       status: "unhealthy",
       timestamp: new Date().toISOString(),

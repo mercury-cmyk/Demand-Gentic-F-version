@@ -278,8 +278,58 @@ export function UnifiedSoftphone({
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleDial()}
-              disabled={!state.isReady}
+              disabled={false}
+              className={!state.isReady ? "border-yellow-500 focus:border-yellow-600" : ""}
             />
+            {!state.isReady && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {state.error ? (
+                    <>
+                      <span className="text-red-500">Connection failed:</span> {state.error.message}
+                      {state.error.message.includes('timeout') && (
+                        <>
+                          <br />
+                          <span className="text-xs mt-1">
+                            Common causes: Network firewall blocking WebRTC, VPN interference, or Telnyx service issues.
+                          </span>
+                        </>
+                      )}
+                      {state.error.message.includes('credentials') && (
+                        <>
+                          <br />
+                          <span className="text-xs mt-1">
+                            Check SIP trunk configuration in Settings → Telephony.
+                          </span>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    'Connecting to WebRTC... (This may take 10-30 seconds)'
+                  )}
+                </p>
+                {state.error && (
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => actions.connect()}
+                      className="self-start"
+                    >
+                      Retry Connection
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => window.open('https://portal.telnyx.com/#/app/connections', '_blank')}
+                      className="self-start text-blue-600"
+                    >
+                      Check Telnyx Portal
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -306,9 +356,14 @@ export function UnifiedSoftphone({
               ) : (
                 <Button
                   size="lg"
-                  className="rounded-full h-14 w-14 bg-green-500 hover:bg-green-600"
+                  className={`rounded-full h-14 w-14 ${
+                    state.isReady 
+                      ? "bg-green-500 hover:bg-green-600" 
+                      : "bg-yellow-500 hover:bg-yellow-600"
+                  }`}
                   onClick={handleDial}
-                  disabled={!state.isReady || !phoneNumber.trim()}
+                  disabled={!phoneNumber.trim()}
+                  title={!state.isReady ? "WebRTC not ready - call may fail" : "Make call"}
                 >
                   <Phone className="h-6 w-6" />
                 </Button>

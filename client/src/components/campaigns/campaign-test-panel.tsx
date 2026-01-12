@@ -157,9 +157,11 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
   });
 
   const { callState, makeCall, hangup, remoteAudioRef } = useSIPWebRTC({
-    // ...existing code...
+    sipUri: sipConfig?.sipUsername ? `sip:${sipConfig.sipUsername}@${sipConfig.sipDomain || 'sip.telnyx.com'}` : '',
+    sipPassword: sipConfig?.sipPassword || '',
+    sipWebSocket: sipConfig?.webSocketUrl || 'wss://sip.telnyx.com',
   });
-  const sipConfigured = false;
+  const sipConfigured = !!sipConfig?.sipUsername && !!sipConfig?.sipPassword;
   const showLoggedTests = true;
 
   // Fetch test calls for this campaign
@@ -372,7 +374,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                 <div className="flex items-center justify-between">
                   <span>SIP status</span>
                   <span>
-                    {!sipConfig ? "Not configured" : (isConnected ? "Connected" : "Connecting...")}
+                    {!sipConfig ? "Not configured" : (callState !== 'idle' ? "Connected" : "Ready")}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">

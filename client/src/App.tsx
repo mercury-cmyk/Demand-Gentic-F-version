@@ -199,16 +199,6 @@ function AuthenticatedApp() {
   ]));
   const resolvedUserRoles = userRoles.length > 0 ? userRoles : ['agent'];
 
-  // Debug log to help troubleshoot role issues
-  console.log('=== AUTH DEBUG ===');
-  console.log('Current user:', user);
-  console.log('Current user roles:', resolvedUserRoles);
-  console.log('User roles type:', typeof userRoles, Array.isArray(userRoles));
-  console.log('User role from legacy:', user?.role);
-  console.log('User roles from new system:', (user as any)?.roles);
-  console.log('User roles from token:', rolesFromToken);
-  console.log('==================');
-
   return (
     <SidebarProvider style={style as React.CSSProperties}>
       <CommandPalette />
@@ -239,16 +229,25 @@ function AuthenticatedApp() {
               <Route path="/contacts/:id" component={ContactDetailPage} />
               <Route path="/segments" component={SegmentsPage} />
               <Route path="/segments/:id" component={SegmentDetailPage} />
+              <Route path="/segments/lists/:id" component={ListDetailPage} />
               <Route path="/lists/:id" component={ListDetailPage} />
               <Route path="/domain-sets" component={DomainSetsPage} />
+              <Route path="/domain-sets/:id" component={AccountsListDetail} />
               
               {/* Campaigns */}
               <Route path="/campaigns" component={CampaignsPage} />
+              <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />
               <Route path="/campaigns/:id/queue" component={CampaignQueuePage} />
               
-              {/* Email Campaigns */}
+              {/* Email Campaigns - support both old /campaigns/email and new /email-campaigns paths */}
+              <Route path="/campaigns/email" component={EmailCampaignsPage} />
+              <Route path="/campaigns/email/create" component={SimpleEmailCampaignCreatePage} />
+              <Route path="/campaigns/email/create-legacy" component={EmailCampaignCreatePage} />
+              <Route path="/campaigns/email/:id/edit" component={SimpleEmailCampaignEditPage} />
+              <Route path="/campaigns/email/:id/reports" component={EmailCampaignReportsPage} />
+              <Route path="/campaigns/email-templates" component={EmailTemplatesPage} />
               <Route path="/email-campaigns" component={EmailCampaignsPage} />
               <Route path="/email-campaigns/create" component={EmailCampaignCreatePage} />
               <Route path="/simple-email-campaigns/create" component={SimpleEmailCampaignCreatePage} />
@@ -257,7 +256,9 @@ function AuthenticatedApp() {
               <Route path="/email-templates" component={EmailTemplatesPage} />
               <Route path="/email-sequences" component={EmailSequencesPage} />
               
-              {/* Phone Campaigns */}
+              {/* Phone Campaigns - support both old /campaigns/telemarketing and new paths */}
+              <Route path="/campaigns/telemarketing" component={PhoneCampaignsPage} />
+              <Route path="/campaigns/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-campaigns" component={PhoneCampaignsPage} />
               <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
@@ -270,11 +271,14 @@ function AuthenticatedApp() {
               
               {/* Content & Marketing */}
               <Route path="/content-studio" component={ContentStudioPage} />
+              <Route path="/content-studio/ai-generator" component={AIContentGeneratorPage} />
+              <Route path="/content-studio/social-publisher" component={SocialMediaPublisherPage} />
               <Route path="/ai-content-generator" component={AIContentGeneratorPage} />
               <Route path="/social-media-publisher" component={SocialMediaPublisherPage} />
               
               {/* Suppressions */}
               <Route path="/suppressions" component={SuppressionsPage} />
+              <Route path="/telemarketing/suppressions" component={TelemarketingSuppressionListPage} />
               <Route path="/telemarketing-suppression-list" component={TelemarketingSuppressionListPage} />
               
               {/* Orders & Imports */}
@@ -296,12 +300,19 @@ function AuthenticatedApp() {
               <Route path="/agent-command-center" component={AgentCommandCenter} />
               <Route path="/campaign-runner" component={CampaignRunnerPage} />
               <Route path="/virtual-agents" component={VirtualAgentsPage} />
+              <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
+              <Route path="/agent-reports" component={AgentReportsDashboard} />
               
               {/* Settings & Administration */}
               <Route path="/settings" component={SettingsPage} />
               <Route path="/settings/telephony" component={SipTrunkSettingsPage} />
+              <Route path="/settings/users" component={UserManagementPage} />
+              <Route path="/settings/compliance" component={SettingsPage} />
+              <Route path="/settings/integrations" component={SettingsPage} />
               <Route path="/user-management" component={UserManagementPage} />
               <Route path="/sender-profiles" component={SenderProfilesPage} />
+              <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
+              <Route path="/telephony/sip-trunks" component={SipTrunkSettingsPage} />
               
               {/* Resources */}
               <Route path="/events" component={EventsPage} />
@@ -320,6 +331,9 @@ function AuthenticatedApp() {
               
               {/* Pipeline & CRM */}
               <Route path="/pipeline" component={PipelineManagementPage} />
+              <Route path="/pipeline/pivotal" component={PivotalPipelineManagementPage} />
+              <Route path="/pipeline/import" component={PipelineImportPage} />
+              <Route path="/pipeline/lead-forms" component={LeadFormsPage} />
               <Route path="/pivotal-pipeline-management" component={PivotalPipelineManagementPage} />
               <Route path="/pipeline-import" component={PipelineImportPage} />
               <Route path="/opportunities/:id" component={OpportunityDetailPage} />

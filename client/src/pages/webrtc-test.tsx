@@ -2,8 +2,30 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { UnifiedSoftphone } from "@/components/softphone/UnifiedSoftphone";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useEffect, useState } from "react";
 
 export default function WebRTCTestPage() {
+  const [sdkStatus, setSdkStatus] = useState<string>('checking');
+
+  // Check SDK availability
+  useEffect(() => {
+    const checkSDK = async () => {
+      try {
+        const { TelnyxRTC } = await import('@telnyx/webrtc');
+        if (typeof TelnyxRTC === 'function') {
+          setSdkStatus('available');
+          console.log('[WebRTC-Test] Telnyx SDK loaded successfully');
+        } else {
+          setSdkStatus('error: SDK loaded but TelnyxRTC is not a function');
+        }
+      } catch (error) {
+        setSdkStatus(`error: ${(error as Error).message}`);
+        console.error('[WebRTC-Test] SDK load error:', error);
+      }
+    };
+    checkSDK();
+  }, []);
+
   const { data: credentials, isLoading, error } = useQuery({
     queryKey: ["/api/telnyx/webrtc/credentials"],
     queryFn: async () => {
@@ -51,6 +73,10 @@ export default function WebRTCTestPage() {
       <Card>
         <CardHeader>
           <CardTitle>Unified WebRTC Calling Test</CardTitle>
+          <div className="text-sm text-muted-foreground space-y-1">
+            <div>SDK Status: <span className={sdkStatus === 'available' ? 'text-green-600' : 'text-red-600'}>{sdkStatus}</span></div>
+            <div>Credentials: {credentials ? '✅ Loaded' : '❌ Not loaded'}</div>
+          </div>
         </CardHeader>
         <CardContent>
           <UnifiedSoftphone
