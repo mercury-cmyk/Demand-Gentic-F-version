@@ -23,8 +23,9 @@ const initiateTestCallSchema = z.object({
   testContactName: z.string().min(1, "Contact name required"),
   testCompanyName: z.string().optional(),
   testJobTitle: z.string().optional(),
-  testContactEmail: z.string().email().optional(),
+  testContactEmail: z.string().email().optional().or(z.literal('')).transform(val => val || undefined),
   customVariables: z.record(z.unknown()).optional(),
+  voiceProvider: z.enum(["openai", "google"]).optional().default("openai"),
 });
 
 /**
@@ -32,10 +33,12 @@ const initiateTestCallSchema = z.object({
  * Initiate a test call for a specific campaign
  * This uses the campaign's actual AI agent and queue system to validate real behavior
  */
-router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager"), async (req, res) => {
+router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const userId = (req as any).user?.id;
+
+    console.log("[Campaign Test Call] Request received:", { campaignId, userId, body: req.body });
 
     // Validate request body
     const validatedData = initiateTestCallSchema.parse({
@@ -43,10 +46,14 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
       ...req.body,
     });
 
+    console.log("[Campaign Test Call] Validated data:", validatedData);
+
     // Get the campaign
     const campaign = await storage.getCampaign(campaignId);
+    console.log("[Campaign Test Call] Campaign lookup result:", campaign ? { id: campaign.id, type: campaign.type, dialMode: campaign.dialMode } : null);
+    
     if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
+      return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
     }
 
     // Verify campaign is a call campaign with AI agent mode
@@ -94,8 +101,8 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
     const telnyxApiKey = process.env.TELNYX_API_KEY;
     const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.OPENAI_API_KEY;
-    // For TeXML outbound calls, prioritize TeXML App ID, then fallbacks
-    const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
+    // For TeXML outbound calls, use ONLY TELNYX_TEXML_APP_ID
+    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
 
     if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
       return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
@@ -103,8 +110,8 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
     if (!openaiApiKey) {
       return res.status(500).json({ message: "OpenAI API key not configured" });
     }
-    if (!connectionId) {
-      return res.status(500).json({ message: "Telnyx Connection or Application ID not configured. Please set TELNYX_TEXML_APP_ID or TELNYX_CONNECTION_ID in your .env.local file." });
+    if (!texmlAppId) {
+      return res.status(500).json({ message: "Telnyx TeXML Application ID not configured. Please set TELNYX_TEXML_APP_ID in your .env.local file." });
     }
 
     // Normalize phone number to E.164
@@ -172,6 +179,12 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
     const voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
 
+    // Map provider selection to internal format
+    // client_state uses openai_realtime for legacy compatibility, session store uses openai
+    const providerForClientState = validatedData.voiceProvider === 'google' ? 'google' : 'openai_realtime';
+    const providerForSession = validatedData.voiceProvider === 'google' ? 'google' : 'openai';
+    console.log(`[Campaign Test Call] Using voice provider: ${validatedData.voiceProvider}`);
+
     const customParams = {
       call_id: testCallId,
       run_id: runId,
@@ -182,7 +195,8 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       virtual_agent_id: assignment.virtualAgentId,
       is_test_call: true,
       test_call_id: testCallId,
-      system_prompt: systemPrompt,
+      // Store large data in Redis, not in URL
+      // system_prompt will be fetched from virtual_agent in openai-realtime-dialer
       first_message: assignment.firstMessage,
       voice,
       agent_name: assignment.agentName,
@@ -192,34 +206,63 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         title: validatedData.testJobTitle,
         email: validatedData.testContactEmail,
       },
-      provider: 'openai_realtime',
+      provider: providerForClientState,
     };
+
+    // Store full session data in Redis for retrieval by WebSocket handler
+    const { callSessionStore } = await import("../services/call-session-store");
+    await callSessionStore.setSession(testCallId, {
+      call_id: testCallId,
+      run_id: runId,
+      campaign_id: campaignId,
+      queue_item_id: customParams.queue_item_id,
+      call_attempt_id: customParams.call_attempt_id,
+      contact_id: customParams.contact_id,
+      virtual_agent_id: assignment.virtualAgentId || undefined,
+      is_test_call: true,
+      test_call_id: testCallId,
+      first_message: assignment.firstMessage || undefined,
+      voice,
+      agent_name: assignment.agentName || undefined,
+      test_contact: customParams.test_contact,
+      provider: providerForSession,
+      system_prompt: systemPrompt, // Store full prompt in Redis
+    });
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
-    // Prepare webhook URL
+    // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
     const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
-    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
+    // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
 
     const payload = {
-      application_id: connectionId, // Use application_id for TeXML calls
+      texml_application_id: texmlAppId,
       to: normalizedPhone,
       from: fromNumber,
-      url: texmlUrl, // Point to our TeXML endpoint
-      client_state: clientStateB64, // Pass parameters via client_state
+      url: texmlUrl, // Point to our TeXML endpoint with client_state
     };
 
     console.log('[Campaign Test Call] Sending TeXML payload to Telnyx:', JSON.stringify(payload, null, 2));
 
-    // Initiate the Telnyx TeXML call
-    const telnyxResponse = await fetch("https://api.telnyx.com/v2/texml/calls", {
+    // Initiate the Telnyx TeXML call using the path-based endpoint
+    // API format: POST /v2/texml/calls/{application_id}
+    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+    console.log('[Campaign Test Call] Telnyx endpoint:', telnyxEndpoint);
+
+    const telnyxResponse = await fetch(telnyxEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${telnyxApiKey}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        To: payload.to,
+        From: payload.from,
+        Url: payload.url,
+        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+      }),
     });
 
     if (!telnyxResponse.ok) {
@@ -285,6 +328,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
   } catch (error) {
     console.error("[Campaign Test Call] Error:", error);
     if (error instanceof z.ZodError) {
+      console.error("[Campaign Test Call] Validation errors:", JSON.stringify(error.errors, null, 2));
       return res.status(400).json({ message: "Validation error", errors: error.errors });
     }
     res.status(500).json({ message: "Failed to initiate test call", error: String(error) });
@@ -396,7 +440,7 @@ router.get("/:campaignId/test-calls/:testCallId", requireAuth, async (req, res) 
  * POST /api/campaigns/:campaignId/test-calls/:testCallId/analyze
  * Analyze a completed test call and generate improvement suggestions
  */
-router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireRole("admin", "manager"), async (req, res) => {
+router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
 
@@ -547,7 +591,7 @@ Analyze the call and return a JSON object with:
  * PATCH /api/campaigns/:campaignId/test-calls/:testCallId
  * Update a test call (e.g., add notes, mark result)
  */
-router.patch("/:campaignId/test-calls/:testCallId", requireAuth, requireRole("admin", "manager"), async (req, res) => {
+router.patch("/:campaignId/test-calls/:testCallId", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { campaignId, testCallId } = req.params;
     const { testResult, testNotes } = req.body;
@@ -669,7 +713,7 @@ router.post("/webhook", async (req, res) => {
           await db.update(campaignTestCalls)
             .set({
               status: 'completed',
-              disposition: 'machine_detected',
+              disposition: 'voicemail',
               testResult: 'failed',
               callSummary: 'Call reached voicemail/answering machine - automatically disconnected per "no voicemail" policy',
               endedAt: new Date(),

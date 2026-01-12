@@ -20,6 +20,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -49,6 +56,7 @@ import {
   Building2,
   Briefcase,
   Mail,
+  Mic,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
@@ -122,10 +130,11 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
   const [callState, setCallState] = useState<'idle' | 'initiating'>('idle');
   const [testFormData, setTestFormData] = useState({
     testPhoneNumber: "",
-    testContactName: "",
-    testCompanyName: "",
-    testJobTitle: "",
-    testContactEmail: "",
+    testContactName: "Zahid Mohammadi",
+    testCompanyName: "Pivotal B2B",
+    testJobTitle: "Founder",
+    testContactEmail: "zahid@pivotal-b2b.com",
+    voiceProvider: "openai" as "openai" | "google",
   });
 
   const showLoggedTests = true;
@@ -181,6 +190,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
         testCompanyName: testFormData.testCompanyName || undefined,
         testJobTitle: testFormData.testJobTitle || undefined,
         testContactEmail: testFormData.testContactEmail || undefined,
+        voiceProvider: testFormData.voiceProvider,
       });
       return response.json();
     },
@@ -355,6 +365,29 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                     onChange={(e) => setTestFormData(prev => ({ ...prev, testContactEmail: e.target.value }))}
                     data-testid="input-test-email"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="voice-provider" className="flex items-center gap-2">
+                    <Mic className="h-4 w-4" />
+                    Voice Provider
+                  </Label>
+                  <Select
+                    value={testFormData.voiceProvider}
+                    onValueChange={(value: "openai" | "google") =>
+                      setTestFormData(prev => ({ ...prev, voiceProvider: value }))
+                    }
+                  >
+                    <SelectTrigger id="voice-provider" data-testid="select-voice-provider">
+                      <SelectValue placeholder="Select voice provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI Realtime</SelectItem>
+                      <SelectItem value="google">Google Gemini</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    OpenAI Realtime offers natural conversation. Gemini is faster and more cost-effective.
+                  </p>
                 </div>
               </div>
               <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">

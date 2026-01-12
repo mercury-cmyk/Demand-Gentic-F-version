@@ -329,14 +329,14 @@ export class TelnyxAiBridge extends EventEmitter {
   - To: ${phoneNumber}
   - Provider: ${provider}`);
 
-      const response = await fetch("https://api.telnyx.com/v2/texml/calls", {
+      const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.telnyxApiKey}`,
         },
         body: JSON.stringify({
-          application_id: connectionId, // Use application_id for TeXML calls
+          texml_application_id: connectionId, // Correct parameter for texml_calls endpoint
           to: phoneNumber,
           from: fromNumber,
           url: texmlUrl,

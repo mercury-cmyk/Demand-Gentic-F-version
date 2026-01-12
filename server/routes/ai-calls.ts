@@ -990,14 +990,14 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     console.log(`[OpenAI Realtime Test] Initiating TeXML call to: ${normalizedPhone}`);
     console.log(`[OpenAI Realtime Test] TeXML URL: ${texmlUrl}`);
 
-    const response = await fetch("https://api.telnyx.com/v2/texml/calls", {
+    const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${telnyxApiKey}`,
       },
       body: JSON.stringify({
-        application_id: connectionId, // Use application_id for TeXML calls
+        texml_application_id: connectionId, // Correct parameter for texml_calls endpoint
         to: normalizedPhone,
         from: fromNumber,
         url: texmlUrl, // Point to our TeXML endpoint

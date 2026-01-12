@@ -344,18 +344,20 @@ app.use((req, res, next) => {
   console.log("[Call Orchestration] Environment Configuration:");
   console.log("=".repeat(70));
   const telnyxKey = process.env.TELNYX_API_KEY;
-  const telnyxConnId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+  const telnyxTexmlAppId = process.env.TELNYX_TEXML_APP_ID;
+  const telnyxConnId = process.env.TELNYX_CONNECTION_ID;
   const publicWsUrl = process.env.PUBLIC_WEBSOCKET_URL;
   const telnyxFrom = process.env.TELNYX_FROM_NUMBER;
   
   console.log(`  TELNYX_API_KEY: ${telnyxKey ? '✅ Configured (' + telnyxKey.slice(0, 12) + '...)' : '❌ NOT SET'}`);
-  console.log(`  TELNYX_CONNECTION_ID: ${telnyxConnId ? '✅ ' + telnyxConnId : '❌ NOT SET'}`);
+  console.log(`  TELNYX_TEXML_APP_ID: ${telnyxTexmlAppId ? '✅ ' + telnyxTexmlAppId : '❌ NOT SET'}`);
+  console.log(`  TELNYX_CONNECTION_ID: ${telnyxConnId ? '✅ ' + telnyxConnId : '⚠️ NOT SET (optional)'}`);
   console.log(`  PUBLIC_WEBSOCKET_URL: ${publicWsUrl ? '✅ ' + publicWsUrl : '❌ NOT SET'}`);
   console.log(`  TELNYX_FROM_NUMBER: ${telnyxFrom ? '✅ ' + telnyxFrom : '❌ NOT SET'}`);
   console.log(`  REDIS_URL: ${hasRedis ? '✅ Configured (session persistence enabled)' : '⚠️ NOT SET (in-memory only - may cause call control ID issues in prod)'}`);
   console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
   
-  if (!telnyxKey || !telnyxConnId || !publicWsUrl) {
+  if (!telnyxKey || !telnyxTexmlAppId || !publicWsUrl) {
     console.log("\n⚠️  WARNING: Some Telnyx configuration is missing. Calls may fail.");
     console.log("   Check /api/call-orchestration for detailed diagnostics.");
   }

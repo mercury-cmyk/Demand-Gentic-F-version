@@ -83,6 +83,14 @@ type DispositionCode = CanonicalDisposition;
 
 const LOG_PREFIX = "[OpenAI-Realtime-Dialer]";
 
+// Telnyx media streaming expects real-time G.711 packetization.
+// For 8kHz μ-law: 20ms == 160 bytes.
+const TELNYX_G711_FRAME_BYTES = 160;
+const TELNYX_G711_FRAME_MS = 20;
+const TELNYX_MAX_FRAMES_PER_TICK = 5;
+// Cap buffer to avoid runaway memory if Telnyx isn't ready.
+const TELNYX_MAX_BUFFER_BYTES = TELNYX_G711_FRAME_BYTES * 2000; // ~40s of audio
+
 interface OpenAIRealtimeSession {
   callId: string;
   runId: string;
@@ -93,6 +101,13 @@ interface OpenAIRealtimeSession {
   provider: 'openai' | 'google';
   virtualAgentId: string;
   isTestSession: boolean;
+  // Test contact data for test sessions (from test panel form)
+  testContact?: {
+    name?: string;
+    company?: string;
+    title?: string;
+    email?: string;
+  } | null;
   telnyxWs: WebSocket;
   openaiWs: WebSocket | null;
   streamSid: string | null;
@@ -130,6 +145,11 @@ interface OpenAIRealtimeSession {
   isResponseInProgress: boolean;
   audioPlaybackMs: number; // Track how much audio has been sent to Telnyx
   lastAudioDeltaTimestamp: number | null;
+  // Telnyx outbound packetization state
+  telnyxOutboundBuffer: Buffer;
+  telnyxOutboundPacer: ReturnType<typeof setInterval> | null;
+  telnyxOutboundLastSendAt: number | null;
+  telnyxOutboundFramesSent: number;
   // Rate limiting state
   rateLimits: {
     requestsRemaining: number;
@@ -162,6 +182,82 @@ type CallSummary = {
   follow_up_consent: "yes" | "no" | "unknown";
   next_step?: string;
 };
+
+type ClientStateFormat = "raw_json" | "base64";
+type ClientStateParseResult = {
+  params: any;
+  format: ClientStateFormat;
+};
+
+function tryParseJson(value: string): any | null {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBase64Url(value: string): string {
+  // Spaces may be + signs that were incorrectly decoded (e.g., by some URL parsers)
+  // Convert spaces back to + before processing
+  const spacesToPlus = value.replace(/ /g, "+");
+
+  // Remove other whitespace (newlines, tabs) that shouldn't be in base64
+  const cleaned = spacesToPlus.replace(/[\t\n\r]/g, "");
+  if (!cleaned) {
+    return "";
+  }
+
+  // Convert URL-safe base64 characters to standard base64
+  const replaced = cleaned.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = replaced.length % 4;
+  return padding ? replaced + "=".repeat(4 - padding) : replaced;
+}
+
+function decodeClientStatePayload(rawValue: string): ClientStateParseResult | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Try direct JSON parse first (for non-base64 encoded payloads)
+  const directParse = tryParseJson(trimmed);
+  if (directParse) {
+    return {
+      params: directParse,
+      format: "raw_json",
+    };
+  }
+
+  // Normalize and decode as base64
+  const normalized = normalizeBase64Url(trimmed);
+  if (!normalized) {
+    console.log(`${LOG_PREFIX} client_state normalization produced empty string from: ${truncateForLog(trimmed)}`);
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(normalized, "base64").toString("utf8");
+    const decodedParse = tryParseJson(decoded);
+    if (decodedParse) {
+      return {
+        params: decodedParse,
+        format: "base64",
+      };
+    }
+    // Base64 decoded successfully but JSON parse failed
+    console.log(`${LOG_PREFIX} client_state base64 decoded but JSON parse failed. First 100 chars of decoded: ${truncateForLog(decoded, 100)}`);
+  } catch (err) {
+    // Base64 decode failed
+    console.log(`${LOG_PREFIX} client_state base64 decode failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  return null;
+}
+
+function truncateForLog(value: string, limit = 120): string {
+  return value.length <= limit ? value : `${value.slice(0, limit)}...`;
+}
 
 const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "qualified_lead",
@@ -216,7 +312,6 @@ const DISPOSITION_FUNCTION_TOOLS = [
       type: "function",
       name: "detect_voicemail_and_hangup",
       description: "Detect voice mail on a call and hang up if it is detected, ensuring the process appears authentic.",
-      strict: false,
       parameters: {
         type: "object",
         properties: {
@@ -407,17 +502,50 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           // Decode client_state from Telnyx or URL parameters
           let customParams: any = {};
           
-          // Priority 1: Check message.start.client_state
-          // Priority 2: Check URL query parameter client_state (for TeXML implementation)
-          const rawClientState = message.start?.client_state || url.searchParams.get('client_state');
+          // Priority 1: Check URL query parameter client_state (for TeXML implementation) - this is where WE put the data
+          // Priority 2: Check message.start.client_state (Telnyx sends its own binary format here, not useful)
+          const urlClientState = url.searchParams.get('client_state');
+          const messageClientState = message.start?.client_state;
+          
+          // Prefer URL client_state since that's where we encode our params
+          const rawClientState = urlClientState || messageClientState;
           
           if (rawClientState) {
+            const clientStateOrigin = urlClientState ? 'URL params' : 'Telnyx payload';
+            let normalizedClientState = rawClientState;
+
             try {
-              const decodedClientState = Buffer.from(rawClientState, 'base64').toString('utf8');
-              customParams = JSON.parse(decodedClientState);
-              console.log(`${LOG_PREFIX} Decoded client_state (from ${message.start?.client_state ? 'Telnyx payload' : 'URL params'}):`, customParams);
-            } catch (err) {
-              console.error(`${LOG_PREFIX} Failed to decode client_state:`, err);
+              normalizedClientState = decodeURIComponent(rawClientState);
+            } catch {
+              // Swallow decode errors and fall back to the raw string we already have
+            }
+
+            const parsedState = decodeClientStatePayload(normalizedClientState);
+
+            if (parsedState) {
+              customParams = parsedState.params;
+              console.log(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
+
+              // If system_prompt is missing, try to fetch from call session store
+              if (!customParams.system_prompt && (customParams.call_id || customParams.test_call_id)) {
+                const callId = customParams.call_id || customParams.test_call_id;
+                try {
+                  const { getCallParams } = await import('./call-session-store');
+                  const storedParams = await getCallParams(callId);
+                  if (storedParams?.system_prompt) {
+                    customParams.system_prompt = storedParams.system_prompt;
+                    console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${callId}`);
+                  }
+                } catch (storeErr) {
+                  console.warn(`${LOG_PREFIX} Failed to fetch from session store:`, storeErr);
+                }
+              }
+            } else {
+              console.error(
+                `${LOG_PREFIX} Failed to decode client_state from ${clientStateOrigin} - raw payload: ${truncateForLog(
+                  normalizedClientState
+                )}`
+              );
               customParams = message.start?.custom_parameters || {};
             }
           } else {
@@ -431,8 +559,6 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           const queueItemId = customParams.queue_item_id || urlParams.queue_item_id;
           const callAttemptId = customParams.call_attempt_id || urlParams.call_attempt_id;
           const contactId = customParams.contact_id || urlParams.contact_id;
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
-          const provider: 'openai' | 'google' = requestedProvider === 'google' ? 'google' : 'openai';
           let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
@@ -441,10 +567,17 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             && (queueItemId?.startsWith('queue-test-') || queueItemId?.startsWith('test-queue-'))
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
+
+          // Determine provider - test sessions default to OpenAI (more reliable)
+          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
+          // Check if openai is requested (handles 'openai', 'openai_realtime', etc.)
+          const isOpenAIRequested = requestedProvider.includes('openai');
+          const provider: 'openai' | 'google' = isOpenAIRequested ? 'openai' : 'google';
+
           if (isTestSession) {
             audioFormat = 'g711_ulaw';
             audioFormatSource = 'test';
-            console.warn(`${LOG_PREFIX} Test session forcing audio format to g711_ulaw to avoid codec mismatch.`);
+            console.log(`${LOG_PREFIX} Test session using provider: ${provider}, audio format: g711_ulaw`);
           }
 
           console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);
@@ -460,26 +593,30 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             has_url_params: Object.keys(urlParams).filter(k => (urlParams as any)[k]).length > 0
           });
 
-          // Validate required identifiers are present
-          const missingParams: string[] = [];
-          if (!callAttemptId) missingParams.push('call_attempt_id');
-          if (!queueItemId) missingParams.push('queue_item_id');
-          if (!contactId) missingParams.push('contact_id');
-          if (!campaignId) missingParams.push('campaign_id');
-          if (!runId) missingParams.push('run_id');
+          // Validate required identifiers are present (skip for test sessions)
+          if (!isTestSession) {
+            const missingParams: string[] = [];
+            if (!callAttemptId) missingParams.push('call_attempt_id');
+            if (!queueItemId) missingParams.push('queue_item_id');
+            if (!contactId) missingParams.push('contact_id');
+            if (!campaignId) missingParams.push('campaign_id');
+            if (!runId) missingParams.push('run_id');
 
-          if (missingParams.length > 0) {
-            console.error(`${LOG_PREFIX} Missing required parameters: ${missingParams.join(', ')}. Terminating session.`);
-            ws.send(JSON.stringify({
-              event: "error",
-              message: `Missing required parameters: ${missingParams.join(', ')}. Session terminated.`,
-              required_workflow: [
-                "1. Call POST /api/dialer-runs/:id/next-contact to get queue_item_id, call_attempt_id, contact_id",
-                "2. Pass all identifiers in Telnyx start.custom_parameters"
-              ]
-            }));
-            ws.close();
-            return;
+            if (missingParams.length > 0) {
+              console.error(`${LOG_PREFIX} Missing required parameters: ${missingParams.join(', ')}. Terminating session.`);
+              ws.send(JSON.stringify({
+                event: "error",
+                message: `Missing required parameters: ${missingParams.join(', ')}. Session terminated.`,
+                required_workflow: [
+                  "1. Call POST /api/dialer-runs/:id/next-contact to get queue_item_id, call_attempt_id, contact_id",
+                  "2. Pass all identifiers in Telnyx start.custom_parameters"
+                ]
+              }));
+              ws.close();
+              return;
+            }
+          } else {
+            console.log(`${LOG_PREFIX} 🧪 Test session detected - skipping production parameter validation`);
           }
 
           // Get virtualAgentId from params
@@ -557,6 +694,10 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               isResponseInProgress: false,
               audioPlaybackMs: 0,
               lastAudioDeltaTimestamp: null,
+              telnyxOutboundBuffer: Buffer.alloc(0),
+              telnyxOutboundPacer: null,
+              telnyxOutboundLastSendAt: null,
+              telnyxOutboundFramesSent: 0,
               // Rate limiting state
               rateLimits: null,
               // Conversation state tracking
@@ -579,6 +720,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || '',
               isTestSession,
+              // Store test contact data from customParams for test sessions
+              testContact: (customParams.test_contact as { name?: string; company?: string; title?: string; email?: string } | undefined) || null,
               telnyxWs: ws,
               openaiWs: null,
               streamSid: message.stream_id || null,
@@ -619,6 +762,10 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               isResponseInProgress: false,
               audioPlaybackMs: 0,
               lastAudioDeltaTimestamp: null,
+              telnyxOutboundBuffer: Buffer.alloc(0),
+              telnyxOutboundPacer: null,
+              telnyxOutboundLastSendAt: null,
+              telnyxOutboundFramesSent: 0,
               // Rate limiting state
               rateLimits: null,
               // Conversation state tracking
@@ -780,6 +927,82 @@ function getAvailableTools(systemTools: SystemToolsSettings) {
   });
 }
 
+function sanitizeRealtimeTools(tools: unknown[]): unknown[] {
+  // OpenAI Realtime rejects unsupported keys like `tools[*].strict`.
+  return tools.map((tool) => {
+    if (!tool || typeof tool !== 'object') return tool;
+    const { strict: _strict, ...rest } = tool as any;
+    return rest;
+  });
+}
+
+function enqueueTelnyxOutboundAudio(session: OpenAIRealtimeSession, audioBytes: Buffer): void {
+  if (!audioBytes?.length) return;
+
+  session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.length
+    ? Buffer.concat([session.telnyxOutboundBuffer, audioBytes])
+    : audioBytes;
+
+  if (session.telnyxOutboundBuffer.length > TELNYX_MAX_BUFFER_BYTES) {
+    // Keep newest audio to reduce perceived latency.
+    const dropped = session.telnyxOutboundBuffer.length - TELNYX_MAX_BUFFER_BYTES;
+    session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(dropped);
+    console.warn(`${LOG_PREFIX} WARN: Telnyx outbound buffer capped (dropped ${dropped} bytes) for call: ${session.callId}`);
+  }
+}
+
+function stopTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
+  if (session.telnyxOutboundPacer) {
+    clearInterval(session.telnyxOutboundPacer);
+    session.telnyxOutboundPacer = null;
+  }
+  session.telnyxOutboundLastSendAt = null;
+}
+
+function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
+  if (session.telnyxOutboundPacer) return;
+
+  session.telnyxOutboundPacer = setInterval(() => {
+    try {
+      if (!session.isActive) return;
+      if (!session.streamSid) return;
+      if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) return;
+      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
+
+      const now = Date.now();
+      if (session.telnyxOutboundLastSendAt == null) {
+        // Make first tick eligible to send exactly 1 frame.
+        session.telnyxOutboundLastSendAt = now - TELNYX_G711_FRAME_MS;
+      }
+
+      const elapsed = now - session.telnyxOutboundLastSendAt;
+      const framesDue = Math.floor(elapsed / TELNYX_G711_FRAME_MS);
+      if (framesDue <= 0) return;
+
+      const framesAvailable = Math.floor(session.telnyxOutboundBuffer.length / TELNYX_G711_FRAME_BYTES);
+      const framesToSend = Math.min(framesDue, framesAvailable, TELNYX_MAX_FRAMES_PER_TICK);
+      if (framesToSend <= 0) return;
+
+      for (let i = 0; i < framesToSend; i++) {
+        const frame = session.telnyxOutboundBuffer.subarray(0, TELNYX_G711_FRAME_BYTES);
+        session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(TELNYX_G711_FRAME_BYTES);
+
+        // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
+        // Including extra fields like stream_id causes silent audio!
+        session.telnyxWs.send(JSON.stringify({
+          event: "media",
+          media: { payload: frame.toString('base64') },
+        }));
+        session.telnyxOutboundFramesSent += 1;
+      }
+
+      session.telnyxOutboundLastSendAt += framesToSend * TELNYX_G711_FRAME_MS;
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Telnyx outbound pacer error for call ${session.callId}:`, err);
+    }
+  }, TELNYX_G711_FRAME_MS);
+}
+
 async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<void> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -794,7 +1017,24 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
   try {
     const campaignConfig = await getCampaignConfig(session.campaignId);
-    const contactInfo = await getContactInfo(session.contactId);
+    let contactInfo = await getContactInfo(session.contactId);
+
+    // For test sessions, use test contact data if database lookup returns null
+    if (session.isTestSession && !contactInfo && session.testContact) {
+      console.log(`${LOG_PREFIX} 🧪 Using test contact data for test session: ${session.testContact.name}`);
+      contactInfo = {
+        id: session.contactId,
+        firstName: session.testContact.name?.split(' ')[0] || 'Test',
+        lastName: session.testContact.name?.split(' ').slice(1).join(' ') || 'Contact',
+        fullName: session.testContact.name || 'Test Contact',
+        jobTitle: session.testContact.title || 'Test Title',
+        email: session.testContact.email || 'test@example.com',
+        company: session.testContact.company || 'Test Company',
+        companyName: session.testContact.company || 'Test Company',
+        accountId: null,
+      };
+    }
+
     const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
     const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
@@ -936,7 +1176,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           output_audio_format: audioFormat,
           input_audio_transcription: transcriptionConfig,
           turn_detection: turnDetection, // Use semantic_vad with eagerness from buildTurnDetection()
-          tools: getAvailableTools(agentSettings.systemTools),
+          tools: sanitizeRealtimeTools(getAvailableTools(agentSettings.systemTools)),
           tool_choice: "auto",
           temperature: 0.7,
           max_response_output_tokens: maxResponseTokens, // Use the cost-optimized max tokens
@@ -1165,22 +1405,151 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
   }
 }
 
-// Placeholder Google provider initialization. This keeps OpenAI as default while
-// allowing a runtime toggle without crashing. Replace this with a full Google
-// Realtime Voice implementation when ready.
+
+// Google Gemini Live Provider Integration
+// Uses the voice-providers abstraction for Google's real-time voice API
+
+// Google Gemini Live Provider Integration
+// Uses the voice-providers abstraction for Google's real-time voice API
 async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<void> {
-  console.warn(`${LOG_PREFIX} âš ï¸ Google Realtime Voice provider selected but not implemented. Falling back to error.`);
+  console.log(`${LOG_PREFIX} Initializing Google Gemini Live session for call: ${session.callId}`);
+
   try {
-    session.telnyxWs.send(JSON.stringify({
-      event: "error",
-      message: "Google Realtime Voice provider is not implemented yet. Please use provider=openai.",
-      provider: "google"
+    // Dynamically import to avoid circular dependencies
+    const { GeminiLiveProvider } = await import("./voice-providers/gemini-live-provider");
+    const { mapVoiceToProvider } = await import("./voice-providers/voice-provider.interface");
+
+    const provider = new GeminiLiveProvider();
+
+    // Connect to Gemini Live API
+    await provider.connect();
+    console.log(`${LOG_PREFIX} Connected to Gemini Live API`);
+
+    // Get campaign and agent config
+    const campaignConfig = await getCampaignConfig(session.campaignId);
+    const contactInfo = await getContactInfo(session.contactId);
+    const agentConfig = session.virtualAgentId ? await getVirtualAgentConfig(session.virtualAgentId) : null;
+
+    // Merge agent settings - combine base settings with any overrides
+    const baseSettings = agentConfig?.settings as Partial<VirtualAgentSettings> | undefined;
+    const mergedBase = session.agentSettingsOverride
+      ? { ...baseSettings, ...session.agentSettingsOverride } as Partial<VirtualAgentSettings>
+      : baseSettings;
+    const agentSettings = mergeAgentSettings(mergedBase);
+
+    // Build system prompt
+    const voiceTemplateValues = buildVoiceTemplateValues({
+      baseValues: session.voiceVariables,
+      contactInfo,
+      callerId: process.env.TELNYX_FROM_NUMBER || null,
+    });
+    const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
+    const useCondensedPrompt = costSettings.useCondensedPrompt !== false;
+
+    const baseSystemPrompt = await buildSystemPrompt(
+      campaignConfig, contactInfo,
+      session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
+      useCondensedPrompt, undefined, agentConfig?.settings as VoiceAgentSettings | null,
+      session.callAttemptId, 1, session.isTestSession
+    );
+    const systemPrompt = interpolateVoiceTemplate(baseSystemPrompt, voiceTemplateValues);
+
+    // Configure Gemini provider
+    const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "Kore";
+    const geminiVoice = mapVoiceToProvider(voice, 'google');
+
+    // Map tools to ProviderTool format
+    const providerTools = getAvailableTools(agentSettings.systemTools).map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters as { type: 'object'; properties: Record<string, any>; required?: string[] },
     }));
-  } catch (err) {
-    console.error(`${LOG_PREFIX} Failed to notify client about Google provider placeholder:`, err);
+
+    await provider.configure({
+      systemPrompt,
+      voice: geminiVoice,
+      inputAudioFormat: session.audioFormat,
+      outputAudioFormat: session.audioFormat,
+      tools: providerTools,
+      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 200 },
+      temperature: 0.7,
+      maxResponseTokens: costSettings.maxResponseTokens || 512,
+      transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
+    });
+
+    // Event handlers: Audio from Gemini -> Telnyx
+    provider.on('audio:delta', (event: any) => {
+      if (!event?.audioBuffer || !(event.audioBuffer instanceof Buffer)) {
+        return;
+      }
+
+      enqueueTelnyxOutboundAudio(session, event.audioBuffer);
+      ensureTelnyxOutboundPacer(session);
+    });
+
+    provider.on('transcript:user', (event: any) => {
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+        session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+    });
+
+    provider.on('transcript:agent', (event: any) => {
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+        session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+    });
+
+    provider.on('function:call', async (event: any) => {
+      console.log(`${LOG_PREFIX} Gemini function call: ${event.name}`);
+      const result = await handleGeminiFunctionCall(session, event.name, event.args);
+      provider.respondToFunctionCall(event.callId, result);
+    });
+
+    provider.on('error', async (event: any) => {
+      console.error(`${LOG_PREFIX} Gemini error:`, event.message);
+      if (!event.recoverable) await endCall(session.callId, 'error');
+    });
+
+    provider.on('disconnected', async () => {
+      console.log(`${LOG_PREFIX} Gemini disconnected: ${session.callId}`);
+      if (session.isActive) await endCall(session.callId, 'error');
+    });
+
+    // Store provider for Telnyx audio routing
+    (session as any).geminiProvider = provider;
+
+    // Send opening message
+    const openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    setTimeout(() => {
+      if (session.isActive && provider.isConnected) {
+        console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
+        provider.sendOpeningMessage(openingScript);
+      }
+    }, 800);
+
+    console.log(`${LOG_PREFIX} Google Gemini Live session initialized`);
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} Gemini init failed:`, error);
+    await endCall(session.callId, 'error');
   }
-  await endCall(session.callId, 'error');
 }
+
+// Handle Gemini function calls
+async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: string, args: Record<string, any>): Promise<any> {
+  switch (name) {
+    case 'submit_disposition': session.detectedDisposition = args.disposition as DispositionCode; return { success: true };
+    case 'submit_call_summary': session.callSummary = normalizeCallSummary(args); return { success: true };
+    case 'schedule_callback': return { success: true, scheduled: args.callback_datetime };
+    case 'transfer_to_human': session.detectedDisposition = 'qualified_lead'; return { success: true };
+    default: return { success: false, error: 'Unknown function' };
+  }
+}
+
+// Get Gemini opening script
+function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any, agentConfig: any, campaignConfig: any, voiceTemplateValues: Record<string, string>): string {
+  const msg = session.firstMessageOverride?.trim() || agentConfig?.firstMessage || campaignConfig?.openingScript || campaignConfig?.script;
+  if (msg) return interpolateVoiceTemplate(msg, voiceTemplateValues);
+  return `Hello, may I speak with ${contactInfo?.fullName || contactInfo?.firstName || 'there'} please?`;
+}
+
 
 function sendOpeningMessage(ws: WebSocket, openingScript: string): void {
   // Send a simulated user event indicating the call has connected
@@ -1281,7 +1650,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
     case "response.audio.delta":
       if (message.delta) {
-        // Decode base64 audio from OpenAI
+        // Decode base64 audio from OpenAI for tracking purposes
         const audioBuffer = Buffer.from(message.delta, 'base64');
 
         session.audioFrameCount++;
@@ -1302,44 +1671,29 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           console.log(`${LOG_PREFIX} Audio frames received: ${session.audioFrameCount}, bytes: ${session.audioBytesSent} (Last packet: ${audioBuffer.length} bytes / ~${packetDuration}ms), playback: ${Math.round(session.audioPlaybackMs)}ms, call: ${session.callId}`);
         }
 
-        const bufferFrame = () => {
-          if (session.audioFrameBuffer.length < 100) {
-            session.audioFrameBuffer.push(audioBuffer);
-            return;
-          }
-          console.error(`${LOG_PREFIX} ERROR: Buffer overflow - dropping audio frame (call: ${session.callId})`);
-        };
-
-        // Send audio to Telnyx immediately if connection is open
+        // Enqueue decoded μ-law bytes and let the pacer send exact 20ms (160-byte) frames.
+        // Never send partial frames and never send large OpenAI chunks as a single Telnyx media event.
         if (session.telnyxWs?.readyState === WebSocket.OPEN) {
           if (!session.streamSid) {
             console.warn(`${LOG_PREFIX} WARN: No stream_id available yet - buffering audio for call: ${session.callId}`);
-            bufferFrame();
+            if (session.audioFrameBuffer.length < 100) {
+              session.audioFrameBuffer.push(audioBuffer);
+            }
             return;
           }
 
-          try {
-            // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
-            // Including extra fields like stream_id causes silent audio!
-            const mediaMessage = {
-              event: "media",
-              media: {
-                payload: message.delta, // Keep as base64 - Telnyx expects base64 encoded audio
-              },
-            };
-            session.telnyxWs.send(JSON.stringify(mediaMessage));
+          enqueueTelnyxOutboundAudio(session, audioBuffer);
+          ensureTelnyxOutboundPacer(session);
 
-            if (session.audioFrameCount === 1) {
-              console.log(`${LOG_PREFIX} First audio frame sent to Telnyx for call: ${session.callId} (${audioBuffer.length} bytes, stream: ${session.streamSid})`);
-            }
-          } catch (error) {
-            console.error(`${LOG_PREFIX} ERROR: Failed to send audio frame to Telnyx (frame ${session.audioFrameCount}):`, error);
-            bufferFrame();
+          if (session.audioFrameCount === 1) {
+            console.log(`${LOG_PREFIX} First OpenAI audio delta queued for Telnyx: ${audioBuffer.length} bytes (~${Math.round(audioBuffer.length / TELNYX_G711_FRAME_BYTES)} frames), call: ${session.callId}`);
           }
         } else {
           const wsState = session.telnyxWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.telnyxWs.readyState] : 'NULL';
           console.warn(`${LOG_PREFIX} WARN: Telnyx WebSocket not open (state: ${wsState}), buffering audio frame (total buffered: ${session.audioFrameBuffer.length}) for call: ${session.callId}`);
-          bufferFrame();
+          if (session.audioFrameBuffer.length < 100) {
+            session.audioFrameBuffer.push(audioBuffer);
+          }
 
           if (session.audioFrameBuffer.length > 20) {
             console.warn(`${LOG_PREFIX} WARN: Large buffer accumulating (${session.audioFrameBuffer.length} frames), possible connection issue`);
@@ -1613,6 +1967,10 @@ async function handleUserInterruption(session: OpenAIRealtimeSession): Promise<v
 
     // 3. Clear any buffered audio that hasn't been sent yet
     session.audioFrameBuffer = [];
+
+    // Also clear any queued outbound audio to Telnyx.
+    session.telnyxOutboundBuffer = Buffer.alloc(0);
+    session.telnyxOutboundLastSendAt = null;
 
     // Reset response tracking
     session.isResponseInProgress = false;
@@ -2056,7 +2414,57 @@ async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transc
   }
 }
 
+
 async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): Promise<void> {
+  // Route audio to the appropriate provider (Google Gemini or OpenAI)
+  const geminiProvider = (session as any).geminiProvider;
+
+  if (session.provider === 'google' && geminiProvider) {
+    // Route to Gemini provider
+    if (!geminiProvider.isConnected) {
+      return;
+    }
+
+    if (message.media?.payload) {
+      session.telnyxInboundFrames += 1;
+      session.telnyxInboundLastTime = new Date();
+
+      if (session.telnyxInboundFrames === 1) {
+        console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} (Gemini provider)`);
+      } else if (session.telnyxInboundFrames % 25 === 0) {
+        console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
+      }
+
+      // Send audio to Gemini provider (transcoding handled internally)
+      const audioBuffer = Buffer.from(message.media.payload, 'base64');
+      geminiProvider.sendAudio(audioBuffer);
+
+      // Track bytes for cost tracking
+      const bytes = audioBuffer.length;
+      session.audioBytesSent += bytes;
+      recordAudioInput(session.callId, bytes);
+
+      // Track how many frames/bytes we push between logs
+      const now = Date.now();
+      session.openaiAppendsSinceLastLog += 1;
+      session.openaiAppendBytesSinceLastLog += bytes;
+
+      if (!session.openaiAppendLastLogTime) {
+        session.openaiAppendLastLogTime = new Date();
+      } else {
+        const elapsed = now - session.openaiAppendLastLogTime.getTime();
+        if (elapsed >= 1000) {
+          console.log(`${LOG_PREFIX} Gemini audio rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms for call: ${session.callId}`);
+          session.openaiAppendsSinceLastLog = 0;
+          session.openaiAppendBytesSinceLastLog = 0;
+          session.openaiAppendLastLogTime = new Date(now);
+        }
+      }
+    }
+    return;
+  }
+
+  // Default: Route to OpenAI provider
   if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
     return;
   }
@@ -2065,10 +2473,20 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
     session.telnyxInboundFrames += 1;
     session.telnyxInboundLastTime = new Date();
 
+    // DIAGNOSTIC: Decode audio to inspect chunk size and header bytes
+    const audioBytes = Buffer.from(message.media.payload, 'base64');
+
     if (session.telnyxInboundFrames === 1) {
-      console.log(`${LOG_PREFIX} ðŸŽ™ï¸ First inbound audio frame received from Telnyx for call: ${session.callId}`);
+      const first8Hex = audioBytes.subarray(0, 8).toString('hex');
+      console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} bytes=${audioBytes.length} first8=${first8Hex}`);
+      // Check for WAV header (RIFF) - indicates container audio mixed with raw PCM
+      const first4 = audioBytes.subarray(0, 4).toString('ascii');
+      if (first4 === 'RIFF') {
+        console.error(`${LOG_PREFIX} WARNING: Received WAV container instead of raw G.711 audio! call=${session.callId}`);
+      }
     } else if (session.telnyxInboundFrames % 25 === 0) {
-      console.log(`${LOG_PREFIX} ðŸŽ™ï¸ Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId}`);
+      const first8Hex = audioBytes.subarray(0, 8).toString('hex');
+      console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} bytes=${audioBytes.length} first8=${first8Hex} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId}`);
     }
 
     const audioMessage = {
@@ -2110,22 +2528,11 @@ function flushAudioBuffer(session: OpenAIRealtimeSession): void {
   
   while (session.audioFrameBuffer.length > 0) {
     const frame = session.audioFrameBuffer.shift();
-    if (frame && session.telnyxWs?.readyState === WebSocket.OPEN) {
-      try {
-        // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
-        // Including extra fields like stream_id causes silent audio!
-        const mediaMessage = {
-          event: "media",
-          media: {
-            payload: frame.toString('base64'),
-          },
-        };
-        session.telnyxWs.send(JSON.stringify(mediaMessage));
-      } catch (error) {
-        console.error(`${LOG_PREFIX} Error flushing buffered audio:`, error);
-      }
-    }
+    if (!frame) continue;
+    enqueueTelnyxOutboundAudio(session, frame);
   }
+
+  ensureTelnyxOutboundPacer(session);
 }
 
 async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise<void> {
@@ -2140,6 +2547,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.isEnding = true;
   session.isActive = false;
   session.callOutcome = outcome;
+
+  stopTelnyxOutboundPacer(session);
+  session.telnyxOutboundBuffer = Buffer.alloc(0);
 
   console.log(`${LOG_PREFIX} Ending call: ${callId}, outcome: ${outcome}, disposition: ${session.detectedDisposition}`);
 

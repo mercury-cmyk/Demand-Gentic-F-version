@@ -1200,6 +1200,10 @@ export const campaigns = pgTable("campaigns", {
   // Lead Delivery Template (custom field selection for client exports)
   deliveryTemplateId: varchar("delivery_template_id").references(() => exportTemplates.id, { onDelete: 'set null' }),
 
+  // Voice Provider Configuration (supports Google Gemini Live and OpenAI Realtime)
+  voiceProvider: text("voice_provider"), // 'google' | 'openai' | null (uses default)
+  voiceProviderFallback: boolean("voice_provider_fallback").default(true), // Enable automatic fallback to alternate provider
+
   // AI Agent Campaign Context (Foundation + Campaign Layer Architecture)
   // These fields are combined with the virtual agent's foundation prompt at runtime
   campaignObjective: text("campaign_objective"), // e.g., "Book qualified meetings with IT decision makers"

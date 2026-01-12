@@ -5,6 +5,13 @@ import { getTelnyxAiBridge } from "./telnyx-ai-bridge";
 
 let openai: OpenAI | null = null;
 
+// Telnyx media streaming expects 20ms G.711 frames.
+// For 8kHz μ-law: 20ms == 160 bytes.
+const TELNYX_G711_FRAME_BYTES = 160;
+const TELNYX_G711_FRAME_MS = 20;
+const TELNYX_MAX_FRAMES_PER_TICK = 5;
+const TELNYX_MAX_BUFFER_BYTES = TELNYX_G711_FRAME_BYTES * 2000; // ~40s
+
 function getOpenAI(): OpenAI {
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) {
@@ -29,10 +36,72 @@ interface MediaSession {
   pendingAudioFrames: number;
   sentFrames: number;
   receivedFrames: number;
+  // Outbound packetization state
+  telnyxOutboundBuffer: Buffer;
+  telnyxOutboundPacer: ReturnType<typeof setInterval> | null;
+  telnyxOutboundLastSendAt: number | null;
 }
 
 const activeSessions = new Map<string, MediaSession>();
 const streamIdToCallId = new Map<string, string>();
+
+function enqueueTelnyxOutboundAudio(session: MediaSession, audioBytes: Buffer): void {
+  if (!audioBytes?.length) return;
+
+  session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.length
+    ? Buffer.concat([session.telnyxOutboundBuffer, audioBytes])
+    : audioBytes;
+
+  if (session.telnyxOutboundBuffer.length > TELNYX_MAX_BUFFER_BYTES) {
+    const dropped = session.telnyxOutboundBuffer.length - TELNYX_MAX_BUFFER_BYTES;
+    session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(dropped);
+    console.warn(`[AiMediaStreaming] WARN: outbound buffer capped (dropped ${dropped} bytes) call=${session.callId}`);
+  }
+}
+
+function stopTelnyxOutboundPacer(session: MediaSession): void {
+  if (session.telnyxOutboundPacer) {
+    clearInterval(session.telnyxOutboundPacer);
+    session.telnyxOutboundPacer = null;
+  }
+  session.telnyxOutboundLastSendAt = null;
+}
+
+function ensureTelnyxOutboundPacer(session: MediaSession): void {
+  if (session.telnyxOutboundPacer) return;
+
+  session.telnyxOutboundPacer = setInterval(() => {
+    try {
+      if (!session.isActive) return;
+      if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) return;
+      if (!session.streamId) return;
+      if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
+
+      const now = Date.now();
+      if (session.telnyxOutboundLastSendAt == null) {
+        session.telnyxOutboundLastSendAt = now - TELNYX_G711_FRAME_MS;
+      }
+
+      const elapsed = now - session.telnyxOutboundLastSendAt;
+      const framesDue = Math.floor(elapsed / TELNYX_G711_FRAME_MS);
+      if (framesDue <= 0) return;
+
+      const framesAvailable = Math.floor(session.telnyxOutboundBuffer.length / TELNYX_G711_FRAME_BYTES);
+      const framesToSend = Math.min(framesDue, framesAvailable, TELNYX_MAX_FRAMES_PER_TICK);
+      if (framesToSend <= 0) return;
+
+      for (let i = 0; i < framesToSend; i++) {
+        const frame = session.telnyxOutboundBuffer.subarray(0, TELNYX_G711_FRAME_BYTES);
+        session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(TELNYX_G711_FRAME_BYTES);
+        sendAudioToTelnyx(session, frame.toString('base64'));
+      }
+
+      session.telnyxOutboundLastSendAt += framesToSend * TELNYX_G711_FRAME_MS;
+    } catch (err) {
+      console.error('[AiMediaStreaming] outbound pacer error:', err);
+    }
+  }, TELNYX_G711_FRAME_MS);
+}
 
 export function initializeAiMediaStreaming(server: HttpServer): WebSocketServer {
   const wss = new WebSocketServer({ 
@@ -132,6 +201,9 @@ async function handleTelnyxMessage(
         pendingAudioFrames: 0,
         sentFrames: 0,
         receivedFrames: 0,
+        telnyxOutboundBuffer: Buffer.alloc(0),
+        telnyxOutboundPacer: null,
+        telnyxOutboundLastSendAt: null,
       };
       
       activeSessions.set(callId, session);
@@ -166,9 +238,22 @@ async function handleTelnyxMessage(
           sessionForMedia.lastActivity = new Date();
           sessionForMedia.pendingAudioFrames++;
           sessionForMedia.receivedFrames++;
+
+          // DIAGNOSTIC: Log chunk size and first 8 bytes to diagnose audio issues
+          const audioBytes = Buffer.from(media.payload, 'base64');
           if (sessionForMedia.receivedFrames === 1 || sessionForMedia.receivedFrames % 50 === 0) {
-            console.log(`[AiMediaStreaming] Telnyx media in frames=${sessionForMedia.receivedFrames} call=${mappedCallId}`);
+            const first8Hex = audioBytes.subarray(0, 8).toString('hex');
+            console.log(`[AiMediaStreaming] Telnyx media in frames=${sessionForMedia.receivedFrames} call=${mappedCallId} bytes=${audioBytes.length} first8=${first8Hex}`);
           }
+
+          // Check for WAV header (RIFF) - indicates container audio mixed with raw PCM
+          if (sessionForMedia.receivedFrames <= 3) {
+            const first4 = audioBytes.subarray(0, 4).toString('ascii');
+            if (first4 === 'RIFF') {
+              console.error(`[AiMediaStreaming] WARNING: Received WAV container instead of raw audio! call=${mappedCallId}`);
+            }
+          }
+
           // Pass base64 payload directly (already μ-law encoded)
           await forwardAudioToOpenAI(sessionForMedia, media.payload);
         }
@@ -199,6 +284,15 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
       
       // Use g711_ulaw end-to-end to match Telnyx media streaming format
       // This eliminates all PCM/resampling conversions
+      //
+      // VAD TUNING: Set OPENAI_VAD_DISABLED=true to disable VAD for testing
+      // If noise bursts followed by silence, try disabling VAD to rule out gating issues
+      const vadDisabled = process.env.OPENAI_VAD_DISABLED === 'true';
+      const vadThreshold = parseFloat(process.env.OPENAI_VAD_THRESHOLD || '0.5');
+      const vadSilenceMs = parseInt(process.env.OPENAI_VAD_SILENCE_MS || '500', 10);
+
+      console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadThreshold=${vadThreshold}, vadSilenceMs=${vadSilenceMs}`);
+
       const configMessage = {
         type: "session.update",
         session: {
@@ -210,11 +304,13 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
           input_audio_transcription: {
             model: "whisper-1",
           },
-          turn_detection: {
+          // VAD can cause noise->silence patterns if too aggressive
+          // Disable with OPENAI_VAD_DISABLED=true, or tune threshold/silence
+          turn_detection: vadDisabled ? null : {
             type: "server_vad",
-            threshold: 0.5,
+            threshold: vadThreshold,        // Default 0.5, lower = more sensitive
             prefix_padding_ms: 300,
-            silence_duration_ms: 500,
+            silence_duration_ms: vadSilenceMs, // Default 500, higher = longer pauses allowed
           },
         },
       };
@@ -267,9 +363,17 @@ async function handleOpenAIMessage(session: MediaSession, message: any): Promise
   switch (type) {
     case "response.audio.delta":
       if (message.delta) {
-        // With g711_ulaw end-to-end, delta is already base64 μ-law
-        // Send directly to Telnyx without conversion
-        sendAudioToTelnyx(session, message.delta);
+        // OpenAI delta is base64 μ-law bytes. Decode -> packetize -> pace to Telnyx.
+        const bytes = Buffer.from(message.delta, 'base64');
+
+        // DIAGNOSTIC: Log first outbound chunk and periodic chunks
+        if (session.sentFrames === 0 || session.sentFrames % 100 === 0) {
+          const first8Hex = bytes.subarray(0, 8).toString('hex');
+          console.log(`[AiMediaStreaming] OpenAI audio delta bytes=${bytes.length} first8=${first8Hex} call=${session.callId}`);
+        }
+
+        enqueueTelnyxOutboundAudio(session, bytes);
+        ensureTelnyxOutboundPacer(session);
       }
       break;
 
@@ -421,7 +525,8 @@ function sendTestToneToTelnyx(session: MediaSession): void {
     }
     // Convert PCM to μ-law for the test tone
     const mulawData = convertPCMToMuLaw(pcm);
-    sendAudioToTelnyx(session, mulawData.toString("base64"));
+    enqueueTelnyxOutboundAudio(session, mulawData);
+    ensureTelnyxOutboundPacer(session);
     console.log(`[AiMediaStreaming] Sent test tone for call: ${session.callId}`);
   } catch (err) {
     console.error('[AiMediaStreaming] Test tone error:', err);
@@ -451,7 +556,8 @@ async function synthesizeAndSendAudio(session: MediaSession, text: string): Prom
     const audioBuffer8k = downsample24kTo8k(audioBuffer24k);
     // Convert PCM to μ-law for Telnyx
     const mulawData = convertPCMToMuLaw(audioBuffer8k);
-    sendAudioToTelnyx(session, mulawData.toString("base64"));
+    enqueueTelnyxOutboundAudio(session, mulawData);
+    ensureTelnyxOutboundPacer(session);
   } catch (error) {
     console.error("[AiMediaStreaming] TTS synthesis error:", error);
   }
@@ -588,6 +694,8 @@ function cleanupSession(callId: string): void {
   const session = activeSessions.get(callId);
   if (session) {
     session.isActive = false;
+
+    stopTelnyxOutboundPacer(session);
     
     if (session.openaiWs) {
       session.openaiWs.close();

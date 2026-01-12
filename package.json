@@ -20,6 +20,7 @@
     "@google-cloud/functions": "^4.2.1",
     "@google-cloud/storage": "^7.18.0",
     "@google-cloud/vertexai": "^1.10.0",
+    "google-auth-library": "^9.14.0",
     "@google/genai": "^1.29.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",

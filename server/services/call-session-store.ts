@@ -465,3 +465,98 @@ export async function getSessionStoreHealth(): Promise<{
 initializeCallSessionStore().catch(err => {
   console.error(`${LOG_PREFIX} Failed to initialize:`, err);
 });
+
+// ============================================================================
+// CALL CUSTOM PARAMS STORE (for large data like system_prompt)
+// ============================================================================
+
+const CALL_PARAMS_PREFIX = 'call_params:';
+const CALL_PARAMS_TTL = 3600; // 1 hour
+
+export interface CallCustomParams {
+  call_id: string;
+  run_id?: string;
+  campaign_id?: string;
+  queue_item_id?: string;
+  call_attempt_id?: string;
+  contact_id?: string;
+  virtual_agent_id?: string;
+  is_test_call?: boolean;
+  test_call_id?: string;
+  system_prompt?: string;
+  first_message?: string;
+  voice?: string;
+  agent_name?: string;
+  test_contact?: {
+    name?: string;
+    company?: string;
+    title?: string;
+    email?: string;
+  };
+  provider?: string;
+  [key: string]: unknown;
+}
+
+const inMemoryCallParams = new Map<string, CallCustomParams>();
+
+/**
+ * Store call custom params (for large data like system_prompt)
+ */
+export async function setCallParams(callId: string, params: CallCustomParams): Promise<void> {
+  const key = `${CALL_PARAMS_PREFIX}${callId}`;
+  
+  if (isRedisAvailable() && redisClient) {
+    await redisClient.setex(key, CALL_PARAMS_TTL, JSON.stringify(params));
+    console.log(`${LOG_PREFIX} Stored call params in Redis for ${callId}`);
+  } else {
+    inMemoryCallParams.set(callId, params);
+    console.log(`${LOG_PREFIX} Stored call params in memory for ${callId}`);
+    // Auto-cleanup after TTL
+    setTimeout(() => inMemoryCallParams.delete(callId), CALL_PARAMS_TTL * 1000);
+  }
+}
+
+/**
+ * Get call custom params
+ */
+export async function getCallParams(callId: string): Promise<CallCustomParams | null> {
+  const key = `${CALL_PARAMS_PREFIX}${callId}`;
+  
+  if (isRedisAvailable() && redisClient) {
+    const data = await redisClient.get(key);
+    if (data) {
+      console.log(`${LOG_PREFIX} Retrieved call params from Redis for ${callId}`);
+      return JSON.parse(data);
+    }
+  } else {
+    const params = inMemoryCallParams.get(callId);
+    if (params) {
+      console.log(`${LOG_PREFIX} Retrieved call params from memory for ${callId}`);
+      return params;
+    }
+  }
+  
+  console.log(`${LOG_PREFIX} No call params found for ${callId}`);
+  return null;
+}
+
+/**
+ * Delete call custom params
+ */
+export async function deleteCallParams(callId: string): Promise<void> {
+  const key = `${CALL_PARAMS_PREFIX}${callId}`;
+  
+  if (isRedisAvailable() && redisClient) {
+    await redisClient.del(key);
+  } else {
+    inMemoryCallParams.delete(callId);
+  }
+  console.log(`${LOG_PREFIX} Deleted call params for ${callId}`);
+}
+
+// Export compatibility wrapper
+export const callSessionStore = {
+  setSession: setCallParams,
+  getSession: getCallParams,
+  deleteSession: deleteCallParams,
+};
