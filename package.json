@@ -4,7 +4,9 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+    "dev": "tsx scripts/dev-with-ngrok.ts",
+    "dev:local": "cross-env NODE_ENV=development tsx server/index.ts",
+    "dev:tunnel": "tsx scripts/dev-with-ngrok.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
@@ -14,8 +16,10 @@
     "test-audio": "tsx test-audio-transmission.ts"
   },
   "dependencies": {
+    "@google-cloud/aiplatform": "^3.35.0",
     "@google-cloud/functions": "^4.2.1",
     "@google-cloud/storage": "^7.18.0",
+    "@google-cloud/vertexai": "^1.10.0",
     "@google/genai": "^1.29.0",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",

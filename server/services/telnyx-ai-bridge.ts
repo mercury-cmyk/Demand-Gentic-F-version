@@ -291,16 +291,45 @@ export class TelnyxAiBridge extends EventEmitter {
     });
 
     try {
-      const webhookUrl = `${this.webhookUrl}/api/ai-calls/webhook`;
-      const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_SIP_CONNECTION_ID;
-      
-      console.log(`[TelnyxAiBridge] Initiating call with:
-  - Webhook URL: ${webhookUrl}
+      // Use TeXML App ID for TeXML calls (preferred), fallback to Call Control App ID
+      const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+
+      // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
+      const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || this.webhookUrl.replace('https://', '').replace('http://', '');
+      const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
+
+      // Build comprehensive client_state for OpenAI Realtime Dialer
+      // This data will be passed through TeXML -> WebSocket connection
+      const customParams = {
+        call_id: callId,
+        run_id: `run-${Date.now()}`,
+        campaign_id: context.campaignId,
+        queue_item_id: context.queueItemId,
+        call_attempt_id: `attempt-${Date.now()}`,
+        contact_id: (context as any).contactId || '',
+        virtual_agent_id: (context as any).virtualAgentId || '',
+        provider: provider,
+        // Include agent configuration for WebSocket session
+        system_prompt: settings.persona?.systemPrompt || '',
+        first_message: settings.scripts?.opening || '',
+        voice: settings.persona?.voice || 'nova',
+        agent_name: settings.persona?.name || '',
+        agent_settings: settings,
+        // Contact context for personalization
+        contact_first_name: context.contactFirstName,
+        contact_last_name: context.contactLastName,
+        company_name: context.companyName,
+      };
+      const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+
+      console.log(`[TelnyxAiBridge] Initiating TeXML call with:
+  - TeXML URL: ${texmlUrl}
   - Connection ID: ${connectionId}
   - From: ${fromNumber}
-  - To: ${phoneNumber}`);
-      
-      const response = await fetch("https://api.telnyx.com/v2/calls", {
+  - To: ${phoneNumber}
+  - Provider: ${provider}`);
+
+      const response = await fetch("https://api.telnyx.com/v2/texml/calls", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -310,19 +339,8 @@ export class TelnyxAiBridge extends EventEmitter {
           connection_id: connectionId,
           to: phoneNumber,
           from: fromNumber,
-          answering_machine_detection: "disabled", // Disabled to save costs
-          // answering_machine_detection_config: { ... } // Config ignored when disabled
-          webhook_url: `${this.webhookUrl}/api/ai-calls/webhook`,
-          webhook_url_method: "POST",
-          client_state: Buffer.from(
-            JSON.stringify({
-              callId,
-              campaignId: context.campaignId,
-              queueItemId: context.queueItemId,
-              isAiCall: true,
-              provider
-            })
-          ).toString("base64"),
+          url: texmlUrl,
+          client_state: clientStateB64,
         }),
       });
 
@@ -404,25 +422,11 @@ export class TelnyxAiBridge extends EventEmitter {
   private async handleCallAnswered(callId: string, call: ActiveAiCall): Promise<void> {
     console.log(`[TelnyxAiBridge] Call answered: ${callId}`);
 
+    // With TeXML, streaming is handled automatically via <Stream bidirectionalMode="rtp" />
+    // The opening message will be sent through the OpenAI Realtime WebSocket connection
+    // No need to call startMediaStreaming() or speakText() here
+
     await call.agent.startConversation();
-
-    // Speak the opening message using Telnyx's speak command
-    const openingMessage = call.agent.getOpeningMessage();
-    console.log(`[TelnyxAiBridge] Speaking opening message: ${openingMessage.substring(0, 50)}...`);
-    
-    try {
-      await this.speakText(call.callControlId, openingMessage);
-    } catch (error) {
-      console.error(`[TelnyxAiBridge] Failed to speak opening message:`, error);
-    }
-
-    // Also start media streaming for bidirectional audio
-    try {
-      await this.startMediaStreaming(call.callControlId);
-    } catch (error) {
-      console.error(`[TelnyxAiBridge] Failed to start media streaming:`, error);
-    }
-
     this.emit("call:answered", { callId });
   }
 
@@ -718,30 +722,7 @@ export class TelnyxAiBridge extends EventEmitter {
     }
   }
 
-  private async startMediaStreaming(callControlId: string): Promise<void> {
-    const streamUrl = `${this.webhookUrl.replace("https://", "wss://")}/ai-media-stream`;
-    console.log(`[TelnyxAiBridge] Starting media streaming to: ${streamUrl}`);
-    
-    const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/streaming_start`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
-      },
-      body: JSON.stringify({
-        stream_url: streamUrl,
-        stream_track: "both_tracks",
-        enable_dialogflow: false,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[TelnyxAiBridge] Failed to start streaming: ${response.status} - ${errorText}`);
-    } else {
-      console.log(`[TelnyxAiBridge] Media streaming started successfully`);
-    }
-  }
+  // startMediaStreaming() removed - TeXML handles streaming automatically via <Stream bidirectionalMode="rtp" />
 
   private async hangupCall(callControlId: string): Promise<void> {
     await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {

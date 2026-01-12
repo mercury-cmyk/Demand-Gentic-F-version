@@ -230,50 +230,14 @@ router.post("/telnyx", async (req, res) => {
           }
         }
         
-        // Handle OpenAI Realtime calls - start streaming when call is answered
+        // TeXML calls handle streaming automatically via <Stream bidirectionalMode="rtp" />
+        // No need to call streaming_start - just log the event
         if (clientState?.provider === 'openai_realtime') {
-          console.log(`[Telnyx Webhook] OpenAI Realtime call answered, starting streaming for: ${payload.call_control_id}`);
-          
-          // Use clean WebSocket URL without query parameters
-          const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] || 
-                       process.env.REPLIT_DEV_DOMAIN || 
-                       'localhost:5000';
-          const wsUrl = host.startsWith('wss://') || host.startsWith('ws://') 
-            ? `${host}/openai-realtime-dialer`
-            : `wss://${host}/openai-realtime-dialer`;
-          
-          // Use the existing client_state that was passed in the original call
-          const customParams = clientState;
-          
-          console.log(`[Telnyx Webhook] Starting OpenAI Realtime streaming to: ${wsUrl} (clean, no query params)`);
-          console.log(`[Telnyx Webhook] Using existing client_state for parameters`);
-          
-          const telnyxApiKey = process.env.TELNYX_API_KEY;
-          const streamResponse = await fetch(`https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/streaming_start`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${telnyxApiKey}`,
-            },
-            body: JSON.stringify({
-              stream_url: wsUrl,
-              stream_track: "both_tracks",
-              stream_bidirectional_mode: "rtp",
-              custom_parameters: customParams,
-              client_state: payload.client_state,
-              enable_dialogflow: false,
-            }),
-          });
-          
-          if (!streamResponse.ok) {
-            const errorText = await streamResponse.text();
-            console.error(`[Telnyx Webhook] Failed to start OpenAI Realtime streaming: ${streamResponse.status} - ${errorText}`);
-          } else {
-            console.log(`[Telnyx Webhook] OpenAI Realtime streaming started successfully`);
-          }
+          console.log(`[Telnyx Webhook] OpenAI Realtime TeXML call answered: ${payload.call_control_id}`);
+          console.log(`[Telnyx Webhook] Streaming handled automatically by TeXML <Stream> verb`);
           return res.json({ status: "ok", event_type: eventType });
         }
-        
+
         await bridge.handleSimpleWebhookEvent('answered', payload);
         return res.json({ status: "ok", event_type: eventType });
 
@@ -292,12 +256,38 @@ router.post("/telnyx", async (req, res) => {
         await bridge.handleSimpleWebhookEvent('hangup', payload);
         return res.json({ status: "ok", event_type: eventType });
 
+      case 'call.machine.detection.ended': {
+        // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
+        const amdResult = payload?.result || payload?.machine_detection_result;
+        console.log(`[Telnyx Webhook] Machine detection result: ${amdResult} for call ${payload.call_control_id}`);
+        
+        if (amdResult === 'machine' || amdResult === 'voicemail') {
+          // Hang up immediately to avoid leaving voicemail
+          try {
+            const telnyxApiKey = process.env.TELNYX_API_KEY;
+            await fetch(`https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/hangup`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${telnyxApiKey}`,
+              },
+              body: JSON.stringify({ client_state: payload?.client_state }),
+            });
+            console.log(`[Telnyx Webhook] Hung up machine-detected call ${payload.call_control_id}`);
+          } catch (hangupErr) {
+            console.error(`[Telnyx Webhook] Failed to hang up machine-detected call:`, hangupErr);
+          }
+        }
+        return res.json({ status: "ok", event_type: eventType, amd_result: amdResult });
+      }
+
       case 'recording.completed':
         // Handle recording completed (existing logic)
         break;
 
       default:
-        console.log(`[Telnyx Webhook] Unhandled event type: ${eventType}`);
+        // Log for traceability but don't treat as error
+        console.log(`[Telnyx Webhook] Event type: ${eventType} (no handler)`);
         return res.json({ status: "ignored", event_type: eventType });
     }
 

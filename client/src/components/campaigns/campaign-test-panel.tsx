@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
   Dialog,
@@ -94,13 +93,6 @@ interface CampaignTestPanelProps {
   dialMode?: string;
 }
 
-type SipConfig = {
-  sipUsername: string;
-  sipPassword: string;
-  sipDomain?: string;
-  callerIdNumber?: string;
-};
-
 function normalizePhoneToE164(phone: string | null, country: string = 'US'): string | null {
   if (!phone) return null;
 
@@ -127,6 +119,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
   const queryClient = useQueryClient();
   const [isTestDialogOpen, setIsTestDialogOpen] = useState(false);
   const [selectedTestCall, setSelectedTestCall] = useState<TestCall | null>(null);
+  const [callState, setCallState] = useState<'idle' | 'initiating'>('idle');
   const [testFormData, setTestFormData] = useState({
     testPhoneNumber: "",
     testContactName: "",
@@ -135,33 +128,6 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
     testContactEmail: "",
   });
 
-  const { data: sipConfig } = useQuery<SipConfig | null>({
-    queryKey: ['/api/sip-trunks/default'],
-    queryFn: async () => {
-      const token = localStorage.getItem('authToken');
-      const response = await fetch('/api/sip-trunks/default', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (response.status === 404) {
-        return null;
-      }
-
-      if (!response.ok) {
-        const text = (await response.text()) || response.statusText;
-        throw new Error(`${response.status}: ${text}`);
-      }
-
-      return response.json();
-    },
-  });
-
-  const { callState, makeCall, hangup, remoteAudioRef } = useSIPWebRTC({
-    sipUri: sipConfig?.sipUsername ? `sip:${sipConfig.sipUsername}@${sipConfig.sipDomain || 'sip.telnyx.com'}` : '',
-    sipPassword: sipConfig?.sipPassword || '',
-    sipWebSocket: sipConfig?.webSocketUrl || 'wss://sip.telnyx.com',
-  });
-  const sipConfigured = !!sipConfig?.sipUsername && !!sipConfig?.sipPassword;
   const showLoggedTests = true;
 
   // Fetch test calls for this campaign
@@ -201,20 +167,50 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
     },
   });
 
+  // Initiate test call via server-side API (no browser SIP needed)
+  const initiateTestMutation = useMutation({
+    mutationFn: async () => {
+      const normalizedPhone = normalizePhoneToE164(testFormData.testPhoneNumber);
+      if (!normalizedPhone) {
+        throw new Error("Invalid phone number format");
+      }
+      
+      const response = await apiRequest("POST", `/api/campaigns/${campaignId}/test-call`, {
+        testPhoneNumber: normalizedPhone,
+        testContactName: testFormData.testContactName,
+        testCompanyName: testFormData.testCompanyName || undefined,
+        testJobTitle: testFormData.testJobTitle || undefined,
+        testContactEmail: testFormData.testContactEmail || undefined,
+      });
+      return response.json();
+    },
+    onMutate: () => {
+      setCallState('initiating');
+    },
+    onSuccess: () => {
+      setCallState('idle');
+      setIsTestDialogOpen(false);
+      toast({
+        title: "Test Call Started",
+        description: `Calling ${testFormData.testPhoneNumber} via AI agent...`,
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}/test-calls`] });
+    },
+    onError: (error: Error) => {
+      setCallState('idle');
+      toast({
+        title: "Test Call Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleInitiateTest = () => {
     if (!testFormData.testPhoneNumber || !testFormData.testContactName) {
       toast({
         title: "Missing Required Fields",
         description: "Phone number and contact name are required",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!sipConfig?.sipUsername || !sipConfig?.sipPassword) {
-      toast({
-        title: "SIP Trunk Required",
-        description: "Configure your SIP trunk (FQDN-based) before placing a test call.",
         variant: "destructive",
       });
       return;
@@ -230,16 +226,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
       return;
     }
 
-    makeCall(normalizedPhone, sipConfig.callerIdNumber || undefined);
-
-    toast({
-      title: "SIP Test Call Started",
-      description: `Calling ${normalizedPhone} via SIP trunk...`,
-    });
-  };
-
-  const handleHangup = () => {
-    hangup();
+    initiateTestMutation.mutate();
   };
 
   const getStatusBadge = (status: string) => {
@@ -282,10 +269,10 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
           <div>
             <CardTitle className="flex items-center gap-2">
               <Phone className="h-5 w-5" />
-              SIP Test Calls
+              AI Test Calls
             </CardTitle>
             <CardDescription>
-              Preview Studio is for AI simulation. Test calls use SIP trunk dialing.
+              Preview Studio is for AI simulation. Test calls use server-side dialing.
             </CardDescription>
           </div>
           <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
@@ -299,7 +286,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
               <DialogHeader>
                 <DialogTitle>Initiate Test Call</DialogTitle>
                 <DialogDescription>
-                  Use SIP trunk dialing to validate call flow. AI prompt rehearsal happens in Preview Studio.
+                  Use server-side dialing to validate call flow. AI prompt rehearsal happens in Preview Studio.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -372,12 +359,6 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
               </div>
               <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
                 <div className="flex items-center justify-between">
-                  <span>SIP status</span>
-                  <span>
-                    {!sipConfig ? "Not configured" : (callState !== 'idle' ? "Connected" : "Ready")}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
                   <span>Call state</span>
                   <span className="uppercase">{callState}</span>
                 </div>
@@ -391,25 +372,19 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                   Cancel
                 </Button>
                 <Button
-                  onClick={callState === 'idle' ? handleInitiateTest : handleHangup}
-                  disabled={!sipConfig?.sipUsername || !sipConfig?.sipPassword}
+                  onClick={handleInitiateTest}
+                  disabled={callState === 'initiating'}
                   data-testid="button-start-test"
                 >
                   <Phone className="mr-2 h-4 w-4" />
-                  {callState === 'idle' ? "Start SIP Test Call" : "Hang Up"}
+                  {callState === 'initiating' ? "Starting..." : "Start Test Call"}
                 </Button>
               </DialogFooter>
-              <audio id="remoteAudio" autoPlay playsInline style={{ display: 'none' }} />
             </DialogContent>
           </Dialog>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {sipConfigured && (
-          <div className="rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
-            SIP test calls are not logged here. Use Preview Studio for AI prompt rehearsal.
-          </div>
-        )}
         {/* Summary Stats */}
         {showLoggedTests && summaryLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

@@ -32,7 +32,6 @@ import {
   Sparkles,
   Hash,
   Settings,
-  Volume2,
   Circle,
   ArrowRight,
   Star,
@@ -40,15 +39,15 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useAuth } from "@/contexts/AuthContext";
-import type { CallState } from "@/hooks/useTelnyxWebRTC";
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { CONTACT_FIELD_LABELS, ACCOUNT_FIELD_LABELS } from '@shared/field-labels';
 import { QueueControls } from "@/components/queue-controls";
-import { AudioDeviceSettings } from "@/components/audio-device-settings";
 import { ContactMismatchDialog } from "@/components/contact-mismatch-dialog";
 import { LeadVerificationModal } from "@/components/lead-verification-modal";
+
+// Call state type for server-managed calls
+type CallState = 'idle' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
 
 // Backwards compatibility type alias
 type CallStatus = CallState | 'wrap-up';
@@ -155,38 +154,15 @@ export default function AgentConsolePage() {
   const [dispositionSaved, setDispositionSaved] = useState(false);
   const [callMadeToContact, setCallMadeToContact] = useState(false);
   const [showKeypad, setShowKeypad] = useState(false);
-  const [showAudioSettings, setShowAudioSettings] = useState(false);
 
   // Contact Mismatch (Wrong Person Answered) state
   const [showContactMismatch, setShowContactMismatch] = useState(false);
   const [switchedContact, setSwitchedContact] = useState<{ id: string; fullName: string } | null>(null);
   const [activeCallAttemptId, setActiveCallAttemptId] = useState<string | null>(null);
-  const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
 
   // Lead Verification Modal state
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationLeadId, setVerificationLeadId] = useState<string | null>(null);
-
-  // Fetch SIP trunk credentials
-  const { data: sipConfig } = useQuery<{
-    sipUsername: string; 
-    sipPassword: string; 
-    sipDomain?: string;
-    callerIdNumber?: string;
-  }>({
-    queryKey: ['/api/sip-trunks/default'],
-  });
-
-  // Debug SIP config
-  useEffect(() => {
-    console.log('SIP Config received:', {
-      hasSipConfig: !!sipConfig,
-      hasUsername: !!sipConfig?.sipUsername,
-      hasPassword: !!sipConfig?.sipPassword,
-      username: sipConfig?.sipUsername,
-      domain: sipConfig?.sipDomain,
-    });
-  }, [sipConfig]);
 
   // Fetch agent's active campaign assignment
   const { data: activeCampaign } = useQuery<{
@@ -212,26 +188,66 @@ export default function AgentConsolePage() {
     setCurrentContactIndex(0);
   }, [selectedCampaignId]);
 
-  // Initialize Telnyx WebRTC
-  // Initialize JsSIP SIP/WebRTC
-  const sipUri = sipConfig?.sipUsername && sipConfig?.sipDomain
-    ? `sip:${sipConfig.sipUsername}@${sipConfig.sipDomain}`
-    : "sip:username@sip.example.com";
-  const sipPassword = sipConfig?.sipPassword || "password";
-  const sipWebSocket = import.meta.env.VITE_REACT_APP_SIP_WEBSOCKET || "wss://rtc.telnyx.com:443";
+  // Server-managed call state (no browser SIP)
+  const [isConnected] = useState(true); // Server is always "connected"
+  const [callDuration, setCallDuration] = useState(0);
+  const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
+  const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const {
-    callState,
-    makeCall,
-    hangup,
-    remoteAudioRef,
-  } = useSIPWebRTC({
-    sipUri,
-    sipPassword,
-    sipWebSocket,
-    onCallStateChange: (state) => setCallStatus(state),
-    onCallEnd: () => setCallStatus('idle'),
-  });
+  // Format duration as MM:SS
+  const formatDuration = () => {
+    const mins = Math.floor(callDuration / 60);
+    const secs = callDuration % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Server-side call initiation via API
+  const makeCall = async (phoneNumber: string) => {
+    try {
+      setCallStatus('connecting');
+      setCallDuration(0);
+      const response = await apiRequest("POST", "/api/calls/start", {
+        to: phoneNumber,
+        campaignId: selectedCampaignId,
+        contactId: currentQueueItem?.contactId,
+        queueItemId: currentQueueItem?.id,
+      });
+      const data = await response.json();
+      setTelnyxCallId(data.callControlId || data.callId || null);
+      setCallStatus('active');
+      
+      // Start call timer
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('[AGENT CONSOLE] Call initiation failed:', error);
+      setCallStatus('idle');
+      toast({
+        title: "Call Failed",
+        description: error instanceof Error ? error.message : "Failed to initiate call",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Server-side hangup
+  const hangup = async () => {
+    try {
+      if (telnyxCallId) {
+        await apiRequest("POST", "/api/calls/hangup", { callControlId: telnyxCallId });
+      }
+    } catch (error) {
+      console.error('[AGENT CONSOLE] Hangup failed:', error);
+    } finally {
+      if (callTimerRef.current) {
+        clearInterval(callTimerRef.current);
+        callTimerRef.current = null;
+      }
+      setTelnyxCallId(null);
+      setCallStatus('wrap-up');
+    }
+  };
 
   // Fetch agent queue data
   const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching } = useQuery<QueueItem[]>({
@@ -725,6 +741,7 @@ export default function AgentConsolePage() {
       setNotes('');
       setQualificationData({});
       setCallStatus('idle');
+      setCallDuration(0);
       setSwitchedContact(null);
       setActiveCallAttemptId(null);
 
@@ -764,8 +781,8 @@ export default function AgentConsolePage() {
   const handleDial = () => {
     if (!isConnected) {
       toast({
-        title: "Not connected",
-        description: "WebRTC client is not connected. Please wait...",
+        title: "Not ready",
+        description: "Calling service is not ready. Please try again.",
         variant: "destructive",
       });
       return;
@@ -859,7 +876,7 @@ export default function AgentConsolePage() {
     // Store the dialed phone number for later use in disposition
     setDialedPhoneNumber(e164Phone);
     
-    makeCall(e164Phone, sipConfig?.callerIdNumber);
+    makeCall(e164Phone);
     setCallMadeToContact(true);
   };
 
@@ -1061,17 +1078,6 @@ export default function AgentConsolePage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setShowAudioSettings(true)}
-              className="h-10 w-10 p-0 text-white hover:bg-white/10"
-              data-testid="button-audio-settings"
-              title="Audio Settings"
-            >
-              <Volume2 className="h-4 w-4" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
               onClick={() => refetchQueue()}
               className="h-10 w-10 p-0 text-white hover:bg-white/10"
               data-testid="button-refresh"
@@ -1168,17 +1174,6 @@ export default function AgentConsolePage() {
             )}
 
             {getStatusBadge()}
-
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowAudioSettings(true)}
-              className="text-white hover:bg-white/10"
-              data-testid="button-audio-settings-desktop"
-              title="Audio Settings"
-            >
-              <Volume2 className="h-4 w-4" />
-            </Button>
 
             <Button
               variant="ghost"
@@ -1902,20 +1897,6 @@ export default function AgentConsolePage() {
           </div>
         </div>
       </div>
-
-      {/* Hidden audio element for Telnyx */}
-      <audio id="remoteAudio" autoPlay playsInline style={{ position: 'absolute', left: '-9999px' }} />
-
-      {/* Audio Device Settings Dialog */}
-      <AudioDeviceSettings
-        open={showAudioSettings}
-        onOpenChange={setShowAudioSettings}
-        onDevicesSelected={(micId, speakerId) => {
-          if (setAudioDevices) {
-            setAudioDevices(micId, speakerId);
-          }
-        }}
-      />
 
       {/* Contact Mismatch Dialog (Wrong Person Answered) */}
       {activeCallAttemptId && currentQueueItem && (

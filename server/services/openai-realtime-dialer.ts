@@ -97,7 +97,7 @@ interface OpenAIRealtimeSession {
   openaiWs: WebSocket | null;
   streamSid: string | null;
   audioFormat: 'g711_ulaw' | 'g711_alaw';
-  audioFormatSource: 'env' | 'telnyx' | 'default';
+  audioFormatSource: 'env' | 'telnyx' | 'default' | 'test';
   isActive: boolean;
   isEnding: boolean; // Idempotent guard to prevent double execution
   startTime: Date;
@@ -185,7 +185,7 @@ function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' |
   return null;
 }
 
-function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' } {
+function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' | 'test' } {
   const envOverride = normalizeG711Format(
     process.env.OPENAI_REALTIME_AUDIO_FORMAT || process.env.TELNYX_AUDIO_FORMAT
   );
@@ -404,13 +404,18 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             return;
           }
 
-          // Decode client_state from Telnyx (base64 encoded JSON with session parameters)
+          // Decode client_state from Telnyx or URL parameters
           let customParams: any = {};
-          if (message.start?.client_state) {
+          
+          // Priority 1: Check message.start.client_state
+          // Priority 2: Check URL query parameter client_state (for TeXML implementation)
+          const rawClientState = message.start?.client_state || url.searchParams.get('client_state');
+          
+          if (rawClientState) {
             try {
-              const decodedClientState = Buffer.from(message.start.client_state, 'base64').toString('utf8');
+              const decodedClientState = Buffer.from(rawClientState, 'base64').toString('utf8');
               customParams = JSON.parse(decodedClientState);
-              console.log(`${LOG_PREFIX} Decoded client_state:`, customParams);
+              console.log(`${LOG_PREFIX} Decoded client_state (from ${message.start?.client_state ? 'Telnyx payload' : 'URL params'}):`, customParams);
             } catch (err) {
               console.error(`${LOG_PREFIX} Failed to decode client_state:`, err);
               customParams = message.start?.custom_parameters || {};
@@ -428,7 +433,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           const contactId = customParams.contact_id || urlParams.contact_id;
           const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
           const provider: 'openai' | 'google' = requestedProvider === 'google' ? 'google' : 'openai';
-          const { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
+          let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
           const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
@@ -436,6 +441,11 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             && (queueItemId?.startsWith('queue-test-') || queueItemId?.startsWith('test-queue-'))
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
+          if (isTestSession) {
+            audioFormat = 'g711_ulaw';
+            audioFormatSource = 'test';
+            console.warn(`${LOG_PREFIX} Test session forcing audio format to g711_ulaw to avoid codec mismatch.`);
+          }
 
           console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);
           console.log(`${LOG_PREFIX} ðŸ“‹ Session parameters:`, {
@@ -751,13 +761,13 @@ function buildTurnDetection(settings: AdvancedSettings['conversational']) {
   // Force "high" eagerness for B2B outbound calls where quick responses matter
   const eagerness = settings.eagerness === 'low' ? 'normal' : (settings.eagerness || 'high');
 
-  console.log(`[Turn Detection] Using semantic_vad with eagerness: ${eagerness}`);
+  console.log(`[Turn Detection] Using server_vad (recommended for Telnyx)`);
 
   return {
-    type: "semantic_vad",
-    eagerness: eagerness,
-    create_response: true,      // Auto-create response when turn detected
-    interrupt_response: true,   // Allow user to interrupt agent
+    type: "server_vad",
+    threshold: 0.5,
+    prefix_padding_ms: 300,
+    silence_duration_ms: 200,
   };
 }
 
@@ -873,7 +883,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         undefined, // foundationCapabilities
         agentConfig?.settings as VoiceAgentSettings | null, // Pass agent settings for personality config
         session.callAttemptId,
-        attemptNumber
+        attemptNumber,
+        session.isTestSession
       );
       const systemPrompt = interpolateVoiceTemplate(
         baseSystemPrompt,
@@ -882,7 +893,10 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
       const modalities = ["text", "audio"];
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
-      const audioFormat = session.audioFormat || 'g711_ulaw';
+      const audioFormat = session.audioFormat;
+      const audioFormatSource = session.audioFormatSource || 'default';
+      console.log(`${LOG_PREFIX} Audio format selected: ${audioFormat} (source=${audioFormatSource})`);
+
       // Transcription configuration - can be disabled to save ~$0.006/min
       const transcriptionEnabled = agentSettings.advanced.asr.transcriptionEnabled !== false;
       const transcriptionConfig: Record<string, unknown> = transcriptionEnabled ? {
@@ -1021,6 +1035,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         }
       } else {
         // No custom message - use canonical default with validation (skip for test sessions)
+        let useGenericOpening = session.isTestSession;
+
         if (!session.isTestSession) {
           const validation = validateOpeningMessageVariables(
             {
@@ -1035,16 +1051,14 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           );
 
           if (!validation.valid) {
-            console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
-            console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
-            // BLOCK THE CALL - do not proceed with incomplete data
-            await endCall(session.callId, 'error');
-            return;
+            console.warn(`${LOG_PREFIX} âš ï¸ ${validation.message}`);
+            console.warn(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')} - Falling back to generic opening`);
+            useGenericOpening = true;
           }
         }
 
-        // For test sessions, use a simple fallback opening
-        if (session.isTestSession) {
+        // For test sessions or validation failures, use a simple fallback opening
+        if (useGenericOpening) {
           const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
           openingScript = `Hello, may I speak with ${testContactName} please?`;
           console.log(`${LOG_PREFIX} ✅ Test session - using simple opening message`);
@@ -1283,9 +1297,9 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         session.audioPlaybackMs += audioDurationMs;
         session.lastAudioDeltaTimestamp = Date.now();
 
-        // Log every 10 frames to track audio flow
-        if (session.audioFrameCount % 10 === 0) {
-          console.log(`${LOG_PREFIX} Audio frames received: ${session.audioFrameCount}, bytes: ${session.audioBytesSent}, playback: ${Math.round(session.audioPlaybackMs)}ms, call: ${session.callId}`);
+        if (session.audioFrameCount % 10 === 0 || session.audioFrameCount === 1) {
+          const packetDuration = Math.round(audioBuffer.length / 8); 
+          console.log(`${LOG_PREFIX} Audio frames received: ${session.audioFrameCount}, bytes: ${session.audioBytesSent} (Last packet: ${audioBuffer.length} bytes / ~${packetDuration}ms), playback: ${Math.round(session.audioPlaybackMs)}ms, call: ${session.callId}`);
         }
 
         const bufferFrame = () => {
@@ -2612,49 +2626,57 @@ async function buildSystemPrompt(
   foundationCapabilities?: string[],    // Foundation agent capabilities
   agentSettings?: VoiceAgentSettings | null,  // Voice agent personality/conversation config
   callAttemptId?: string | null,
-  attemptNumber?: number
+  attemptNumber?: number,
+  isTestSession: boolean = false
 ): Promise<string> {
-  const accountId = contactInfo?.accountId;
-  if (!accountId) {
-    throw new Error("CALL BLOCKED: Missing accountId for account intelligence.");
-  }
   const contactId = contactInfo?.id;
+  
+  // Allow missing contactId (warn only)
   if (!contactId) {
-    throw new Error("CALL BLOCKED: Missing contactId for call planning.");
+    console.warn(`${LOG_PREFIX} Missing contactId - call planning context will be limited.`);
   }
 
-  const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
-  const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
-    accountId,
-    campaignId: campaignConfig?.id || null,
-    intelligenceRecord: accountIntelligenceRecord,
-  });
+  const accountId = contactInfo?.accountId;
+  let accountContextSection: string | null = null;
+  let callPlanContextSection: string | null = null;
+  
+  // Skip intelligence if either ID is missing
+  if (!accountId || !contactId) {
+    console.warn(`${LOG_PREFIX} Missing accountId or contactId - skipping account intelligence and call planning.`);
+  } else {
+    const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+    const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+      accountId,
+      campaignId: campaignConfig?.id || null,
+      intelligenceRecord: accountIntelligenceRecord,
+    });
 
-  const accountContextSection = buildAccountContextSection(
-    accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
-    accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
-  );
+    accountContextSection = buildAccountContextSection(
+      accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
+      accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+    );
 
-  const accountCallBriefRecord = await getOrBuildAccountCallBrief({
-    accountId,
-    campaignId: campaignConfig?.id || null,
-  });
-  const participantContext = await buildParticipantCallContext(contactId);
-  const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
-    accountId,
-    contactId,
-    campaignId: campaignConfig?.id || null,
-    attemptNumber: attemptNumber || 1,
-    callAttemptId: callAttemptId || null,
-    accountCallBrief: accountCallBriefRecord,
-  });
-  const memoryNotes = await getCallMemoryNotes(accountId, contactId);
-  const callPlanContextSection = buildCallPlanContextSection({
-    accountCallBrief: accountCallBriefRecord.payloadJson as any,
-    participantCallPlan: participantCallPlanRecord.payloadJson as any,
-    participantContext,
-    memoryNotes,
-  });
+    const accountCallBriefRecord = await getOrBuildAccountCallBrief({
+      accountId,
+      campaignId: campaignConfig?.id || null,
+    });
+    const participantContext = await buildParticipantCallContext(contactId);
+    const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
+      accountId,
+      contactId,
+      campaignId: campaignConfig?.id || null,
+      attemptNumber: attemptNumber || 1,
+      callAttemptId: callAttemptId || null,
+      accountCallBrief: accountCallBriefRecord,
+    });
+    const memoryNotes = await getCallMemoryNotes(accountId, contactId);
+    callPlanContextSection = buildCallPlanContextSection({
+      accountCallBrief: accountCallBriefRecord.payloadJson as any,
+      participantCallPlan: participantCallPlanRecord.payloadJson as any,
+      participantContext,
+      memoryNotes,
+    });
+  }
 
   // =====================================================================
   // FOUNDATION + CAMPAIGN + CONTACT LAYER ARCHITECTURE

@@ -126,6 +126,10 @@ app.use((req, res, next) => {
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
+    // FORCE LOGGING TO STDERR TO BYPASS ANY CONSOLE INTERCEPTION
+    process.stderr.write(`[DEBUG-UPGRADE] Upgrade request for URL: ${req.url}\n`);
+    process.stderr.write(`[DEBUG-UPGRADE] Headers: ${JSON.stringify(req.headers)}\n`);
+
     const pathname = new URL(req.url || '', `ws://${req.headers.host}`).pathname;
     console.log(`[WebSocket Upgrade] URL: ${req.url}`);
     console.log(`[WebSocket Upgrade] Headers:`, JSON.stringify(req.headers, null, 2));
@@ -256,7 +260,26 @@ app.use((req, res, next) => {
   if (hasRedis) {
     initializeAiCampaignOrchestrator();
   }
-  
+
+  // Initialize Vertex AI Agentic CRM Operator
+  if (process.env.USE_VERTEX_AI === 'true') {
+    const { initializeVertexAI } = await import("./services/vertex-ai");
+    try {
+      const vertexResult = await initializeVertexAI({
+        indexData: false,  // Set to true to pre-index accounts/contacts for vector search
+        startOperator: true,  // Start the agentic operator task queue
+      });
+      console.log(`[VertexAI] Agentic CRM Operator initialized: ${vertexResult.status}`);
+      if (vertexResult.operatorStarted) {
+        console.log("[VertexAI] Task queue processor started");
+      }
+    } catch (error) {
+      console.error("[VertexAI] Failed to initialize:", error);
+    }
+  } else {
+    console.log("[VertexAI] Disabled - Set USE_VERTEX_AI=true to enable Agentic CRM Operator");
+  }
+
   // M365 email sync - Only start if enabled (DISABLED by default for performance)
   // Enable M365 auto-sync for production email inbox
   const ENABLE_M365_SYNC = process.env.ENABLE_M365_SYNC === 'true' || true; // Enabled by default
@@ -324,7 +347,7 @@ app.use((req, res, next) => {
   console.log("[Call Orchestration] Environment Configuration:");
   console.log("=".repeat(70));
   const telnyxKey = process.env.TELNYX_API_KEY;
-  const telnyxConnId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_SIP_CONNECTION_ID;
+  const telnyxConnId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
   const publicWsUrl = process.env.PUBLIC_WEBSOCKET_URL;
   const telnyxFrom = process.env.TELNYX_FROM_NUMBER;
   

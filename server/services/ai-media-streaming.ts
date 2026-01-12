@@ -50,23 +50,34 @@ export function initializeAiMediaStreaming(server: HttpServer): WebSocketServer 
     let session: MediaSession | null = null;
     let firstMessageLogged = false;
 
-    ws.on("message", async (data: Buffer | string) => {
+    // ws v8+ passes text frames as Buffer with isBinary=false
+    // We must handle the isBinary flag properly to distinguish JSON from binary audio
+    ws.on("message", async (data: Buffer, isBinary: boolean) => {
       try {
-        if (typeof data === "string" && !firstMessageLogged) {
-          const preview = data.length > 400 ? `${data.substring(0, 400)}...` : data;
+        // Telnyx media streaming delivers JSON envelopes (start/media/stop)
+        // Audio is inside JSON as base64 payload, NOT as raw binary frames
+        const text = isBinary ? null : data.toString("utf8");
+
+        if (text && !firstMessageLogged) {
+          const preview = text.length > 400 ? `${text.substring(0, 400)}...` : text;
           console.log(`[AiMediaStreaming] Raw Telnyx message (truncated): ${preview}`);
           firstMessageLogged = true;
         }
 
-        const message = typeof data === "string" ? JSON.parse(data) : null;
-        
-        if (message) {
+        const message = text ? JSON.parse(text) : null;
+
+        if (message?.event) {
           await handleTelnyxMessage(ws, message, urlParams, (callId) => {
             sessionId = callId;
             session = activeSessions.get(callId) || null;
           });
-        } else if (session?.isActive && session.openaiWs) {
-          await forwardAudioToOpenAI(session, data as Buffer);
+          return;
+        }
+
+        // If Telnyx ever sends raw binary audio frames (not their default behavior),
+        // only then forward as binary audio
+        if (isBinary && session?.isActive && session.openaiWs) {
+          await forwardAudioToOpenAI(session, data);
         }
       } catch (error) {
         console.error("[AiMediaStreaming] Error processing message:", error);
@@ -147,7 +158,8 @@ async function handleTelnyxMessage(
 
     case "media":
       if (media?.payload) {
-        const audioData = Buffer.from(media.payload, "base64");
+        // With g711_ulaw end-to-end, pass the base64 payload directly to OpenAI
+        // No need to decode/convert - Telnyx sends μ-law, OpenAI expects μ-law
         const mappedCallId = streamIdToCallId.get(stream_id) || stream_id;
         const sessionForMedia = activeSessions.get(mappedCallId);
         if (sessionForMedia?.isActive) {
@@ -157,7 +169,8 @@ async function handleTelnyxMessage(
           if (sessionForMedia.receivedFrames === 1 || sessionForMedia.receivedFrames % 50 === 0) {
             console.log(`[AiMediaStreaming] Telnyx media in frames=${sessionForMedia.receivedFrames} call=${mappedCallId}`);
           }
-          await forwardAudioToOpenAI(sessionForMedia, audioData);
+          // Pass base64 payload directly (already μ-law encoded)
+          await forwardAudioToOpenAI(sessionForMedia, media.payload);
         }
       }
       break;
@@ -184,14 +197,16 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
     openaiWs.on("open", () => {
       console.log(`[AiMediaStreaming] OpenAI Realtime connected for call: ${session.callId}`);
       
+      // Use g711_ulaw end-to-end to match Telnyx media streaming format
+      // This eliminates all PCM/resampling conversions
       const configMessage = {
         type: "session.update",
         session: {
           modalities: ["text", "audio"],
           instructions: getSystemInstructions(session.callId),
           voice: getVoiceForCall(session.callId),
-          input_audio_format: "pcm16",
-          output_audio_format: "pcm16",
+          input_audio_format: "g711_ulaw",
+          output_audio_format: "g711_ulaw",
           input_audio_transcription: {
             model: "whisper-1",
           },
@@ -252,9 +267,9 @@ async function handleOpenAIMessage(session: MediaSession, message: any): Promise
   switch (type) {
     case "response.audio.delta":
       if (message.delta) {
-        const audioData16k = Buffer.from(message.delta, "base64");
-        const audioData8k = downsample16kTo8k(audioData16k);
-        sendAudioToTelnyx(session, audioData8k);
+        // With g711_ulaw end-to-end, delta is already base64 μ-law
+        // Send directly to Telnyx without conversion
+        sendAudioToTelnyx(session, message.delta);
       }
       break;
 
@@ -283,10 +298,22 @@ async function handleOpenAIMessage(session: MediaSession, message: any): Promise
       if (message.transcript) {
         console.log(`[AiMediaStreaming] Transcript: ${message.transcript}`);
         const bridge = getTelnyxAiBridge();
-        const response = await bridge.processTranscribedSpeech(session.callId, message.transcript);
-        
-        if (response && !session.openaiWs) {
-          await synthesizeAndSendAudio(session, response);
+        const activeCall = bridge.getActiveCall(session.callId);
+
+        // With OpenAI Realtime, audio responses come via response.audio.delta
+        // We only emit the transcript for logging/context tracking
+        if (activeCall) {
+          activeCall.agent.emit("transcript:human", message.transcript);
+        }
+
+        // TTS fallback only if realtime is unavailable/disconnected
+        // This is a true fallback path, not the normal flow
+        if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+          console.log(`[AiMediaStreaming] Realtime unavailable, using TTS fallback`);
+          const response = await bridge.processTranscribedSpeech(session.callId, message.transcript);
+          if (response) {
+            await synthesizeAndSendAudio(session, response);
+          }
         }
       }
       break;
@@ -301,17 +328,21 @@ async function handleOpenAIMessage(session: MediaSession, message: any): Promise
   }
 }
 
-async function forwardAudioToOpenAI(session: MediaSession, audioData: Buffer): Promise<void> {
+// With g711_ulaw end-to-end, audioPayload is already base64 μ-law from Telnyx
+async function forwardAudioToOpenAI(session: MediaSession, audioPayload: string | Buffer): Promise<void> {
   if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
     return;
   }
 
-  const pcm8k = convertMuLawToPCM(audioData);
-  const pcm16k = upsample8kTo16k(pcm8k);
-  
+  // If string, it's already base64 from Telnyx media.payload
+  // If Buffer (from binary frame fallback), encode it
+  const base64Audio = typeof audioPayload === "string"
+    ? audioPayload
+    : audioPayload.toString("base64");
+
   const message = {
     type: "input_audio_buffer.append",
-    audio: pcm16k.toString("base64"),
+    audio: base64Audio,
   };
 
   session.openaiWs.send(JSON.stringify(message));
@@ -353,18 +384,17 @@ function downsample16kTo8k(pcm16k: Buffer): Buffer {
   return pcm8k;
 }
 
-function sendAudioToTelnyx(session: MediaSession, pcm8kData: Buffer): void {
+// With g711_ulaw end-to-end, audioPayload is already base64 μ-law from OpenAI
+function sendAudioToTelnyx(session: MediaSession, audioPayload: string): void {
   if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) {
     return;
   }
 
-  const mulawData = convertPCMToMuLaw(pcm8kData);
-  
   const message = {
     event: "media",
     stream_id: session.streamId,
     media: {
-      payload: mulawData.toString("base64"),
+      payload: audioPayload,
     },
   };
 
@@ -377,7 +407,7 @@ function sendAudioToTelnyx(session: MediaSession, pcm8kData: Buffer): void {
 
 function sendTestToneToTelnyx(session: MediaSession): void {
   try {
-    // Generate ~400ms 1kHz tone at 8kHz sample rate, 16-bit PCM
+    // Generate ~400ms 1kHz tone at 8kHz sample rate, converted to μ-law
     const sampleRate = 8000;
     const durationSec = 0.4;
     const samples = Math.floor(sampleRate * durationSec);
@@ -389,7 +419,9 @@ function sendTestToneToTelnyx(session: MediaSession): void {
       const sample = Math.round(amplitude * Math.sin(2 * Math.PI * freq * t));
       pcm.writeInt16LE(sample, i * 2);
     }
-    sendAudioToTelnyx(session, pcm);
+    // Convert PCM to μ-law for the test tone
+    const mulawData = convertPCMToMuLaw(pcm);
+    sendAudioToTelnyx(session, mulawData.toString("base64"));
     console.log(`[AiMediaStreaming] Sent test tone for call: ${session.callId}`);
   } catch (err) {
     console.error('[AiMediaStreaming] Test tone error:', err);
@@ -400,6 +432,7 @@ function getOpeningScript(): string {
   return process.env.AI_OPENING_SCRIPT || "Hello, this is the UK Export Finance virtual agent. I’d like to share our Leading with Finance guide and confirm the best email to send it.";
 }
 
+// Fallback TTS synthesis when realtime is unavailable
 async function synthesizeAndSendAudio(session: MediaSession, text: string): Promise<void> {
   if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) {
     return;
@@ -416,7 +449,9 @@ async function synthesizeAndSendAudio(session: MediaSession, text: string): Prom
 
     const audioBuffer24k = Buffer.from(await response.arrayBuffer());
     const audioBuffer8k = downsample24kTo8k(audioBuffer24k);
-    sendAudioToTelnyx(session, audioBuffer8k);
+    // Convert PCM to μ-law for Telnyx
+    const mulawData = convertPCMToMuLaw(audioBuffer8k);
+    sendAudioToTelnyx(session, mulawData.toString("base64"));
   } catch (error) {
     console.error("[AiMediaStreaming] TTS synthesis error:", error);
   }
@@ -538,10 +573,12 @@ function getVoiceForCall(callId: string): string {
   return "alloy";
 }
 
+// With server_vad enabled, OpenAI auto-commits on speech_stopped
+// We only need to trigger response.create, NOT manual commit
 function requestOpenAIResponse(session: MediaSession): void {
   if (session.openaiWs?.readyState === WebSocket.OPEN && session.pendingAudioFrames > 0) {
     console.log(`[AiMediaStreaming] Requesting response for call: ${session.callId}`);
-    session.openaiWs.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+    // Do NOT send input_audio_buffer.commit with server_vad - it's automatic
     session.openaiWs.send(JSON.stringify({ type: "response.create" }));
     session.pendingAudioFrames = 0;
   }

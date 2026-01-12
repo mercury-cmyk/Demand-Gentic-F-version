@@ -50,6 +50,7 @@ import campaignSendRouter from './routes/campaign-send-routes';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
+import texmlRouter from './routes/texml';
 import openaiSipRouter from './routes/openai-sip';
 import openaiWebrtcRouter from './routes/openai-webrtc';
 import telnyxWebrtcRouter from './routes/telnyx-webrtc';
@@ -64,6 +65,7 @@ import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import previewStudioRouter from './routes/preview-studio';
 import healthRouter from './routes/health';
+import vertexAiRouter from './routes/vertex-ai';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -627,7 +629,10 @@ export function registerRoutes(app: Express) {
 
   // Health Check Endpoint
   app.use('/api', healthRouter);
-  
+
+  // Vertex AI Agentic CRM Operator
+  app.use('/api/vertex-ai', vertexAiRouter);
+
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes
   
@@ -6030,6 +6035,120 @@ export function registerRoutes(app: Express) {
   });
 
   // ==================== CALL ATTEMPTS ====================
+
+  // Start a manual call via Telnyx Call Control (server-side)
+  app.post("/api/calls/start", requireAuth, async (req, res) => {
+    try {
+      const { to } = req.body as { to?: string };
+      if (!to || typeof to !== "string") {
+        return res.status(400).json({ message: "Missing required field: to" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const sipConfig = await storage.getDefaultSipTrunkConfig();
+      const connectionId =
+        sipConfig?.connectionId ||
+        process.env.TELNYX_CALL_CONTROL_APP_ID ||
+        process.env.TELNYX_CONNECTION_ID;
+      const fromNumber =
+        sipConfig?.callerIdNumber ||
+        process.env.TELNYX_FROM_NUMBER;
+
+      if (!connectionId) {
+        return res.status(500).json({ message: "TELNYX connection ID not configured" });
+      }
+      if (!fromNumber) {
+        return res.status(500).json({ message: "TELNYX_FROM_NUMBER not configured" });
+      }
+
+      const response = await fetch("https://api.telnyx.com/v2/calls", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({
+          connection_id: connectionId,
+          to,
+          from: fromNumber,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL START] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to initiate Telnyx call",
+          status: response.status,
+        });
+      }
+
+      const result = await response.json();
+      const callControlId = result.data?.call_control_id;
+
+      if (!callControlId) {
+        return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
+      }
+
+      res.json({
+        success: true,
+        callControlId,
+        from: fromNumber,
+        to,
+      });
+    } catch (error) {
+      console.error("[CALL START] Error:", error);
+      res.status(500).json({
+        message: "Failed to start call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Hang up a manual call via Telnyx Call Control (server-side)
+  app.post("/api/calls/hangup", requireAuth, async (req, res) => {
+    try {
+      const { callControlId } = req.body as { callControlId?: string };
+      if (!callControlId || typeof callControlId !== "string") {
+        return res.status(400).json({ message: "Missing required field: callControlId" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL HANGUP] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to hang up Telnyx call",
+          status: response.status,
+        });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[CALL HANGUP] Error:", error);
+      res.status(500).json({
+        message: "Failed to hang up call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
 
   // Create call attempt when call connects (before disposition)
   app.post("/api/call-attempts/start", requireAuth, async (req, res) => {
@@ -12434,6 +12553,7 @@ Provide JSON response with:
   // ==================== AI VOICE AGENT CALLS ====================
 
   app.use("/api/ai-calls", aiCallsRouter);
+  app.use("/api/texml", texmlRouter);
 
   // ==================== OPENAI SIP REALTIME (Inbound) ====================
 

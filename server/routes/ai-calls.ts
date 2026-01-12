@@ -601,58 +601,14 @@ router.post("/webhook", async (req, res) => {
       }
     }
     
-    // Handle OpenAI Realtime calls - start streaming when call is answered
+    // TeXML calls handle streaming automatically via <Stream bidirectionalMode="rtp" />
+    // No need to call streaming_start - just log the event for debugging
     if (clientState?.provider === 'openai_realtime' && eventType === 'call.answered') {
-      console.log(`[AI Webhook] OpenAI Realtime call answered, starting streaming for: ${payload?.call_control_id}`);
-      
-      // Use clean WebSocket URL without query parameters (same as test endpoint)
-      const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] || 
-                   process.env.REPLIT_DEV_DOMAIN || 
-                   'localhost:5000';
-      const wsUrl = host.startsWith('wss://') || host.startsWith('ws://') 
-        ? `${host}/openai-realtime-dialer`
-        : `wss://${host}/openai-realtime-dialer`;
-      
-      // Pass parameters via client_state (base64 encoded) - same as test endpoint
-      const customParams = {
-        provider: clientState.provider,
-        call_id: clientState.call_id || '',
-        run_id: clientState.run_id || '',
-        campaign_id: clientState.campaign_id || '',
-        queue_item_id: clientState.queue_item_id || '',
-        call_attempt_id: clientState.call_attempt_id || '',
-        contact_id: clientState.contact_id || '',
-        virtual_agent_id: clientState.virtual_agent_id || '',
-      };
-      const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
-      
-      console.log(`[AI Webhook] Starting OpenAI Realtime streaming to: ${wsUrl} (clean, no query params)`);
-      console.log(`[AI Webhook] Parameters encoded in client_state`);
-      
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      const streamResponse = await fetch(`https://api.telnyx.com/v2/calls/${payload?.call_control_id}/actions/streaming_start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          stream_url: wsUrl,
-          stream_track: "both_tracks",
-          client_state: clientStateB64,
-          enable_dialogflow: false,
-        }),
-      });
-      
-      if (!streamResponse.ok) {
-        const errorText = await streamResponse.text();
-        console.error(`[AI Webhook] Failed to start OpenAI Realtime streaming: ${streamResponse.status} - ${errorText}`);
-      } else {
-        console.log(`[AI Webhook] OpenAI Realtime streaming started successfully`);
-      }
-      return; // Don't pass to bridge for OpenAI Realtime calls
+      console.log(`[AI Webhook] OpenAI Realtime TeXML call answered: ${payload?.call_control_id}`);
+      console.log(`[AI Webhook] Streaming handled automatically by TeXML <Stream> verb`);
+      return; // TeXML handles everything, don't pass to bridge
     }
-    
+
     const bridge = getTelnyxAiBridge();
     await bridge.handleWebhookEvent(event);
   } catch (error) {
@@ -1028,8 +984,12 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     // Use the same host (public if provided) for Telnyx webhook callbacks
     const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
-    const response = await fetch("https://api.telnyx.com/v2/calls", {
+    console.log(`[OpenAI Realtime Test] Initiating TeXML call to: ${normalizedPhone}`);
+    console.log(`[OpenAI Realtime Test] TeXML URL: ${texmlUrl}`);
+
+    const response = await fetch("https://api.telnyx.com/v2/texml/calls", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1039,13 +999,8 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
         connection_id: connectionId,
         to: normalizedPhone,
         from: fromNumber,
-        answering_machine_detection: "detect",
-        stream_url: wsUrl, // Clean URL without query params - Telnyx validates this
-        stream_track: "both_tracks",
-        stream_bidirectional_mode: "rtp", // Enable bidirectional audio
-        custom_parameters: customParams, // Pass parameters in custom_parameters
-        client_state: clientStateB64, // Also encode in client_state as fallback
-        webhook_url: `${webhookProtocol}://${webhookHost}/api/ai-calls/webhook`,
+        url: texmlUrl, // Point to our TeXML endpoint
+        client_state: clientStateB64, // Pass parameters via client_state
       }),
     });
 

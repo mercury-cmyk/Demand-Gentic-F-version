@@ -14,6 +14,25 @@ import { TelnyxRTC } from '@telnyx/webrtc';
 export type ICall = any;
 export type INotification = any;
 
+const formatSocketCloseDetails = (event?: CloseEvent | Event | null): string => {
+  if (!event || typeof (event as CloseEvent).code !== 'number') {
+    return '';
+  }
+
+  const closeEvent = event as CloseEvent;
+  const details: string[] = [`code=${closeEvent.code}`];
+
+  if (closeEvent.reason) {
+    details.push(`reason=${closeEvent.reason}`);
+  }
+
+  if (typeof closeEvent.wasClean === 'boolean') {
+    details.push(`clean=${closeEvent.wasClean}`);
+  }
+
+  return details.length ? ` (${details.join(', ')})` : '';
+};
+
 export type TelnyxCallState = 
   | 'idle'
   | 'connecting'
@@ -41,6 +60,13 @@ export interface TelnyxClientConfig {
   // Audio device IDs
   audioInputDeviceId?: string;
   audioOutputDeviceId?: string;
+  // Network configuration for corporate/restrictive environments
+  ringToneFile?: string;
+  ringtoneFile?: string;
+  host?: string;
+  port?: number;
+  wss?: boolean;
+  iceServers?: RTCIceServer[];
   // Callbacks
   onReady?: () => void;
   onError?: (error: Error) => void;
@@ -99,6 +125,11 @@ export class TelnyxWebRTCClient {
         hasPassword: !!this.config.credentials.password,
       });
 
+      const wsHost = this.config.host || 'rtc.telnyx.com';
+      const wsPort = this.config.port || 14938; // Telnyx documented WebRTC port
+      const wsSecure = this.config.wss !== false; // default to secure
+      const wsUrl = `${wsSecure ? 'wss' : 'ws'}://${wsHost}:${wsPort}`;
+
       const clientOptions: any = {
         // WebRTC-only configuration
         useMicrophone: true,
@@ -106,6 +137,11 @@ export class TelnyxWebRTCClient {
         // Audio device selection
         ...(this.config.audioInputDeviceId && { micId: this.config.audioInputDeviceId }),
         ...(this.config.audioOutputDeviceId && { speakerId: this.config.audioOutputDeviceId }),
+        // Explicit WebSocket endpoint (avoids default wss://rtc.telnyx.com/ with no port)
+        host: wsHost,
+        port: wsPort,
+        wss: wsSecure,
+        wsServer: wsUrl,
       };
 
       // Set credentials
@@ -168,9 +204,16 @@ export class TelnyxWebRTCClient {
     });
 
     // Socket disconnect event  
-    this.client.on('telnyx.socket.close', (event: any) => {
-      console.log('[TelnyxWebRTC] Socket closed:', event);
+    this.client.on('telnyx.socket.close', (event: CloseEvent | Event) => {
+      const details = formatSocketCloseDetails(event);
+      console.log(`[TelnyxWebRTC] Socket closed${details}:`, event);
       this.isConnected = false;
+      this.updateCallState('idle');
+    });
+
+    // Socket error event
+    this.client.on('telnyx.socket.error', (event: Event) => {
+      console.error('[TelnyxWebRTC] Socket error:', event);
     });
 
     // Registration events
@@ -194,12 +237,6 @@ export class TelnyxWebRTCClient {
       this.handleNotification(notification);
     });
 
-    // Socket closed
-    this.client.on('telnyx.socket.close', () => {
-      console.log('[TelnyxWebRTC] Socket closed');
-      this.isConnected = false;
-      this.updateCallState('idle');
-    });
   }
 
   /**

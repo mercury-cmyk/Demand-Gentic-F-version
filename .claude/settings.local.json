@@ -107,7 +107,12 @@
       "Bash(npx tsx:*)",
       "Bash(node -e:*)",
       "Bash(docker tag:*)",
-      "Bash(docker push:*)"
+      "Bash(docker push:*)",
+      "Bash(ipconfig:*)",
+      "Bash(cmd.exe /c \"ipconfig /flushdns\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Windows\\System32\\drivers\\etc"
     ]
   }
 }

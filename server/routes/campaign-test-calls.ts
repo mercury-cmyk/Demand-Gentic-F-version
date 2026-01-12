@@ -94,7 +94,7 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "manager
     const telnyxApiKey = process.env.TELNYX_API_KEY;
     const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.OPENAI_API_KEY;
-    const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+    const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
 
     if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
       return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
@@ -158,6 +158,16 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 `;
 
     // Custom parameters for the WebSocket connection
+    const supportedVoices = new Set([
+      'alloy',
+      'ash',
+      'coral',
+      'marin',
+      'verse',
+    ]);
+    const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
+    const voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
+
     const customParams = {
       call_id: testCallId,
       run_id: runId,
@@ -170,7 +180,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       test_call_id: testCallId,
       system_prompt: systemPrompt,
       first_message: assignment.firstMessage,
-      voice: assignment.voice,
+      voice,
       agent_name: assignment.agentName,
       test_contact: {
         name: validatedData.testContactName,
@@ -186,35 +196,20 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     // Prepare webhook URL
     const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
-    console.log(`[Campaign Test Call] Initiating test call:
-  - Campaign: ${campaign.name} (${campaignId})
-  - To: ${normalizedPhone}
-  - From: ${fromNumber}
-  - Agent: ${assignment.agentName} (${assignment.virtualAgentId})
-  - Test Call ID: ${testCallId}
-  - WebSocket URL: ${wsUrl}`);
-
-    // DEBUG: Log connection_id being used
-    console.log(`[Campaign Test Call] Using connection_id: ${connectionId} (from TELNYX_CALL_CONTROL_APP_ID=${process.env.TELNYX_CALL_CONTROL_APP_ID}, TELNYX_CONNECTION_ID=${process.env.TELNYX_CONNECTION_ID})`);
-    
     const payload = {
       connection_id: connectionId,
       to: normalizedPhone,
       from: fromNumber,
-      answering_machine_detection: "detect",
-      stream_url: wsUrl,
-      stream_track: "both_tracks",
-      stream_bidirectional_mode: "rtp",
-      custom_parameters: customParams,
-      client_state: clientStateB64,
-      webhook_url: `${webhookProtocol}://${webhookHost}/api/campaign-test-calls/webhook`,
+      url: texmlUrl, // Point to our TeXML endpoint
+      client_state: clientStateB64, // Pass parameters via client_state
     };
 
-    console.log('[Campaign Test Call] Sending payload to Telnyx:', JSON.stringify(payload, null, 2));
+    console.log('[Campaign Test Call] Sending TeXML payload to Telnyx:', JSON.stringify(payload, null, 2));
 
-    // Initiate the Telnyx call
-    const telnyxResponse = await fetch("https://api.telnyx.com/v2/calls", {
+    // Initiate the Telnyx TeXML call
+    const telnyxResponse = await fetch("https://api.telnyx.com/v2/texml/calls", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -660,6 +655,46 @@ router.post("/webhook", async (req, res) => {
           .where(eq(campaignTestCalls.id, testCallId));
         break;
 
+      case 'call.machine.detection.ended': {
+        // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
+        const amdResult = payload?.result || payload?.machine_detection_result;
+        console.log(`[Test Call Webhook] Machine detection result for test call ${testCallId}: ${amdResult}`);
+        
+        if (amdResult === 'machine' || amdResult === 'voicemail') {
+          // Mark as machine detected and hang up immediately
+          await db.update(campaignTestCalls)
+            .set({
+              status: 'completed',
+              disposition: 'machine_detected',
+              testResult: 'failed',
+              callSummary: 'Call reached voicemail/answering machine - automatically disconnected per "no voicemail" policy',
+              endedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(campaignTestCalls.id, testCallId));
+          
+          // Hang up immediately to avoid leaving voicemail
+          const callControlId = payload?.call_control_id;
+          if (callControlId) {
+            try {
+              const telnyxApiKey = process.env.TELNYX_API_KEY;
+              await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${telnyxApiKey}`,
+                },
+                body: JSON.stringify({ client_state: payload?.client_state }),
+              });
+              console.log(`[Test Call Webhook] Hung up machine-detected call ${testCallId}`);
+            } catch (hangupErr) {
+              console.error(`[Test Call Webhook] Failed to hang up machine-detected call:`, hangupErr);
+            }
+          }
+        }
+        break;
+      }
+
       case 'call.recording.saved':
         const recordingUrl = payload?.recording?.url;
         if (recordingUrl) {
@@ -672,9 +707,10 @@ router.post("/webhook", async (req, res) => {
             .where(eq(campaignTestCalls.id, testCallId));
         }
         break;
+
       default:
-        // Log all other event types for traceability
-        console.log(`[Test Call Webhook] Unhandled event type: ${eventType}`);
+        // Log for traceability but don't treat as error
+        console.log(`[Test Call Webhook] Event type: ${eventType} (no handler)`);
         break;
     }
   } catch (error) {

@@ -59,7 +59,6 @@ import NewsPage from "@/pages/news";
 import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
-import { useSIPWebRTC } from "./hooks/useTelnyxWebRTC";
 import ResourcesCentrePage from "@/pages/resources-centre";
 import CampaignQueuePage from "@/pages/campaign-queue";
 import VerificationCampaignsPage from "@/pages/verification-campaigns";
@@ -91,8 +90,6 @@ import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
 import PreviewStudioPage from "@/pages/preview-studio";
-import WebRTCTestPage from "@/pages/webrtc-test";
-import CampaignRunnerPage from "@/pages/campaign-runner";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -162,24 +159,6 @@ const parseJwtPayload = (token: string): Record<string, unknown> | null => {
 function AuthenticatedApp() {
   const { user, token, getToken } = useAuth();
 
-  // Example SIP credentials (replace with env/config)
-  const sipUri = import.meta.env.VITE_SIP_URI || "sip:your-username@sip.example.com";
-  const sipPassword = import.meta.env.VITE_SIP_PASSWORD || "yourpassword";
-  const sipWebSocket = import.meta.env.VITE_SIP_WEBSOCKET || "wss://sip.example.com:7443";
-
-  // JsSIP hook
-  const sip = useSIPWebRTC({
-    sipUri,
-    sipPassword,
-    sipWebSocket,
-    onCallStateChange: (state) => {
-      console.log("SIP Call State:", state);
-    },
-    onCallEnd: () => {
-      console.log("SIP Call Ended");
-    },
-  });
-
   // Custom sidebar width for enterprise CRM
   const style = {
     "--sidebar-width": "18rem",       // 288px standard sidebar
@@ -210,14 +189,6 @@ function AuthenticatedApp() {
             userRoles={resolvedUserRoles}
           />
           <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
-            {/* JsSIP SIP/WebRTC Example UI */}
-            <div style={{ marginBottom: 16 }}>
-              <h3>SIP Call (JsSIP)</h3>
-              <button onClick={() => sip.makeCall("sip:destination@sip.example.com")}>Call Destination</button>
-              <button onClick={sip.hangup} style={{ marginLeft: 8 }}>Hangup</button>
-              <div>Call State: {sip.callState}</div>
-              <audio ref={sip.remoteAudioRef} id="remoteAudio" autoPlay />
-            </div>
             <Switch>
               <Route path="/" component={Dashboard} />
               
@@ -298,7 +269,6 @@ function AuthenticatedApp() {
               <Route path="/agent-console" component={AgentConsolePage} />
               <Route path="/unified-agent-console" component={UnifiedAgentConsolePage} />
               <Route path="/agent-command-center" component={AgentCommandCenter} />
-              <Route path="/campaign-runner" component={CampaignRunnerPage} />
               <Route path="/virtual-agents" component={VirtualAgentsPage} />
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
@@ -353,7 +323,6 @@ function AuthenticatedApp() {
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
-              <Route path="/webrtc-test" component={WebRTCTestPage} />
               
               {/* 404 */}
               <Route component={NotFound} />

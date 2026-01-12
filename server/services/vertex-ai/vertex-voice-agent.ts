@@ -1,43 +1,55 @@
-import OpenAI from "openai";
-import WebSocket from "ws";
+/**
+ * Vertex AI Voice Agent Service
+ *
+ * Voice agent implementation powered by Vertex AI Gemini.
+ * Replaces OpenAI-based voice agent with Google Cloud native solution.
+ *
+ * Features:
+ * - Gemini-powered conversation management
+ * - Real-time streaming responses
+ * - Function calling for dispositions and actions
+ * - Integration with Telnyx for telephony
+ */
+
 import { EventEmitter } from "events";
-import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { ensureVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+import {
+  chat,
+  streamChat,
+  generateWithFunctions,
+  type ChatMessage,
+  type FunctionDeclaration,
+} from "./vertex-client";
+import {
+  generateVertexMasterPrompt,
+  determineDisposition,
+  summarizeCall,
+  handleObjection,
+  type VertexAgentCreationInput,
+} from "./vertex-agent-brain";
+import { getOrganizationBrain } from "../agent-brain-service";
 import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
-} from "./account-messaging-service";
+} from "../account-messaging-service";
 import {
   buildCallPlanContextSection,
   buildParticipantCallContext,
   getCallMemoryNotes,
   getOrBuildAccountCallBrief,
   getOrBuildParticipantCallPlan,
-} from "./account-call-service";
+} from "../account-call-service";
+import { ensureVoiceAgentControlLayer } from "../voice-agent-control-defaults";
 
-let openai: OpenAI | null = null;
+// ==================== TYPES ====================
 
-function getOpenAI(): OpenAI {
-  if (!openai) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not configured");
-    }
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
-  return openai;
-}
-
-export interface AiAgentSettings {
+export interface VertexAgentSettings {
   persona: {
     name: string;
     companyName: string;
     role: string;
-    voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
   };
   scripts: {
     opening: string;
@@ -56,7 +68,7 @@ export interface AiAgentSettings {
   };
 }
 
-export interface CallContext {
+export interface VertexCallContext {
   contactFirstName: string;
   contactLastName: string;
   contactTitle?: string;
@@ -69,36 +81,119 @@ export interface CallContext {
   agentFullName?: string;
   agentFirstName?: string;
   contactId?: string;
-  elevenLabsAgentId?: string; // Campaign-specific ElevenLabs agent ID (overrides env var)
-  virtualAgentId?: string; // Virtual agent ID for tracking in reports
+  virtualAgentId?: string;
 }
 
 type ConversationPhase = "opening" | "gatekeeper" | "pitch" | "objection_handling" | "closing" | "handoff";
 
-export interface AiVoiceAgentEvents {
+export interface VertexVoiceAgentEvents {
   "conversation:started": (callId: string) => void;
   "conversation:phase": (phase: ConversationPhase) => void;
   "transcript:ai": (text: string) => void;
   "transcript:human": (text: string) => void;
   "handoff:triggered": (reason: string) => void;
+  "function:called": (name: string, args: Record<string, any>) => void;
   "call:completed": (disposition: string, summary: string) => void;
   "error": (error: Error) => void;
 }
 
-export class AiVoiceAgent extends EventEmitter {
-  private settings: AiAgentSettings;
-  private context: CallContext;
-  private realtimeWs: WebSocket | null = null;
+// ==================== FUNCTION DECLARATIONS ====================
+
+const AGENT_FUNCTIONS: FunctionDeclaration[] = [
+  {
+    name: "submit_disposition",
+    description: "Submit the final disposition for this call. Call this when the conversation has concluded.",
+    parameters: {
+      type: "object",
+      properties: {
+        disposition: {
+          type: "string",
+          description: "The call outcome",
+          enum: ["qualified_lead", "not_interested", "do_not_call", "callback_requested", "voicemail", "no_answer", "invalid_data"],
+        },
+        notes: {
+          type: "string",
+          description: "Any relevant notes about the call",
+        },
+      },
+      required: ["disposition"],
+    },
+  },
+  {
+    name: "schedule_callback",
+    description: "Schedule a callback with the prospect at a specific time",
+    parameters: {
+      type: "object",
+      properties: {
+        dateTime: {
+          type: "string",
+          description: "The date and time for the callback (ISO 8601 format)",
+        },
+        notes: {
+          type: "string",
+          description: "Notes about why the callback was scheduled",
+        },
+      },
+      required: ["dateTime"],
+    },
+  },
+  {
+    name: "transfer_to_human",
+    description: "Transfer the call to a human agent",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "The reason for the transfer",
+        },
+        urgency: {
+          type: "string",
+          description: "Urgency level",
+          enum: ["low", "medium", "high"],
+        },
+      },
+      required: ["reason"],
+    },
+  },
+  {
+    name: "log_key_info",
+    description: "Log important information shared by the prospect",
+    parameters: {
+      type: "object",
+      properties: {
+        infoType: {
+          type: "string",
+          description: "Type of information",
+          enum: ["budget", "timeline", "decision_maker", "pain_point", "competitor", "other"],
+        },
+        details: {
+          type: "string",
+          description: "The specific information to log",
+        },
+      },
+      required: ["infoType", "details"],
+    },
+  },
+];
+
+// ==================== VERTEX VOICE AGENT CLASS ====================
+
+export class VertexVoiceAgent extends EventEmitter {
+  private settings: VertexAgentSettings;
+  private context: VertexCallContext;
   private currentPhase: ConversationPhase = "opening";
   private gatekeeperAttempts = 0;
-  private conversationHistory: { role: "ai" | "human"; text: string }[] = [];
+  private conversationHistory: ChatMessage[] = [];
   private callId: string;
+  private systemPrompt: string = "";
+  private loggedInfo: { infoType: string; details: string }[] = [];
 
-  constructor(settings: AiAgentSettings, context: CallContext) {
+  constructor(settings: VertexAgentSettings, context: VertexCallContext) {
     super();
     this.settings = settings;
     this.context = context;
-    this.callId = `ai-call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.callId = `vertex-call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   private interpolateScript(script: string): string {
@@ -122,6 +217,7 @@ export class AiVoiceAgent extends EventEmitter {
     if (!accountId || !contactId) {
       console.warn("Missing accountId or contactId - skipping account intelligence and call planning.");
     } else {
+      // Build account context
       const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
       const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
         accountId: accountId,
@@ -133,6 +229,7 @@ export class AiVoiceAgent extends EventEmitter {
         accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
       );
 
+      // Build call plan context
       const accountCallBriefRecord = await getOrBuildAccountCallBrief({
         accountId: accountId,
         campaignId: this.context.campaignId || null,
@@ -155,7 +252,8 @@ export class AiVoiceAgent extends EventEmitter {
       });
     }
 
-    const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}. 
+    // Build persona and scripts
+    const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}.
 You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.`;
 
     const gatekeeperInstructions = `
@@ -185,12 +283,12 @@ ${this.interpolateScript(this.settings.scripts.objections)}`
     const handoffInstructions = this.settings.handoff.enabled
       ? `
 HANDOFF TRIGGERS:
-Transfer the call to a human agent if any of these occur:
+Transfer the call to a human agent using the transfer_to_human function if any of these occur:
 ${this.settings.handoff.triggers.map((t) => `- ${t}`).join("\n")}
 Say: "That's a great point. Let me connect you with one of our specialists who can better assist you."`
       : "";
 
-    const prompt = `${personaIntro}
+    const basePrompt = `${personaIntro}
 
 VOICE & TONE:
 - Speak naturally and conversationally
@@ -208,57 +306,39 @@ ${objectionHandling}
 
 ${handoffInstructions}
 
+FUNCTION CALLING:
+- Use submit_disposition when the call concludes to record the outcome
+- Use schedule_callback if the prospect wants to talk at a specific time
+- Use transfer_to_human if handoff conditions are met
+- Use log_key_info to capture important details shared by the prospect
+
 IMPORTANT:
 - Always identify yourself at the start
 - Be truthful and don't make claims you can't back up
 - If you don't understand something, ask for clarification
 - Log any key information the prospect shares for follow-up`;
+
     return ensureVoiceAgentControlLayer(
-      `${prompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
+      `${basePrompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
     );
-
-    // Build complete prompt with organization context from database
-    const basePrompt = `${personaIntro}
-
-  VOICE & TONE:
-  - Speak naturally and conversationally
-  - Be professional but warm and friendly
-  - Listen carefully and respond appropriately
-  - Keep responses concise (1-3 sentences typically)
-  - Don't be pushy or aggressive
-  - If the prospect says they're not interested, respect that gracefully
-
-  ${gatekeeperInstructions}
-
-  ${pitchInstructions}
-
-  ${objectionHandling}
-
-  ${handoffInstructions}
-
-  IMPORTANT:
-  - Always identify yourself at the start
-  - Be truthful and don't make claims you can't back up
-  - If you don't understand something, ask for clarification
-  - Log any key information the prospect shares for follow-up`;
-
-    // Wrap with organization context from database (includes compliance, policies, voice defaults)
-    return await buildAgentSystemPrompt(basePrompt);
   }
 
   async startConversation(): Promise<void> {
-    this.emit("conversation:started", this.callId);
-    this.emit("conversation:phase", "opening");
-  }
-
-  async processIncomingAudio(audioBuffer: Buffer): Promise<Buffer | null> {
-    return null;
+    try {
+      this.systemPrompt = await this.buildSystemPrompt();
+      this.emit("conversation:started", this.callId);
+      this.emit("conversation:phase", "opening");
+    } catch (error) {
+      this.emit("error", error as Error);
+      throw error;
+    }
   }
 
   async generateResponse(humanText: string): Promise<string> {
-    this.conversationHistory.push({ role: "human", text: humanText });
+    this.conversationHistory.push({ role: "user", content: humanText });
     this.emit("transcript:human", humanText);
 
+    // Detect gatekeeper
     const isGatekeeper = this.detectGatekeeper(humanText);
     if (isGatekeeper && this.currentPhase === "opening") {
       this.currentPhase = "gatekeeper";
@@ -266,6 +346,7 @@ IMPORTANT:
       this.emit("conversation:phase", "gatekeeper");
     }
 
+    // Check for handoff triggers
     const shouldHandoff = this.checkHandoffTriggers(humanText);
     if (shouldHandoff) {
       this.currentPhase = "handoff";
@@ -275,31 +356,81 @@ IMPORTANT:
     }
 
     try {
-        const systemPrompt = await this.buildSystemPrompt();
-      
-      const response = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...this.conversationHistory.map((m) => ({
-            role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
-            content: m.text,
-          })),
-        ],
-        max_tokens: 200,
-        temperature: 0.7,
-      });
+      // Generate response with function calling support
+      const result = await generateWithFunctions(
+        this.systemPrompt,
+        humanText,
+        AGENT_FUNCTIONS,
+        {
+          temperature: 0.7,
+          maxTokens: 300,
+        }
+      );
 
-      const aiResponse = response.choices[0]?.message?.content || "";
-      this.conversationHistory.push({ role: "ai", text: aiResponse });
+      // Handle function calls
+      for (const fc of result.functionCalls) {
+        this.emit("function:called", fc.name, fc.args);
+        await this.handleFunctionCall(fc.name, fc.args);
+      }
+
+      const aiResponse = result.text || "";
+      this.conversationHistory.push({ role: "model", content: aiResponse });
       this.emit("transcript:ai", aiResponse);
 
+      // Update phase based on conversation
       this.updatePhaseFromResponse(humanText, aiResponse);
 
       return aiResponse;
     } catch (error) {
       this.emit("error", error as Error);
       throw error;
+    }
+  }
+
+  async *generateStreamingResponse(humanText: string): AsyncGenerator<string> {
+    this.conversationHistory.push({ role: "user", content: humanText });
+    this.emit("transcript:human", humanText);
+
+    try {
+      let fullResponse = "";
+
+      for await (const chunk of streamChat(this.systemPrompt, this.conversationHistory, {
+        temperature: 0.7,
+        maxTokens: 300,
+      })) {
+        fullResponse += chunk;
+        yield chunk;
+      }
+
+      this.conversationHistory.push({ role: "model", content: fullResponse });
+      this.emit("transcript:ai", fullResponse);
+    } catch (error) {
+      this.emit("error", error as Error);
+      throw error;
+    }
+  }
+
+  private async handleFunctionCall(name: string, args: Record<string, any>): Promise<void> {
+    switch (name) {
+      case "submit_disposition":
+        console.log(`[VertexVoiceAgent] Disposition submitted: ${args.disposition}`);
+        break;
+
+      case "schedule_callback":
+        console.log(`[VertexVoiceAgent] Callback scheduled: ${args.dateTime}`);
+        break;
+
+      case "transfer_to_human":
+        console.log(`[VertexVoiceAgent] Transfer requested: ${args.reason}`);
+        this.currentPhase = "handoff";
+        this.emit("conversation:phase", "handoff");
+        this.emit("handoff:triggered", args.reason);
+        break;
+
+      case "log_key_info":
+        console.log(`[VertexVoiceAgent] Info logged: ${args.infoType} - ${args.details}`);
+        this.loggedInfo.push({ infoType: args.infoType, details: args.details });
+        break;
     }
   }
 
@@ -373,7 +504,6 @@ IMPORTANT:
         "annoyed",
         "frustrated",
       ],
-      decision_maker_reached: [],
     };
 
     for (const trigger of this.settings.handoff.triggers) {
@@ -422,36 +552,31 @@ IMPORTANT:
     }
   }
 
-  async endConversation(disposition: string): Promise<{ summary: string; transcript: string }> {
+  async endConversation(disposition?: string): Promise<{ summary: string; transcript: string; disposition: string }> {
     const transcript = this.conversationHistory
-      .map((m) => `${m.role === "ai" ? "AI" : "Prospect"}: ${m.text}`)
+      .map((m) => `${m.role === "model" ? "Agent" : "Prospect"}: ${m.content}`)
       .join("\n");
 
-    let summary = "";
-    try {
-      const summaryResponse = await getOpenAI().chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Summarize this sales call in 2-3 sentences. Include: who was reached, main outcome, and any follow-up actions needed.",
-          },
-          {
-            role: "user",
-            content: transcript,
-          },
-        ],
-        max_tokens: 150,
+    // Auto-determine disposition if not provided
+    let finalDisposition = disposition;
+    if (!finalDisposition) {
+      const dispositionResult = await determineDisposition(transcript, {
+        contactName: `${this.context.contactFirstName} ${this.context.contactLastName}`,
+        companyName: this.context.companyName,
       });
-      summary = summaryResponse.choices[0]?.message?.content || "Call completed.";
-    } catch {
-      summary = `Call ended with disposition: ${disposition}`;
+      finalDisposition = dispositionResult.disposition;
     }
 
-    this.emit("call:completed", disposition, summary);
+    // Generate summary
+    const summary = await summarizeCall(transcript, {
+      contactName: `${this.context.contactFirstName} ${this.context.contactLastName}`,
+      companyName: this.context.companyName,
+      disposition: finalDisposition,
+    });
 
-    return { summary, transcript };
+    this.emit("call:completed", finalDisposition, summary);
+
+    return { summary, transcript, disposition: finalDisposition };
   }
 
   getCallId(): string {
@@ -470,11 +595,25 @@ IMPORTANT:
     return this.gatekeeperAttempts;
   }
 
-  getVoiceSetting(): string {
-    return this.settings.persona.voice || "alloy";
+  getLoggedInfo(): { infoType: string; details: string }[] {
+    return this.loggedInfo;
+  }
+
+  getConversationHistory(): ChatMessage[] {
+    return this.conversationHistory;
   }
 }
 
-export function createAiVoiceAgent(settings: AiAgentSettings, context: CallContext): AiVoiceAgent {
-  return new AiVoiceAgent(settings, context);
+// ==================== FACTORY FUNCTION ====================
+
+export function createVertexVoiceAgent(
+  settings: VertexAgentSettings,
+  context: VertexCallContext
+): VertexVoiceAgent {
+  return new VertexVoiceAgent(settings, context);
 }
+
+export default {
+  VertexVoiceAgent,
+  createVertexVoiceAgent,
+};
