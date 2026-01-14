@@ -139,6 +139,10 @@ export class TelnyxAiBridge extends EventEmitter {
   private telnyxApiKey: string;
   private webhookUrl: string;
   
+  // Track client_state by call_control_id for AMD webhook lookups
+  // AMD webhook fires before WebSocket connection, so we need to track state separately
+  private callStateByControlId: Map<string, any> = new Map();
+  
   // Concurrency control - max 10 concurrent calls for AI agents
   private readonly MAX_CONCURRENT_CALLS = 10;
   private semaphore: Semaphore;
@@ -157,6 +161,11 @@ export class TelnyxAiBridge extends EventEmitter {
     this.telnyxApiKey = process.env.TELNYX_API_KEY || "";
     this.webhookUrl = process.env.TELNYX_WEBHOOK_URL || "";
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
+  }
+  
+  // Get client state for a call by control ID (for AMD webhook processing)
+  getClientStateByControlId(callControlId: string): any | null {
+    return this.callStateByControlId.get(callControlId) || null;
   }
   
   // Get cached audio by ID (for serving to Telnyx)
@@ -291,9 +300,11 @@ export class TelnyxAiBridge extends EventEmitter {
     });
 
     try {
-      // For TeXML outbound calls, prioritize TeXML App ID
-      const connectionId = process.env.TELNYX_TEXML_APP_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
-
+      // For TeXML outbound calls, prioritize TeXML App ID but fall back to Call Control App ID
+      // Note: TeXML requires a TeXML Application ID created in Telnyx Portal
+      const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
+      const callControlAppId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+      
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
       const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || this.webhookUrl.replace('https://', '').replace('http://', '');
       const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
@@ -322,27 +333,84 @@ export class TelnyxAiBridge extends EventEmitter {
       };
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
-      console.log(`[TelnyxAiBridge] Initiating TeXML call with:
-  - TeXML URL: ${texmlUrl}
-  - Connection ID: ${connectionId}
+      let response: Response;
+      let useTexml = !!texmlAppId;
+      
+      if (useTexml) {
+        // Build TeXML URL with client_state in query params (like test calls)
+        const texmlUrlWithState = `${texmlUrl}?client_state=${encodeURIComponent(clientStateB64)}`;
+        
+        console.log(`[TelnyxAiBridge] Initiating TeXML call with:
+  - TeXML URL: ${texmlUrlWithState}
+  - TeXML App ID: ${texmlAppId}
   - From: ${fromNumber}
   - To: ${phoneNumber}
   - Provider: ${provider}`);
 
-      const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          texml_application_id: connectionId, // Correct parameter for texml_calls endpoint
-          to: phoneNumber,
-          from: fromNumber,
-          url: texmlUrl,
-          client_state: clientStateB64,
-        }),
-      });
+        // Use the path-based TeXML endpoint (same as test calls)
+        // POST /v2/texml/calls/{application_id}
+        response = await fetch(`https://api.telnyx.com/v2/texml/calls/${texmlAppId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.telnyxApiKey}`,
+          },
+          body: JSON.stringify({
+            To: phoneNumber,
+            From: fromNumber,
+            Url: texmlUrlWithState,
+            StatusCallback: `https://${webhookHost}/api/webhooks/telnyx`,
+            // Include client_state so AMD webhook receives call context
+            ClientState: clientStateB64,
+          }),
+        });
+        
+        // If TeXML app doesn't exist (404), fall back to Call Control API
+        if (response.status === 404) {
+          console.warn(`[TelnyxAiBridge] TeXML App ID ${texmlAppId} not found, falling back to Call Control API`);
+          useTexml = false;
+        }
+      }
+      
+      // Fallback to Call Control API if TeXML not available or failed
+      if (!useTexml) {
+        if (!callControlAppId) {
+          throw new Error("No Telnyx Call Control App ID configured. Set TELNYX_CALL_CONTROL_APP_ID or TELNYX_TEXML_APP_ID");
+        }
+        
+        console.log(`[TelnyxAiBridge] Initiating Call Control call with:
+  - Connection ID: ${callControlAppId}
+  - From: ${fromNumber}
+  - To: ${phoneNumber}
+  - Provider: ${provider}`);
+        
+        response = await fetch("https://api.telnyx.com/v2/calls", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.telnyxApiKey}`,
+          },
+          body: JSON.stringify({
+            connection_id: callControlAppId,
+            to: phoneNumber,
+            from: fromNumber,
+            client_state: clientStateB64,
+            webhook_url: `https://${webhookHost}/api/webhooks/telnyx`,
+            // Enable AMD (Answering Machine Detection)
+            answering_machine_detection: "detect_words",
+            answering_machine_detection_config: {
+              // Detect after machine beep message ends
+              after_greeting_silence_millis: 1200,
+              // Wait for machine to finish speaking
+              total_analysis_time_millis: 30000,
+              // Minimum speech for machine detection
+              initial_silence_timeout_millis: 5000,
+              // Speech threshold for machine
+              greeting_total_analysis_time_millis: 3500,
+            },
+          }),
+        });
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -350,9 +418,19 @@ export class TelnyxAiBridge extends EventEmitter {
       }
 
       const result = await response.json();
-      const callControlId = result.data.call_control_id;
-      const callSessionId = result.data.call_session_id;
+      // TeXML path-based endpoint returns CallSid, Call Control returns data.call_control_id
+      const callControlId = result.data?.call_control_id || result.CallSid || result.call_sid;
+      const callSessionId = result.data?.call_session_id || result.CallSessionId || result.call_session_id || callControlId;
 
+      if (!callControlId) {
+        console.error(`[TelnyxAiBridge] Missing call ID in response:`, JSON.stringify(result));
+        throw new Error(`Telnyx API returned no call ID: ${JSON.stringify(result)}`);
+      }
+
+      // Store client state by call_control_id for AMD webhook lookups
+      // AMD webhook fires before WebSocket connection, so we need this mapping
+      this.callStateByControlId.set(callControlId, customParams);
+      
       this.activeCalls.set(callId, {
         callControlId,
         callSessionId,

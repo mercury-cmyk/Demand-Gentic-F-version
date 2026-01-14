@@ -7,6 +7,7 @@ import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
+import { generateTotpSecret, verifyTotpToken, verifyBackupCode, generateBackupCodes } from "./totp-mfa";
 import webhooksRouter from "./routes/webhooks";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
@@ -62,10 +63,14 @@ import aiOperatorRouter from './routes/ai-operator';
 import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
+import problemIntelligenceRouter from './routes/problem-intelligence-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import previewStudioRouter from './routes/preview-studio';
 import healthRouter from './routes/health';
 import vertexAiRouter from './routes/vertex-ai';
+import knowledgeBlocksRouter from './routes/knowledge-blocks';
+import agentPromptVisibilityRouter from './routes/agent-prompt-visibility-routes';
+import superOrganizationRouter from './routes/super-organization-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -87,7 +92,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/s3";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, type InsertMailboxAccount } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -918,6 +923,16 @@ export function registerRoutes(app: Express) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
+      // Check if user has TOTP MFA enabled
+      if (user.mfaEnabled && user.totpSecret) {
+        console.log('[LOGIN DEBUG] TOTP MFA enabled for user');
+        return res.json({
+          requiresMFA: true,
+          mfaType: 'totp',
+          message: "Please enter your authentication code"
+        });
+      }
+
       // Fetch user roles (multi-role support)
       let userRoles = await storage.getUserRoles(user.id);
 
@@ -953,6 +968,258 @@ export function registerRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
+    }
+  });
+
+  // TOTP MFA Verification Endpoint
+  app.post("/api/auth/mfa/verify", authLimiter, async (req, res) => {
+    try {
+      const { username, password, token, useBackupCode } = req.body;
+
+      if (!username || !password || !token) {
+        return res.status(400).json({ message: "Username, password, and token required" });
+      }
+
+      // Verify user credentials first
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isValidPassword = await comparePassword(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // Check if MFA is enabled
+      if (!user.mfaEnabled || !user.totpSecret) {
+        return res.status(400).json({ message: "MFA is not enabled for this account" });
+      }
+
+      let isValidToken = false;
+
+      if (useBackupCode) {
+        // Verify backup code
+        const usedCodes = (user.usedBackupCodes as string[]) || [];
+        const backupCodes = (user.backupCodes as string[]) || [];
+        isValidToken = verifyBackupCode(usedCodes, backupCodes, token);
+
+        if (isValidToken) {
+          // Mark backup code as used
+          await storage.updateUser(user.id, {
+            usedBackupCodes: [...usedCodes, token.toUpperCase().trim()],
+          });
+        }
+      } else {
+        // Verify TOTP token
+        isValidToken = verifyTotpToken(user.totpSecret, token);
+      }
+
+      if (!isValidToken) {
+        return res.status(401).json({ message: "Invalid authentication code" });
+      }
+
+      // Fetch user roles
+      let userRoles = await storage.getUserRoles(user.id);
+
+      if (userRoles.length === 0) {
+        const allUsersWithRoles = await storage.getAllUsersWithRoles();
+        const hasAdmin = allUsersWithRoles.some(u => u.roles.includes('admin'));
+
+        if (!hasAdmin) {
+          await storage.assignUserRole(user.id, 'admin', user.id);
+          userRoles = ['admin'];
+        } else {
+          userRoles = [user.role || 'agent'];
+        }
+      }
+
+      if (!Array.isArray(userRoles)) {
+        userRoles = [userRoles];
+      }
+
+      // Generate JWT token
+      const jwtToken = generateToken(user, userRoles);
+
+      const { password: _, totpSecret: __, backupCodes: ___, usedBackupCodes: ____, ...userWithoutSensitive } = user;
+      res.json({
+        token: jwtToken,
+        user: { ...userWithoutSensitive, roles: userRoles }
+      });
+    } catch (error) {
+      console.error('[MFA VERIFY] Error:', error);
+      res.status(500).json({ message: "MFA verification failed" });
+    }
+  });
+
+  // Enroll in TOTP MFA
+  app.post("/api/auth/mfa/enroll", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.mfaEnabled) {
+        return res.status(400).json({ message: "MFA is already enabled" });
+      }
+
+      // Generate TOTP secret and QR code
+      const { secret, qrCode, backupCodes } = await generateTotpSecret(user.username);
+
+      // Store encrypted secret (in production, encrypt this!)
+      await storage.updateUser(userId, {
+        totpSecret: secret,
+        backupCodes: backupCodes,
+        usedBackupCodes: [],
+      });
+
+      res.json({
+        qrCode,
+        secret,
+        backupCodes,
+        message: "Scan the QR code with Google Authenticator or enter the secret manually"
+      });
+    } catch (error) {
+      console.error('[MFA ENROLL] Error:', error);
+      res.status(500).json({ message: "Failed to enroll in MFA" });
+    }
+  });
+
+  // Confirm TOTP MFA enrollment
+  app.post("/api/auth/mfa/confirm", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({ message: "Verification token required" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user || !user.totpSecret) {
+        return res.status(400).json({ message: "MFA enrollment not initiated" });
+      }
+
+      // Verify the token
+      const isValid = verifyTotpToken(user.totpSecret, token);
+      if (!isValid) {
+        return res.status(401).json({ message: "Invalid verification code" });
+      }
+
+      // Enable MFA
+      await storage.updateUser(userId, {
+        mfaEnabled: true,
+        mfaEnrolledAt: new Date(),
+      });
+
+      res.json({ message: "MFA enabled successfully" });
+    } catch (error) {
+      console.error('[MFA CONFIRM] Error:', error);
+      res.status(500).json({ message: "Failed to confirm MFA enrollment" });
+    }
+  });
+
+  // Disable TOTP MFA
+  app.post("/api/auth/mfa/disable", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const { password } = req.body;
+
+      if (!password) {
+        return res.status(400).json({ message: "Password required to disable MFA" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Verify password
+      const isValid = await comparePassword(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({ message: "Invalid password" });
+      }
+
+      // Disable MFA
+      await storage.updateUser(userId, {
+        mfaEnabled: false,
+        totpSecret: null,
+        backupCodes: null,
+        usedBackupCodes: null,
+        mfaEnrolledAt: null,
+      });
+
+      res.json({ message: "MFA disabled successfully" });
+    } catch (error) {
+      console.error('[MFA DISABLE] Error:', error);
+      res.status(500).json({ message: "Failed to disable MFA" });
+    }
+  });
+
+  // Regenerate backup codes
+  app.post("/api/auth/mfa/regenerate-codes", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const { password } = req.body;
+
+      if (!password) {
+        return res.status(400).json({ message: "Password required" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (!user.mfaEnabled) {
+        return res.status(400).json({ message: "MFA is not enabled" });
+      }
+
+      // Verify password
+      const isValid = await comparePassword(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({ message: "Invalid password" });
+      }
+
+      // Generate new backup codes
+      const newBackupCodes = generateBackupCodes();
+
+      await storage.updateUser(userId, {
+        backupCodes: newBackupCodes,
+        usedBackupCodes: [],
+      });
+
+      res.json({ 
+        backupCodes: newBackupCodes,
+        message: "Backup codes regenerated successfully"
+      });
+    } catch (error) {
+      console.error('[MFA REGENERATE] Error:', error);
+      res.status(500).json({ message: "Failed to regenerate backup codes" });
+    }
+  });
+
+  // Get MFA status
+  app.get("/api/auth/mfa/status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({
+        mfaEnabled: user.mfaEnabled || false,
+        mfaEnrolledAt: user.mfaEnrolledAt,
+        hasBackupCodes: !!(user.backupCodes && Array.isArray(user.backupCodes) && user.backupCodes.length > 0),
+      });
+    } catch (error) {
+      console.error('[MFA STATUS] Error:', error);
+      res.status(500).json({ message: "Failed to get MFA status" });
     }
   });
 
@@ -4356,13 +4623,17 @@ export function registerRoutes(app: Express) {
       const typeFilter = req.query.type as string | undefined;
       let campaigns = await storage.getCampaigns();
 
+      console.log(`[GET /api/campaigns] Found ${campaigns.length} campaigns in database${typeFilter ? ` (filtering by type: ${typeFilter})` : ''}`);
+
       // Filter by type if specified
       if (typeFilter) {
         campaigns = campaigns.filter(c => c.type === typeFilter);
+        console.log(`[GET /api/campaigns] After filter: ${campaigns.length} campaigns`);
       }
 
       res.json(campaigns);
     } catch (error) {
+      console.error('[GET /api/campaigns] ERROR:', error);
       res.status(500).json({ message: "Failed to fetch campaigns" });
     }
   });
@@ -6145,6 +6416,134 @@ export function registerRoutes(app: Express) {
       console.error("[CALL HANGUP] Error:", error);
       res.status(500).json({
         message: "Failed to hang up call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Send DTMF tones during a call via Telnyx Call Control
+  app.post("/api/calls/dtmf", requireAuth, async (req, res) => {
+    try {
+      const { callControlId, digit } = req.body as { callControlId?: string; digit?: string };
+      if (!callControlId || typeof callControlId !== "string") {
+        return res.status(400).json({ message: "Missing required field: callControlId" });
+      }
+      if (!digit || typeof digit !== "string" || !/^[0-9*#]+$/.test(digit)) {
+        return res.status(400).json({ message: "Invalid DTMF digit(s)" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/send_dtmf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({ digits: digit }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL DTMF] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to send DTMF",
+          status: response.status,
+        });
+      }
+
+      res.json({ success: true, digit });
+    } catch (error) {
+      console.error("[CALL DTMF] Error:", error);
+      res.status(500).json({
+        message: "Failed to send DTMF",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Mute call via Telnyx Call Control
+  app.post("/api/calls/mute", requireAuth, async (req, res) => {
+    try {
+      const { callControlId } = req.body as { callControlId?: string };
+      if (!callControlId || typeof callControlId !== "string") {
+        return res.status(400).json({ message: "Missing required field: callControlId" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      // Telnyx uses client_mute_on action to mute the agent's microphone
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/client_mute_on`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL MUTE] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to mute call",
+          status: response.status,
+        });
+      }
+
+      res.json({ success: true, muted: true });
+    } catch (error) {
+      console.error("[CALL MUTE] Error:", error);
+      res.status(500).json({
+        message: "Failed to mute call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Unmute call via Telnyx Call Control
+  app.post("/api/calls/unmute", requireAuth, async (req, res) => {
+    try {
+      const { callControlId } = req.body as { callControlId?: string };
+      if (!callControlId || typeof callControlId !== "string") {
+        return res.status(400).json({ message: "Missing required field: callControlId" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      // Telnyx uses client_mute_off action to unmute the agent's microphone
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/client_mute_off`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL UNMUTE] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to unmute call",
+          status: response.status,
+        });
+      }
+
+      res.json({ success: true, muted: false });
+    } catch (error) {
+      console.error("[CALL UNMUTE] Error:", error);
+      res.status(500).json({
+        message: "Failed to unmute call",
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -8094,6 +8493,225 @@ export function registerRoutes(app: Express) {
   });
 
   // ==================== LEADS & QA ====================
+
+  // Unified QA Conversations endpoint - fetches ALL interactions (calls, test calls, emails)
+  app.get("/api/qa/conversations", requireAuth, async (req, res) => {
+    try {
+      const { campaignId, type, status, search, limit = '100', offset = '0' } = req.query;
+      const limitNum = Math.min(parseInt(limit as string) || 100, 500);
+      const offsetNum = parseInt(offset as string) || 0;
+
+      const conversations: any[] = [];
+
+      // 1. Fetch Call Sessions with transcripts
+      let callSessionsQuery = db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          status: callSessions.status,
+          agentType: callSessions.agentType,
+          startedAt: callSessions.startedAt,
+          endedAt: callSessions.endedAt,
+          durationSec: callSessions.durationSec,
+          aiTranscript: callSessions.aiTranscript,
+          aiAnalysis: callSessions.aiAnalysis,
+          aiDisposition: callSessions.aiDisposition,
+          recordingUrl: callSessions.recordingUrl,
+          createdAt: callSessions.createdAt,
+          campaignName: campaigns.name,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          contactEmail: contacts.email,
+          companyName: accounts.name,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .orderBy(desc(callSessions.createdAt))
+        .limit(limitNum);
+
+      if (campaignId && campaignId !== 'all') {
+        callSessionsQuery = callSessionsQuery.where(eq(callSessions.campaignId, campaignId as string)) as any;
+      }
+
+      const callSessionsData = await callSessionsQuery;
+
+      for (const session of callSessionsData) {
+        conversations.push({
+          id: session.id,
+          type: 'call',
+          source: 'call_session',
+          campaignId: session.campaignId,
+          campaignName: session.campaignName || 'Unknown Campaign',
+          contactId: session.contactId,
+          contactName: `${session.contactFirstName || ''} ${session.contactLastName || ''}`.trim() || 'Unknown',
+          companyName: session.companyName || 'Unknown',
+          status: session.status,
+          disposition: session.aiDisposition,
+          agentType: session.agentType,
+          duration: session.durationSec,
+          transcript: session.aiTranscript,
+          analysis: session.aiAnalysis,
+          recordingUrl: session.recordingUrl,
+          createdAt: session.createdAt,
+          isTestCall: false,
+        });
+      }
+
+      // 2. Fetch Test Calls with transcripts
+      let testCallsQuery = db
+        .select({
+          id: campaignTestCalls.id,
+          campaignId: campaignTestCalls.campaignId,
+          virtualAgentId: campaignTestCalls.virtualAgentId,
+          testPhoneNumber: campaignTestCalls.testPhoneNumber,
+          testContactName: campaignTestCalls.testContactName,
+          testCompanyName: campaignTestCalls.testCompanyName,
+          status: campaignTestCalls.status,
+          disposition: campaignTestCalls.disposition,
+          durationSeconds: campaignTestCalls.durationSeconds,
+          fullTranscript: campaignTestCalls.fullTranscript,
+          transcriptTurns: campaignTestCalls.transcriptTurns,
+          aiPerformanceMetrics: campaignTestCalls.aiPerformanceMetrics,
+          detectedIssues: campaignTestCalls.detectedIssues,
+          callSummary: campaignTestCalls.callSummary,
+          testResult: campaignTestCalls.testResult,
+          recordingUrl: campaignTestCalls.recordingUrl,
+          createdAt: campaignTestCalls.createdAt,
+          campaignName: campaigns.name,
+          agentName: virtualAgents.name,
+        })
+        .from(campaignTestCalls)
+        .leftJoin(campaigns, eq(campaignTestCalls.campaignId, campaigns.id))
+        .leftJoin(virtualAgents, eq(campaignTestCalls.virtualAgentId, virtualAgents.id))
+        .orderBy(desc(campaignTestCalls.createdAt))
+        .limit(limitNum);
+
+      if (campaignId && campaignId !== 'all') {
+        testCallsQuery = testCallsQuery.where(eq(campaignTestCalls.campaignId, campaignId as string)) as any;
+      }
+
+      const testCallsData = await testCallsQuery;
+
+      for (const testCall of testCallsData) {
+        conversations.push({
+          id: testCall.id,
+          type: 'call',
+          source: 'test_call',
+          campaignId: testCall.campaignId,
+          campaignName: testCall.campaignName || 'Unknown Campaign',
+          contactName: testCall.testContactName || 'Test Contact',
+          companyName: testCall.testCompanyName || 'Test Company',
+          status: testCall.status,
+          disposition: testCall.disposition,
+          agentType: 'ai',
+          agentName: testCall.agentName,
+          duration: testCall.durationSeconds,
+          transcript: testCall.fullTranscript,
+          transcriptTurns: testCall.transcriptTurns,
+          analysis: testCall.aiPerformanceMetrics,
+          detectedIssues: testCall.detectedIssues,
+          callSummary: testCall.callSummary,
+          testResult: testCall.testResult,
+          recordingUrl: testCall.recordingUrl,
+          createdAt: testCall.createdAt,
+          isTestCall: true,
+        });
+      }
+
+      // 3. Fetch Email Sends (for email interactions)
+      if (!type || type === 'all' || type === 'email') {
+        let emailsQuery = db
+          .select({
+            id: emailSends.id,
+            campaignId: emailSends.campaignId,
+            contactId: emailSends.contactId,
+            status: emailSends.status,
+            sentAt: emailSends.sentAt,
+            createdAt: emailSends.createdAt,
+            campaignName: campaigns.name,
+            contactFirstName: contacts.firstName,
+            contactLastName: contacts.lastName,
+            contactEmail: contacts.email,
+            companyName: accounts.name,
+          })
+          .from(emailSends)
+          .leftJoin(campaigns, eq(emailSends.campaignId, campaigns.id))
+          .leftJoin(contacts, eq(emailSends.contactId, contacts.id))
+          .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+          .orderBy(desc(emailSends.createdAt))
+          .limit(limitNum);
+
+        if (campaignId && campaignId !== 'all') {
+          emailsQuery = emailsQuery.where(eq(emailSends.campaignId, campaignId as string)) as any;
+        }
+
+        const emailsData = await emailsQuery;
+
+        for (const email of emailsData) {
+          conversations.push({
+            id: email.id,
+            type: 'email',
+            source: 'email_send',
+            campaignId: email.campaignId,
+            campaignName: email.campaignName || 'Unknown Campaign',
+            contactId: email.contactId,
+            contactName: `${email.contactFirstName || ''} ${email.contactLastName || ''}`.trim() || 'Unknown',
+            contactEmail: email.contactEmail,
+            companyName: email.companyName || 'Unknown',
+            status: email.status,
+            createdAt: email.createdAt,
+            sentAt: email.sentAt,
+            isTestCall: false,
+          });
+        }
+      }
+
+      // Sort all conversations by createdAt descending
+      conversations.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      // Apply search filter if provided
+      let filtered = conversations;
+      if (search) {
+        const searchLower = (search as string).toLowerCase();
+        filtered = conversations.filter(c =>
+          c.contactName?.toLowerCase().includes(searchLower) ||
+          c.companyName?.toLowerCase().includes(searchLower) ||
+          c.campaignName?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Apply type filter
+      if (type && type !== 'all') {
+        filtered = filtered.filter(c => c.type === type);
+      }
+
+      // Apply pagination
+      const paginated = filtered.slice(offsetNum, offsetNum + limitNum);
+
+      // Calculate stats
+      const stats = {
+        total: filtered.length,
+        calls: filtered.filter(c => c.type === 'call').length,
+        emails: filtered.filter(c => c.type === 'email').length,
+        testCalls: filtered.filter(c => c.isTestCall).length,
+        withTranscripts: filtered.filter(c => c.transcript || c.transcriptTurns).length,
+      };
+
+      res.json({
+        conversations: paginated,
+        stats,
+        total: filtered.length,
+        limit: limitNum,
+        offset: offsetNum,
+      });
+    } catch (error) {
+      console.error('[QA Conversations] Error:', error);
+      res.status(500).json({ message: 'Failed to fetch QA conversations' });
+    }
+  });
 
   app.get("/api/leads", requireAuth, async (req, res) => {
     // Disable HTTP caching to ensure fresh data for all users
@@ -12597,6 +13215,10 @@ Provide JSON response with:
   // Voice Agent OI Modes: use_existing | fresh_research | none
   app.use("/api/org-intelligence-injection", orgIntelligenceInjectionRouter);
 
+  // ==================== PROBLEM INTELLIGENCE SYSTEM ====================
+  // Service Catalog, Problem Framework, Campaign Problem Intelligence
+  app.use("/api", problemIntelligenceRouter);
+
   // ==================== DIALER RUNS (Manual/PowerDialer) ====================
 
   app.use("/api/dialer-runs", dialerRunsRouter);
@@ -12604,6 +13226,16 @@ Provide JSON response with:
   // ==================== PREVIEW STUDIO ====================
   // Preview and test campaign content (emails, call plans, live simulation)
   app.use("/api/preview-studio", previewStudioRouter);
+
+  // ==================== KNOWLEDGE BLOCKS ====================
+  // Modular, versioned agent knowledge management
+  app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
+  app.use("/api/agent-prompts", agentPromptVisibilityRouter);
+
+  // ==================== SUPER ORGANIZATION ====================
+  // Platform owner organization (Pivotal B2B) management
+  // Only accessible by organization owners
+  app.use("/api/super-org", superOrganizationRouter);
 
   // ==================== QUEUE MANAGEMENT ====================
 

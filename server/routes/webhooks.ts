@@ -209,6 +209,16 @@ router.post("/telnyx", async (req, res) => {
     const eventType = eventData.event_type || req.body.event_type;
     const payload = eventData.payload || eventData;
     
+    // Handle Cost/Billing events (no event_type)
+    if (!eventType && payload.CallbackSource === 'call-cost-events') {
+      return res.json({ status: "ignored", reason: "cost_event" });
+    }
+
+    if (!eventType) {
+      console.log(`[Telnyx Webhook] Received payload without event_type:`, JSON.stringify(payload).substring(0, 200));
+      return res.json({ status: "ignored", reason: "missing_event_type" });
+    }
+
     console.log(`[Telnyx Webhook] Processing event: ${eventType}`);
 
     // Import AI bridge for handling AI call events
@@ -231,7 +241,7 @@ router.post("/telnyx", async (req, res) => {
         }
         
         // TeXML calls handle streaming automatically via <Stream bidirectionalMode="rtp" />
-        // No need to call streaming_start - just log the event
+        // The TeXML endpoint returns XML with <Stream> directive that auto-connects to WebSocket
         if (clientState?.provider === 'openai_realtime') {
           console.log(`[Telnyx Webhook] OpenAI Realtime TeXML call answered: ${payload.call_control_id}`);
           console.log(`[Telnyx Webhook] Streaming handled automatically by TeXML <Stream> verb`);
@@ -259,12 +269,15 @@ router.post("/telnyx", async (req, res) => {
       case 'call.machine.detection.ended': {
         // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
         const amdResult = payload?.result || payload?.machine_detection_result;
-        console.log(`[Telnyx Webhook] Machine detection result: ${amdResult} for call ${payload.call_control_id}`);
+        const amdConfidence = payload?.confidence || payload?.machine_detection_confidence;
+        console.log(`[Telnyx Webhook] Machine detection result: ${amdResult} (confidence: ${amdConfidence}) for call ${payload.call_control_id}`);
         
-        if (amdResult === 'machine' || amdResult === 'voicemail') {
-          // Hang up immediately to avoid leaving voicemail
+        if (amdResult === 'machine' || amdResult === 'machine_end_beep' || amdResult === 'machine_end_silence' || amdResult === 'machine_end_other') {
+          // Machine/voicemail detected - hang up immediately and record disposition
           try {
             const telnyxApiKey = process.env.TELNYX_API_KEY;
+            
+            // Hang up immediately to avoid leaving voicemail
             await fetch(`https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/hangup`, {
               method: 'POST',
               headers: {
@@ -274,9 +287,56 @@ router.post("/telnyx", async (req, res) => {
               body: JSON.stringify({ client_state: payload?.client_state }),
             });
             console.log(`[Telnyx Webhook] Hung up machine-detected call ${payload.call_control_id}`);
+            
+            // Try to get client_state from webhook payload first
+            let clientStateData: any = null;
+            if (payload?.client_state) {
+              try {
+                clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+            
+            // Fallback: get client_state from bridge's state map if not in webhook
+            if (!clientStateData) {
+              clientStateData = bridge.getClientStateByControlId(payload.call_control_id);
+              if (clientStateData) {
+                console.log(`[Telnyx Webhook] Retrieved client state from bridge for call ${payload.call_control_id}`);
+              }
+            }
+            
+            // Record voicemail disposition
+            if (clientStateData?.queue_item_id) {
+              const { db } = await import('../db');
+              const { campaignQueue } = await import('@shared/schema');
+              const { eq } = await import('drizzle-orm');
+              
+              // Schedule retry in 3-7 days (random) - voicemail retry logic
+              const retryDays = 3 + Math.floor(Math.random() * 5);
+              const nextAttemptAt = new Date();
+              nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+              
+              await db.update(campaignQueue)
+                .set({
+                  status: 'queued',
+                  nextAttemptAt,
+                  agentId: null,
+                  virtualAgentId: null,
+                  lockExpiresAt: null,
+                  updatedAt: new Date()
+                })
+                .where(eq(campaignQueue.id, clientStateData.queue_item_id));
+              console.log(`[Telnyx Webhook] Voicemail detected - queue item ${clientStateData.queue_item_id} scheduled for retry on ${nextAttemptAt.toISOString()}`);
+            } else {
+              console.log(`[Telnyx Webhook] AMD detected machine but no queue_item_id available for disposition`);
+            }
           } catch (hangupErr) {
-            console.error(`[Telnyx Webhook] Failed to hang up machine-detected call:`, hangupErr);
+            console.error(`[Telnyx Webhook] Failed to process machine-detected call:`, hangupErr);
           }
+        } else if (amdResult === 'human' || amdResult === 'human_residence' || amdResult === 'human_business') {
+          console.log(`[Telnyx Webhook] Human detected for call ${payload.call_control_id} - continuing with AI conversation`);
+          // Human detected - the AI conversation will continue normally via the WebSocket stream
         }
         return res.json({ status: "ok", event_type: eventType, amd_result: amdResult });
       }

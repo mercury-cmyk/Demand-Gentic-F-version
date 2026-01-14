@@ -192,7 +192,40 @@ export default function AgentConsolePage() {
   const [isConnected] = useState(true); // Server is always "connected"
   const [callDuration, setCallDuration] = useState(0);
   const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Mute toggle (server-managed calls don't have client-side audio control)
+  const toggleMute = async () => {
+    if (!telnyxCallId) return;
+    try {
+      const action = isMuted ? 'unmute' : 'mute';
+      await apiRequest("POST", `/api/calls/${action}`, { callControlId: telnyxCallId });
+      setIsMuted(!isMuted);
+    } catch (error) {
+      console.error('[AGENT CONSOLE] Mute toggle failed:', error);
+      toast({
+        title: "Mute Failed",
+        description: error instanceof Error ? error.message : "Failed to toggle mute",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Send DTMF tones
+  const sendDTMF = async (digit: string) => {
+    if (!telnyxCallId) return;
+    try {
+      await apiRequest("POST", "/api/calls/dtmf", { callControlId: telnyxCallId, digit });
+    } catch (error) {
+      console.error('[AGENT CONSOLE] DTMF send failed:', error);
+      toast({
+        title: "DTMF Failed",
+        description: error instanceof Error ? error.message : "Failed to send DTMF",
+        variant: "destructive",
+      });
+    }
+  };
 
   // Format duration as MM:SS
   const formatDuration = () => {
@@ -250,11 +283,12 @@ export default function AgentConsolePage() {
   };
 
   // Fetch agent queue data
-  const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching } = useQuery<QueueItem[]>({
+  const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching, isPlaceholderData } = useQuery<QueueItem[]>({
     queryKey: selectedCampaignId 
       ? [`/api/agents/me/queue?campaignId=${selectedCampaignId}&status=queued`]
       : ['/api/agents/me/queue?status=queued'],
-    placeholderData: undefined, // Clear old queue data immediately when campaign changes
+    placeholderData: (previousData) => previousData, // Keep previous data during refetch to prevent UI flickering
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
 
   // Debug queue data
@@ -963,7 +997,32 @@ export default function AgentConsolePage() {
 
   const queueProgress = queueData.length > 0 ? ((currentContactIndex + 1) / queueData.length) * 100 : 0;
 
-  if (!queueData || queueData.length === 0) {
+  // Show loading state when initially loading (not during background refetch)
+  if (queueLoading && !queueData.length) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">Agent Console</h1>
+          {selectedCampaign && (
+            <p className="text-sm text-muted-foreground">
+              Campaign: {selectedCampaign.name}
+            </p>
+          )}
+        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center py-12">
+              <div className="animate-spin w-8 h-8 mx-auto border-4 border-primary border-t-transparent rounded-full mb-4" />
+              <p className="text-muted-foreground">Loading queue...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Only show empty state when not loading and queue is actually empty
+  if (!queueLoading && (!queueData || queueData.length === 0)) {
     return (
       <div className="container mx-auto p-6">
         <div className="mb-6">

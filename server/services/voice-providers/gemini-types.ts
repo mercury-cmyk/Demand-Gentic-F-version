@@ -365,7 +365,8 @@ export function getGeminiLiveEndpoint(config: GeminiLiveConfig): string {
     return `wss://${config.location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
   } else {
     // Google AI endpoint (consumer) - requires API key
-    return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${config.apiKey}`;
+    // Use v1beta as per https://ai.google.dev/api/live
+    return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${config.apiKey}`;
   }
 }
 
@@ -424,38 +425,45 @@ export function isGeminiError(message: any): message is GeminiError {
 
 // ==================== MESSAGE TYPE GUARDS ====================
 
-export function isSetupComplete(msg: GeminiServerMessage): msg is BidiGenerateContentSetupComplete {
-  return 'setup_complete' in msg;
+export function isSetupComplete(msg: any): msg is BidiGenerateContentSetupComplete {
+  return 'setup_complete' in msg || 'setupComplete' in msg;
 }
 
-export function isServerContent(msg: GeminiServerMessage): msg is BidiGenerateContentServerContent {
-  return 'server_content' in msg;
+export function isServerContent(msg: any): msg is BidiGenerateContentServerContent {
+  return 'server_content' in msg || 'serverContent' in msg;
 }
 
-export function isToolCall(msg: GeminiServerMessage): msg is BidiGenerateContentToolCall {
-  return 'tool_call' in msg;
+export function isToolCall(msg: any): msg is BidiGenerateContentToolCall {
+  return 'tool_call' in msg || 'toolCall' in msg;
 }
 
-export function isToolCallCancellation(msg: GeminiServerMessage): msg is BidiGenerateContentToolCallCancellation {
-  return 'tool_call_cancellation' in msg;
+export function isToolCallCancellation(msg: any): msg is BidiGenerateContentToolCallCancellation {
+  // Check for both snake_case and camelCase
+  return 'tool_call_cancellation' in msg || 'toolCallCancellation' in msg;
 }
 
-export function hasAudioPart(parts: GeminiContentPart[]): boolean {
-  return parts.some(part => 'inline_data' in part && part.inline_data.mime_type.startsWith('audio/'));
+export function hasAudioPart(parts: any[]): boolean {
+  return parts.some(part => 
+    ('inline_data' in part && part.inline_data.mime_type.startsWith('audio/')) ||
+    ('inlineData' in part && part.inlineData.mimeType.startsWith('audio/'))
+  );
 }
 
-export function hasTextPart(parts: GeminiContentPart[]): boolean {
+export function hasTextPart(parts: any[]): boolean {
   return parts.some(part => 'text' in part);
 }
 
-export function hasFunctionCall(parts: GeminiContentPart[]): boolean {
-  return parts.some(part => 'function_call' in part);
+export function hasFunctionCall(parts: any[]): boolean {
+  return parts.some(part => 'function_call' in part || 'functionCall' in part);
 }
 
-export function extractAudioData(parts: GeminiContentPart[]): string | null {
+export function extractAudioData(parts: any[]): string | null {
   for (const part of parts) {
     if ('inline_data' in part && part.inline_data.mime_type.startsWith('audio/')) {
       return part.inline_data.data;
+    }
+    if ('inlineData' in part && part.inlineData.mimeType.startsWith('audio/')) {
+      return part.inlineData.data;
     }
   }
   return null;
@@ -468,8 +476,8 @@ export function extractText(parts: GeminiContentPart[]): string {
     .join('');
 }
 
-export function extractFunctionCalls(parts: GeminiContentPart[]): GeminiFunctionCall[] {
+export function extractFunctionCalls(parts: any[]): GeminiFunctionCall[] {
   return parts
-    .filter((part): part is { function_call: GeminiFunctionCall } => 'function_call' in part)
-    .map(part => part.function_call);
+    .filter((part): boolean => 'function_call' in part || 'functionCall' in part)
+    .map(part => part.function_call || part.functionCall);
 }

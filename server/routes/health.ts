@@ -92,7 +92,7 @@ router.get("/call-orchestration", async (req, res) => {
       PUBLIC_WEBSOCKET_URL: {
         configured: !!publicWebsocketUrl,
         value: publicWebsocketUrl || null,
-        isProduction: publicWebsocketUrl?.includes('demangent.ai') || false,
+        isProduction: publicWebsocketUrl?.includes('demandgentic.ai') || false,
       },
       TELNYX_FROM_NUMBER: {
         configured: !!telnyxFromNumber,

@@ -2,6 +2,18 @@ import { config } from "dotenv";
 // Load environment variables from .env.local
 config({ path: ".env.local" });
 
+// Global Error Handlers - catch unhandled exceptions to prevent silent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled Rejection:', reason);
+  // Don't exit here, just log it. 
+  // In production you might want to exit, but for dev debugging we want to see it.
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught Exception:', err);
+  // Keep process alive if possible during dev
+});
+
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import compression from "compression";
@@ -373,9 +385,13 @@ app.use((req, res, next) => {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    
+    // Log the error but don't crash the server
+    console.error('[Express Error]', err);
 
-    res.status(status).json({ message });
-    throw err;
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
   });
 
   // importantly only setup vite in development and after

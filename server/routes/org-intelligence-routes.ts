@@ -7,8 +7,8 @@
 import { Router, Request, Response } from "express";
 import { requireAuth, requireRole } from "../auth";
 import { db } from "../db";
-import { accounts, contacts, accountIntelligence } from "@shared/schema";
-import { ilike, or, inArray, desc, sql } from "drizzle-orm";
+import { accounts, contacts, accountIntelligence, campaignOrganizations } from "@shared/schema";
+import { ilike, or, inArray, desc, sql, eq } from "drizzle-orm";
 import { collectWebsiteContent, type WebsitePageSummary } from "../lib/website-research";
 import {
   researchCompanyCore,
@@ -183,7 +183,7 @@ async function performMultiModelAnalysis(params: {
   const timeoutMs = resolveNumberFromEnv("ORG_INTELLIGENCE_MODEL_TIMEOUT_MS", 120000, 10000, 300000);
 
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   const anthropicKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
 
   const jobs: Array<{ name: string; run: () => Promise<{ model: string; data: any; confidence: number }> }> = [];
@@ -227,8 +227,8 @@ async function performMultiModelAnalysis(params: {
           const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genai = new GoogleGenerativeAI(geminiKey);
 
-          // Prefer latest stable GA model aliases for AI Studio (v1beta endpoints)
-          const candidateModels = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest"];
+          // Use working Gemini models (gemini-2.0-flash works, 1.5 models deprecated)
+          const candidateModels = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash-8b"];
           let result = null;
           let lastError = null;
           let successModel = null;
@@ -260,7 +260,7 @@ async function performMultiModelAnalysis(params: {
             throw new Error("Gemini returned invalid JSON.");
           }
           console.log(`[Org-Intelligence] Gemini analysis completed`);
-          return { model: successModel, data: parsed, confidence: 0.93 };
+          return { model: successModel || "gemini", data: parsed, confidence: 0.93 };
         } catch (err: any) {
           console.error(`[Org-Intelligence] Gemini error: ${err.message}`);
           throw err;
@@ -283,9 +283,13 @@ async function performMultiModelAnalysis(params: {
           ? `${normalizedBaseUrl}/messages`
           : `${normalizedBaseUrl}/v1/messages`;
 
-        const maxTokens = resolveNumberFromEnv("ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS", 4096, 1024, 8192);
+        const configuredMaxTokens = resolveNumberFromEnv("ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS", 4096, 1024, 8192);
 
         for (const claudeModel of candidateModels) {
+          // Haiku has a 4096 token limit, cap max_tokens accordingly
+          const isHaiku = claudeModel.includes("haiku");
+          const maxTokens = isHaiku ? Math.min(configuredMaxTokens, 4096) : configuredMaxTokens;
+
           console.log(`[Org-Intelligence] Using Claude ${claudeModel} for deep reasoning...`);
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -314,7 +318,9 @@ async function performMultiModelAnalysis(params: {
 
           if (!response.ok) {
             const errorBody = await response.text();
-            if (response.status === 404 && claudeModel !== candidateModels[candidateModels.length - 1]) {
+            const isLastModel = claudeModel === candidateModels[candidateModels.length - 1];
+            // Fall back on 404 (model not found) or 400 (bad request, e.g., token limit)
+            if ((response.status === 404 || response.status === 400) && !isLastModel) {
               console.warn(`[Org-Intelligence] Claude model ${claudeModel} not available, falling back...`);
               continue;
             }
@@ -419,7 +425,7 @@ async function performMultiModelAnalysis(params: {
           const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genai = new GoogleGenerativeAI(geminiKey);
 
-          const candidateModels = ["gemini-1.5-flash-latest", "gemini-1.5-pro-latest", synthModel];
+          const candidateModels = ["gemini-2.0-flash-exp", "gemini-2.0-flash", synthModel];
           let parsed = null;
           let successModel = null;
           
@@ -1580,14 +1586,14 @@ router.post("/analyze-deep", requireAuth, requireRole('admin', 'campaign_manager
 router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), async (req: Request, res: Response) => {
   try {
     const { domain, profile, models, reasoning, orgIntelligence, compliancePolicy, platformPolicies, agentVoiceDefaults } = req.body;
-    
+
     if (!domain || !profile) {
       return res.status(400).json({ error: "Domain and profile are required" });
     }
 
     // Determine model version from request or use default
-    const modelVersion = Array.isArray(models) && models.length > 0 
-      ? models.join(', ') 
+    const modelVersion = Array.isArray(models) && models.length > 0
+      ? models.join(', ')
       : 'multi-model-reasoning';
 
     // Save to accountIntelligence table
@@ -1609,11 +1615,72 @@ router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), asyn
 
     console.log('[Org-Intelligence] Organization profile saved:', savedIntelligence.id, 'Models:', modelVersion);
 
+    // Also create/update entry in campaignOrganizations for organization selector
+    let campaignOrgId: string | null = null;
+    try {
+      const orgName = profile.identity?.legalName?.value || domain;
+      const orgDescription = profile.identity?.description?.value || null;
+      const orgIndustry = profile.identity?.industry?.value || null;
+
+      console.log('[Org-Intelligence] Creating/updating campaign organization for domain:', domain, 'name:', orgName);
+
+      // Check if organization with this domain already exists
+      const [existingOrg] = await db.select()
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.domain, domain))
+        .limit(1);
+
+      if (existingOrg) {
+        // Update existing organization
+        const [updatedOrg] = await db.update(campaignOrganizations)
+          .set({
+            name: orgName,
+            description: orgDescription,
+            industry: orgIndustry,
+            identity: profile.identity || {},
+            offerings: profile.offerings || {},
+            icp: profile.icp || {},
+            positioning: profile.positioning || {},
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignOrganizations.id, existingOrg.id))
+          .returning();
+        campaignOrgId = updatedOrg.id;
+        console.log('[Org-Intelligence] Updated campaign organization:', campaignOrgId);
+      } else {
+        // Check if any default exists, if not make this the default
+        const [defaultOrg] = await db.select()
+          .from(campaignOrganizations)
+          .where(eq(campaignOrganizations.isDefault, true))
+          .limit(1);
+
+        // Create new organization
+        const [newOrg] = await db.insert(campaignOrganizations).values({
+          name: orgName,
+          domain,
+          description: orgDescription,
+          industry: orgIndustry,
+          identity: profile.identity || {},
+          offerings: profile.offerings || {},
+          icp: profile.icp || {},
+          positioning: profile.positioning || {},
+          isDefault: !defaultOrg, // Set as default if no default exists
+          isActive: true,
+        }).returning();
+        campaignOrgId = newOrg.id;
+        console.log('[Org-Intelligence] Created campaign organization:', campaignOrgId, 'isDefault:', !defaultOrg);
+      }
+    } catch (orgError: any) {
+      console.error('[Org-Intelligence] Failed to create/update campaign organization:', orgError.message);
+      // Continue anyway - the main profile was saved
+    }
+
     res.json({
       success: true,
       message: "Organization profile saved successfully",
       domain,
       id: savedIntelligence.id,
+      organizationId: campaignOrgId,
       models: modelVersion,
     });
 

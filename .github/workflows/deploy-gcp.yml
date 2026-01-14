@@ -10,7 +10,7 @@ on:
 env:
   PROJECT_ID: pivotalb2b-2026
   REGION: us-central1
-  SERVICE: demangent-api
+  SERVICE: demandgentic-api
   REPOSITORY: pivotalcrm-repo
 
 jobs:

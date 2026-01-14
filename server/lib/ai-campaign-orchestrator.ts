@@ -96,47 +96,67 @@ function isContactWithinBusinessHours(contact: { country?: string | null; state?
 }
 
 /**
- * Check if phone is a valid UK number and return priority
- * Priority: 1 = UK mobile (+447), 2 = UK landline (+441/2/3), 0 = not UK
+ * Check if phone is a valid UK/USA/Canada number and return priority
+ * Priority: 1 = UK mobile (+447), 2 = UK landline (+441/2/3), 
+ *          3 = USA/Canada mobile (+1 with mobile area codes), 4 = USA/Canada other (+1),
+ *          0 = not a priority country
  */
-function getUkPhonePriority(phone: string | null | undefined): number {
+function getPhonePriority(phone: string | null | undefined): number {
   if (!phone) return 0;
   const cleaned = phone.replace(/[^\d+]/g, '');
   const e164 = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
   
-  // UK mobile numbers: +447...
+  // UK mobile numbers: +447... (highest priority)
   if (e164.startsWith('+447')) return 1;
   
   // UK landline numbers: +441..., +442..., +443...
   if (e164.startsWith('+441') || e164.startsWith('+442') || e164.startsWith('+443')) return 2;
   
-  // Not a valid UK number
+  // USA/Canada numbers: +1...
+  if (e164.startsWith('+1') && e164.length === 12) {
+    // Common mobile area code patterns in US/Canada (less reliable than UK but useful)
+    // Most US mobile numbers are indistinguishable from landlines, so we give all +1 numbers priority 3-4
+    return 3; // USA/Canada numbers get priority 3
+  }
+  
+  // Not a priority country number
   return 0;
 }
 
+// Alias for backward compatibility
+const getUkPhonePriority = getPhonePriority;
+
 /**
- * Get the best UK phone for a contact (mobile preferred, then landline)
+ * Get the best priority phone for a contact (UK mobile > UK landline > USA/Canada > other)
  */
-function getBestUkPhone(contact: any): { phone: string | null; priority: number } {
-  // Check mobile first (highest priority)
-  const mobilePriority = getUkPhonePriority(contact?.mobilePhoneE164);
+function getBestPriorityPhone(contact: any): { phone: string | null; priority: number } {
+  // Check mobile first (highest priority for UK mobile)
+  const mobilePriority = getPhonePriority(contact?.mobilePhoneE164);
   if (mobilePriority === 1) {
     return { phone: contact.mobilePhoneE164, priority: 1 };
   }
   
-  // Check direct phone
-  const directPriority = getUkPhonePriority(contact?.directPhoneE164);
-  if (directPriority > 0) {
+  // Check direct phone for UK landline or USA/Canada
+  const directPriority = getPhonePriority(contact?.directPhoneE164);
+  if (directPriority > 0 && directPriority <= mobilePriority) {
     return { phone: contact.directPhoneE164, priority: directPriority };
   }
   
-  // Check mobile for landline (might be UK landline stored in mobile field)
+  // Return mobile if it has any priority (UK landline in mobile field or USA/Canada)
   if (mobilePriority > 0) {
     return { phone: contact.mobilePhoneE164, priority: mobilePriority };
   }
   
+  // Return direct if it has any priority
+  if (directPriority > 0) {
+    return { phone: contact.directPhoneE164, priority: directPriority };
+  }
+  
   return { phone: null, priority: 0 };
 }
+
+// Alias for backward compatibility
+const getBestUkPhone = getBestPriorityPhone;
 
 interface OrchestratorJobData {
   type: 'tick' | 'campaign-replenish';
@@ -259,25 +279,65 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       c.email as contact_email,
       c.job_title as contact_job_title,
       a.name as account_name,
-      CASE 
-        WHEN c.mobile_phone_e164 LIKE '+447%' THEN 1
-        WHEN c.direct_phone_e164 LIKE '+447%' THEN 2
-        WHEN c.mobile_phone_e164 LIKE '+441%' OR c.mobile_phone_e164 LIKE '+442%' OR c.mobile_phone_e164 LIKE '+443%' THEN 3
-        WHEN c.direct_phone_e164 LIKE '+441%' OR c.direct_phone_e164 LIKE '+442%' OR c.direct_phone_e164 LIKE '+443%' THEN 4
-        WHEN c.mobile_phone_e164 IS NOT NULL THEN 5
-        WHEN c.direct_phone_e164 IS NOT NULL THEN 6
-        ELSE 99
-      END as phone_priority,
+      -- Infer timezone from: explicit timezone > country > phone prefix
+      COALESCE(
+        c.timezone,
+        CASE 
+          WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES') THEN 'Europe/London'
+          WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA') THEN 'America/New_York'
+          WHEN UPPER(c.country) IN ('CA', 'CANADA') THEN 'America/Toronto'
+          WHEN c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%' THEN 'Europe/London'
+          WHEN c.mobile_phone_e164 LIKE '+1%' OR c.direct_phone_e164 LIKE '+1%' THEN 'America/New_York'
+          ELSE NULL
+        END
+      ) as inferred_timezone,
       -- Compute if contact is within business hours (Mon-Fri 9am-5pm local time)
+      -- Uses explicit timezone, or infers from country/phone prefix
       CASE 
         WHEN c.timezone IS NOT NULL 
              AND EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = c.timezone)
         THEN (
-          EXTRACT(DOW FROM NOW() AT TIME ZONE c.timezone) BETWEEN 1 AND 5  -- Monday-Friday
-          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE c.timezone) BETWEEN 9 AND 16  -- 9am-5pm (16 means hour 16:xx is included, 17 is not)
+          EXTRACT(DOW FROM NOW() AT TIME ZONE c.timezone) BETWEEN 1 AND 5
+          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE c.timezone) BETWEEN 9 AND 16
+        )
+        -- UK (from country or phone)
+        WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES')
+             OR c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%'
+        THEN (
+          EXTRACT(DOW FROM NOW() AT TIME ZONE 'Europe/London') BETWEEN 1 AND 5
+          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'Europe/London') BETWEEN 9 AND 16
+        )
+        -- USA (from country or phone) - use Eastern as default, most business
+        WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA')
+             OR (c.mobile_phone_e164 LIKE '+1%' AND LENGTH(c.mobile_phone_e164) = 12)
+             OR (c.direct_phone_e164 LIKE '+1%' AND LENGTH(c.direct_phone_e164) = 12)
+        THEN (
+          EXTRACT(DOW FROM NOW() AT TIME ZONE 'America/New_York') BETWEEN 1 AND 5
+          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'America/New_York') BETWEEN 9 AND 16
+        )
+        -- Canada (from country)
+        WHEN UPPER(c.country) IN ('CA', 'CANADA')
+        THEN (
+          EXTRACT(DOW FROM NOW() AT TIME ZONE 'America/Toronto') BETWEEN 1 AND 5
+          AND EXTRACT(HOUR FROM NOW() AT TIME ZONE 'America/Toronto') BETWEEN 9 AND 16
         )
         ELSE false
-      END as within_hours
+      END as within_hours,
+      CASE 
+        -- UK mobile (highest priority)
+        WHEN c.mobile_phone_e164 LIKE '+447%' THEN 1
+        WHEN c.direct_phone_e164 LIKE '+447%' THEN 2
+        -- UK landline
+        WHEN c.mobile_phone_e164 LIKE '+441%' OR c.mobile_phone_e164 LIKE '+442%' OR c.mobile_phone_e164 LIKE '+443%' THEN 3
+        WHEN c.direct_phone_e164 LIKE '+441%' OR c.direct_phone_e164 LIKE '+442%' OR c.direct_phone_e164 LIKE '+443%' THEN 4
+        -- USA/Canada (+1)
+        WHEN c.mobile_phone_e164 LIKE '+1%' AND LENGTH(c.mobile_phone_e164) = 12 THEN 5
+        WHEN c.direct_phone_e164 LIKE '+1%' AND LENGTH(c.direct_phone_e164) = 12 THEN 6
+        -- Other countries with phone numbers
+        WHEN c.mobile_phone_e164 IS NOT NULL THEN 10
+        WHEN c.direct_phone_e164 IS NOT NULL THEN 11
+        ELSE 99
+      END as phone_priority
     FROM campaign_queue cq
     LEFT JOIN contacts c ON c.id = cq.contact_id
     LEFT JOIN accounts a ON a.id = c.account_id

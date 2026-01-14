@@ -11,17 +11,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Headphones,
-  Activity,
   Database,
-  Phone,
-  Mail,
-  KanbanSquare,
-  Inbox,
   Bot,
   Sparkles,
-  BrainCircuit,
   ShieldCheck,
   FileText,
+  MessageSquare,
+  KanbanSquare,
+  Settings,
+  type LucideIcon,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,224 +46,282 @@ import {
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useState, useEffect, useCallback } from "react";
+import {
+  NAVIGATION_SECTIONS,
+  filterSectionsByRoles,
+  getSpotlightItems,
+  type NavSection,
+  type NavItem,
+  type SubNavItem,
+} from "@/lib/navigation-config";
 
-interface NavItem {
-  title: string;
-  url?: string;
-  icon: any;
-  roles: string[];
-  items?: SubNavItem[];
-}
-
-interface SubNavItem {
-  title: string;
-  url: string;
-  roles: string[];
-}
-
-interface NavSection {
-  label: string;
-  items: NavItem[];
-  roles: string[];
-}
-
-const spotlightSubItems = new Set([
-  "Organization Intelligence",
-  "AI Agents",
-]);
-
-// Organized navigation structure with sections
-const getNavSections = (): NavSection[] => [
-  // AI & Intelligence
-  {
-    label: "AI & Intelligence",
-    roles: ["admin", "campaign_manager"],
-    items: [
-      {
-        title: "AI Studio",
-        icon: Sparkles,
-        roles: ["admin", "campaign_manager"],
-        items: [
-          { title: "Organization Intelligence", url: "/ai-studio/intelligence", roles: ["admin", "campaign_manager"] },
-          { title: "AI Agents", url: "/ai-studio/agents", roles: ["admin", "campaign_manager"] },
-          { title: "Agentic Operator", url: "/ai-studio/operator", roles: ["admin", "campaign_manager"] },
-        ],
-      },
-    ],
-  },
-
-  // Core CRM
-  {
-    label: "Core CRM",
-    roles: ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent", "client_user"],
-    items: [
-      {
-        title: "Dashboard",
-        icon: LayoutDashboard,
-        roles: ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent", "client_user"],
-        items: [
-          { title: "Overview", url: "/", roles: ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent", "client_user"] },
-        ],
-      },
-      {
-        title: "Accounts",
-        icon: Building2,
-        roles: ["admin", "campaign_manager", "data_ops"],
-        items: [
-          { title: "All Accounts", url: "/accounts", roles: ["admin", "campaign_manager", "data_ops"] },
-          { title: "Target Accounts (TAL)", url: "/domain-sets", roles: ["admin", "data_ops"] },
-          { title: "Account Segments & Lists", url: "/segments?entity=account", roles: ["admin", "campaign_manager", "data_ops"] },
-        ],
-      },
-      {
-        title: "Contacts",
-        icon: Users,
-        roles: ["admin", "campaign_manager", "data_ops"],
-        items: [
-          { title: "All Contacts", url: "/contacts", roles: ["admin", "campaign_manager", "data_ops"] },
-          { title: "Contact Segments & Lists", url: "/segments?entity=contact", roles: ["admin", "campaign_manager", "data_ops"] },
-        ],
-      },
-      {
-        title: "Revenue & Pipeline",
-        icon: KanbanSquare,
-        roles: ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent", "client_user"],
-        items: [
-          { title: "Pipeline", url: "/pipeline", roles: ["admin", "campaign_manager", "data_ops", "quality_analyst", "agent", "client_user"] },
-          { title: "Opportunities", url: "/pipeline", roles: ["admin", "campaign_manager", "data_ops"] },
-          { title: "Import Opportunities", url: "/pipeline/import", roles: ["admin", "campaign_manager", "data_ops"] },
-          { title: "Revenue Inbox", url: "/inbox", roles: ["admin", "campaign_manager"] },
-          { title: "Email Sequences", url: "/email-sequences", roles: ["admin", "campaign_manager"] },
-        ],
-      },
-    ],
-  },
-
-  // Campaigns & Execution
-  {
-    label: "Campaigns & Execution",
-    roles: ["admin", "campaign_manager", "agent"],
-    items: [
-      {
-        title: "Campaigns",
-        url: "/campaigns",
-        icon: Megaphone,
-        roles: ["admin", "campaign_manager"],
-      },
-      {
-        title: "Agent Console",
-        url: "/agent-console",
-        icon: Headphones,
-        roles: ["admin", "campaign_manager", "agent"],
-      },
-      {
-        title: "QA & Lead Review",
-        url: "/leads",
-        icon: CheckCircle,
-        roles: ["admin", "campaign_manager", "quality_analyst", "agent"],
-      },
-    ],
-  },
-
-  // Data Trust & Validation
-  {
-    label: "Data Trust & Validation",
-    roles: ["admin", "data_ops", "quality_analyst"],
-    items: [
-      {
-        title: "Data Integrity",
-        url: "/data-integrity",
-        icon: ShieldCheck,
-        roles: ["admin", "data_ops"],
-      },
-      {
-        title: "Validation Campaigns",
-        url: "/verification/campaigns",
-        icon: Database,
-        roles: ["admin", "data_ops", "quality_analyst"],
-      },
-    ],
-  },
-
-  // Analytics & Insights
-  {
-    label: "Analytics & Insights",
-    roles: ["admin", "campaign_manager", "quality_analyst", "client_user"],
-    items: [
-      {
-        title: "Analytics",
-        url: "/engagement-analytics",
-        icon: BarChart3,
-        roles: ["admin", "campaign_manager", "quality_analyst", "client_user"],
-      },
-      {
-        title: "AI Call Analytics",
-        url: "/ai-call-analytics",
-        icon: Bot,
-        roles: ["admin", "campaign_manager"],
-      },
-      {
-        title: "Reports",
-        url: "/reports",
-        icon: FileText,
-        roles: ["admin", "campaign_manager", "quality_analyst", "client_user"],
-      },
-    ],
-  },
-
-  // Projects & Operations
-  {
-    label: "Projects & Operations",
-    roles: ["admin", "campaign_manager", "client_user"],
-    items: [
-      {
-        title: "Projects",
-        url: "/orders",
-        icon: Briefcase,
-        roles: ["admin", "campaign_manager", "client_user"],
-      },
-    ],
-  },
-];
-
-// Filter sections and items based on user roles
-const filterSectionsByRoles = (sections: NavSection[], userRoles: string[]): NavSection[] => {
-  // If user has admin role, show everything
-  if (userRoles.includes('admin')) {
-    return sections;
-  }
-
-  return sections
-    .filter(section => section.roles.some(role => userRoles.includes(role)))
-    .map(section => ({
-      ...section,
-      items: section.items
-        .filter(item => item.roles.some(role => userRoles.includes(role)))
-        .map(item => ({
-          ...item,
-          items: item.items?.filter(subItem => subItem.roles.some(role => userRoles.includes(role))),
-        })),
-    }))
-    .filter(section => section.items.length > 0);
+// ============================================
+// ICON RESOLVER
+// Maps string icon names to Lucide components
+// ============================================
+const ICON_MAP: Record<string, LucideIcon> = {
+  LayoutDashboard,
+  Building2,
+  Users,
+  Megaphone,
+  CheckCircle,
+  BarChart3,
+  Briefcase,
+  Headphones,
+  Database,
+  Bot,
+  Sparkles,
+  ShieldCheck,
+  FileText,
+  MessageSquare,
+  KanbanSquare,
+  Settings,
 };
 
-export function AppSidebar({ userRoles = ["admin"] }: { userRoles?: string[] }) {
-  const [location] = useLocation();
-  const filteredSections = filterSectionsByRoles(getNavSections(), userRoles);
+function resolveIcon(iconName: string): LucideIcon {
+  return ICON_MAP[iconName] || LayoutDashboard;
+}
 
-  const isActive = (url?: string, items?: SubNavItem[]) => {
+// ============================================
+// LOCAL STORAGE KEYS
+// ============================================
+const STORAGE_KEY_COLLAPSED_SECTIONS = 'sidebar-collapsed-sections';
+
+// ============================================
+// HOOKS
+// ============================================
+
+/**
+ * Hook to persist collapsed section state
+ */
+function useCollapsedSections() {
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_COLLAPSED_SECTIONS);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggleSection = useCallback((sectionId: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      // Persist to localStorage
+      localStorage.setItem(STORAGE_KEY_COLLAPSED_SECTIONS, JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  const isSectionCollapsed = useCallback((sectionId: string) => {
+    return collapsedSections.has(sectionId);
+  }, [collapsedSections]);
+
+  return { toggleSection, isSectionCollapsed };
+}
+
+// ============================================
+// COMPONENTS
+// ============================================
+
+interface SidebarNavItemProps {
+  item: NavItem;
+  isActive: boolean;
+  spotlightItems: Set<string>;
+  location: string;
+}
+
+function SidebarNavItem({ item, isActive, spotlightItems, location }: SidebarNavItemProps) {
+  const Icon = resolveIcon(item.icon);
+
+  // Simple item without sub-items
+  if (!item.items || item.items.length === 0) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          asChild
+          tooltip={item.title}
+          isActive={isActive}
+          data-testid={`nav-${item.id}`}
+          className={cn(
+            "transition-all duration-200 rounded-xl mx-1 mb-1",
+            isActive
+              ? "bg-gradient-to-r from-primary/20 via-primary/10 to-transparent text-sidebar-foreground font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:from-primary/25"
+              : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground font-medium"
+          )}
+        >
+          <a href={item.url}>
+            <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-sidebar-foreground/60")} />
+            <span>{item.title}</span>
+          </a>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
+
+  // Collapsible item with sub-items
+  return (
+    <Collapsible
+      defaultOpen={isActive}
+      className="group/collapsible"
+    >
+      <SidebarMenuItem>
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton
+            tooltip={item.title}
+            isActive={isActive}
+            data-testid={`nav-${item.id}`}
+            className={cn(
+              "transition-all duration-200 rounded-xl mx-1 mb-1",
+              isActive
+                ? "bg-gradient-to-r from-primary/20 via-primary/10 to-transparent text-sidebar-foreground font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:from-primary/25"
+                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground font-medium"
+            )}
+          >
+            <Icon className={cn("h-4 w-4", isActive ? "text-primary" : "text-sidebar-foreground/60")} />
+            <span>{item.title}</span>
+            <ChevronDown className="ml-auto h-3 w-3 transition-transform group-data-[state=open]/collapsible:rotate-180 opacity-50" />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenuSub className="mr-1 ml-3 border-l border-sidebar-border/60 pl-3 py-1 my-1 space-y-1">
+            {item.items.map((subItem) => (
+              <SidebarSubNavItem
+                key={subItem.id}
+                subItem={subItem}
+                location={location}
+                isSpotlight={spotlightItems.has(subItem.title)}
+              />
+            ))}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
+  );
+}
+
+interface SidebarSubNavItemProps {
+  subItem: SubNavItem;
+  location: string;
+  isSpotlight: boolean;
+}
+
+function SidebarSubNavItem({ subItem, location, isSpotlight }: SidebarSubNavItemProps) {
+  const subActive = location === subItem.url;
+  const hasBadge = subItem.badge?.variant === 'new' || isSpotlight;
+
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton
+        asChild
+        isActive={subActive}
+        data-testid={`nav-sub-${subItem.id}`}
+        className={cn(
+          "rounded-md transition-colors h-8 text-[0.85rem]",
+          subActive
+            ? "text-sidebar-foreground bg-sidebar-accent/60 font-semibold"
+            : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/40",
+          hasBadge && "nav-spotlight"
+        )}
+      >
+        <a href={subItem.url}>
+          <span className="pr-2">{subItem.title}</span>
+          {hasBadge && (
+            <div className="nav-new-badge">
+              <span className="nav-new-dot" aria-hidden="true" />
+              <span className="nav-new-text">New</span>
+            </div>
+          )}
+        </a>
+      </SidebarMenuSubButton>
+    </SidebarMenuSubItem>
+  );
+}
+
+interface SidebarSectionProps {
+  section: NavSection;
+  isLastSection: boolean;
+  spotlightItems: Set<string>;
+  location: string;
+  isActive: (url?: string, items?: SubNavItem[]) => boolean;
+}
+
+function SidebarSection({ section, isLastSection, spotlightItems, location, isActive }: SidebarSectionProps) {
+  return (
+    <div className="mb-4">
+      {section.label && (
+        <h4 className="px-4 text-[0.72rem] font-semibold text-sidebar-foreground/70 uppercase tracking-[0.22em] mb-2">
+          {section.label}
+        </h4>
+      )}
+      <SidebarGroup className="p-0">
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {section.items.map((item) => {
+              const active = isActive(item.url, item.items);
+              return (
+                <SidebarNavItem
+                  key={item.id}
+                  item={item}
+                  isActive={active}
+                  spotlightItems={spotlightItems}
+                  location={location}
+                />
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      {!isLastSection && (
+        <SidebarSeparator className="my-3 opacity-60" />
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
+export interface AppSidebarProps {
+  userRoles?: string[];
+}
+
+export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
+  const [location] = useLocation();
+  const { state, toggleSidebar } = useSidebar();
+
+  // Filter sections based on user roles
+  const filteredSections = filterSectionsByRoles(NAVIGATION_SECTIONS, userRoles);
+
+  // Get spotlight items (items with "new" badge)
+  const spotlightItems = getSpotlightItems();
+
+  /**
+   * Check if a navigation item or any of its sub-items is active
+   */
+  const isActive = useCallback((url?: string, items?: SubNavItem[]): boolean => {
     if (url) {
       const urlWithoutParams = url.split('?')[0];
       const locationWithoutParams = location.split('?')[0];
 
+      // Exact match
       if (location === url) return true;
 
+      // Query parameter match
       if (url.includes('?') && locationWithoutParams === urlWithoutParams) {
         return location.includes(url.split('?')[1]);
       }
 
       return false;
     }
+
     if (items) {
       return items.some(item => {
         const itemUrlWithoutParams = item.url.split('?')[0];
@@ -278,23 +334,23 @@ export function AppSidebar({ userRoles = ["admin"] }: { userRoles?: string[] }) 
         return false;
       });
     }
-    return false;
-  };
 
-  const { state, toggleSidebar } = useSidebar();
+    return false;
+  }, [location]);
 
   return (
     <Sidebar className="relative bg-gradient-to-b from-sidebar/95 via-sidebar/90 to-sidebar/80 border-r border-sidebar-border/70 backdrop-blur-xl shadow-[0_24px_60px_-40px_rgba(15,23,42,0.55)]">
       <SidebarContent className="px-3 py-4 text-sidebar-foreground/95">
+        {/* Logo and Toggle */}
         <SidebarGroup className="mb-6">
           <div className="flex items-center justify-between px-2">
             <SidebarGroupLabel className="text-lg font-semibold px-0 text-sidebar-foreground tracking-tight flex items-center gap-2">
               <img
                 src="/demangent-logo.png"
-                alt="DemanGent.ai"
+                alt="DemandGentic.ai"
                 className="h-6 w-auto"
               />
-              <span className="align-middle">DemanGent.ai</span>
+              <span className="align-middle">DemandGentic.ai</span>
             </SidebarGroupLabel>
 
             <SidebarGroupAction asChild>
@@ -315,115 +371,20 @@ export function AppSidebar({ userRoles = ["admin"] }: { userRoles?: string[] }) 
           </div>
         </SidebarGroup>
 
+        {/* Navigation Sections */}
         {filteredSections.map((section, sectionIndex) => (
-          <div key={section.label} className="mb-4">
-            {section.label && (
-              <h4 className="px-4 text-[0.72rem] font-semibold text-sidebar-foreground/70 uppercase tracking-[0.22em] mb-2">
-                {section.label}
-              </h4>
-            )}
-            <SidebarGroup className="p-0">
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {section.items.map((item) => {
-                    const active = isActive(item.url, item.items);
-                    
-                    if (!item.items || item.items.length === 0) {
-                      return (
-                        <SidebarMenuItem key={item.title}>
-                          <SidebarMenuButton
-                            asChild
-                            tooltip={item.title}
-                            isActive={active}
-                            data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
-                            className={cn(
-                              "transition-all duration-200 rounded-xl mx-1 mb-1",
-                              active 
-                                ? "bg-gradient-to-r from-primary/20 via-primary/10 to-transparent text-sidebar-foreground font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] hover:from-primary/25" 
-                                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground font-medium"
-                            )}
-                          >
-                            <a href={item.url}>
-                              <item.icon className={cn("h-4 w-4", active ? "text-primary" : "text-sidebar-foreground/60")} />
-                              <span>{item.title}</span>
-                            </a>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    }
-
-                    return (
-                      <Collapsible
-                        key={item.title}
-                        defaultOpen={active}
-                        className="group/collapsible"
-                      >
-                        <SidebarMenuItem>
-                          <CollapsibleTrigger asChild>
-                            <SidebarMenuButton
-                              tooltip={item.title}
-                              isActive={active}
-                              data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
-                              className={cn(
-                                "transition-all duration-200 rounded-xl mx-1 mb-1",
-                              active 
-                                ? "bg-gradient-to-r from-primary/20 via-primary/10 to-transparent text-sidebar-foreground font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] hover:from-primary/25" 
-                                : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground font-medium"
-                            )}
-                            >
-                              <item.icon className={cn("h-4 w-4", active ? "text-primary" : "text-sidebar-foreground/60")} />
-                              <span>{item.title}</span>
-                              <ChevronDown className="ml-auto h-3 w-3 transition-transform group-data-[state=open]/collapsible:rotate-180 opacity-50" />
-                            </SidebarMenuButton>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <SidebarMenuSub className="mr-1 ml-3 border-l border-sidebar-border/60 pl-3 py-1 my-1 space-y-1">
-                              {item.items.map((subItem) => {
-                                const subActive = location === subItem.url;
-                                const isSpotlight = spotlightSubItems.has(subItem.title);
-                                return (
-                                  <SidebarMenuSubItem key={subItem.title}>
-                                    <SidebarMenuSubButton
-                                      asChild
-                                      isActive={subActive}
-                                      data-testid={`nav-sub-${subItem.title.toLowerCase().replace(/\s+/g, '-')}`}
-                                      className={cn(
-                                        "rounded-md transition-colors h-8 text-[0.85rem]",
-                                        subActive 
-                                          ? "text-sidebar-foreground bg-sidebar-accent/60 font-semibold" 
-                                          : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/40",
-                                        isSpotlight && "nav-spotlight"
-                                      )}
-                                    >
-                                      <a href={subItem.url}>
-                                        <span className="pr-2">{subItem.title}</span>
-                                        {isSpotlight && (
-                                          <div className="nav-new-badge">
-                                            <span className="nav-new-dot" aria-hidden="true" />
-                                            <span className="nav-new-text">New</span>
-                                          </div>
-                                        )}
-                                      </a>
-                                    </SidebarMenuSubButton>
-                                  </SidebarMenuSubItem>
-                                );
-                              })}
-                            </SidebarMenuSub>
-                          </CollapsibleContent>
-                        </SidebarMenuItem>
-                      </Collapsible>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-            {sectionIndex < filteredSections.length - 1 && (
-              <SidebarSeparator className="my-3 opacity-60" />
-            )}
-          </div>
+          <SidebarSection
+            key={section.id}
+            section={section}
+            isLastSection={sectionIndex === filteredSections.length - 1}
+            spotlightItems={spotlightItems}
+            location={location}
+            isActive={isActive}
+          />
         ))}
       </SidebarContent>
 
+      {/* Footer */}
       <SidebarFooter className="p-4 border-t border-sidebar-border/70 bg-sidebar/80 backdrop-blur-sm">
         <Button
           variant="ghost"

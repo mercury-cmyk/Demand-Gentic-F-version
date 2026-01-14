@@ -80,18 +80,21 @@ export function CallPlanPanel({
   previewContext,
   isLoading,
 }: CallPlanPanelProps) {
-  // Fetch detailed call plan if contact is selected
+  // Fetch detailed call plan (works with or without contact)
   const { data: callPlanData, isLoading: planLoading } = useQuery<CallPlanResponse>({
     queryKey: ['/api/preview-studio/generate-call-plan', campaignId, accountId, contactId],
     queryFn: async () => {
-      const response = await apiRequest('POST', '/api/preview-studio/generate-call-plan', {
+      const payload: any = {
         campaignId,
         accountId,
-        contactId,
-      });
+      };
+      if (contactId) {
+        payload.contactId = contactId;
+      }
+      const response = await apiRequest('POST', '/api/preview-studio/generate-call-plan', payload);
       return response.json();
     },
-    enabled: !!(campaignId && accountId && contactId),
+    enabled: !!(campaignId && accountId),
   });
 
   // Use either the detailed call plan or the preview context
@@ -118,9 +121,9 @@ export function CallPlanPanel({
           <Phone className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold mb-2">No Call Plan Available</h2>
           <p className="text-muted-foreground">
-            {!contactId
-              ? "Select a contact to generate a participant-specific call plan."
-              : "Call plan could not be generated for this context."}
+            {!campaignId || !accountId
+              ? "Select a campaign and account to view the call strategy."
+              : "Loading account intelligence and call strategy..."}
           </p>
         </CardContent>
       </Card>
@@ -141,52 +144,56 @@ export function CallPlanPanel({
               How this contact is understood by the AI
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Name</p>
-                <p className="font-medium">{participantContext.name || 'Unknown'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Role</p>
-                <p className="font-medium">{participantContext.role || 'Unknown'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Seniority</p>
-                <p className="font-medium">{participantContext.seniority || 'Unknown'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Relationship State</p>
-                <Badge variant={
-                  participantContext.relationship_state === 'engaged' ? 'default' :
-                  participantContext.relationship_state === 'cold' ? 'secondary' : 'outline'
-                }>
-                  {participantContext.relationship_state || 'Unknown'}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Channel Preference</p>
-                <p className="font-medium">{participantContext.channel_preference || 'Unknown'}</p>
-              </div>
-              {participantContext.last_call_outcome && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Last Call Outcome</p>
-                  <p className="font-medium">{participantContext.last_call_outcome}</p>
-                </div>
-              )}
-            </div>
-            {participantContext.prior_touches && participantContext.prior_touches.length > 0 && (
-              <div className="mt-4">
-                <p className="text-xs text-muted-foreground mb-2">Prior Touches</p>
-                <div className="flex flex-wrap gap-2">
-                  {participantContext.prior_touches.map((touch, i) => (
-                    <Badge key={i} variant="outline" className="text-xs">
-                      {touch}
+          <CardContent className="p-0">
+            <ScrollArea className="max-h-[400px]">
+              <div className="p-6 pt-0 space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Name</p>
+                    <p className="font-medium">{participantContext.name || 'Unknown'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Role</p>
+                    <p className="font-medium">{participantContext.role || 'Unknown'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Seniority</p>
+                    <p className="font-medium">{participantContext.seniority || 'Unknown'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Relationship State</p>
+                    <Badge variant={
+                      participantContext.relationship_state === 'engaged' ? 'default' :
+                      participantContext.relationship_state === 'cold' ? 'secondary' : 'outline'
+                    }>
+                      {participantContext.relationship_state || 'Unknown'}
                     </Badge>
-                  ))}
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Channel Preference</p>
+                    <p className="font-medium">{participantContext.channel_preference || 'Unknown'}</p>
+                  </div>
+                  {participantContext.last_call_outcome && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Last Call Outcome</p>
+                      <p className="font-medium">{participantContext.last_call_outcome}</p>
+                    </div>
+                  )}
                 </div>
+                {participantContext.prior_touches && participantContext.prior_touches.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Prior Touches</p>
+                    <div className="flex flex-wrap gap-2">
+                      {participantContext.prior_touches.map((touch: string, i: number) => (
+                        <Badge key={i} variant="outline" className="text-xs">
+                          {touch}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </ScrollArea>
           </CardContent>
         </Card>
       )}

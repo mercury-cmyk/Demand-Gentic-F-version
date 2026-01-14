@@ -57,8 +57,11 @@ import {
   Briefcase,
   Mail,
   Mic,
+  Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import { Link } from "wouter";
 
 interface TestCall {
   id: string;
@@ -285,13 +288,21 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
               Preview Studio is for AI simulation. Test calls use server-side dialing.
             </CardDescription>
           </div>
-          <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-new-test-call">
-                <Play className="h-4 w-4 mr-2" />
-                New Test Call
+          <div className="flex items-center gap-2">
+            <Link href={`/preview-studio?campaignId=${campaignId}`}>
+              <Button variant="outline" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                Preview Studio
+                <ExternalLink className="h-3 w-3 ml-1" />
               </Button>
-            </DialogTrigger>
+            </Link>
+            <Dialog open={isTestDialogOpen} onOpenChange={setIsTestDialogOpen}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-new-test-call">
+                  <Play className="h-4 w-4 mr-2" />
+                  New Test Call
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-[500px]">
               <DialogHeader>
                 <DialogTitle>Initiate Test Call</DialogTitle>
@@ -414,7 +425,8 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                 </Button>
               </DialogFooter>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">

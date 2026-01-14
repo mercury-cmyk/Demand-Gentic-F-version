@@ -1,6 +1,7 @@
 import WebSocket from "ws";
+import OpenAI from "openai";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, callSessions } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -104,6 +105,7 @@ interface SipDialerSession {
   voiceOverride: string | null;
   agentSettingsOverride: Partial<VirtualAgentSettings> | null;
   voiceVariables: Record<string, string> | null;
+  dbCallSessionId?: string; // ID for call_sessions table for unified reporting
   rateLimits: {
     requestsRemaining: number;
     requestsLimit: number;
@@ -407,6 +409,29 @@ export async function initiateOpenAISipCall(params: {
   session.telnyxCallControlId = telnyxCallControlId;
   session.isActive = true;
 
+  // Create call_sessions record for unified reporting
+  try {
+    const [insertedSession] = await db.insert(callSessions).values({
+      campaignId: campaignId || null,
+      contactId: contactId || null,
+      telnyxCallId: telnyxCallControlId,
+      toNumberE164: toNumber,
+      fromNumber: fromNumber,
+      agentType: 'ai',
+      status: 'connecting',
+      startedAt: new Date(),
+      // Use virtualAgentId for AI identity tracking
+      aiConversationId: runId, // Using runId as conversation grouping for now
+    }).returning({ id: callSessions.id });
+    
+    if (insertedSession) {
+      session.dbCallSessionId = insertedSession.id;
+      console.log(`${LOG_PREFIX} Created call_sessions record: ${insertedSession.id}`);
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to create call_sessions record:`, error);
+  }
+
   // Store session
   activeSessions.set(callId, session);
   telnyxCallIdToSessionId.set(telnyxCallControlId, callId);
@@ -415,10 +440,10 @@ export async function initiateOpenAISipCall(params: {
   if (!isTestSession) {
     await db.update(dialerCallAttempts)
       .set({
-        status: 'calling',
-        callControlId: telnyxCallControlId,
-        callSessionId: telnyxCallSessionId,
-        startedAt: new Date(),
+        // status: 'calling', // Not in schema
+        // callControlId: telnyxCallControlId, // Not in schema
+        callSessionId: session.dbCallSessionId, // Link to call_sessions table for unified reporting
+        callStartedAt: new Date(),
       })
       .where(eq(dialerCallAttempts.id, callAttemptId));
   }
@@ -437,6 +462,17 @@ export async function handleCallAnswered(callId: string): Promise<void> {
   }
 
   console.log(`${LOG_PREFIX} Call answered: ${callId}`);
+
+  // Update unified reporting status
+  if (session.dbCallSessionId) {
+    try {
+      await db.update(callSessions)
+        .set({ status: 'connected' })
+        .where(eq(callSessions.id, session.dbCallSessionId));
+    } catch (e) { 
+      console.warn(`${LOG_PREFIX} Failed to update status to connected:`, e);
+    }
+  }
 
   // Get OpenAI API key
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -688,6 +724,74 @@ async function handleFunctionCall(
   }
 }
 
+function getOpenAIClient(): OpenAI {
+  // Try to use the AI_INTEGRATIONS_OPENAI_API_KEY first, fallback to OPENAI_API_KEY
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenAI API key not configured.");
+  }
+  return new OpenAI({ apiKey });
+}
+
+async function generatePostCallAnalysis(transcript: string, context: any): Promise<{ summary: CallSummary, disposition: DispositionCode } | null> {
+    if (!transcript.trim()) return null;
+
+    console.log(`${LOG_PREFIX} Generating post-call analysis for call...`);
+
+    try {
+        const openai = getOpenAIClient();
+        const prompt = `
+You are an expert sales call analyst. Analyze the following call transcript and provide a structured summary and disposition.
+
+Context:
+${JSON.stringify(context, null, 2)}
+
+Transcript:
+${transcript}
+
+Output a JSON object with the following structure:
+{
+  "summary": "2-4 sentence summary of the conversation.",
+  "engagement_level": "low" | "medium" | "high",
+  "sentiment": "guarded" | "neutral" | "reflective" | "positive",
+  "time_pressure": boolean,
+  "primary_challenge": "string",
+  "follow_up_consent": "yes" | "no" | "unknown",
+  "next_step": "string",
+  "disposition": "qualified_lead" | "not_interested" | "do_not_call" | "voicemail" | "no_answer" | "invalid_data"
+}
+`;
+
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are a helpful assistant that outputs JSON." }, { role: "user", content: prompt }],
+            response_format: { type: "json_object" }
+        });
+
+        const content = response.choices[0].message.content;
+        if (!content) return null;
+        
+        const result = JSON.parse(content);
+        
+        return {
+            summary: {
+                summary: result.summary,
+                engagement_level: result.engagement_level,
+                sentiment: result.sentiment,
+                time_pressure: result.time_pressure,
+                primary_challenge: result.primary_challenge,
+                follow_up_consent: result.follow_up_consent,
+                next_step: result.next_step
+            },
+            disposition: result.disposition
+        };
+
+    } catch (error) {
+        console.error(`${LOG_PREFIX} Failed to generate post-call analysis:`, error);
+        return null; // Return null on failure so we don't block saving
+    }
+}
+
 /**
  * Hang up a call via Telnyx
  */
@@ -734,31 +838,78 @@ export async function endCall(callId: string, outcome: string): Promise<void> {
     .map(t => `[${t.role.toUpperCase()}] ${t.text}`)
     .join("\n");
 
+  // Post-call analysis if needed (AI Summary + Disposition)
+  let finalDisposition = session.detectedDisposition || outcome;
+  let finalSummary = session.callSummary;
+
+  // Only run analysis if we have a transcript and missing info
+  if (session.transcripts.length > 0 && (!finalSummary || !session.detectedDisposition)) {
+     const analysis = await generatePostCallAnalysis(transcriptText, {
+        campaignId: session.campaignId,
+        contactId: session.contactId,
+        agentName: (session.agentSettings as any).name || 'AI Agent'
+     });
+
+     if (analysis) {
+        if (!finalSummary) finalSummary = analysis.summary;
+        if (!session.detectedDisposition) finalDisposition = analysis.disposition;
+        console.log(`${LOG_PREFIX} Post-call analysis completed. Disposition: ${finalDisposition}`);
+     }
+  }
+
   // Update database
   if (!session.isTestSession) {
     try {
       await db.update(dialerCallAttempts)
         .set({
-          status: 'completed',
-          endedAt: new Date(),
-          duration,
-          disposition: session.detectedDisposition || outcome,
-          transcript: transcriptText,
-          callSummary: session.callSummary ? JSON.stringify(session.callSummary) : null,
+          // status: 'completed', // Not in schema
+          callEndedAt: new Date(),
+          callDurationSeconds: duration,
+          disposition: finalDisposition as any, // Cast to match schema enum if needed
+          // transcript: transcriptText, // Not in schema
+          // callSummary: finalSummary ? JSON.stringify(finalSummary) : null, // Not in schema
         })
         .where(eq(dialerCallAttempts.id, session.callAttemptId));
 
       // Update queue item
       await db.update(campaignQueue)
         .set({
-          status: 'completed',
-          lastAttemptAt: new Date(),
+          status: 'done',
+          updatedAt: new Date(),
         })
         .where(eq(campaignQueue.id, session.queueItemId));
 
       console.log(`${LOG_PREFIX} Database updated for call ${callId}`);
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to update database:`, error);
+    }
+  }
+
+  // Update unified reporting (call_sessions)
+  if (session.dbCallSessionId) {
+    try {
+      // Map outcome to status enum
+      let statusString = 'completed';
+      if (outcome === 'voicemail') statusString = 'voicemail_detected';
+      else if (outcome === 'no_answer') statusString = 'no_answer';
+      else if (outcome === 'error') statusString = 'failed';
+      else if (outcome === 'busy') statusString = 'busy';
+
+      // Safe casting to enum values handled by Drizzle/Postgres usually, 
+      // but ensure string matches enum values: 'connecting', 'ringing', 'connected', 'no_answer', 'busy', 'failed', 'voicemail_detected', 'cancelled', 'completed'
+      
+      await db.update(callSessions).set({
+        status: statusString as any,
+        endedAt: new Date(),
+        durationSec: duration,
+        aiTranscript: transcriptText,
+        aiAnalysis: finalSummary, // This is JSONB in schema
+        aiDisposition: finalDisposition,
+      }).where(eq(callSessions.id, session.dbCallSessionId));
+
+      console.log(`${LOG_PREFIX} Updated call_sessions record ${session.dbCallSessionId}`);
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Failed to update call_sessions record:`, error);
     }
   }
 

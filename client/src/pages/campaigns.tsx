@@ -1,12 +1,13 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Mail, Phone, Plus, BarChart, Settings, Play, Pause, Edit, Trash2, 
-  MoreVertical, Zap, Search, ArrowUpRight, AlertCircle, CheckCircle2 
+import {
+  Mail, Phone, Plus, BarChart, Settings, Play, Pause, Edit, Trash2,
+  MoreVertical, Zap, Search, ArrowUpRight, AlertCircle, CheckCircle2,
+  ChevronDown, ChevronUp, Bot, Users
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +36,10 @@ import { StatCard } from "@/components/shared/stat-card";
 import { ConfidenceIndicator } from "@/components/ui/confidence-indicator";
 import { Progress } from "@/components/ui/progress";
 import { CampaignPerformanceSnapshot, type CampaignPerformanceSnapshotData } from "@/components/campaigns/campaign-performance-snapshot";
+import { PhoneCampaignPanel, type QueueStats } from "@/components/campaigns/phone-campaign-panel";
+import { EmailCampaignPanel, type EmailStats } from "@/components/campaigns/email-campaign-panel";
+import { AgentAssignmentDialog } from "@/components/campaigns/agent-assignment-dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type EmailStatsResponse = {
   totalSent: number;
@@ -57,13 +62,29 @@ type CallStatsResponse = {
 };
 
 export default function CampaignsPage() {
-  const [activeTab, setActiveTab] = useState("all");
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const typeFromUrl = searchParams.get('type');
+
+  const [activeTab, setActiveTab] = useState(typeFromUrl === 'phone' ? 'call' : typeFromUrl === 'email' ? 'email' : 'all');
   const [, setLocation] = useLocation();
-  const { getToken } = useAuth();
+  const { getToken, token } = useAuth();
   const { toast } = useToast();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [campaignToDelete, setCampaignToDelete] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string | number>>(new Set());
+  const [assignAgentsDialogOpen, setAssignAgentsDialogOpen] = useState(false);
+  const [selectedCampaignForAgents, setSelectedCampaignForAgents] = useState<any>(null);
+
+  // Sync tab with URL parameter
+  useEffect(() => {
+    if (typeFromUrl === 'phone') {
+      setActiveTab('call');
+    } else if (typeFromUrl === 'email') {
+      setActiveTab('email');
+    }
+  }, [typeFromUrl]);
 
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ["/api/campaigns"],
@@ -83,7 +104,7 @@ export default function CampaignsPage() {
     queryKey: ["/api/campaigns", "performance-snapshots", campaigns.map((campaign: any) => campaign.id).join(",")],
     queryFn: async () => {
       const token = getToken();
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
       const snapshots = await Promise.all(
         campaigns.map(async (campaign: any) => {
@@ -128,6 +149,71 @@ export default function CampaignsPage() {
       return Object.fromEntries(snapshots);
     },
     enabled: campaigns.length > 0,
+  });
+
+  // Fetch queue stats for phone campaigns
+  const phoneCampaigns = campaigns.filter((c: any) => c.type === 'call' || c.type === 'telemarketing');
+  const { data: queueStats = {} } = useQuery<Record<string, QueueStats>>({
+    queryKey: ["/api/campaigns/queue-stats", phoneCampaigns.map((c: any) => c.id).join(',')],
+    queryFn: async () => {
+      const stats: Record<string, QueueStats> = {};
+      for (const campaign of phoneCampaigns) {
+        const [statsRes, suppressionStatsRes] = await Promise.all([
+          fetch(`/api/campaigns/${campaign.id}/queue/stats`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Cache-Control': 'no-cache',
+            },
+          }),
+          fetch(`/api/campaigns/${campaign.id}/suppressions/stats`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Cache-Control': 'no-cache',
+            },
+          })
+        ]);
+        if (statsRes.ok) {
+          const queueStatsData = await statsRes.json();
+          const suppressionStats = suppressionStatsRes.ok ? await suppressionStatsRes.json() : null;
+
+          stats[campaign.id] = {
+            total: queueStatsData.total || 0,
+            queued: queueStatsData.queued || 0,
+            inProgress: queueStatsData.inProgress || 0,
+            completed: queueStatsData.completed || 0,
+            agents: queueStatsData.agents || 0,
+            suppression: suppressionStats
+          };
+        }
+      }
+      return stats;
+    },
+    enabled: phoneCampaigns.length > 0 && !!token,
+    refetchInterval: 10000,
+  });
+
+  // Toggle status mutation
+  const toggleStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const newStatus = status === 'active' ? 'paused' : 'active';
+      return await apiRequest('PATCH', `/api/campaigns/${id}`, { status: newStatus });
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns/queue-stats"] });
+      const newStatus = variables.status === 'active' ? 'paused' : 'active';
+      toast({
+        title: "Success",
+        description: `Campaign ${newStatus === 'active' ? 'resumed' : 'paused'} successfully`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update campaign status",
+        variant: "destructive",
+      });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -176,8 +262,31 @@ export default function CampaignsPage() {
     }
   };
 
+  const toggleCampaignExpanded = (campaignId: string | number) => {
+    setExpandedCampaigns(prev => {
+      const next = new Set(prev);
+      if (next.has(campaignId)) {
+        next.delete(campaignId);
+      } else {
+        next.add(campaignId);
+      }
+      return next;
+    });
+  };
+
+  const handleAssignAgentsClick = (campaign: any) => {
+    setSelectedCampaignForAgents(campaign);
+    setAssignAgentsDialogOpen(true);
+  };
+
+  const isPhoneCampaign = (campaign: any) => campaign.type === 'call' || campaign.type === 'telemarketing';
+  const isEmailCampaign = (campaign: any) => campaign.type === 'email';
+
   const filteredCampaigns = campaigns.filter((c: any) => {
-    const matchesTab = activeTab === "all" || c.type === activeTab;
+    // Handle "call" tab to also include "telemarketing" type campaigns
+    const matchesTab = activeTab === "all" ||
+      c.type === activeTab ||
+      (activeTab === "call" && (c.type === "telemarketing" || c.type === "call"));
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTab && matchesSearch;
   });
@@ -312,98 +421,209 @@ export default function CampaignsPage() {
             ) : (
               filteredCampaigns.map((campaign: any) => {
                 const insight = getCampaignInsight(campaign);
-                
+                const isExpanded = expandedCampaigns.has(campaign.id);
+                const isPhone = isPhoneCampaign(campaign);
+                const isEmail = isEmailCampaign(campaign);
+                const campaignQueueStats = isPhone ? queueStats[campaign.id] : undefined;
+                const emailStats: EmailStats | null = campaignSnapshots[String(campaign.id)]?.email || null;
+
                 return (
-                  <div 
-                    key={campaign.id} 
-                    className="group flex flex-col gap-4 rounded-xl border bg-card p-4 transition-all duration-200 hover:shadow-md"
+                  <Collapsible
+                    key={campaign.id}
+                    open={isExpanded}
+                    onOpenChange={() => toggleCampaignExpanded(campaign.id)}
                   >
-                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    {/* Left: Info */}
-                    <div className="flex items-start gap-4 min-w-[250px]">
-                      <div className={`p-2.5 rounded-lg ${campaign.type === 'email' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
-                        {campaign.type === "email" ? <Mail className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-base text-foreground">{campaign.name}</h3>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                          <span>Started {new Date(campaign.startDate).toLocaleDateString()}</span>
-                          <span>•</span>
-                          <span className="capitalize">{campaign.type === 'call' ? 'Phone' : campaign.type}</span>
+                    <div className="group rounded-xl border bg-card transition-all duration-200 hover:shadow-md">
+                      <div className="p-4">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                          {/* Left: Info */}
+                          <div className="flex items-start gap-4 min-w-[250px]">
+                            <div className={`p-2.5 rounded-lg ${isEmail ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+                              {isEmail ? <Mail className="h-5 w-5" /> : <Phone className="h-5 w-5" />}
+                            </div>
+                            <div>
+                              <h3 className="font-semibold text-base text-foreground">{campaign.name}</h3>
+                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                                {campaign.startDate && (
+                                  <>
+                                    <span>Started {new Date(campaign.startDate).toLocaleDateString()}</span>
+                                    <span>•</span>
+                                  </>
+                                )}
+                                <span className="capitalize">{isPhone ? 'Phone' : campaign.type}</span>
+                                {isPhone && campaign.dialMode === 'ai_agent' && (
+                                  <>
+                                    <span>•</span>
+                                    <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-purple-300 text-purple-600">
+                                      <Bot className="h-3 w-3 mr-1" />
+                                      AI Agent
+                                    </Badge>
+                                  </>
+                                )}
+                                {isPhone && campaignQueueStats && (
+                                  <>
+                                    <span>•</span>
+                                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                                      <Users className="h-3 w-3 mr-1" />
+                                      {campaignQueueStats.queued} in queue
+                                    </Badge>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Middle: Metrics & Status */}
+                          <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full md:w-auto items-center">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className={getStatusColor(campaign.status)}>
+                                {campaign.status}
+                              </Badge>
+                            </div>
+
+                            <div className="col-span-2 space-y-1.5">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-muted-foreground">
+                                  {isEmail ? 'Engagement Rate' : 'Connect Rate'}
+                                </span>
+                                <span className="font-medium">
+                                  {isEmail
+                                    ? `${campaign.sent && campaign.opened ? Math.round((campaign.opened / campaign.sent) * 100) : 0}%`
+                                    : `${campaign.calls && campaign.connected ? Math.round((campaign.connected / campaign.calls) * 100) : 0}%`
+                                  }
+                                </span>
+                              </div>
+                              <Progress
+                                value={isEmail
+                                  ? (campaign.opened / campaign.sent) * 100
+                                  : (campaign.connected / campaign.calls) * 100
+                                }
+                                className="h-2"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Right: AI Insight & Actions */}
+                          <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+                            {insight && (
+                              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border text-xs">
+                                {insight.type === 'success' ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                                ) : (
+                                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                                )}
+                                <span className="font-medium">{insight.message}</span>
+                                <div className="w-px h-3 bg-border mx-1" />
+                                <ConfidenceIndicator score={insight.score} showBar={false} className="!gap-0" />
+                              </div>
+                            )}
+
+                            {/* Quick Status Toggle */}
+                            {(campaign.status === 'active' || campaign.status === 'paused') && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleStatusMutation.mutate({ id: campaign.id.toString(), status: campaign.status });
+                                }}
+                                disabled={toggleStatusMutation.isPending}
+                              >
+                                {campaign.status === 'active' ? (
+                                  <>
+                                    <Pause className="h-4 w-4 mr-1" />
+                                    Pause
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="h-4 w-4 mr-1" />
+                                    Resume
+                                  </>
+                                )}
+                              </Button>
+                            )}
+
+                            <CollapsibleTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 px-2">
+                                {isExpanded ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </CollapsibleTrigger>
+
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                {isPhone && (
+                                  <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
+                                    <Users className="mr-2 h-4 w-4" />
+                                    Assign Agents
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+
+                        {/* Performance Snapshot - Always visible */}
+                        <div className="mt-4">
+                          <CampaignPerformanceSnapshot
+                            data={campaignSnapshots[String(campaign.id)]}
+                            isLoading={snapshotsLoading}
+                          />
                         </div>
                       </div>
-                    </div>
 
-                    {/* Middle: Metrics & Status */}
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full md:w-auto items-center">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={getStatusColor(campaign.status)}>
-                          {campaign.status}
-                        </Badge>
-                      </div>
-                      
-                      <div className="col-span-2 space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">
-                            {campaign.type === 'email' ? 'Engagement Rate' : 'Connect Rate'}
-                          </span>
-                          <span className="font-medium">
-                            {campaign.type === 'email' 
-                              ? `${campaign.sent && campaign.opened ? Math.round((campaign.opened / campaign.sent) * 100) : 0}%`
-                              : `${campaign.calls && campaign.connected ? Math.round((campaign.connected / campaign.calls) * 100) : 0}%`
-                            }
-                          </span>
-                        </div>
-                        <Progress 
-                          value={campaign.type === 'email' 
-                            ? (campaign.opened / campaign.sent) * 100 
-                            : (campaign.connected / campaign.calls) * 100
-                          } 
-                          className="h-2" 
-                        />
-                      </div>
-                    </div>
-
-                    {/* Right: AI Insight & Actions */}
-                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-                      {insight && (
-                        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border text-xs">
-                          {insight.type === 'success' ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                          ) : (
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                      {/* Expandable Type-Specific Panel */}
+                      <CollapsibleContent>
+                        <div className="border-t px-4 py-4 bg-muted/20">
+                          {isPhone && (
+                            <PhoneCampaignPanel
+                              campaign={{
+                                id: campaign.id,
+                                name: campaign.name,
+                                status: campaign.status,
+                                dialMode: campaign.dialMode,
+                              }}
+                              queueStats={campaignQueueStats}
+                              onAssignAgents={() => handleAssignAgentsClick(campaign)}
+                              onToggleStatus={() => toggleStatusMutation.mutate({
+                                id: campaign.id.toString(),
+                                status: campaign.status
+                              })}
+                              isToggling={toggleStatusMutation.isPending}
+                            />
                           )}
-                          <span className="font-medium">{insight.message}</span>
-                          <div className="w-px h-3 bg-border mx-1" />
-                          <ConfidenceIndicator score={insight.score} showBar={false} className="!gap-0" />
+                          {isEmail && (
+                            <EmailCampaignPanel
+                              campaign={{
+                                id: campaign.id,
+                                name: campaign.name,
+                                status: campaign.status,
+                              }}
+                              emailStats={emailStats}
+                              isLoading={snapshotsLoading}
+                            />
+                          )}
                         </div>
-                      )}
-
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      </CollapsibleContent>
                     </div>
-                  </div>
-
-                  <CampaignPerformanceSnapshot
-                    data={campaignSnapshots[String(campaign.id)]}
-                    isLoading={snapshotsLoading}
-                  />
-                </div>
+                  </Collapsible>
                 );
               })
             )}
@@ -432,6 +652,16 @@ export default function CampaignsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Agent Assignment Dialog */}
+      <AgentAssignmentDialog
+        open={assignAgentsDialogOpen}
+        onOpenChange={setAssignAgentsDialogOpen}
+        campaign={selectedCampaignForAgents}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/campaigns/queue-stats"] });
+        }}
+      />
         </div>
       </div>
     </div>

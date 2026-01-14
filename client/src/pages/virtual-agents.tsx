@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -87,6 +88,8 @@ import {
 import { format } from "date-fns";
 import { SkillBasedAgentCreator } from "@/components/virtual-agents/skill-based-agent-creator";
 import { OrganizationIntelligenceSetup, type OrgIntelligenceConfig } from "@/components/agents/organization-intelligence-setup";
+import { KnowledgeInspector } from "@/components/virtual-agents/knowledge-inspector";
+import { PromptPreviewPanel } from "@/components/virtual-agents/prompt-preview-panel";
 
 interface VirtualAgent {
   id: string;
@@ -261,6 +264,93 @@ type ConversationAnalysis = {
   issues: string[];
   suggestions: string[];
 };
+
+// Side-by-Side Simulation Types
+type SimulationPanelState = {
+  panelId: 0 | 1 | 2;
+  sessionId: string | null;
+  messages: PreviewMessage[];
+  turnState: TurnState;
+  isPending: boolean;
+  sessionMemory: SessionMemory;
+  reasoningPanel: ReasoningPanel;
+  conversationAnalysis: ConversationAnalysis;
+  rightPartyStatus: 'unknown' | 'right-party' | 'gatekeeper' | 'wrong-number';
+  evaluationReport: EvaluationReport | null;
+  error: string | null;
+};
+
+type ComparisonReport = {
+  panels: Array<{
+    panelIndex: number;
+    promptLabel: string;
+    messageCount: number;
+    evaluation: EvaluationReport | null;
+  }>;
+  comparison: {
+    bestPerformer: number;
+    worstPerformer: number;
+    scoreDelta: number;
+    commonIssues: string[];
+  };
+  recommendation: {
+    selectedPrompt: number;
+    reasoning: string;
+  };
+};
+
+// Helper to create empty panel state
+const createEmptyPanelState = (panelId: 0 | 1 | 2): SimulationPanelState => ({
+  panelId,
+  sessionId: null,
+  messages: [],
+  turnState: 'agent',
+  isPending: false,
+  sessionMemory: {
+    userGoal: '',
+    prospectSignals: [],
+    agentClaims: [],
+    questionsAsked: [],
+    objectionsDetected: [],
+    commitments: [],
+    complianceSignals: [],
+    unresolvedItems: [],
+  },
+  reasoningPanel: {
+    understanding: {
+      currentObjective: 'Confirm prospect identity and establish rapport',
+      prospectCareAbout: 'Unknown - needs discovery',
+      confidence: 'medium',
+    },
+    strategy: {
+      chosenApproach: 'Professional, consultative opening',
+      nextBestMove: 'Ask an open-ended question about their current challenges',
+    },
+    riskCompliance: {
+      flags: [],
+      toneCheck: 'executive-grade',
+    },
+    evidence: [],
+  },
+  conversationAnalysis: {
+    stage: 'opening',
+    turnGoal: 'Greet prospect and confirm identity',
+    confidence: 100,
+    userIntent: 'neutral',
+    issues: [],
+    suggestions: [],
+  },
+  rightPartyStatus: 'unknown',
+  evaluationReport: null,
+  error: null,
+});
+
+// Panel color themes for visual distinction
+const PANEL_COLORS = {
+  0: { bg: 'bg-blue-50 dark:bg-blue-950/20', border: 'border-blue-200 dark:border-blue-800', label: 'text-blue-600 dark:text-blue-400' },
+  1: { bg: 'bg-green-50 dark:bg-green-950/20', border: 'border-green-200 dark:border-green-800', label: 'text-green-600 dark:text-green-400' },
+  2: { bg: 'bg-purple-50 dark:bg-purple-950/20', border: 'border-purple-200 dark:border-purple-800', label: 'text-purple-600 dark:text-purple-400' },
+} as const;
 
 type OrgPromptData = {
   agentVoiceDefaults: string[];
@@ -754,7 +844,7 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
     'If unsure, ask a concise clarifying question',
     // VOICEMAIL POLICY (MANDATORY - NO EXCEPTIONS)
     'NEVER leave voicemail - no exceptions, no fallback, no shortened version',
-    'First spoken line must be: "Hi, may I speak with {{ContactFullName}}, the {{JobTitle}} at {{CompanyName}}?"',
+    'First spoken line must be: "Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?"',
     'If voicemail is offered by anyone, say: "That\'s okay — I\'ll try again later. Thank you." then END CALL immediately',
     'If call routes directly to voicemail: Do NOT speak, do NOT record anything, do NOT introduce yourself - end call silently',
     'If gatekeeper mentions voicemail ("leave a voicemail", "send to voicemail", "goes to voicemail"), say: "No problem — I\'ll try again later. Thank you." then END CALL',
@@ -795,7 +885,7 @@ const ASSISTANT_MIN_COOLDOWN_MS = 2000;
 const ASSISTANT_WORD_MS = 450;
 const ASSISTANT_POST_PLAYBACK_COOLDOWN_MS = 800;
 
-const DEFAULT_FIRST_MESSAGE = 'Hi, may I speak with {{ContactFullName}}, the {{JobTitle}} at {{CompanyName}}?';
+const DEFAULT_FIRST_MESSAGE = 'Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?';
 
 // Foundation Capability options (matches server/services/foundation-capabilities.ts)
 const FOUNDATION_CAPABILITIES = [
@@ -833,6 +923,243 @@ const defaultFormData: VirtualAgentFormData = {
   foundationCapabilities: [],
 };
 
+// ============================================================================
+// SIDE-BY-SIDE SIMULATION PANEL COMPONENT
+// ============================================================================
+type SimulationPanelProps = {
+  panelIndex: 0 | 1 | 2;
+  panelState: SimulationPanelState;
+  promptLabel: string;
+  promptPreview: string;
+  simulationStarted: boolean;
+  onPlayVoice?: (content: string) => void;
+};
+
+const SimulationPanelComponent: React.FC<SimulationPanelProps> = ({
+  panelIndex,
+  panelState,
+  promptLabel,
+  promptPreview,
+  simulationStarted,
+  onPlayVoice,
+}) => {
+  const colors = PANEL_COLORS[panelIndex];
+
+  return (
+    <Card className={`flex flex-col h-full ${colors.border} border-2`}>
+      {/* Panel Header */}
+      <CardHeader className={`pb-2 ${colors.bg}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className={`text-sm font-semibold ${colors.label}`}>
+              {promptLabel}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground truncate max-w-[200px]" title={promptPreview}>
+              {promptPreview || "No prompt configured"}
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Badge
+              variant={panelState.turnState === 'thinking' ? 'secondary' : panelState.turnState === 'agent' ? 'default' : 'outline'}
+              className="text-[10px] px-1.5 py-0"
+            >
+              {panelState.turnState === 'thinking' ? 'Thinking...' : panelState.turnState === 'agent' ? 'Agent' : 'Your Turn'}
+            </Badge>
+            {panelState.error && (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Error</Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+
+      {/* Conversation Area */}
+      <CardContent className="flex-1 p-2 overflow-hidden">
+        <ScrollArea className="h-[220px] rounded border bg-muted/20 p-2">
+          {!simulationStarted ? (
+            <div className="h-full flex flex-col items-center justify-center text-center text-muted-foreground">
+              <Phone className="h-6 w-6 mb-2 opacity-50" />
+              <p className="text-xs">Ready to simulate</p>
+            </div>
+          ) : panelState.messages.length === 0 ? (
+            <div className="text-xs text-muted-foreground text-center py-4">
+              {panelState.isPending ? (
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Waiting for response...</span>
+                </div>
+              ) : (
+                "Waiting for agent..."
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {panelState.messages.map((message, index) => (
+                <div key={`${message.role}-${index}`} className="flex items-start gap-2">
+                  <div className={`mt-1 h-1.5 w-1.5 rounded-full flex-shrink-0 ${message.role === 'assistant' ? 'bg-primary' : 'bg-green-500'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {message.role === 'user' ? 'You' : 'Agent'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-foreground mt-0.5 break-words">{message.content}</div>
+                    {message.role === 'assistant' && onPlayVoice && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 mt-0.5"
+                        onClick={() => onPlayVoice(message.content)}
+                      >
+                        <PlayCircle className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {panelState.isPending && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span className="text-xs">Thinking...</span>
+                </div>
+              )}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* Mini Stats */}
+        <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+          <span>{panelState.messages.length} turns</span>
+          {panelState.evaluationReport && (
+            <Badge variant="outline" className="text-[10px]">
+              Score: {panelState.evaluationReport.scorecard.total}/135
+            </Badge>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+// ============================================================================
+// COMPARISON OVERLAY COMPONENT
+// ============================================================================
+type ComparisonOverlayProps = {
+  panels: [SimulationPanelState, SimulationPanelState, SimulationPanelState];
+  promptVariants: [string, string, string];
+  onClose: () => void;
+  onSelectWinner: (panelIndex: number) => void;
+};
+
+const ComparisonOverlayComponent: React.FC<ComparisonOverlayProps> = ({
+  panels,
+  promptVariants,
+  onClose,
+  onSelectWinner,
+}) => {
+  // Calculate scores for each panel
+  const panelScores = panels.map((panel, index) => ({
+    index,
+    label: `Variant ${index + 1}`,
+    messageCount: panel.messages.length,
+    score: panel.evaluationReport?.scorecard.total ?? 0,
+    verdict: panel.evaluationReport?.executiveSummary.verdict ?? 'needs-edits',
+    promptPreview: promptVariants[index]?.slice(0, 100) || 'No prompt',
+    hasEvaluation: !!panel.evaluationReport,
+  }));
+
+  const bestIndex = panelScores.reduce((best, current) =>
+    current.score > panelScores[best].score ? current.index : best
+  , 0);
+
+  return (
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <Card className="w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              Prompt Comparison Results
+            </CardTitle>
+            <CardDescription>
+              Compare performance across your 3 prompt variants
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </CardHeader>
+
+        <CardContent className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-3 gap-4">
+            {panelScores.map((panel) => {
+              const colors = PANEL_COLORS[panel.index as 0 | 1 | 2];
+              const isBest = panel.index === bestIndex && panel.score > 0;
+
+              return (
+                <Card key={panel.index} className={`${colors.border} ${isBest ? 'ring-2 ring-primary' : ''}`}>
+                  <CardHeader className={`pb-2 ${colors.bg}`}>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className={`text-sm ${colors.label}`}>{panel.label}</CardTitle>
+                      {isBest && <Badge>Best</Badge>}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="text-xs text-muted-foreground line-clamp-2">
+                      {panel.promptPreview}...
+                    </div>
+
+                    {panel.hasEvaluation ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">Score</span>
+                          <span className="text-2xl font-bold">{panel.score}/135</span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Verdict</span>
+                          <Badge variant={
+                            panel.verdict === 'approve' ? 'default' :
+                            panel.verdict === 'needs-edits' ? 'secondary' : 'destructive'
+                          }>
+                            {panel.verdict}
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">Turns</span>
+                          <span className="text-sm">{panel.messageCount}</span>
+                        </div>
+
+                        <Button
+                          className="w-full"
+                          variant={isBest ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => onSelectWinner(panel.index)}
+                        >
+                          <Check className="h-3 w-3 mr-1" />
+                          Use This Prompt
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="text-center py-4 text-xs text-muted-foreground">
+                        No evaluation available
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </CardContent>
+
+        <div className="p-4 border-t flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
 export default function VirtualAgentsPage() {
   const [, setLocation] = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -868,7 +1195,24 @@ export default function VirtualAgentsPage() {
   const [autoSendVoice, setAutoSendVoice] = useState(true);
   const [autoPlayVoice, setAutoPlayVoice] = useState(true);
   const [previewLanguage, setPreviewLanguage] = useState('en-US');
-  
+
+  // Enhanced Preview Lab State
+  const [previewProvider, setPreviewProvider] = useState<'openai' | 'gemini' | 'google'>('openai');
+  const [previewVoice, setPreviewVoice] = useState<string>('');
+  const [previewEnvVars, setPreviewEnvVars] = useState<Array<{key: string, value: string}>>([]);
+  const [previewPromptVariants, setPreviewPromptVariants] = useState<[string, string, string]>(['', '', '']);
+  const [activePromptVariant, setActivePromptVariant] = useState<0 | 1 | 2>(0);
+
+  // Side-by-Side Mode State
+  const [sideBySideMode, setSideBySideMode] = useState(false);
+  const [simulationPanels, setSimulationPanels] = useState<[SimulationPanelState, SimulationPanelState, SimulationPanelState]>([
+    createEmptyPanelState(0),
+    createEmptyPanelState(1),
+    createEmptyPanelState(2),
+  ]);
+  const [showComparisonOverlay, setShowComparisonOverlay] = useState(false);
+  const [comparisonReport, setComparisonReport] = useState<ComparisonReport | null>(null);
+
   // Agent Preview Lab - Enhanced State
   const [previewMode, setPreviewMode] = useState<PreviewMode>('training');
   const [previewScenario, setPreviewScenario] = useState<PreviewScenario>('cold-call');
@@ -941,6 +1285,7 @@ export default function VirtualAgentsPage() {
   const voiceInitializedRef = useRef(false); // Prevent multiple voice initializations
   const lastPreviewLanguageRef = useRef(previewLanguage);
   const suppressAutoRestartRef = useRef(false);
+  const startListeningRef = useRef<() => void>(() => {});
   const restartTimeoutRef = useRef<number | null>(null);
   const { toast } = useToast();
 
@@ -1018,9 +1363,11 @@ export default function VirtualAgentsPage() {
       return;
     }
 
+    // Extract tokens from agent prompts AND all prompt variants (for side-by-side mode)
     const tokens = extractPreviewTokens([
       testCallAgent.systemPrompt,
       testCallAgent.firstMessage,
+      ...previewPromptVariants, // Include all variant prompts
     ]);
 
     setPreviewTokens(tokens);
@@ -1036,6 +1383,21 @@ export default function VirtualAgentsPage() {
       });
       return nextValues;
     });
+  }, [testCallAgent, previewPromptVariants]);
+
+  // Initialize enhanced preview settings
+  useEffect(() => {
+    if (testCallAgent) {
+      // Default to agent's provider if known, else OpenAI
+      const p = (testCallAgent.provider as 'openai' | 'gemini') || 'openai';
+      setPreviewProvider(p);
+      setPreviewVoice(testCallAgent.voice || (p === 'openai' ? 'nova' : 'Puck'));
+
+      // Initialize prompt variants - Variant 0 is the agent's current prompt
+      setPreviewPromptVariants([testCallAgent.systemPrompt || '', '', '']);
+      setActivePromptVariant(0);
+      setPreviewEnvVars([]); // Reset env vars on agent switch
+    }
   }, [testCallAgent]);
 
   // Fetch campaign assignments for preview context selector
@@ -1100,9 +1462,13 @@ export default function VirtualAgentsPage() {
   }, [autoPlayVoice]);
 
   const previewSystemPrompt = useMemo(() => {
-    if (!testCallAgent?.systemPrompt?.trim()) return '';
-    return applyPreviewValues(testCallAgent.systemPrompt, previewValues);
-  }, [previewValues, testCallAgent]);
+    const rawPrompt = previewPromptVariants[activePromptVariant]?.trim() 
+      ? previewPromptVariants[activePromptVariant]
+      : (testCallAgent?.systemPrompt?.trim() || '');
+      
+    if (!rawPrompt) return '';
+    return applyPreviewValues(rawPrompt, previewValues);
+  }, [previewValues, testCallAgent, previewPromptVariants, activePromptVariant]);
 
   const previewOpeningMessage = useMemo(() => {
     if (!testCallAgent?.firstMessage?.trim()) {
@@ -1228,6 +1594,8 @@ export default function VirtualAgentsPage() {
       promptVersion,
       promptVariables,
       tools,
+      provider,
+      envVars,
     }: {
       sessionId?: string;
       virtualAgentId?: string;
@@ -1241,6 +1609,8 @@ export default function VirtualAgentsPage() {
       promptVersion?: string;
       promptVariables?: Record<string, any>;
       tools?: string[];
+      provider?: string;
+      envVars?: Record<string, string>;
     }) => {
       // Always send required settings for preview session
       const requiredSettings = {
@@ -1291,6 +1661,8 @@ export default function VirtualAgentsPage() {
         systemPrompt,
         firstMessage,
         messages,
+        provider,
+        envVars,
         ...requiredSettings,
       });
       return response.json() as Promise<{ reply: string; sessionId?: string; conversationState?: any }>;
@@ -2180,6 +2552,111 @@ export default function VirtualAgentsPage() {
     });
   }, [learnings, previewSystemPrompt, toast]);
 
+  const stopListening = useCallback(() => {
+    suppressAutoRestartRef.current = true;
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+    try {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.abort(); // Use abort() for immediate stop
+        speechRecognitionRef.current = null;
+      }
+    } catch {
+      // Ignore stop errors.
+    }
+    setIsListening(false);
+  }, []);
+
+  const handlePlayPreviewVoice = useCallback(async (text: string) => {
+    if (!previewVoice || !previewProvider) return;
+    const wasListening = isListening;
+    const allowAutoResume = autoListenRef.current && !manualStopRef.current;
+    const normalizedText = normalizePreviewTranscript(text);
+    if (normalizedText) {
+      const wordCount = normalizedText.split(" ").filter(Boolean).length;
+      const estimatedDurationMs = Math.max(
+        ASSISTANT_MIN_COOLDOWN_MS,
+        wordCount * ASSISTANT_WORD_MS
+      );
+      lastAssistantSpokenRef.current = normalizedText;
+      lastAssistantSpokenAtRef.current = Date.now();
+      assistantPlaybackUntilRef.current = Date.now()
+        + estimatedDurationMs
+        + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS;
+    }
+    playbackLockRef.current = true;
+    if (wasListening) {
+      manualStopRef.current = true;
+      stopListening();
+    }
+    if (audioPlaybackRef.current) {
+      audioPlaybackRef.current.pause();
+      audioPlaybackRef.current = null;
+    }
+    try {
+      const response = await apiRequest(
+        'GET',
+        `/api/virtual-agents/preview-voice?voice=${previewVoice}&provider=${previewProvider}&text=${encodeURIComponent(text)}`
+      );
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioPlaybackRef.current = audio;
+      audio.onloadedmetadata = () => {
+        const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
+        if (durationMs > 0) {
+          assistantPlaybackUntilRef.current = Math.max(
+            assistantPlaybackUntilRef.current,
+            Date.now() + durationMs + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
+          );
+        }
+      };
+      const cleanupPlayback = () => {
+        URL.revokeObjectURL(audioUrl);
+        if (audioPlaybackRef.current === audio) {
+          audioPlaybackRef.current = null;
+        }
+        if (normalizedText) {
+          lastAssistantSpokenAtRef.current = Date.now();
+        }
+        assistantPlaybackUntilRef.current = Math.max(
+          assistantPlaybackUntilRef.current,
+          Date.now() + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
+        );
+        playbackLockRef.current = false;
+        if (allowAutoResume) {
+          manualStopRef.current = false;
+          setTimeout(() => {
+            startListeningRef.current();
+          }, 200);
+        }
+      };
+      audio.onended = cleanupPlayback;
+      audio.onerror = cleanupPlayback;
+      try {
+        await audio.play();
+      } catch (playError) {
+        cleanupPlayback();
+        throw playError;
+      }
+    } catch (error) {
+      playbackLockRef.current = false;
+      if (allowAutoResume) {
+        manualStopRef.current = false;
+        setTimeout(() => {
+          startListeningRef.current();
+        }, 200);
+      }
+      toast({
+        title: "Voice preview failed",
+        description: error instanceof Error ? error.message : "Could not play voice preview",
+        variant: "destructive"
+      });
+    }
+  }, [previewVoice, previewProvider, isListening, stopListening, toast]);
+
   const handleStartSimulation = useCallback(() => {
     console.log('[Voice Preview] handleStartSimulation called - previewOpeningMessage:', !!previewOpeningMessage, 'testCallAgent:', !!testCallAgent);
     
@@ -2336,6 +2813,184 @@ export default function VirtualAgentsPage() {
     });
   }, [previewMessages, generateEvaluationReport, toast]);
 
+  // ============================================================================
+  // SIDE-BY-SIDE SIMULATION HANDLERS
+  // ============================================================================
+
+  // Start all 3 simulations simultaneously
+  const handleStartSideBySideSimulation = useCallback(() => {
+    // Check at least one prompt is configured
+    if (!previewPromptVariants.some(p => p.trim())) {
+      toast({
+        title: "No prompts configured",
+        description: "Configure at least one prompt variant to start simulation",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Initialize all panels with opening message (with variable substitution)
+    const rawOpeningMessage = previewOpeningMessage || DEFAULT_FIRST_MESSAGE;
+    const openingMessage = applyPreviewValues(rawOpeningMessage, previewValues);
+    setSimulationPanels(prev => prev.map((panel, idx) => ({
+      ...panel,
+      sessionId: `side-by-side-${idx}-${Date.now()}`,
+      messages: previewPromptVariants[idx]?.trim()
+        ? [{ role: 'assistant' as const, content: openingMessage, timestamp: new Date(), stage: 'opening' as ConversationStage }]
+        : [],
+      turnState: 'user' as TurnState,
+      isPending: false,
+      error: null,
+      evaluationReport: null,
+    })) as [SimulationPanelState, SimulationPanelState, SimulationPanelState]);
+
+    setSimulationStarted(true);
+    setSimulationStartTime(new Date());
+
+    toast({
+      title: "Simulation started",
+      description: "All panels are ready. Type or speak your response.",
+    });
+  }, [previewPromptVariants, previewOpeningMessage, previewValues, toast]);
+
+  // Send message to all panels in parallel
+  const handleSendToAllPanels = useCallback(async (overrideMessage?: string) => {
+    const message = (overrideMessage ?? previewInput).trim();
+    if (!message || !simulationStarted) return;
+
+    // Add user message to all panels and set them to thinking
+    setSimulationPanels(prev => prev.map((panel, idx) => {
+      // Skip panels without prompts
+      if (!previewPromptVariants[idx]?.trim()) return panel;
+
+      const userMsg: PreviewMessage = {
+        role: 'user',
+        content: message,
+        timestamp: new Date(),
+      };
+      return {
+        ...panel,
+        messages: [...panel.messages, userMsg],
+        turnState: 'thinking' as TurnState,
+        isPending: true,
+        error: null,
+      };
+    }) as [SimulationPanelState, SimulationPanelState, SimulationPanelState]);
+
+    setPreviewInput('');
+
+    // Build API calls for all 3 panels
+    const apiCalls = simulationPanels.map(async (panel, index) => {
+      const rawPromptForPanel = previewPromptVariants[index];
+      if (!rawPromptForPanel?.trim()) {
+        return { status: 'skipped' as const, panelIndex: index };
+      }
+
+      // Apply variable substitution to the prompt
+      const promptForPanel = applyPreviewValues(rawPromptForPanel, previewValues);
+      const openingMessage = previewOpeningMessage || (testCallAgent?.firstMessage ? applyPreviewValues(testCallAgent.firstMessage, previewValues) : undefined);
+
+      try {
+        const response = await apiRequest('POST', '/api/virtual-agents/preview-conversation', {
+          sessionId: panel.sessionId,
+          virtualAgentId: testCallAgent?.id,
+          campaignId: testCallAgentCampaignId || undefined,
+          systemPrompt: promptForPanel,
+          firstMessage: openingMessage,
+          messages: [...panel.messages, { role: 'user', content: message }].map(m => ({ role: m.role, content: m.content })),
+          provider: previewProvider,
+          envVars: previewEnvVars.reduce((acc, curr) => ({...acc, [curr.key]: curr.value}), {} as Record<string, string>),
+        });
+        const data = await response.json();
+        return { status: 'success' as const, panelIndex: index, data };
+      } catch (error: any) {
+        return { status: 'error' as const, panelIndex: index, error: error.message || 'Request failed' };
+      }
+    });
+
+    // Execute all API calls in parallel
+    const results = await Promise.allSettled(apiCalls);
+
+    // Update each panel with its result
+    setSimulationPanels(prev => {
+      const newPanels = [...prev] as [SimulationPanelState, SimulationPanelState, SimulationPanelState];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const value = result.value;
+          if (value.status === 'success' && value.data?.reply) {
+            const assistantMsg: PreviewMessage = {
+              role: 'assistant',
+              content: value.data.reply,
+              timestamp: new Date(),
+            };
+            newPanels[index] = {
+              ...newPanels[index],
+              isPending: false,
+              turnState: 'user',
+              messages: [...newPanels[index].messages, assistantMsg],
+            };
+          } else if (value.status === 'error') {
+            newPanels[index] = {
+              ...newPanels[index],
+              isPending: false,
+              turnState: 'user',
+              error: value.error,
+            };
+          } else if (value.status === 'skipped') {
+            newPanels[index] = {
+              ...newPanels[index],
+              isPending: false,
+            };
+          }
+        } else {
+          // Promise rejected
+          newPanels[index] = {
+            ...newPanels[index],
+            isPending: false,
+            turnState: 'user',
+            error: 'Request failed',
+          };
+        }
+      });
+      return newPanels;
+    });
+  }, [previewInput, simulationStarted, simulationPanels, previewPromptVariants, previewValues, testCallAgent, testCallAgentCampaignId, previewOpeningMessage, previewProvider, previewEnvVars]);
+
+  // End simulation and show comparison
+  const handleEndAndCompare = useCallback(() => {
+    // Generate evaluation reports for each panel
+    setSimulationPanels(prev => prev.map((panel, idx) => {
+      if (panel.messages.length < 3 || !previewPromptVariants[idx]?.trim()) {
+        return panel;
+      }
+      const report = generateEvaluationReport(panel.messages);
+      return {
+        ...panel,
+        evaluationReport: report,
+      };
+    }) as [SimulationPanelState, SimulationPanelState, SimulationPanelState]);
+
+    setSimulationStarted(false);
+    setShowComparisonOverlay(true);
+  }, [previewPromptVariants, generateEvaluationReport]);
+
+  // Reset all panels
+  const handleResetSideBySide = useCallback(() => {
+    setSimulationPanels([
+      createEmptyPanelState(0),
+      createEmptyPanelState(1),
+      createEmptyPanelState(2),
+    ]);
+    setSimulationStarted(false);
+    setSimulationStartTime(null);
+    setShowComparisonOverlay(false);
+    setPreviewInput('');
+  }, []);
+
+  // ============================================================================
+  // END SIDE-BY-SIDE HANDLERS
+  // ============================================================================
+
   const handleSendPreview = useCallback(async (overrideMessage?: string) => {
     if (!testCallAgent) return;
     const message = (overrideMessage ?? previewInput).trim();
@@ -2388,6 +3043,8 @@ export default function VirtualAgentsPage() {
         systemPrompt: previewSystemPrompt || undefined,
         firstMessage: previewOpeningMessage || undefined,
         messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
+        provider: previewProvider,
+        envVars: previewEnvVars.reduce((acc, curr) => ({...acc, [curr.key]: curr.value}), {} as Record<string, string>),
       });
 
       // Store session ID if returned (prevents conversation resets)
@@ -2453,95 +3110,10 @@ export default function VirtualAgentsPage() {
     getStageGoal,
     updateSessionMemory,
     updateReasoningPanel,
+    previewProvider,
+    previewEnvVars,
+    handlePlayPreviewVoice,
   ]);
-
-  const handlePlayPreviewVoice = async (text: string) => {
-    if (!testCallAgent?.voice || !testCallAgent.provider) return;
-    const wasListening = isListening;
-    const allowAutoResume = autoListenRef.current && !manualStopRef.current;
-    const normalizedText = normalizePreviewTranscript(text);
-    if (normalizedText) {
-      const wordCount = normalizedText.split(" ").filter(Boolean).length;
-      const estimatedDurationMs = Math.max(
-        ASSISTANT_MIN_COOLDOWN_MS,
-        wordCount * ASSISTANT_WORD_MS
-      );
-      lastAssistantSpokenRef.current = normalizedText;
-      lastAssistantSpokenAtRef.current = Date.now();
-      assistantPlaybackUntilRef.current = Date.now()
-        + estimatedDurationMs
-        + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS;
-    }
-    playbackLockRef.current = true;
-    if (wasListening) {
-      manualStopRef.current = true;
-      stopListening();
-    }
-    if (audioPlaybackRef.current) {
-      audioPlaybackRef.current.pause();
-      audioPlaybackRef.current = null;
-    }
-    try {
-      const response = await apiRequest(
-        'GET',
-        `/api/virtual-agents/preview-voice?voice=${testCallAgent.voice}&provider=${testCallAgent.provider}&text=${encodeURIComponent(text)}`
-      );
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      audioPlaybackRef.current = audio;
-      audio.onloadedmetadata = () => {
-        const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
-        if (durationMs > 0) {
-          assistantPlaybackUntilRef.current = Math.max(
-            assistantPlaybackUntilRef.current,
-            Date.now() + durationMs + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
-          );
-        }
-      };
-      const cleanupPlayback = () => {
-        URL.revokeObjectURL(audioUrl);
-        if (audioPlaybackRef.current === audio) {
-          audioPlaybackRef.current = null;
-        }
-        if (normalizedText) {
-          lastAssistantSpokenAtRef.current = Date.now();
-        }
-        assistantPlaybackUntilRef.current = Math.max(
-          assistantPlaybackUntilRef.current,
-          Date.now() + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
-        );
-        playbackLockRef.current = false;
-        if (allowAutoResume) {
-          manualStopRef.current = false;
-          setTimeout(() => {
-            startListening();
-          }, 200);
-        }
-      };
-      audio.onended = cleanupPlayback;
-      audio.onerror = cleanupPlayback;
-      try {
-        await audio.play();
-      } catch (playError) {
-        cleanupPlayback();
-        throw playError;
-      }
-    } catch (error) {
-      playbackLockRef.current = false;
-      if (allowAutoResume) {
-        manualStopRef.current = false;
-        setTimeout(() => {
-          startListening();
-        }, 200);
-      }
-      toast({
-        title: "Voice preview failed",
-        description: error instanceof Error ? error.message : "Could not play voice preview",
-        variant: "destructive"
-      });
-    }
-  };
 
   const startListening = useCallback(() => {
     // Guard: Don't start if manually stopped or dialog is closed
@@ -2652,7 +3224,13 @@ export default function VirtualAgentsPage() {
         }
       }
       if (autoSendVoice) {
-        handleSendPreview(transcript);
+        // In side-by-side mode, broadcast to all panels
+        if (sideBySideMode) {
+          // Pass transcript directly to avoid React batching state issues
+          handleSendToAllPanels(transcript);
+        } else {
+          handleSendPreview(transcript);
+        }
       } else {
         setPreviewInput((current) => (current ? `${current} ${transcript}` : transcript));
       }
@@ -2751,24 +3329,11 @@ export default function VirtualAgentsPage() {
         variant: "destructive",
       });
     }
-  }, [autoSendVoice, handleSendPreview, isListening, previewLanguage, toast]);
+  }, [autoSendVoice, handleSendPreview, handleSendToAllPanels, isListening, previewLanguage, sideBySideMode, toast]);
 
-  const stopListening = useCallback(() => {
-    suppressAutoRestartRef.current = true;
-    if (restartTimeoutRef.current) {
-      clearTimeout(restartTimeoutRef.current);
-      restartTimeoutRef.current = null;
-    }
-    try {
-      if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.abort(); // Use abort() for immediate stop
-        speechRecognitionRef.current = null;
-      }
-    } catch {
-      // Ignore stop errors.
-    }
-    setIsListening(false);
-  }, []);
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   const handleVoiceToggle = () => {
     if (!speechSupported) {
@@ -2804,9 +3369,11 @@ export default function VirtualAgentsPage() {
   };
 
   useEffect(() => {
-    console.log('[Voice Preview] useEffect triggered - testCallAgent:', !!testCallAgent, 'speechSupported:', speechSupported, 'simulationStarted:', simulationStarted, 'alreadyInitialized:', voiceInitializedRef.current);
-    
-    if (!testCallAgent || !speechSupported || !simulationStarted) {
+    console.log('[Voice Preview] useEffect triggered - testCallAgent:', !!testCallAgent, 'speechSupported:', speechSupported, 'simulationStarted:', simulationStarted, 'sideBySideMode:', sideBySideMode, 'alreadyInitialized:', voiceInitializedRef.current);
+
+    // Voice works in single mode with testCallAgent OR in side-by-side mode without testCallAgent
+    const hasAgentOrSideBySide = testCallAgent || sideBySideMode;
+    if (!hasAgentOrSideBySide || !speechSupported || !simulationStarted) {
       console.log('[Voice Preview] useEffect early return - missing requirements');
       // Reset initialized flag when dialog closes
       if (!simulationStarted) {
@@ -2893,7 +3460,7 @@ export default function VirtualAgentsPage() {
         }
       }
     };
-  }, [testCallAgent?.id, speechSupported, simulationStarted]);
+  }, [testCallAgent?.id, speechSupported, simulationStarted, sideBySideMode]);
 
   useEffect(() => {
     if (lastPreviewLanguageRef.current === previewLanguage) {
@@ -3078,7 +3645,23 @@ export default function VirtualAgentsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {agents.map(agent => (
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-32 text-center">
+                      <div className="flex flex-col justify-center items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <span className="text-sm text-muted-foreground">Loading agents...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (agents || []).length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                      No agents found. Create your first agent to get started.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  (agents || []).map(agent => (
                   <TableRow key={agent.id} data-testid={`row-agent-${agent.id}`}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -3172,7 +3755,7 @@ export default function VirtualAgentsPage() {
                               </>
                             )}
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setTestCallAgent(agent)}>
+                          <DropdownMenuItem onClick={() => setLocation('/preview-studio')}>
                             <MessageSquare className="h-4 w-4 mr-2" />
                             Preview Studio
                           </DropdownMenuItem>
@@ -3187,7 +3770,7 @@ export default function VirtualAgentsPage() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                )))}
               </TableBody>
             </Table>
           )}
@@ -3308,33 +3891,82 @@ export default function VirtualAgentsPage() {
             setShowEvaluationReport(false);
             setEvaluationReport(null);
             setLearnings([]);
+            // Reset side-by-side state
+            setSideBySideMode(false);
+            setSimulationPanels([
+              createEmptyPanelState(0),
+              createEmptyPanelState(1),
+              createEmptyPanelState(2),
+            ]);
+            setShowComparisonOverlay(false);
           }
         }}
       >
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className={`${sideBySideMode ? 'max-w-[95vw]' : 'max-w-6xl'} max-h-[90vh] overflow-hidden flex flex-col`}>
           <DialogHeader>
             <div className="flex items-center justify-between">
               <div>
                 <DialogTitle className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5" />
                   Agent Preview Lab
+                  {sideBySideMode && <Badge variant="outline" className="ml-2 text-xs">Side-by-Side</Badge>}
                 </DialogTitle>
                 <DialogDescription>
-                  Full-conversation simulation. You are the prospect. No phone calls are placed.
+                  {sideBySideMode
+                    ? "Compare up to 3 prompt variants simultaneously. Your input broadcasts to all panels."
+                    : "Full-conversation simulation. You are the prospect. No phone calls are placed."
+                  }
                 </DialogDescription>
               </div>
               <div className="flex items-center gap-2">
-                {/* Preview Mode Selector */}
-                <Select value={previewMode} onValueChange={(v) => setPreviewMode(v as PreviewMode)}>
-                  <SelectTrigger className="h-8 w-[140px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="training">🎯 Training Mode</SelectItem>
-                    <SelectItem value="realism">🎭 Realism Mode</SelectItem>
-                    <SelectItem value="stress-test">🧪 Stress Test</SelectItem>
-                  </SelectContent>
-                </Select>
+                {/* Mode Toggle */}
+                <div className="flex rounded-lg border p-0.5">
+                  <Button
+                    variant={!sideBySideMode ? "default" : "ghost"}
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => {
+                      if (simulationStarted) return;
+                      setSideBySideMode(false);
+                    }}
+                    disabled={simulationStarted}
+                  >
+                    Single
+                  </Button>
+                  <Button
+                    variant={sideBySideMode ? "default" : "ghost"}
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => {
+                      if (simulationStarted) return;
+                      setSideBySideMode(true);
+                      // Reset panels when switching to side-by-side
+                      setSimulationPanels([
+                        createEmptyPanelState(0),
+                        createEmptyPanelState(1),
+                        createEmptyPanelState(2),
+                      ]);
+                    }}
+                    disabled={simulationStarted}
+                  >
+                    Side-by-Side
+                  </Button>
+                </div>
+                {!sideBySideMode && (
+                  <>
+                    {/* Preview Mode Selector */}
+                    <Select value={previewMode} onValueChange={(v) => setPreviewMode(v as PreviewMode)}>
+                      <SelectTrigger className="h-8 w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="training">Training Mode</SelectItem>
+                        <SelectItem value="realism">Realism Mode</SelectItem>
+                        <SelectItem value="stress-test">Stress Test</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </>
+                )}
                 <Badge variant={simulationStarted ? "default" : "secondary"}>
                   {simulationStarted ? "Live Simulation" : "Ready"}
                 </Badge>
@@ -3342,6 +3974,282 @@ export default function VirtualAgentsPage() {
             </div>
           </DialogHeader>
 
+          {/* ============================================================ */}
+          {/* SIDE-BY-SIDE MODE LAYOUT                                     */}
+          {/* ============================================================ */}
+          {sideBySideMode && (
+            <div className="flex-1 overflow-y-auto flex flex-col gap-4">
+              {/* Shared Config Bar */}
+              <div className="flex flex-wrap items-center gap-4 p-3 rounded-lg border bg-muted/30">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs whitespace-nowrap">Provider:</Label>
+                  <Select value={previewProvider} onValueChange={(v: any) => setPreviewProvider(v)}>
+                    <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="gemini">Gemini</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs whitespace-nowrap">Voice:</Label>
+                  <Select value={previewVoice} onValueChange={setPreviewVoice}>
+                    <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {previewProvider === 'openai' ? (
+                        <>
+                          <SelectItem value="alloy">Alloy</SelectItem>
+                          <SelectItem value="echo">Echo</SelectItem>
+                          <SelectItem value="nova">Nova</SelectItem>
+                          <SelectItem value="shimmer">Shimmer</SelectItem>
+                        </>
+                      ) : (
+                        <>
+                          <SelectItem value="Puck">Puck</SelectItem>
+                          <SelectItem value="Kore">Kore</SelectItem>
+                          <SelectItem value="Aoede">Aoede</SelectItem>
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs whitespace-nowrap">Scenario:</Label>
+                  <Select value={previewScenario} onValueChange={(v) => setPreviewScenario(v as PreviewScenario)}>
+                    <SelectTrigger className="h-7 w-[110px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cold-call">Cold Call</SelectItem>
+                      <SelectItem value="follow-up">Follow-up</SelectItem>
+                      <SelectItem value="objection">Objection</SelectItem>
+                      <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {testCallAgentCampaigns.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs whitespace-nowrap">Campaign:</Label>
+                    <Select
+                      value={testCallAgentCampaignId || "none"}
+                      onValueChange={(v) => setTestCallAgentCampaignId(v === "none" ? null : v)}
+                    >
+                      <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No campaign</SelectItem>
+                        {testCallAgentCampaigns.map((c) => (
+                          <SelectItem key={c.campaignId} value={c.campaignId}>
+                            {c.campaignName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Variables Panel (Collapsible) */}
+              {previewTokens.length > 0 && (
+                <Collapsible defaultOpen={true}>
+                  <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <ChevronDown className="h-4 w-4 transition-transform ui-state-open:rotate-180" />
+                      <Label className="text-xs font-medium cursor-pointer">Variables</Label>
+                      <Badge variant="outline" className="text-xs">{previewTokens.length}</Badge>
+                      {missingPreviewTokens.length > 0 && (
+                        <Badge variant="destructive" className="text-xs">{missingPreviewTokens.length} missing</Badge>
+                      )}
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 p-2 rounded-lg border bg-muted/20">
+                      {previewTokens.map((token) => (
+                        <div key={token} className="space-y-0.5">
+                          <Label className="text-[10px] text-muted-foreground truncate block" title={token}>
+                            {token}
+                          </Label>
+                          <Input
+                            value={previewValues[token] || ""}
+                            onChange={(e) =>
+                              setPreviewValues({
+                                ...previewValues,
+                                [token]: e.target.value,
+                              })
+                            }
+                            placeholder={token}
+                            className="h-7 text-xs"
+                            disabled={simulationStarted}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Prompt Configuration Row */}
+              <div className="grid grid-cols-3 gap-4">
+                {([0, 1, 2] as const).map((idx) => {
+                  const colors = PANEL_COLORS[idx];
+                  return (
+                    <div key={idx} className={`p-2 rounded-lg border ${colors.border} ${colors.bg}`}>
+                      <Label className={`text-xs font-medium ${colors.label}`}>Variant {idx + 1} Prompt</Label>
+                      <Textarea
+                        className="min-h-[80px] text-xs font-mono resize-y mt-1"
+                        value={previewPromptVariants[idx]}
+                        onChange={(e) => {
+                          const newVariants = [...previewPromptVariants] as [string, string, string];
+                          newVariants[idx] = e.target.value;
+                          setPreviewPromptVariants(newVariants);
+                        }}
+                        placeholder={`System prompt for variant ${idx + 1}...`}
+                        disabled={simulationStarted}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* View Final Assembled Prompts (after variable substitution) */}
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded-lg border bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-950/40 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <Label className="text-xs font-medium cursor-pointer text-amber-700 dark:text-amber-300">View Final Assembled Prompts</Label>
+                    <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700">
+                      Variables Applied
+                    </Badge>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-amber-600 dark:text-amber-400 transition-transform ui-state-open:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <div className="grid grid-cols-3 gap-4">
+                    {([0, 1, 2] as const).map((idx) => {
+                      const colors = PANEL_COLORS[idx];
+                      const rawPrompt = previewPromptVariants[idx]?.trim() || '';
+                      const finalPrompt = rawPrompt ? applyPreviewValues(rawPrompt, previewValues) : '';
+                      const hasChanges = rawPrompt !== finalPrompt;
+                      return (
+                        <div key={idx} className={`p-2 rounded-lg border ${colors.border} bg-white dark:bg-zinc-900`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <Label className={`text-xs font-medium ${colors.label}`}>Variant {idx + 1} (Final)</Label>
+                            {hasChanges && (
+                              <Badge variant="secondary" className="text-[10px]">Variables Substituted</Badge>
+                            )}
+                          </div>
+                          {finalPrompt ? (
+                            <ScrollArea className="h-[100px] rounded border bg-muted/30 p-2">
+                              <pre className="text-[10px] font-mono whitespace-pre-wrap text-muted-foreground">{finalPrompt}</pre>
+                            </ScrollArea>
+                          ) : (
+                            <div className="h-[100px] rounded border bg-muted/30 p-2 flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">No prompt configured</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              {/* 3 Simulation Panels */}
+              <div className="grid grid-cols-3 gap-4 flex-1 min-h-[300px]">
+                {([0, 1, 2] as const).map((idx) => (
+                  <SimulationPanelComponent
+                    key={idx}
+                    panelIndex={idx}
+                    panelState={simulationPanels[idx]}
+                    promptLabel={`Variant ${idx + 1}`}
+                    promptPreview={previewPromptVariants[idx]?.slice(0, 50) || ''}
+                    simulationStarted={simulationStarted}
+                    onPlayVoice={handlePlayPreviewVoice}
+                  />
+                ))}
+              </div>
+
+              {/* Shared Input Area */}
+              <div className="flex gap-2 p-3 rounded-lg border bg-muted/30">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={isListening ? "default" : "outline"}
+                    size="sm"
+                    onClick={handleVoiceToggle}
+                    disabled={!speechSupported || !simulationStarted}
+                    className="h-8"
+                  >
+                    {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <Textarea
+                  value={previewInput}
+                  onChange={(e) => setPreviewInput(e.target.value)}
+                  placeholder={simulationStarted ? "Type your response (broadcasts to all panels)..." : "Start simulation first..."}
+                  className="min-h-[50px] text-sm flex-1"
+                  disabled={!simulationStarted}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSendToAllPanels();
+                    }
+                  }}
+                />
+                <Button
+                  className="h-[50px] px-6"
+                  onClick={() => handleSendToAllPanels()}
+                  disabled={!simulationStarted || !previewInput.trim() || simulationPanels.some(p => p.isPending)}
+                >
+                  {simulationPanels.some(p => p.isPending) ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-between items-center">
+                {!simulationStarted ? (
+                  <Button onClick={handleStartSideBySideSimulation} disabled={!previewPromptVariants.some(p => p.trim())}>
+                    <Phone className="h-4 w-4 mr-2" />
+                    Start All Simulations
+                  </Button>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button variant="default" onClick={handleEndAndCompare}>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      End & Compare
+                    </Button>
+                    <Button variant="outline" onClick={handleResetSideBySide}>
+                      <PhoneOff className="h-4 w-4 mr-2" />
+                      Reset All
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Comparison Overlay */}
+              {showComparisonOverlay && (
+                <ComparisonOverlayComponent
+                  panels={simulationPanels}
+                  promptVariants={previewPromptVariants}
+                  onClose={() => setShowComparisonOverlay(false)}
+                  onSelectWinner={(idx) => {
+                    // Copy winning prompt to agent's system prompt
+                    toast({
+                      title: "Prompt Selected",
+                      description: `Variant ${idx + 1} selected as winner. You can now apply it to your agent.`,
+                    });
+                    setShowComparisonOverlay(false);
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* ============================================================ */}
+          {/* SINGLE MODE LAYOUT (Original)                                */}
+          {/* ============================================================ */}
+          {!sideBySideMode && (
+          <>
           <div className="flex-1 overflow-y-auto">
             <div className="grid gap-4 md:grid-cols-[1fr_1.8fr_1fr]">
               {/* Left Panel - Scenario Setup */}
@@ -3350,6 +4258,107 @@ export default function VirtualAgentsPage() {
                   <CardTitle className="text-sm">Scenario Setup</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {/* Provider & Env Vars */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Provider</Label>
+                      <Select value={previewProvider} onValueChange={(v: any) => setPreviewProvider(v)}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="openai">OpenAI</SelectItem>
+                          <SelectItem value="gemini">Gemini</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Voice Selector */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Voice</Label>
+                      <Select value={previewVoice} onValueChange={setPreviewVoice}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                           {previewProvider === 'openai' ? (
+                              <>
+                                <SelectItem value="alloy">Alloy</SelectItem>
+                                <SelectItem value="echo">Echo</SelectItem>
+                                <SelectItem value="fable">Fable</SelectItem>
+                                <SelectItem value="onyx">Onyx</SelectItem>
+                                <SelectItem value="nova">Nova</SelectItem>
+                                <SelectItem value="shimmer">Shimmer</SelectItem>
+                              </>
+                           ) : (
+                              <>
+                                <SelectItem value="Puck">Puck</SelectItem>
+                                <SelectItem value="Charon">Charon</SelectItem>
+                                <SelectItem value="Kore">Kore</SelectItem>
+                                <SelectItem value="Fenrir">Fenrir</SelectItem>
+                                <SelectItem value="Aoede">Aoede</SelectItem>
+                              </>
+                           )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                     <div className="space-y-1 col-span-2">
+                      <Label className="text-xs">Env Vars</Label>
+                      <Dialog>
+                          <DialogTrigger asChild><Button variant="outline" size="sm" className="w-full h-8 text-xs">Edit ({previewEnvVars.length})</Button></DialogTrigger>
+                          <DialogContent>
+                             <DialogHeader><DialogTitle>Environment Variables</DialogTitle></DialogHeader>
+                             <ScrollArea className="max-h-[300px]">
+                             <div className="space-y-2 p-1">
+                                {previewEnvVars.map((ev, i) => (
+                                    <div key={i} className="flex gap-2">
+                                        <Input value={ev.key} onChange={e => {
+                                            const newVars = [...previewEnvVars];
+                                            newVars[i].key = e.target.value;
+                                            setPreviewEnvVars(newVars);
+                                        }} placeholder="Key" />
+                                        <Input value={ev.value} onChange={e => {
+                                            const newVars = [...previewEnvVars];
+                                            newVars[i].value = e.target.value;
+                                            setPreviewEnvVars(newVars);
+                                        }} placeholder="Value" />
+                                        <Button variant="ghost" size="icon" onClick={() => {
+                                             const newVars = [...previewEnvVars];
+                                             newVars.splice(i, 1);
+                                             setPreviewEnvVars(newVars);
+                                        }}><Trash2 className="h-4 w-4"/></Button>
+                                    </div>
+                                ))}
+                                <Button size="sm" onClick={() => setPreviewEnvVars([...previewEnvVars, {key:'', value:''}])}>Add Variable</Button>
+                             </div>
+                             </ScrollArea>
+                          </DialogContent>
+                      </Dialog>
+                    </div>
+                  </div>
+
+                  {/* System Prompt Variants */}
+                  <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <Label className="text-xs">System Prompt</Label>
+                        <span className="text-[10px] text-muted-foreground">{activePromptVariant + 1}/3</span>
+                      </div>
+                      <Tabs value={String(activePromptVariant)} onValueChange={(v) => setActivePromptVariant(Number(v) as 0|1|2)}>
+                        <TabsList className="grid w-full grid-cols-3 h-7 mb-1">
+                           <TabsTrigger value="0" className="text-[10px] h-6">Variant 1</TabsTrigger>
+                           <TabsTrigger value="1" className="text-[10px] h-6">Variant 2</TabsTrigger>
+                           <TabsTrigger value="2" className="text-[10px] h-6">Variant 3</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value={String(activePromptVariant)} className="mt-0">
+                            <Textarea 
+                                className="min-h-[100px] text-xs font-mono resize-y"
+                                value={previewPromptVariants[activePromptVariant]}
+                                onChange={(e) => {
+                                    const newVariants = [...previewPromptVariants] as [string, string, string];
+                                    newVariants[activePromptVariant] = e.target.value;
+                                    setPreviewPromptVariants(newVariants);
+                                }}
+                                placeholder="Configure system prompt variant..."
+                            />
+                        </TabsContent>
+                      </Tabs>
+                  </div>
+
                   {previewTokens.length > 0 ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
@@ -3385,6 +4394,32 @@ export default function VirtualAgentsPage() {
                       No variables detected.
                     </div>
                   )}
+
+                  {/* View Final Assembled Prompt (single mode) */}
+                  <Collapsible>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded-lg border bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-950/40 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300">View Final Prompt</span>
+                      </div>
+                      <ChevronDown className="h-3 w-3 text-amber-600 dark:text-amber-400 transition-transform ui-state-open:rotate-180" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2">
+                      <div className="rounded-lg border bg-muted/30 p-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] text-muted-foreground">With variables substituted:</span>
+                          {previewSystemPrompt !== previewPromptVariants[activePromptVariant] && (
+                            <Badge variant="secondary" className="text-[9px]">Variables Applied</Badge>
+                          )}
+                        </div>
+                        <ScrollArea className="h-[120px]">
+                          <pre className="text-[10px] font-mono whitespace-pre-wrap text-muted-foreground">
+                            {previewSystemPrompt || 'No prompt configured'}
+                          </pre>
+                        </ScrollArea>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
 
                   <div className="rounded-lg border p-2 bg-muted/50">
                     <div className="text-xs font-medium">{testCallAgent?.name}</div>
@@ -4422,8 +5457,10 @@ export default function VirtualAgentsPage() {
               </div>
             </div>
           )}
+          </>
+          )}
 
-          <DialogFooter className="flex-shrink-0">
+          <DialogFooter className="flex-shrink-0 mt-4">
             <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto">
               <span>💡</span>
               <span>
@@ -4673,8 +5710,9 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
     <div className="flex-1 overflow-y-auto min-h-0">
       <div className="px-6 py-4">
         <Tabs defaultValue="essentials" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-4">
+          <TabsList className="grid w-full grid-cols-4 mb-4">
             <TabsTrigger value="essentials">Essentials</TabsTrigger>
+            <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
             <TabsTrigger value="tools">System Tools</TabsTrigger>
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
           </TabsList>
@@ -5157,6 +6195,43 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
               data-testid="switch-active"
             />
           </div>
+        </TabsContent>
+
+        <TabsContent value="knowledge" className="space-y-3 mt-0">
+          {editingAgent ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border p-4">
+                <h4 className="font-medium mb-2 flex items-center gap-2">
+                  <Layers className="h-4 w-4" />
+                  Runtime Knowledge Inspector
+                </h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  View exactly what this agent knows at runtime. Knowledge is assembled from modular blocks that can be individually edited or overridden.
+                </p>
+                <KnowledgeInspector
+                  agentId={editingAgent.id}
+                  agentName={editingAgent.name}
+                />
+              </div>
+              <div className="rounded-lg border p-4">
+                <h4 className="font-medium mb-2 flex items-center gap-2">
+                  <Eye className="h-4 w-4" />
+                  Full Prompt Preview
+                </h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Preview the complete prompt that will be sent to the model, including campaign context and variable substitution.
+                </p>
+                <PromptPreviewPanel
+                  agentId={editingAgent.id}
+                  agentName={editingAgent.name}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-8">
+              <p>Save the agent first to view knowledge blocks</p>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="tools" className="space-y-3 mt-0">

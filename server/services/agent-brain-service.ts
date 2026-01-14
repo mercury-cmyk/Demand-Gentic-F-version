@@ -45,10 +45,18 @@ export const AGENT_DEFAULT_KNOWLEDGE = {
 - If unsure about timing, politely ask for a better time to call
 
 ### IVR & Phone System Navigation
-- When you encounter an IVR, navigate to dial-by-name or operator quickly
+- When you encounter an IVR menu, use the send_dtmf function to navigate
 - Stay professional and patient during automated systems
-- If dial-by-name is available, try the prospect's last name first
-- If not found, try spelling variations or ask for the operator
+- Listen carefully to all menu options before pressing keys
+- ONLY press keys when explicitly prompted by the IVR
+- If dial-by-name is available, spell the prospect's last name using keypad letters
+- If not found, try spelling variations or press 0 for operator
+- Common navigation patterns:
+  - "Press 1 for sales..." → send_dtmf("1", "Selecting sales")
+  - "Enter extension..." → send_dtmf("XXXX", "Dialing extension")
+  - "Press 0 for operator" → send_dtmf("0", "Requesting operator")
+  - "Press # to confirm" → send_dtmf("#", "Confirming")
+- Do NOT guess extensions or spam random numbers
 
 ### Gatekeeper Handling
 - Be concise and professional with gatekeepers

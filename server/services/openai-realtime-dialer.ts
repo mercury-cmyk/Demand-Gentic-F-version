@@ -1,7 +1,7 @@
 ﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -77,6 +77,11 @@ import {
   type SystemToolsSettings,
   type VirtualAgentSettings,
 } from "./virtual-agent-settings";
+import {
+  assembleProviderPrompt,
+  getUniversalKnowledgeForProvider,
+  type AssembledProviderPrompt,
+} from "./provider-prompt-assembly";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -108,6 +113,8 @@ interface OpenAIRealtimeSession {
     title?: string;
     email?: string;
   } | null;
+  // OpenAI Realtime configuration (from Preview Studio)
+  openaiConfig?: OpenAIConfigOverride | null;
   telnyxWs: WebSocket;
   openaiWs: WebSocket | null;
   streamSid: string | null;
@@ -165,6 +172,8 @@ interface OpenAIRealtimeSession {
     currentState: 'IDENTITY_CHECK' | 'RIGHT_PARTY_INTRO' | 'CONTEXT_FRAMING' | 'DISCOVERY' | 'LISTENING' | 'ACKNOWLEDGEMENT' | 'PERMISSION_REQUEST' | 'CLOSE' | 'GATEKEEPER';
     stateHistory: string[];
   };
+  // Campaign-level max call duration (enforced strictly)
+  campaignMaxCallDurationSeconds: number | null;
 }
 
 interface DispositionFunctionResult {
@@ -310,6 +319,25 @@ function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; 
 const DISPOSITION_FUNCTION_TOOLS = [
     {
       type: "function",
+      name: "send_dtmf",
+      description: "Send DTMF tones (keypad digits) during a call. Use this to navigate IVR systems, dial extensions, or respond to automated phone menus. Only press keys when explicitly prompted by the IVR system.",
+      parameters: {
+        type: "object",
+        properties: {
+          digits: {
+            type: "string",
+            description: "The DTMF digits to send (0-9, *, #). Can be a single digit or multiple digits. Examples: '1' for menu option, '1234' for extension, '*' for operator, '#' to confirm."
+          },
+          reason: {
+            type: "string",
+            description: "Brief explanation of why sending these digits (e.g., 'Selecting option 1 for sales', 'Dialing extension 1234', 'Pressing 0 for operator')"
+          }
+        },
+        required: ["digits", "reason"]
+      }
+    },
+    {
+      type: "function",
       name: "detect_voicemail_and_hangup",
       description: "Detect voice mail on a call and hang up if it is detected, ensuring the process appears authentic.",
       parameters: {
@@ -407,6 +435,21 @@ const DISPOSITION_FUNCTION_TOOLS = [
         }
       },
       required: ["callback_datetime"]
+    }
+  },
+  {
+    type: "function",
+    name: "end_call",
+    description: "End the call gracefully. Call this after saying goodbye when the conversation is complete, when you need to hang up on voicemail/IVR, or when the prospect asks you to stop calling. Always call submit_disposition BEFORE calling end_call.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Brief reason for ending the call (e.g., 'Conversation complete', 'Voicemail detected', 'Prospect requested to end call', 'Gatekeeper blocked')"
+        }
+      },
+      required: ["reason"]
     }
   },
   {
@@ -526,15 +569,30 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               customParams = parsedState.params;
               console.log(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
 
-              // If system_prompt is missing, try to fetch from call session store
-              if (!customParams.system_prompt && (customParams.call_id || customParams.test_call_id)) {
+              // Try to fetch additional params from call session store (system_prompt, openai_config, etc.)
+              if (customParams.call_id || customParams.test_call_id) {
                 const callId = customParams.call_id || customParams.test_call_id;
                 try {
                   const { getCallParams } = await import('./call-session-store');
                   const storedParams = await getCallParams(callId);
-                  if (storedParams?.system_prompt) {
-                    customParams.system_prompt = storedParams.system_prompt;
-                    console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${callId}`);
+                  if (storedParams) {
+                    // Merge stored params, preferring already decoded params but filling in gaps
+                    if (!customParams.system_prompt && storedParams.system_prompt) {
+                      customParams.system_prompt = storedParams.system_prompt;
+                      console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${callId}`);
+                    }
+                    if (!customParams.openai_config && storedParams.openai_config) {
+                      customParams.openai_config = storedParams.openai_config;
+                      console.log(`${LOG_PREFIX} Retrieved openai_config from session store for ${callId}:`, storedParams.openai_config);
+                    }
+                    if (!customParams.first_message && storedParams.first_message) {
+                      customParams.first_message = storedParams.first_message;
+                      console.log(`${LOG_PREFIX} Retrieved first_message from session store for ${callId}`);
+                    }
+                    if (!customParams.provider && storedParams.provider) {
+                      customParams.provider = storedParams.provider;
+                      console.log(`${LOG_PREFIX} Retrieved provider from session store for ${callId}: ${storedParams.provider}`);
+                    }
                   }
                 } catch (storeErr) {
                   console.warn(`${LOG_PREFIX} Failed to fetch from session store:`, storeErr);
@@ -559,6 +617,9 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           const queueItemId = customParams.queue_item_id || urlParams.queue_item_id;
           const callAttemptId = customParams.call_attempt_id || urlParams.call_attempt_id;
           const contactId = customParams.contact_id || urlParams.contact_id;
+
+          console.log(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
+
           let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
@@ -654,6 +715,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || validationResult.virtualAgentId || '',
               isTestSession,
+              // OpenAI config override from Preview Studio
+              openaiConfig: customParams.openai_config as OpenAIConfigOverride | undefined,
               telnyxWs: ws,
               openaiWs: null,
               streamSid: message.stream_id || null,
@@ -707,6 +770,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
               },
+              // Campaign-level max call duration (will be fetched from campaign config)
+              campaignMaxCallDurationSeconds: null,
             };
           } else {
             console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
@@ -722,6 +787,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               isTestSession,
               // Store test contact data from customParams for test sessions
               testContact: (customParams.test_contact as { name?: string; company?: string; title?: string; email?: string } | undefined) || null,
+              // OpenAI config override from Preview Studio
+              openaiConfig: customParams.openai_config as OpenAIConfigOverride | undefined,
               telnyxWs: ws,
               openaiWs: null,
               streamSid: message.stream_id || null,
@@ -775,6 +842,8 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
               },
+              // Campaign-level max call duration (will be fetched from campaign config)
+              campaignMaxCallDurationSeconds: null,
             };
           }
 
@@ -895,26 +964,60 @@ function mapAsrModel(model: AdvancedSettings['asr']['model']): string {
   return model === 'scribe_realtime' ? 'gpt-4o-mini-transcribe' : 'whisper-1';
 }
 
-function buildTurnDetection(settings: AdvancedSettings['conversational']) {
-  const takeTurnSeconds = Number(settings.takeTurnAfterSilenceSeconds);
+interface OpenAIConfigOverride {
+  turn_detection?: 'server_vad' | 'semantic' | 'disabled';
+  eagerness?: 'low' | 'medium' | 'high';
+  max_tokens?: number;
+}
 
-  // ALWAYS use semantic_vad for lowest latency turn detection
-  // semantic_vad understands speech patterns and responds faster than server_vad
-  // Eagerness levels:
-  //   - "high": Responds quickly, may occasionally interrupt (best for B2B calls)
-  //   - "normal": Balanced response timing
-  //   - "low": Waits longer before responding (more conservative)
+function buildTurnDetection(
+  settings: AdvancedSettings['conversational'],
+  configOverride?: OpenAIConfigOverride
+) {
+  // Check if turn detection is disabled via override
+  if (configOverride?.turn_detection === 'disabled') {
+    console.log(`[Turn Detection] Disabled via config override`);
+    return null;
+  }
 
-  // Force "high" eagerness for B2B outbound calls where quick responses matter
-  const eagerness = settings.eagerness === 'low' ? 'normal' : (settings.eagerness || 'high');
+  // Use override turn detection type or default to server_vad
+  const turnDetectionType = configOverride?.turn_detection || 'server_vad';
 
-  console.log(`[Turn Detection] Using server_vad (recommended for Telnyx)`);
+  // Map eagerness levels from override or settings
+  // IMPORTANT: For compliance-focused B2B calls, we need LOW eagerness to ensure
+  // the agent waits for the full response before speaking
+  let eagernessValue: string;
+  if (configOverride?.eagerness) {
+    // Map 'medium' to 'normal' for OpenAI API compatibility
+    eagernessValue = configOverride.eagerness === 'medium' ? 'normal' : configOverride.eagerness;
+  } else {
+    // Use LOW eagerness by default to ensure proper turn-taking and identity verification
+    // High eagerness causes the agent to assume responses and skip verification
+    eagernessValue = settings.eagerness || 'low';
+  }
+
+  console.log(`[Turn Detection] Using ${turnDetectionType} with eagerness: ${eagernessValue}`);
+
+  if (turnDetectionType === 'semantic') {
+    // Semantic turn detection - context-aware, understands speech patterns
+    // Low eagerness ensures the model waits for clear confirmation before proceeding
+    return {
+      type: "semantic_vad",
+      eagerness: eagernessValue,
+    };
+  }
+
+  // Default: server_vad - recommended for Telnyx
+  // CRITICAL: silence_duration_ms must be long enough to allow natural pauses
+  // Use configurable silenceDurationMs from settings, default to 1200ms for natural conversation
+  const silenceDurationMs = settings.silenceDurationMs || 1200;
+  console.log(`[Turn Detection] Using server_vad with silence_duration_ms: ${silenceDurationMs}`);
 
   return {
     type: "server_vad",
     threshold: 0.5,
     prefix_padding_ms: 300,
-    silence_duration_ms: 200,
+    silence_duration_ms: silenceDurationMs, // Configurable: prevents mid-sentence cutoffs
   };
 }
 
@@ -965,7 +1068,14 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
   session.telnyxOutboundPacer = setInterval(() => {
     try {
       if (!session.isActive) return;
+      
+      // DEBUG: Warn if streamSid is missing but we have audio
+      if (!session.streamSid && session.telnyxOutboundBuffer && session.telnyxOutboundBuffer.length > 0) {
+          if (Math.random() < 0.05) console.warn(`${LOG_PREFIX} [PACER] Has audio but no streamSid! Waiting...`);
+          return;
+      }
       if (!session.streamSid) return;
+
       if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) return;
       if (!session.telnyxOutboundBuffer || session.telnyxOutboundBuffer.length < TELNYX_G711_FRAME_BYTES) return;
 
@@ -988,11 +1098,22 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
         session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(TELNYX_G711_FRAME_BYTES);
 
         // IMPORTANT: Telnyx bidirectional RTP requires minimal JSON format
-        // Including extra fields like stream_id causes silent audio!
-        session.telnyxWs.send(JSON.stringify({
-          event: "media",
-          media: { payload: frame.toString('base64') },
-        }));
+        // Including extra fields like stream_id can cause issues, but sometimes required.
+        
+        try {
+            const payload: any = {
+              event: "media",
+              media: { payload: frame.toString('base64') },
+            };
+            // Re-adding stream_id as it is required for bidirectional streams in many cases
+            if (session.streamSid) {
+                payload.stream_id = session.streamSid;
+            }
+            session.telnyxWs.send(JSON.stringify(payload));
+        } catch (e) {
+            console.error(`${LOG_PREFIX} Error sending to Telnyx WS`, e);
+        }
+
         session.telnyxOutboundFramesSent += 1;
       }
 
@@ -1017,7 +1138,26 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
   try {
     const campaignConfig = await getCampaignConfig(session.campaignId);
+    console.log(`${LOG_PREFIX} 🔍 Fetched Campaign Config for ${session.campaignId}:`, {
+        found: !!campaignConfig,
+        objective: campaignConfig?.campaignObjective ? 'Present' : 'Missing',
+        brief: campaignConfig?.campaignContextBrief ? 'Present' : 'Missing',
+        maxCallDuration: campaignConfig?.maxCallDurationSeconds ?? 'Not set'
+    });
+
+    // Set campaign-level max call duration for strict enforcement
+    if (campaignConfig?.maxCallDurationSeconds) {
+      session.campaignMaxCallDurationSeconds = campaignConfig.maxCallDurationSeconds;
+      console.log(`${LOG_PREFIX} ⏱️ Campaign max call duration set to ${campaignConfig.maxCallDurationSeconds}s`);
+    }
+
     let contactInfo = await getContactInfo(session.contactId);
+
+    // DEBUG: Log contact resolution details
+    console.log(`${LOG_PREFIX} ðŸ”Ž Contact Info Resolution - IsTest: ${session.isTestSession}, ContactInfo Found: ${!!contactInfo}, TestContact Present: ${!!session.testContact}`);
+    if (session.isTestSession && session.testContact) {
+       console.log(`${LOG_PREFIX} ðŸ§ª Test Contact Data:`, JSON.stringify(session.testContact));
+    }
 
     // For test sessions, use test contact data if database lookup returns null
     if (session.isTestSession && !contactInfo && session.testContact) {
@@ -1033,6 +1173,21 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         companyName: session.testContact.company || 'Test Company',
         accountId: null,
       };
+    }
+
+    // For test sessions, fill in missing fields from test contact data
+    // This handles the case where contact exists in DB but has no account/company
+    if (session.isTestSession && contactInfo && session.testContact) {
+      if (!contactInfo.company && !contactInfo.companyName) {
+        const fallbackCompany = session.testContact.company || 'Test Company';
+        contactInfo.company = fallbackCompany;
+        contactInfo.companyName = fallbackCompany;
+        console.log(`${LOG_PREFIX} 🧪 Filled missing company from test contact: ${fallbackCompany}`);
+      }
+      if (!contactInfo.jobTitle && session.testContact.title) {
+        contactInfo.jobTitle = session.testContact.title;
+        console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
+      }
     }
 
     const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
@@ -1124,7 +1279,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         agentConfig?.settings as VoiceAgentSettings | null, // Pass agent settings for personality config
         session.callAttemptId,
         attemptNumber,
-        session.isTestSession
+        session.isTestSession,
+        'openai'  // Use OpenAI provider for prompt formatting
       );
       const systemPrompt = interpolateVoiceTemplate(
         baseSystemPrompt,
@@ -1132,7 +1288,8 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
       );
       const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
       const modalities = ["text", "audio"];
-      const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
+      // Use OpenAI config override from session (used by Preview Studio for custom configuration)
+      const turnDetection = buildTurnDetection(agentSettings.advanced.conversational, session.openaiConfig || undefined);
       const audioFormat = session.audioFormat;
       const audioFormatSource = session.audioFormatSource || 'default';
       console.log(`${LOG_PREFIX} Audio format selected: ${audioFormat} (source=${audioFormatSource})`);
@@ -1157,7 +1314,9 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 
       // Get cost optimization settings with defaults
       const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
-      const maxResponseTokens = Math.min(Math.max(costSettings.maxResponseTokens || 512, 256), 1024);
+      // Use override max_tokens from Preview Studio config, or fall back to cost settings
+      const configuredMaxTokens = session.openaiConfig?.max_tokens || costSettings.maxResponseTokens || 512;
+      const maxResponseTokens = Math.min(Math.max(configuredMaxTokens, 256), 16384);
 
       // Initialize cost tracking if enabled
       if (costSettings.enableCostTracking) {
@@ -1247,13 +1406,23 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
             }
           }
 
-          // For test sessions, use test contact data or a simple fallback
+          // For test sessions, FORCE the canonical opening to ensure identity verification behavior
           if (session.isTestSession) {
-            const testContactName = session.firstMessageOverride?.includes('{{')
-              ? 'there'
-              : (contactInfo?.fullName || contactInfo?.firstName || 'there');
-            openingScript = `Hello, may I speak with ${testContactName} please?`;
-            console.log(`${LOG_PREFIX} ✅ Test session - using simple opening message`);
+            const debugCompanyName = contactInfo?.companyName || contactInfo?.company;
+            console.log(`${LOG_PREFIX} ðŸ§ª Interpolating Canonical Opening. Company Name: "${debugCompanyName}", FullName: "${contactInfo?.fullName}"`);
+            
+            openingScript = interpolateCanonicalOpening(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+            console.log(`${LOG_PREFIX} ✅ Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
           } else {
             // Interpolate the canonical opening with validated data
             openingScript = interpolateCanonicalOpening(
@@ -1274,34 +1443,32 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           openingScript = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
         }
       } else {
-        // No custom message - use canonical default with validation (skip for test sessions)
-        let useGenericOpening = session.isTestSession;
+        // No custom message - use canonical default with validation
+        let useGenericOpening = false;
 
-        if (!session.isTestSession) {
-          const validation = validateOpeningMessageVariables(
-            {
-              fullName: contactInfo?.fullName,
-              firstName: contactInfo?.firstName,
-              lastName: contactInfo?.lastName,
-              jobTitle: contactInfo?.jobTitle,
-            },
-            {
-              name: contactInfo?.companyName || contactInfo?.company,
-            }
-          );
-
-          if (!validation.valid) {
-            console.warn(`${LOG_PREFIX} âš ï¸ ${validation.message}`);
-            console.warn(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')} - Falling back to generic opening`);
-            useGenericOpening = true;
+        const validation = validateOpeningMessageVariables(
+          {
+            fullName: contactInfo?.fullName,
+            firstName: contactInfo?.firstName,
+            lastName: contactInfo?.lastName,
+            jobTitle: contactInfo?.jobTitle,
+          },
+          {
+            name: contactInfo?.companyName || contactInfo?.company,
           }
+        );
+
+        if (!validation.valid) {
+          console.warn(`${LOG_PREFIX} ⚠️ ${validation.message}`);
+          console.warn(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')} - Falling back to generic opening`);
+          useGenericOpening = true;
         }
 
-        // For test sessions or validation failures, use a simple fallback opening
+        // For validation failures, use a simple fallback opening
         if (useGenericOpening) {
           const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
           openingScript = `Hello, may I speak with ${testContactName} please?`;
-          console.log(`${LOG_PREFIX} ✅ Test session - using simple opening message`);
+          console.log(`${LOG_PREFIX} ⚠️ Validation failed - using simple opening message`);
         } else {
           // Use the canonical opening with interpolation
           openingScript = interpolateCanonicalOpening(
@@ -1414,6 +1581,19 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<void> {
   console.log(`${LOG_PREFIX} Initializing Google Gemini Live session for call: ${session.callId}`);
 
+  // Check for required environment variables
+  const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+
+  if (!apiKey && !projectId) {
+    console.error(`${LOG_PREFIX} ❌ GEMINI CONFIG ERROR: No API key or Project ID found`);
+    console.error(`${LOG_PREFIX} Set GEMINI_API_KEY or GOOGLE_AI_API_KEY in .env.local`);
+    await endCall(session.callId, 'error');
+    return;
+  }
+
+  console.log(`${LOG_PREFIX} Gemini config: apiKey=${apiKey ? 'present' : 'missing'}, projectId=${projectId || 'not set'}`);
+
   try {
     // Dynamically import to avoid circular dependencies
     const { GeminiLiveProvider } = await import("./voice-providers/gemini-live-provider");
@@ -1422,13 +1602,36 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     const provider = new GeminiLiveProvider();
 
     // Connect to Gemini Live API
+    console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
     await provider.connect();
-    console.log(`${LOG_PREFIX} Connected to Gemini Live API`);
+    console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API`);
 
     // Get campaign and agent config
     const campaignConfig = await getCampaignConfig(session.campaignId);
-    const contactInfo = await getContactInfo(session.contactId);
+    let contactInfo = await getContactInfo(session.contactId);
     const agentConfig = session.virtualAgentId ? await getVirtualAgentConfig(session.virtualAgentId) : null;
+
+    // For test sessions, fill in missing fields from test contact data
+    if (session.isTestSession && session.testContact) {
+      if (!contactInfo) {
+        contactInfo = {
+          id: session.contactId,
+          firstName: session.testContact.name?.split(' ')[0] || 'Test',
+          lastName: session.testContact.name?.split(' ').slice(1).join(' ') || 'Contact',
+          fullName: session.testContact.name || 'Test Contact',
+          jobTitle: session.testContact.title || 'Test Title',
+          email: session.testContact.email || 'test@example.com',
+          company: session.testContact.company || 'Test Company',
+          companyName: session.testContact.company || 'Test Company',
+          accountId: null,
+        };
+      } else if (!contactInfo.company && !contactInfo.companyName) {
+        const fallbackCompany = session.testContact.company || 'Test Company';
+        contactInfo.company = fallbackCompany;
+        contactInfo.companyName = fallbackCompany;
+        console.log(`${LOG_PREFIX} 🧪 [Gemini] Filled missing company from test contact: ${fallbackCompany}`);
+      }
+    }
 
     // Merge agent settings - combine base settings with any overrides
     const baseSettings = agentConfig?.settings as Partial<VirtualAgentSettings> | undefined;
@@ -1450,7 +1653,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       campaignConfig, contactInfo,
       session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
       useCondensedPrompt, undefined, agentConfig?.settings as VoiceAgentSettings | null,
-      session.callAttemptId, 1, session.isTestSession
+      session.callAttemptId, 1, session.isTestSession,
+      'google'  // Use Google/Gemini provider for prompt formatting
     );
     const systemPrompt = interpolateVoiceTemplate(baseSystemPrompt, voiceTemplateValues);
 
@@ -1471,7 +1675,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       inputAudioFormat: session.audioFormat,
       outputAudioFormat: session.audioFormat,
       tools: providerTools,
-      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 200 },
+      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 700 }, // Increased for proper turn-taking
       temperature: 0.7,
       maxResponseTokens: costSettings.maxResponseTokens || 512,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
@@ -1518,16 +1722,25 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Send opening message
     const openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    // Wait briefly for setup to complete (usually fast)
     setTimeout(() => {
       if (session.isActive && provider.isConnected) {
         console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
         provider.sendOpeningMessage(openingScript);
       }
-    }, 800);
+    }, 200);
 
-    console.log(`${LOG_PREFIX} Google Gemini Live session initialized`);
+    console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized`);
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} Gemini init failed:`, error);
+    console.error(`${LOG_PREFIX} ❌ Gemini init failed:`, error.message || error);
+    console.error(`${LOG_PREFIX} Stack:`, error.stack);
+    // Check for common errors
+    if (error.message?.includes('401') || error.message?.includes('UNAUTHENTICATED')) {
+      console.error(`${LOG_PREFIX} 🔑 Authentication error - check your GEMINI_API_KEY`);
+    }
+    if (error.message?.includes('timeout')) {
+      console.error(`${LOG_PREFIX} ⏱️ Connection timeout - Gemini API may be unreachable`);
+    }
     await endCall(session.callId, 'error');
   }
 }
@@ -1552,18 +1765,38 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
 
 
 function sendOpeningMessage(ws: WebSocket, openingScript: string): void {
-  // Send a simulated user event indicating the call has connected
-  // The opening script is the EXACT words to speak - no interpretation needed
+  // Use response.create with explicit instructions to ensure the opening message is spoken exactly
+  // This is more reliable than creating a user message asking the model to "say exactly"
+  // The instructions field overrides the session instructions for this specific response
+  //
+  // CRITICAL: The model must ONLY say the exact greeting and then STOP completely.
+  // It must NOT predict, assume, or continue with phrases like "okay, great" or acknowledgements.
+  // The model must wait for the actual human to respond before saying anything else.
   ws.send(JSON.stringify({
-    type: "conversation.item.create",
-    item: {
-      type: "message",
-      role: "user",
-      content: [{ type: "input_text", text: `[CALL CONNECTED] Say exactly: "${openingScript}"` }]
+    type: "response.create",
+    response: {
+      modalities: ["text", "audio"],
+      instructions: `CRITICAL INSTRUCTION: Say ONLY this exact opening message, then STOP completely and wait in ABSOLUTE SILENCE.
+
+Say exactly this and nothing more: "${openingScript}"
+
+CRITICAL RULES - VIOLATION OF ANY RULE IS UNACCEPTABLE:
+1. Do NOT add any greetings like "Hello" or "Hi" before or after unless they are part of the exact message above.
+2. Do NOT ask follow-up questions after the opening.
+3. Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement.
+4. Do NOT assume, predict, or anticipate the person's response.
+5. Do NOT continue with transition phrases.
+6. Do NOT assume the person confirmed their identity - you MUST hear them EXPLICITLY say "yes" or their name.
+7. Do NOT proceed with the pitch until you HEAR explicit confirmation.
+
+After saying this exact message, you MUST:
+- STOP speaking immediately
+- Wait in complete silence
+- Listen for the person's ACTUAL spoken response
+- The NEXT words must come from THEM, not from you
+- If you hear silence, continue waiting - do NOT fill the silence`,
     }
   }));
-
-  ws.send(JSON.stringify({ type: "response.create" }));
 }
 
 function scheduleSoftTimeout(session: OpenAIRealtimeSession): void {
@@ -1851,8 +2084,18 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
       session.lastUserSpeechTime = new Date();
 
       // Handle user interruption - cancel current response and truncate
+      // IMPORTANT: Only interrupt if the AI has been speaking for at least 1.5 seconds
+      // This prevents:
+      // 1. Interrupting the opening greeting too early
+      // 2. False interruptions from echo/noise during short responses
+      // 3. The AI stopping mid-sentence on brief background sounds
+      const MIN_PLAYBACK_BEFORE_INTERRUPT_MS = 1500;
       if (session.isResponseInProgress && session.currentResponseItemId) {
-        await handleUserInterruption(session);
+        if (session.audioPlaybackMs >= MIN_PLAYBACK_BEFORE_INTERRUPT_MS) {
+          await handleUserInterruption(session);
+        } else {
+          console.log(`${LOG_PREFIX} Ignoring speech_started - only ${session.audioPlaybackMs}ms of audio played (need ${MIN_PLAYBACK_BEFORE_INTERRUPT_MS}ms)`);
+        }
       }
       break;
 
@@ -2269,8 +2512,36 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
           session.openaiWs.send(JSON.stringify({ type: "response.create" }));
         }
         
-        if (args.disposition === 'do_not_call' || args.disposition === 'not_interested') {
-          setTimeout(() => endCall(session.callId, 'completed'), 5000);
+        // Auto-hangup after any disposition is submitted (5 second delay for goodbye)
+        // The AI should say goodbye before the call ends
+        const hangupDelay = args.disposition === 'do_not_call' ? 2000 : 5000;
+        setTimeout(() => {
+          if (session.isActive && !session.isEnding) {
+            console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${args.disposition}`);
+            endCall(session.callId, args.disposition === 'voicemail' ? 'voicemail' : 'completed');
+          }
+        }, hangupDelay);
+        break;
+
+      case "end_call":
+        {
+          const reason = args.reason || 'Call ended by AI';
+          console.log(`${LOG_PREFIX} AI requested call end for ${session.callId}: ${reason}`);
+          
+          if (session.openaiWs?.readyState === WebSocket.OPEN) {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id,
+                output: JSON.stringify({ success: true, message: "Call ending" })
+              }
+            }));
+          }
+          
+          // End call immediately
+          const outcome = session.detectedDisposition === 'voicemail' ? 'voicemail' : 'completed';
+          await endCall(session.callId, outcome);
         }
         break;
 
@@ -2309,6 +2580,113 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             }
           }));
           session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+        }
+        break;
+
+      case "send_dtmf":
+        {
+          const digits = args.digits;
+          const reason = args.reason || 'IVR navigation';
+          
+          if (!digits || typeof digits !== 'string' || !/^[0-9*#]+$/.test(digits)) {
+            console.error(`${LOG_PREFIX} Invalid DTMF digits: ${digits}`);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "Invalid digits. Use 0-9, *, or #" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+            break;
+          }
+          
+          console.log(`${LOG_PREFIX} Sending DTMF digits "${digits}" for call ${session.callId} - Reason: ${reason}`);
+          
+          // Get the call_control_id from TelnyxAiBridge
+          const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+          const bridge = getTelnyxAiBridge();
+          const callState = bridge.getClientStateByControlId(session.callId) || 
+                           (bridge as any).activeCalls?.get(session.callId);
+          
+          // Try to find call_control_id from session or bridge
+          let callControlId = session.callId;
+          if (callState?.callControlId) {
+            callControlId = callState.callControlId;
+          }
+          
+          const telnyxApiKey = process.env.TELNYX_API_KEY;
+          if (!telnyxApiKey) {
+            console.error(`${LOG_PREFIX} TELNYX_API_KEY not configured for DTMF`);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "DTMF service unavailable" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+            break;
+          }
+          
+          try {
+            const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/send_dtmf`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${telnyxApiKey}`,
+              },
+              body: JSON.stringify({ digits }),
+            });
+            
+            if (response.ok) {
+              console.log(`${LOG_PREFIX} ✅ DTMF "${digits}" sent successfully for call ${session.callId}`);
+              if (session.openaiWs?.readyState === WebSocket.OPEN) {
+                session.openaiWs.send(JSON.stringify({
+                  type: "conversation.item.create",
+                  item: {
+                    type: "function_call_output",
+                    call_id,
+                    output: JSON.stringify({ success: true, message: `Sent digits: ${digits}` })
+                  }
+                }));
+                session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+              }
+            } else {
+              const errorText = await response.text();
+              console.error(`${LOG_PREFIX} DTMF send failed: ${response.status} - ${errorText}`);
+              if (session.openaiWs?.readyState === WebSocket.OPEN) {
+                session.openaiWs.send(JSON.stringify({
+                  type: "conversation.item.create",
+                  item: {
+                    type: "function_call_output",
+                    call_id,
+                    output: JSON.stringify({ success: false, error: "Failed to send DTMF" })
+                  }
+                }));
+                session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+              }
+            }
+          } catch (dtmfError) {
+            console.error(`${LOG_PREFIX} DTMF send error:`, dtmfError);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "DTMF transmission error" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+          }
         }
         break;
 
@@ -2573,41 +2951,100 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   const disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
   let dispositionProcessed = false;
   let dispositionResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
-  
+
+  // Check if this is a test session
+  const isTestCall = session.isTestSession || session.callAttemptId?.startsWith('test-attempt-');
+
   if (session.callAttemptId && disposition) {
     try {
       const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
       const noPiiLogging = session.agentSettings?.advanced.privacy.noPiiLogging;
       const notes = buildCallNotes(session, !noPiiLogging);
-      
-      await db.update(dialerCallAttempts).set({
-        callEndedAt: new Date(),
-        callDurationSeconds: callDuration,
-        disposition: disposition,
-        notes,
-        updatedAt: new Date()
-      }).where(eq(dialerCallAttempts.id, session.callAttemptId));
 
-      // Process disposition through the engine (this handles lock release)
-      dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
-      dispositionProcessed = true;
-      
-      console.log(`${LOG_PREFIX} Call ${callId} completed with disposition: ${disposition}`);
+      if (isTestCall) {
+        // Handle test call post-call analysis
+        console.log(`${LOG_PREFIX} Processing post-call analysis for test call ${callId}`);
 
-      if (!noPiiLogging && shouldAutoTranscribeDisposition(disposition)) {
-        await scheduleEngagedCallTranscription({
+        // Extract test call ID from the callAttemptId (format: test-attempt-{testCallId})
+        const testCallId = session.callAttemptId.replace(/^test-attempt-/, '');
+
+        // Build AI performance metrics from session state
+        const aiPerformanceMetrics = {
+          identityConfirmed: session.conversationState?.identityConfirmed ?? false,
+          gatekeeperHandled: session.conversationState?.stateHistory?.includes('GATEKEEPER') ?? false,
+          pitchDelivered: session.conversationState?.stateHistory?.includes('CONTEXT_FRAMING') ?? false,
+          objectionHandled: session.conversationState?.stateHistory?.includes('ACKNOWLEDGEMENT') ?? false,
+          closingAttempted: session.conversationState?.stateHistory?.includes('CLOSE') ?? false,
+          conversationStatesReached: session.conversationState?.stateHistory ?? [],
+          responseLatencyAvgMs: 0, // Could be calculated from response times if tracked
+          tokensUsed: (costMetrics?.textInputTokens ?? 0) + (costMetrics?.textOutputTokens ?? 0),
+          estimatedCost: costMetrics?.costs.total ?? 0,
+          audioInputSeconds: costMetrics?.audioInputSeconds ?? 0,
+          audioOutputSeconds: costMetrics?.audioOutputSeconds ?? 0,
+        };
+
+        // Build transcript turns from session transcripts
+        const transcriptTurns = session.transcripts.map(t => ({
+          role: t.role === 'assistant' ? 'agent' : 'contact',
+          text: t.text,
+          timestamp: t.timestamp.toISOString(),
+        }));
+
+        // Build full transcript text
+        const fullTranscript = session.transcripts
+          .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+          .join('\n');
+
+        // Update the test call record with post-call data
+        await db.update(campaignTestCalls).set({
+          status: 'completed',
+          endedAt: new Date(),
+          durationSeconds: callDuration,
+          disposition: disposition,
+          callSummary: session.callSummary?.summary || notes,
+          transcriptTurns: transcriptTurns,
+          fullTranscript: fullTranscript,
+          aiPerformanceMetrics: aiPerformanceMetrics,
+          updatedAt: new Date(),
+        }).where(eq(campaignTestCalls.id, testCallId));
+
+        dispositionProcessed = true;
+        console.log(`${LOG_PREFIX} ✅ Test call ${callId} post-call analysis saved to campaignTestCalls`);
+        console.log(`${LOG_PREFIX} Test call summary: ${session.callSummary?.summary || 'No summary generated'}`);
+        console.log(`${LOG_PREFIX} Test call disposition: ${disposition}`);
+        console.log(`${LOG_PREFIX} Test call duration: ${callDuration}s`);
+        console.log(`${LOG_PREFIX} Test call transcripts: ${session.transcripts.length} turns`);
+      } else {
+        // Handle real call post-call processing
+        await db.update(dialerCallAttempts).set({
+          callEndedAt: new Date(),
+          callDurationSeconds: callDuration,
+          disposition: disposition,
+          notes,
+          updatedAt: new Date()
+        }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+
+        // Process disposition through the engine (this handles lock release)
+        dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
+        dispositionProcessed = true;
+
+        console.log(`${LOG_PREFIX} Call ${callId} completed with disposition: ${disposition}`);
+
+        if (!noPiiLogging && shouldAutoTranscribeDisposition(disposition)) {
+          await scheduleEngagedCallTranscription({
+            callAttemptId: session.callAttemptId,
+            leadId: dispositionResult?.leadId ?? null,
+          });
+        }
+
+        await handlePostCallArtifacts({
           callAttemptId: session.callAttemptId,
-          leadId: dispositionResult?.leadId ?? null,
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          disposition,
+          callSummary: session.callSummary,
         });
       }
-
-      await handlePostCallArtifacts({
-        callAttemptId: session.callAttemptId,
-        campaignId: session.campaignId,
-        contactId: session.contactId,
-        disposition,
-        callSummary: session.callSummary,
-      });
     } catch (error) {
       console.error(`${LOG_PREFIX} Error processing disposition:`, error);
     }
@@ -2615,7 +3052,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
   // If disposition processing failed or was skipped, release the lock manually
   // to prevent the contact from being stuck in 'in_progress' state
-  if (!dispositionProcessed && session.queueItemId) {
+  // Skip for test sessions as they don't have real queue items
+  if (!dispositionProcessed && session.queueItemId && !isTestCall) {
     console.log(`${LOG_PREFIX} Disposition not processed, releasing lock manually for queue item: ${session.queueItemId}`);
     await releaseQueueLock(session.queueItemId);
   }
@@ -2656,6 +3094,37 @@ async function scheduleEngagedCallTranscription(options: {
   leadId: string | null;
 }): Promise<void> {
   try {
+    // Handle Test Calls
+    if (options.callAttemptId && options.callAttemptId.startsWith('test-attempt-')) {
+      const testCallId = options.callAttemptId.replace(/^test-attempt-/, '');
+      
+      const [testCall] = await db
+        .select({
+          phoneDialed: campaignTestCalls.testPhoneNumber,
+          campaignId: campaignTestCalls.campaignId,
+          contactFirstName: campaignTestCalls.testContactName,
+        })
+        .from(campaignTestCalls)
+        .where(eq(campaignTestCalls.id, testCallId))
+        .limit(1);
+
+      if (!testCall) {
+        console.warn(`${LOG_PREFIX} Unable to schedule transcription: test call ${testCallId} not found (derived from ${options.callAttemptId})`);
+        return;
+      }
+
+      await scheduleAutoRecordingSync({
+        leadId: options.leadId || undefined,
+        callAttemptId: options.callAttemptId,
+        contactFirstName: testCall.contactFirstName,
+        agentId: null,
+        telnyxCallId: null,
+        dialedNumber: testCall.phoneDialed,
+        campaignId: testCall.campaignId,
+      });
+      return;
+    }
+
     const [attempt] = await db
       .select({
         phoneDialed: dialerCallAttempts.phoneDialed,
@@ -2920,6 +3389,8 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignObjections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
       successCriteria: campaign.successCriteria,
       campaignContextBrief: campaign.campaignContextBrief,
+      // Max call duration enforcement (campaign-level)
+      maxCallDurationSeconds: campaign.maxCallDurationSeconds,
       ...(campaign.aiAgentSettings as any || {})
     };
   } catch (error) {
@@ -3028,6 +3499,34 @@ function applyPersonalityConfiguration(
   return basePrompt;
 }
 
+/**
+ * Get provider-specific voice control layer from knowledge blocks or legacy constants
+ * This function integrates with the new knowledge block system while maintaining backward compatibility.
+ */
+async function getProviderVoiceControlLayer(
+  provider: 'openai' | 'google',
+  campaignId: string | null,
+  useCondensed: boolean = true
+): Promise<{ content: string; source: 'blocks' | 'legacy' }> {
+  try {
+    const assembled = await assembleProviderPrompt({
+      provider,
+      campaignId: campaignId || undefined,
+      useCondensedPrompt: useCondensed,
+    });
+
+    if (assembled.source === 'blocks') {
+      console.log(`${LOG_PREFIX} Using knowledge blocks for ${provider} voice control (${assembled.totalTokens} tokens)`);
+      return { content: assembled.prompt, source: 'blocks' };
+    }
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to get knowledge blocks for ${provider}, using legacy:`, error);
+  }
+
+  // Fallback to legacy
+  return { content: '', source: 'legacy' };
+}
+
 async function buildSystemPrompt(
   campaignConfig: any,
   contactInfo: any,
@@ -3037,8 +3536,21 @@ async function buildSystemPrompt(
   agentSettings?: VoiceAgentSettings | null,  // Voice agent personality/conversation config
   callAttemptId?: string | null,
   attemptNumber?: number,
-  isTestSession: boolean = false
+  isTestSession: boolean = false,
+  provider: 'openai' | 'google' = 'openai'  // Voice provider for prompt optimization
 ): Promise<string> {
+  // Try to get provider-specific knowledge blocks first
+  const providerKnowledge = await getProviderVoiceControlLayer(
+    provider,
+    campaignConfig?.id || null,
+    useCondensedPrompt
+  );
+
+  const useKnowledgeBlocks = providerKnowledge.source === 'blocks' && providerKnowledge.content.length > 0;
+  if (useKnowledgeBlocks) {
+    console.log(`${LOG_PREFIX} Building prompt with knowledge blocks for ${provider}`);
+  }
+
   const contactId = contactInfo?.id;
   
   // Allow missing contactId (warn only)
@@ -3120,8 +3632,20 @@ async function buildSystemPrompt(
       brief: campaignConfig?.campaignContextBrief,
     });
 
+    console.log(`${LOG_PREFIX} 🔍 DEBUG CAMPAIGN CONTEXT (PATH 1):`, {
+      hasCampaignConfig: !!campaignConfig,
+      campaignId: campaignConfig?.id,
+      objective: !!campaignConfig?.campaignObjective,
+      brief: !!campaignConfig?.campaignContextBrief,
+      sectionLength: campaignContextSection?.length || 0,
+      talkingPointsCount: campaignConfig?.talkingPoints?.length || 0
+    });
+
     if (campaignContextSection) {
+      console.log(`${LOG_PREFIX} ✅ Injected Campaign Context (Length: ${campaignContextSection.length})`);
       prompt += `\n\n---\n\n${campaignContextSection}`;
+    } else {
+      console.warn(`${LOG_PREFIX} ⚠️ No Campaign Context generated to inject in custom prompt`);
     }
 
     if (accountContextSection) {
@@ -3149,7 +3673,59 @@ async function buildSystemPrompt(
   }
 
   // =====================================================================
-  // CANONICAL SYSTEM PROMPT STRUCTURE
+  // PATH 2: KNOWLEDGE BLOCKS PATH - Provider-specific prompt from knowledge blocks
+  // When knowledge blocks are available and have content, use them as the foundation
+  // This allows prompts to be edited through the UI without code changes
+  // =====================================================================
+  if (useKnowledgeBlocks) {
+    console.log(`${LOG_PREFIX} Using provider-specific knowledge blocks path for ${provider}`);
+
+    let prompt = providerKnowledge.content;
+
+    // Layer campaign context from new fields if available
+    const campaignContextSection = buildCampaignContextSection({
+      objective: campaignConfig?.campaignObjective,
+      productInfo: campaignConfig?.productServiceInfo,
+      talkingPoints: campaignConfig?.talkingPoints,
+      targetAudience: campaignConfig?.targetAudienceDescription,
+      objections: campaignConfig?.campaignObjections,
+      successCriteria: campaignConfig?.successCriteria,
+      brief: campaignConfig?.campaignContextBrief,
+    });
+
+    if (campaignContextSection) {
+      console.log(`${LOG_PREFIX} Injected Campaign Context into knowledge blocks prompt (Length: ${campaignContextSection.length})`);
+      prompt += `\n\n---\n\n${campaignContextSection}`;
+    }
+
+    // Add account intelligence context
+    if (accountContextSection) {
+      prompt += `\n\n---\n\n${accountContextSection}`;
+    }
+
+    // Add call plan context
+    if (callPlanContextSection) {
+      prompt += `\n\n---\n\n${callPlanContextSection}`;
+    }
+
+    // Add contact context (per-call personalization)
+    const contactContextSection = buildContactContextSection(contactInfo);
+    if (contactContextSection) {
+      prompt += `\n\n---\n\n${contactContextSection}`;
+    }
+
+    // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+    prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
+
+    // Apply organization intelligence and training rules
+    const finalPrompt = await buildAgentSystemPrompt(prompt);
+    const tokenEstimate = estimateTokenCount(finalPrompt);
+    console.log(`${LOG_PREFIX} Using knowledge blocks prompt with provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+    return finalPrompt;
+  }
+
+  // =====================================================================
+  // PATH 3: CANONICAL SYSTEM PROMPT STRUCTURE (Legacy fallback)
   // This follows the required flow: Personality → Environment → Tone → Goal → Call Flow → Guardrails
   // =====================================================================
 
@@ -3203,15 +3779,35 @@ Your primary objective is to confirm that you are speaking directly with ${first
 
 This is **not a sales call**.
 
-Do not explain the purpose of the call until the right person is confirmed.
+**CRITICAL COMPLIANCE REQUIREMENT: Do not explain the purpose of the call, mention the company you represent, or provide ANY context until the right person is EXPLICITLY confirmed.**
 
 ---
 
 ## Call Flow Logic
 
-### 1. Identity Detection
+### CRITICAL: Turn-Taking Rules
+**NEVER speak until the other person finishes responding.** After asking ANY question:
+- You MUST wait in complete silence for their actual response
+- Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement until you HEAR their actual spoken response
+- Do NOT assume, predict, or anticipate what they will say
+- Do NOT continue speaking after your question ends
+- The next words must come from THEM, not from you
+
+---
+
+### 1. Identity Detection (RIGHT-PARTY VERIFICATION)
 Begin every call by asking to speak with ${firstName}.
+**After asking, STOP speaking and wait in silence for their response.**
+
 Listen carefully and classify the response.
+
+**You MUST NOT disclose the purpose, topic, or context of the call until identity is confirmed.**
+
+Right Party is confirmed ONLY when the person explicitly states:
+- "Yes, this is [Name]" / "[Name] speaking" / "That's me" / "Speaking"
+- Clear, unambiguous self-identification
+
+Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying question, then end politely if still unclear.
 
 ---
 
@@ -3234,14 +3830,19 @@ Proceed naturally and communicate the following ideas in your own words, while k
 
 ---
 
-### 3. Gatekeeper Detected
+### 3. Gatekeeper Detected (STRICT COMPLIANCE)
 If the person indicates they are not ${firstName} or sounds like a gatekeeper:
 
+**MANDATORY: Disclose NOTHING about the call purpose, company, or context.**
+
 - Be polite and respectful.
-- Ask to be connected to ${firstName}.
-- Do not pitch, explain details, or justify the call.
-- Make no more than two polite attempts.
-- If refused, thank them sincerely and end the call.
+- Ask ONLY to be connected: "May I speak with ${firstName}?" or "Could you connect me?"
+- If asked "What is this regarding?": "It's a professional matter for ${firstName} specifically."
+- Do NOT pitch, explain details, justify the call, or mention any company/product/service.
+- Make NO MORE than two polite attempts.
+- If refused or access denied → Thank them sincerely and END THE CALL immediately.
+
+**Any disclosure to a gatekeeper = COMPLIANCE VIOLATION.**
 
 ---
 
@@ -3250,6 +3851,33 @@ If you are connected to ${firstName} after a transfer:
 
 - Restart the introduction calmly.
 - Continue the conversation following the same flow.
+
+---
+
+### 5. IVR / Automated Phone System Detected
+If you hear an automated phone system (IVR), menu prompts, or "press X for...":
+
+**Use the send_dtmf function to navigate:**
+- Listen carefully to ALL menu options before pressing any keys
+- ONLY press keys when explicitly prompted by the IVR
+- Wait for the IVR to finish speaking before pressing the next digit
+
+**Navigation strategies:**
+- If there's a "dial-by-name directory": Spell the contact's last name using keypad letters
+- If there's an "operator" option: Press 0 to reach a human
+- If you hear "enter extension": Only enter if you know the exact extension
+- If unsure: Press 0 for operator or wait for the next menu
+
+**Common DTMF patterns:**
+- Menu selection: send_dtmf("1", "Selecting option 1 for sales")
+- Extension: send_dtmf("1234", "Dialing extension 1234")
+- Operator: send_dtmf("0", "Requesting operator")
+- Confirm: send_dtmf("#", "Confirming selection")
+
+**Do NOT:**
+- Guess extension numbers
+- Spam random keys
+- Press keys before the IVR finishes speaking
 
 ---
 
@@ -3277,6 +3905,17 @@ If the person expresses discomfort or asks to stop:
 
 # Tools
 
+## send_dtmf
+Use this to navigate IVR systems by sending DTMF tones (keypad digits).
+- digits: The key(s) to press (0-9, *, #). Can be single or multiple.
+- reason: Brief explanation (e.g., "Selecting option 1 for sales")
+
+**Examples:**
+- send_dtmf("1", "Selecting menu option 1")
+- send_dtmf("0", "Requesting operator")
+- send_dtmf("1234", "Dialing extension 1234")
+- send_dtmf("#", "Confirming selection")
+
 ## submit_disposition
 Call this when you determine the call outcome. REQUIRED at end of every call.
 - qualified_lead: Prospect expressed genuine interest, asked relevant questions, or wants more info
@@ -3285,6 +3924,19 @@ Call this when you determine the call outcome. REQUIRED at end of every call.
 - voicemail: Reached voicemail or answering machine
 - no_answer: Call connected but no meaningful human interaction
 - callback_requested: Prospect asked to be called back
+
+## end_call
+Use this to explicitly hang up the call. Call flow:
+1. Say your goodbye/closing statement
+2. Call submit_disposition with the appropriate outcome
+3. Call end_call to terminate the connection
+
+**When to use:**
+- After completing a successful conversation (say goodbye first)
+- When voicemail/answering machine is detected (no goodbye needed)
+- When gatekeeper blocks you after 2 attempts
+- When prospect says "please stop calling" (comply immediately)
+- When IVR has no path to reach the contact
 
 ## submit_call_summary
 Call this after submit_disposition when a human conversation occurred.
@@ -3470,9 +4122,23 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       ? Math.round((now.getTime() - session.lastAudioFrameTime.getTime()) / 1000)
       : elapsedSeconds;
     const endAfterSilenceRaw = Number(session.agentSettings?.advanced.conversational.endConversationAfterSilenceSeconds);
-    const maxDurationRaw = Number(session.agentSettings?.advanced.conversational.maxConversationDurationSeconds);
+    const agentMaxDurationRaw = Number(session.agentSettings?.advanced.conversational.maxConversationDurationSeconds);
+    const campaignMaxDurationRaw = Number(session.campaignMaxCallDurationSeconds);
     const endAfterSilenceSeconds = Number.isFinite(endAfterSilenceRaw) ? endAfterSilenceRaw : -1;
-    const maxDurationSeconds = Number.isFinite(maxDurationRaw) ? maxDurationRaw : -1;
+    const agentMaxDurationSeconds = Number.isFinite(agentMaxDurationRaw) ? agentMaxDurationRaw : -1;
+    const campaignMaxDurationSeconds = Number.isFinite(campaignMaxDurationRaw) ? campaignMaxDurationRaw : -1;
+
+    // Use the more restrictive (minimum) of agent and campaign max durations
+    // Campaign max duration takes priority for strict enforcement
+    let effectiveMaxDuration = -1;
+    if (campaignMaxDurationSeconds >= 0 && agentMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = Math.min(campaignMaxDurationSeconds, agentMaxDurationSeconds);
+    } else if (campaignMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = campaignMaxDurationSeconds;
+    } else if (agentMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = agentMaxDurationSeconds;
+    }
+
     const timeSinceUserSpeech = session.lastUserSpeechTime
       ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)
       : null;
@@ -3483,8 +4149,9 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       return;
     }
 
-    if (maxDurationSeconds >= 0 && elapsedSeconds > maxDurationSeconds) {
-      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after max duration ${maxDurationSeconds}s`);
+    if (effectiveMaxDuration >= 0 && elapsedSeconds > effectiveMaxDuration) {
+      const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds <= agentMaxDurationSeconds ? 'campaign' : 'agent';
+      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after max duration ${effectiveMaxDuration}s (${source} limit)`);
       endCall(session.callId, 'completed');
       return;
     }

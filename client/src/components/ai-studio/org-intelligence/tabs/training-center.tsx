@@ -64,7 +64,7 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
     'If unsure, ask a concise clarifying question',
     // VOICEMAIL POLICY (MANDATORY - NO EXCEPTIONS)
     'NEVER leave voicemail - no exceptions, no fallback, no shortened version',
-    'First spoken line must be: "Hi, may I speak with {{ContactFullName}}, the {{JobTitle}} at {{CompanyName}}?"',
+    'First spoken line must be: "Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?"',
     'If voicemail is offered by anyone, say: "That\'s okay — I\'ll try again later. Thank you." then END CALL immediately',
     'If call routes directly to voicemail: Do NOT speak, do NOT record anything, do NOT introduce yourself - end call silently',
     'If gatekeeper mentions voicemail ("leave a voicemail", "send to voicemail", "goes to voicemail"), say: "No problem — I\'ll try again later. Thank you." then END CALL',

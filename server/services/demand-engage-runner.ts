@@ -484,11 +484,23 @@ async function buildPersonalizationContext(
 
   // Level 3: Add deep personalization data
   if (level >= 3) {
-    context.contact.linkedInUrl = contact.linkedIn || '';
+    context.contact.linkedInUrl = contact.linkedinUrl || '';
 
     // Add tech stack if available
     if (account?.customFields?.techStack) {
       context.account.techStack = account.customFields.techStack;
+    }
+
+    // Add recent activity from engagement signals
+    if (contact.id) {
+      const signals = await getEngagementSignals(contact.id);
+      const recentSignals = signals.filter(s => s.count > 0);
+      if (recentSignals.length > 0) {
+        const descriptions = recentSignals.map(s => 
+          `${s.type} ${s.count} time${s.count > 1 ? 's' : ''}`
+        );
+        context.contact.recentActivity = `Recent interactions: ${descriptions.join(', ')}`;
+      }
     }
 
     // Add intelligence data if provided

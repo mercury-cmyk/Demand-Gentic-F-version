@@ -16,6 +16,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
+  const [showMfaInput, setShowMfaInput] = useState(false);
+  const [mfaToken, setMfaToken] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
 
   // Redirect after successful login once authentication state is updated
   useEffect(() => {
@@ -49,7 +52,19 @@ export default function LoginPage() {
         throw new Error(data.message || "Login failed");
       }
 
-      // Store auth data
+      // Check if MFA is required
+      if (data.requiresMFA && data.mfaType === 'totp') {
+        console.log('[LOGIN] TOTP MFA required, showing input');
+        setShowMfaInput(true);
+        setIsLoading(false);
+        toast({
+          title: "Multi-Factor Authentication Required",
+          description: "Please enter your authentication code",
+        });
+        return;
+      }
+
+      // Store auth data (no MFA required)
       console.log('[LOGIN] Calling login() with token and user');
       login(data.token, data.user);
       
@@ -71,6 +86,49 @@ export default function LoginPage() {
     }
   };
 
+  const handleMfaVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/mfa/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ 
+          username, 
+          password, 
+          token: mfaToken,
+          useBackupCode 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "MFA verification failed");
+      }
+
+      // Store auth data
+      login(data.token, data.user);
+      setLoginSuccess(true);
+      
+      toast({
+        title: "Welcome back!",
+        description: `Logged in as ${data.user.username}`,
+      });
+    } catch (error) {
+      console.error('[MFA VERIFY] Error:', error);
+      toast({
+        variant: "destructive",
+        title: "Verification failed",
+        description: error instanceof Error ? error.message : "Invalid code",
+      });
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       {/* Premium gradient background */}
@@ -83,61 +141,116 @@ export default function LoginPage() {
           <div className="flex justify-center mb-4">
             <img
               src="/demangent-logo.png"
-              alt="DemanGent.ai"
+              alt="DemandGentic.ai"
               className="h-12 w-auto"
             />
           </div>
           <CardTitle className="text-3xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-            DemanGent.ai
+            DemandGentic.ai
           </CardTitle>
           <CardDescription className="text-base">
             Intelligent B2B demand generation platform
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username" className="text-sm font-medium">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                placeholder="Enter your username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                data-testid="input-username"
-                className="h-11"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm font-medium">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                data-testid="input-password"
-                className="h-11"
-              />
-            </div>
-            <Button 
-              type="submit" 
-              className="w-full h-11 text-base font-semibold shadow-smooth" 
-              data-testid="button-login" 
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                'Sign In'
-              )}
-            </Button>
-          </form>
+          {!showMfaInput ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username" className="text-sm font-medium">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="Enter your username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  data-testid="input-username"
+                  className="h-11"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  data-testid="input-password"
+                  className="h-11"
+                />
+              </div>
+              <Button 
+                type="submit" 
+                className="w-full h-11 text-base font-semibold shadow-smooth" 
+                data-testid="button-login" 
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  'Sign In'
+                )}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleMfaVerify} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="mfa-token" className="text-sm font-medium">
+                  {useBackupCode ? 'Backup Code' : 'Authentication Code'}
+                </Label>
+                <Input
+                  id="mfa-token"
+                  type="text"
+                  placeholder={useBackupCode ? 'Enter backup code' : 'Enter 6-digit code'}
+                  value={mfaToken}
+                  onChange={(e) => setMfaToken(e.target.value)}
+                  required
+                  className="h-11 text-center text-xl tracking-widest"
+                  maxLength={useBackupCode ? 10 : 6}
+                  autoFocus
+                />
+              </div>
+              <Button 
+                type="submit" 
+                className="w-full h-11 text-base font-semibold shadow-smooth" 
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Verify'
+                )}
+              </Button>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  type="button"
+                  onClick={() => setUseBackupCode(!useBackupCode)}
+                  className="text-primary hover:underline"
+                >
+                  {useBackupCode ? 'Use authenticator code' : 'Use backup code'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMfaInput(false);
+                    setMfaToken('');
+                    setUseBackupCode(false);
+                  }}
+                  className="text-muted-foreground hover:underline"
+                >
+                  Back to login
+                </button>
+              </div>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>

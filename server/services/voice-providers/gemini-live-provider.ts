@@ -12,6 +12,7 @@
 
 import WebSocket from "ws";
 import { GoogleAuth } from "google-auth-library";
+import { SpeechClient, protos } from "@google-cloud/speech";
 import {
   BaseVoiceProvider,
   VoiceProviderConfig,
@@ -63,14 +64,30 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Accumulated transcript for the current turn
   private currentTranscript: string = '';
 
+  // Speech-to-Text streaming for user transcription
+  private speechClient: SpeechClient | null = null;
+  private recognizeStream: ReturnType<SpeechClient['streamingRecognize']> | null = null;
+  private sttEnabled: boolean = false;
+  private currentUserTranscript: string = '';
+  private sttRestartTimeout: ReturnType<typeof setTimeout> | null = null;
+
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
     const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
 
     // Check for API key (Google AI Studio) or use ADC (Vertex AI)
-    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    // Accept multiple env var names for flexibility
+    const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
     const useVertexAI = !apiKey && !!projectId;
+
+    console.log(`${LOG_PREFIX} Configuration:`, {
+      model,
+      useVertexAI,
+      hasApiKey: !!apiKey,
+      hasProjectId: !!projectId,
+      projectId: projectId || 'N/A'
+    });
 
     if (!apiKey && !projectId) {
       throw new Error("Google AI API key or Cloud Project ID required");
@@ -119,6 +136,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         }
 
         console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
+        console.log(`${LOG_PREFIX} Mode: ${useVertexAI ? 'Vertex AI' : 'Google AI Studio'}, Model: ${model}`);
+        console.log(`${LOG_PREFIX} WebSocket URL: ${wsUrl.replace(/key=[^&]+/, 'key=***')}`);
 
         this.ws = new WebSocket(wsUrl, { headers });
 
@@ -149,8 +168,16 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           this.ws = null;
         });
 
-        this.ws.on("error", (error) => {
-          console.error(`${LOG_PREFIX} WebSocket error:`, error);
+        this.ws.on("error", (error: any) => {
+          console.error(`${LOG_PREFIX} ❌ WebSocket error:`, error);
+          console.error(`${LOG_PREFIX} Error details: code=${error.code}, errno=${error.errno}, message=${error.message}`);
+          if (error.message?.includes('401') || error.message?.includes('403')) {
+            console.error(`${LOG_PREFIX} 🔑 Authentication failed - your GEMINI_API_KEY may not have access to Gemini Live API`);
+            console.error(`${LOG_PREFIX} 💡 Try getting a new API key from https://aistudio.google.com/apikey`);
+          }
+          if (error.message?.includes('404')) {
+            console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp'})`);
+          }
           this.emitError('connection_error', error.message, false);
           reject(error);
         });
@@ -162,6 +189,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   }
 
   async disconnect(): Promise<void> {
+    // Stop Speech-to-Text first
+    this.stopSpeechToText();
+
     if (this.connectionTimeout) {
       clearTimeout(this.connectionTimeout);
       this.connectionTimeout = null;
@@ -193,13 +223,15 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   private sendSetupMessage(config: VoiceProviderConfig): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`${LOG_PREFIX} sendSetupMessage failed: WS not open`);
       return;
     }
 
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
     const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
-    const useVertexAI = !!projectId && !process.env.GOOGLE_AI_API_KEY;
+    const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+    const useVertexAI = !!projectId && !apiKey;
 
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');
@@ -264,8 +296,157 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       },
     };
 
-    this.ws.send(JSON.stringify(message));
-    this.audioBytesSent += audioBuffer.length;
+    try {
+        this.ws.send(JSON.stringify(message));
+        this.audioBytesSent += audioBuffer.length;
+
+        // Also stream to Speech-to-Text for user transcription
+        // Note: The streaming recognize stream expects raw PCM audio bytes
+        if (this.sttEnabled && this.recognizeStream) {
+          try {
+            this.recognizeStream.write(pcmBuffer);
+          } catch (sttErr) {
+            // Ignore write errors - stream may be restarting
+          }
+        }
+    } catch (e) {
+        console.error(`${LOG_PREFIX} Error sending audio to Gemini`, e);
+    }
+  }
+
+  /**
+   * Initialize Google Cloud Speech-to-Text for user speech transcription.
+   * This runs in parallel with Gemini to transcribe user input.
+   */
+  private async initializeSpeechToText(): Promise<void> {
+    // Skip if STT is explicitly disabled
+    if (process.env.GEMINI_STT_ENABLED === 'false') {
+      console.log(`${LOG_PREFIX} Speech-to-Text disabled via GEMINI_STT_ENABLED=false`);
+      return;
+    }
+
+    try {
+      this.speechClient = new SpeechClient();
+      this.sttEnabled = true;
+      await this.startRecognizeStream();
+      console.log(`${LOG_PREFIX} Speech-to-Text initialized for user transcription`);
+    } catch (error: any) {
+      console.warn(`${LOG_PREFIX} Speech-to-Text initialization failed (user transcripts will be unavailable):`, error.message);
+      this.sttEnabled = false;
+    }
+  }
+
+  /**
+   * Start or restart the streaming recognition stream.
+   * Streams have a ~5 minute limit, so we need to restart periodically.
+   */
+  private async startRecognizeStream(): Promise<void> {
+    if (!this.speechClient || !this.sttEnabled) return;
+
+    // Close existing stream if any
+    if (this.recognizeStream) {
+      try {
+        this.recognizeStream.end();
+      } catch (e) {
+        // Ignore close errors
+      }
+    }
+
+    // Clear any pending restart timeout
+    if (this.sttRestartTimeout) {
+      clearTimeout(this.sttRestartTimeout);
+    }
+
+    const request: protos.google.cloud.speech.v1.IStreamingRecognitionConfig = {
+      config: {
+        encoding: protos.google.cloud.speech.v1.RecognitionConfig.AudioEncoding.LINEAR16,
+        sampleRateHertz: 16000,
+        languageCode: 'en-US',
+        enableAutomaticPunctuation: true,
+        model: 'phone_call', // Optimized for phone calls
+      },
+      interimResults: true,
+    };
+
+    this.recognizeStream = this.speechClient.streamingRecognize(request);
+
+    this.recognizeStream.on('data', (response: protos.google.cloud.speech.v1.IStreamingRecognizeResponse) => {
+      const results = response.results || [];
+      for (const result of results) {
+        const alternatives = result.alternatives || [];
+        if (alternatives.length > 0) {
+          const transcript = alternatives[0].transcript || '';
+          const isFinal = result.isFinal || false;
+
+          if (isFinal && transcript.trim()) {
+            // Emit final user transcript
+            this.emit('transcript:user', {
+              text: transcript,
+              isFinal: true,
+              timestamp: new Date(),
+            });
+            console.log(`${LOG_PREFIX} User said: ${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}`);
+            this.currentUserTranscript = '';
+          } else if (transcript.trim()) {
+            // Update interim transcript
+            this.currentUserTranscript = transcript;
+          }
+        }
+      }
+    });
+
+    this.recognizeStream.on('error', (error: any) => {
+      // DEADLINE_EXCEEDED is expected after ~5 minutes, restart the stream
+      if (error.code === 4 || error.message?.includes('DEADLINE_EXCEEDED')) {
+        console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
+        this.startRecognizeStream().catch(() => {});
+      } else {
+        console.warn(`${LOG_PREFIX} STT stream error:`, error.message || error);
+      }
+    });
+
+    this.recognizeStream.on('end', () => {
+      // Stream ended, restart if still enabled
+      if (this.sttEnabled) {
+        this.sttRestartTimeout = setTimeout(() => {
+          this.startRecognizeStream().catch(() => {});
+        }, 100);
+      }
+    });
+
+    // Set a timeout to restart the stream before Google's 5-minute limit
+    this.sttRestartTimeout = setTimeout(() => {
+      if (this.sttEnabled) {
+        console.log(`${LOG_PREFIX} STT stream timeout, restarting...`);
+        this.startRecognizeStream().catch(() => {});
+      }
+    }, 4 * 60 * 1000); // 4 minutes (before 5-minute limit)
+  }
+
+  /**
+   * Stop Speech-to-Text streaming.
+   */
+  private stopSpeechToText(): void {
+    this.sttEnabled = false;
+
+    if (this.sttRestartTimeout) {
+      clearTimeout(this.sttRestartTimeout);
+      this.sttRestartTimeout = null;
+    }
+
+    if (this.recognizeStream) {
+      try {
+        this.recognizeStream.end();
+      } catch (e) {
+        // Ignore close errors
+      }
+      this.recognizeStream = null;
+    }
+
+    if (this.speechClient) {
+      this.speechClient.close().catch(() => {});
+      this.speechClient = null;
+    }
   }
 
   sendTextMessage(text: string): void {
@@ -357,6 +538,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   /**
    * Send opening message to start the conversation
+   *
+   * CRITICAL: The model must ONLY say the exact greeting and then STOP.
+   * It must NOT predict, assume, or continue with any follow-up like "okay, great".
+   * The model must wait for the actual human to respond before saying anything else.
    */
   sendOpeningMessage(text: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
@@ -365,11 +550,28 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // In Gemini, we send a text prompt and let the model generate audio
+    // CRITICAL: Strong instruction to prevent the model from continuing past the greeting
     const message = {
       client_content: {
         turns: [{
           role: 'user',
-          parts: [{ text: `Please say this greeting to start the conversation: "${text}"` }],
+          parts: [{ text: `CRITICAL INSTRUCTION: Say ONLY this exact greeting, then STOP completely and wait in ABSOLUTE SILENCE.
+
+Say exactly this and nothing more: "${text}"
+
+CRITICAL RULES - VIOLATION IS UNACCEPTABLE:
+1. Do NOT add any words before or after the message above.
+2. Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement.
+3. Do NOT assume, predict, or anticipate the person's response.
+4. Do NOT assume the person confirmed their identity - you MUST hear them EXPLICITLY say "yes" or their name.
+5. Do NOT proceed with any pitch or introduction until you HEAR explicit confirmation.
+6. If you hear silence, continue waiting - do NOT fill the silence.
+
+After saying this exact message, you MUST:
+- STOP speaking immediately
+- Wait in complete silence
+- Listen for the person's ACTUAL spoken response
+- The NEXT words must come from THEM, not from you` }],
         }],
         turn_complete: true,
       },
@@ -406,6 +608,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       console.log(`${LOG_PREFIX} Setup complete - ready to receive audio`);
       this.setupComplete = true;
       this.setConnected(true);
+      // Initialize Speech-to-Text for user transcription (async, don't block)
+      this.initializeSpeechToText().catch(err => {
+        console.warn(`${LOG_PREFIX} STT init failed:`, err.message);
+      });
       return;
     }
 
@@ -417,8 +623,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     // Tool call cancellation
     if (isToolCallCancellation(message)) {
-      for (const id of message.tool_call_cancellation.ids) {
-        this.pendingFunctionCalls.delete(id);
+      const cancellation = message.tool_call_cancellation || (message as any).toolCallCancellation;
+      if (cancellation && cancellation.ids) {
+        for (const id of cancellation.ids) {
+          this.pendingFunctionCalls.delete(id);
+        }
       }
       return;
     }
@@ -430,18 +639,24 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
   }
 
-  private handleServerContent(message: { server_content: any }): void {
-    const content = message.server_content;
+  private handleServerContent(message: any): void {
+    const content = message.server_content || message.serverContent;
 
     // Check for model turn with content
-    if (content.model_turn?.parts) {
-      const parts = content.model_turn.parts;
+    if (content.model_turn?.parts || content.modelTurn?.parts) {
+      const parts = content.model_turn?.parts || content.modelTurn?.parts;
 
       // Handle audio output
       if (hasAudioPart(parts)) {
         const audioData = extractAudioData(parts);
         if (audioData) {
+          // DEBUG: Log first few audio chunks to verify Gemini is sending data
+          if (this.audioPlaybackMs === 0) {
+              console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO RECEIVED from Gemini. Chunk size: ${audioData.length} chars (base64)`);
+          }
           this.handleAudioOutput(audioData);
+        } else {
+             console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
         }
       }
 
@@ -472,7 +687,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Turn complete
-    if (content.turn_complete) {
+    if (content.turn_complete || content.turnComplete) {
       if (this.currentTranscript) {
         this.emit('transcript:agent', {
           text: this.currentTranscript,
@@ -497,18 +712,21 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
   }
 
-  private handleToolCall(message: { tool_call: any }): void {
-    const toolCall = message.tool_call;
+  private handleToolCall(message: any): void {
+    const toolCall = message.tool_call || message.toolCall;
 
-    for (const fc of toolCall.function_calls) {
-      const callId = fc.id;
-      this.pendingFunctionCalls.set(callId, { name: fc.name, args: fc.args });
+    const functionCalls = toolCall.function_calls || toolCall.functionCalls;
+    if (functionCalls) {
+      for (const fc of functionCalls) {
+        const callId = fc.id;
+        this.pendingFunctionCalls.set(callId, { name: fc.name, args: fc.args });
 
-      this.emit('function:call', {
-        callId,
-        name: fc.name,
-        args: fc.args,
-      });
+        this.emit('function:call', {
+          callId,
+          name: fc.name,
+          args: fc.args,
+        });
+      }
     }
   }
 
@@ -529,6 +747,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     // Transcode to G.711 for Telnyx
     const g711Buffer = this.transcoder.geminiToTelnyx(pcmBuffer, 24000);
+
+    // DEBUG: Log audio output from Gemini
+    if (this.audioPlaybackMs === 0 || this.audioPlaybackMs % 1000 < 50) {
+      console.log(`${LOG_PREFIX} Received audio from Gemini: ${pcmBuffer.length} bytes PCM -> ${g711Buffer.length} bytes G.711`);
+    }
 
     // Calculate duration (G.711: 8 bytes per ms)
     const durationMs = g711Buffer.length / 8;

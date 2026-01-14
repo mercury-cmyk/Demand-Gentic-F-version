@@ -1,4 +1,4 @@
-# Deploying DemanGent.ai to Google Cloud Run
+# Deploying DemandGentic.ai to Google Cloud Run
 
 ## Prerequisites
 
@@ -46,11 +46,11 @@ chmod +x deploy-gcloud.sh
 4. **Build and deploy:**
    ```bash
    # Build image
-   gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/demangent-api
+   gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/demandgentic-api
    
    # Deploy
-   gcloud run deploy demangent-api \
-     --image gcr.io/YOUR_PROJECT_ID/demangent-api \
+   gcloud run deploy demandgentic-api \
+     --image gcr.io/YOUR_PROJECT_ID/demandgentic-api \
      --platform managed \
      --region us-central1 \
      --allow-unauthenticated \
@@ -65,7 +65,7 @@ chmod +x deploy-gcloud.sh
 
 1. Create a Cloud SQL PostgreSQL instance:
    ```bash
-   gcloud sql instances create demangent-db \
+   gcloud sql instances create demandgentic-db \
      --database-version=POSTGRES_16 \
      --tier=db-f1-micro \
      --region=us-central1
@@ -73,8 +73,8 @@ chmod +x deploy-gcloud.sh
 
 2. Create database and user:
    ```bash
-   gcloud sql databases create pivotal_crm --instance=demangent-db
-   gcloud sql users create appuser --instance=demangent-db --password=YOUR_PASSWORD
+   gcloud sql databases create pivotal_crm --instance=demandgentic-db
+   gcloud sql users create appuser --instance=demandgentic-db --password=YOUR_PASSWORD
    ```
 
 3. Connect Cloud Run to Cloud SQL using the Cloud SQL Proxy (automatic with proper IAM).
@@ -108,7 +108,7 @@ The `cloudbuild.yaml` file is configured for automatic deployments:
 ```bash
 # Map a custom domain
 gcloud run domain-mappings create \
-  --service demangent-api \
+  --service demandgentic-api \
   --domain your-domain.com \
   --region us-central1
 ```
@@ -129,7 +129,7 @@ gcloud run domain-mappings create \
 ## Troubleshooting
 
 ### Container fails to start
-- Check logs: `gcloud run logs read demangent-api --region us-central1`
+- Check logs: `gcloud run logs read demandgentic-api --region us-central1`
 - Verify DATABASE_URL is correct
 - Ensure database is accessible from Cloud Run
 

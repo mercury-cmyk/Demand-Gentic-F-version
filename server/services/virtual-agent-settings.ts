@@ -17,13 +17,32 @@ export type AdvancedSettings = {
     model: 'default' | 'scribe_realtime';
     inputFormat: 'pcm_16000';
     keywords: string;
-    transcriptionEnabled: boolean;
+    transcriptionEnabled?: boolean;
+    textOnly?: boolean;
   };
   conversational: {
     eagerness: 'low' | 'normal' | 'high';
+    silenceDurationMs?: number;  // Milliseconds of silence before assuming turn is complete
     takeTurnAfterSilenceSeconds: number;
     endConversationAfterSilenceSeconds: number;
     maxConversationDurationSeconds: number;
+  };
+  realtime: {
+    turnDetection: {
+      mode: 'normal' | 'semantic' | 'disabled';
+      threshold: number;
+      prefixPaddingMs: number;
+      silenceDurationMs: number;
+      idleTimeoutMs: number;
+    };
+    functions: string[];
+    mcpServers: string[];
+    model: string;
+    userTranscriptModel: string;
+    noiseReduction: 'enabled' | 'disabled';
+    modelConfig: string;
+    maxTokens: number;
+    toolChoice: 'auto' | 'required' | 'none';
   };
   softTimeout: {
     responseTimeoutSeconds: number;
@@ -69,10 +88,28 @@ export const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     transcriptionEnabled: true,
   },
   conversational: {
-    eagerness: 'high',
+    eagerness: 'low',  // Changed from 'high' to prevent mid-sentence cutoffs
+    silenceDurationMs: 1200,  // 1.2 seconds of silence before assuming turn is complete (prevents cutting mid-sentence)
     takeTurnAfterSilenceSeconds: 2,
     endConversationAfterSilenceSeconds: 60,
     maxConversationDurationSeconds: 240,
+  },
+  realtime: {
+    turnDetection: {
+      mode: 'normal',
+      threshold: 0.5,
+      prefixPaddingMs: 300,
+      silenceDurationMs: 500,
+      idleTimeoutMs: 0,
+    },
+    functions: [],
+    mcpServers: [],
+    model: 'gpt-4o-realtime-preview',
+    userTranscriptModel: '',
+    noiseReduction: 'enabled',
+    modelConfig: '',
+    maxTokens: 4096,
+    toolChoice: 'auto',
   },
   softTimeout: {
     responseTimeoutSeconds: -1,
@@ -89,7 +126,7 @@ export const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     retentionDays: -1,
   },
   costOptimization: {
-    maxResponseTokens: 512,
+    maxResponseTokens: 1024,  // Increased from 512 to prevent mid-sentence token cutoffs
     useCondensedPrompt: true,
     enableCostTracking: true,
   },
@@ -109,6 +146,14 @@ export function mergeAgentSettings(raw?: Partial<VirtualAgentSettings>): Virtual
       conversational: {
         ...DEFAULT_ADVANCED_SETTINGS.conversational,
         ...(raw?.advanced?.conversational ?? {}),
+      },
+      realtime: {
+        ...DEFAULT_ADVANCED_SETTINGS.realtime,
+        turnDetection: {
+          ...DEFAULT_ADVANCED_SETTINGS.realtime.turnDetection,
+          ...(raw?.advanced?.realtime?.turnDetection ?? {}),
+        },
+        ...(raw?.advanced?.realtime ?? {}),
       },
       softTimeout: {
         ...DEFAULT_ADVANCED_SETTINGS.softTimeout,

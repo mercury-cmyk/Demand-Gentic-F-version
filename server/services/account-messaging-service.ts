@@ -122,18 +122,42 @@ export async function getOrBuildAccountIntelligence(
   const payload = await generateAccountIntelligencePayload(signals);
   const version = latest ? latest.version + 1 : 1;
 
-  const [inserted] = await db
-    .insert(accountIntelligenceRecords)
-    .values({
-      accountId,
-      version,
-      sourceFingerprint,
-      confidence: payload.confidence,
-      payloadJson: payload,
-    })
-    .returning();
+  try {
+    const [inserted] = await db
+      .insert(accountIntelligenceRecords)
+      .values({
+        accountId,
+        version,
+        sourceFingerprint,
+        confidence: payload.confidence,
+        payloadJson: payload,
+      })
+      .returning();
 
-  return inserted;
+    return inserted;
+  } catch (error: any) {
+    // Handle duplicate key constraint - another request might have inserted this version
+    if (error?.code === '23505') {
+      // Query for the existing record with this version
+      const [existing] = await db
+        .select()
+        .from(accountIntelligenceRecords)
+        .where(
+          and(
+            eq(accountIntelligenceRecords.accountId, accountId),
+            eq(accountIntelligenceRecords.version, version)
+          )
+        )
+        .limit(1);
+      
+      if (existing) {
+        return existing;
+      }
+    }
+    
+    // Re-throw if it's a different error or we couldn't find the record
+    throw error;
+  }
 }
 
 export async function getOrBuildAccountMessagingBrief(params: {
@@ -608,8 +632,24 @@ function hashObject(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value || {})).digest("hex");
 }
 
-function toIso(value: Date | null | undefined): string | null {
-  return value ? value.toISOString() : null;
+function toIso(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  
+  // If already a Date object
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  
+  // If it's a string, try to parse it
+  if (typeof value === 'string') {
+    try {
+      return new Date(value).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  
+  return null;
 }
 
 function clampConfidence(value: any): number {

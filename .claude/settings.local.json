@@ -110,7 +110,9 @@
       "Bash(docker push:*)",
       "Bash(ipconfig:*)",
       "Bash(cmd.exe /c \"ipconfig /flushdns\")",
-      "Bash(wmic process:*)"
+      "Bash(wmic process:*)",
+      "Bash(export PUBLIC_WEBSOCKET_URL=\"wss://steve-unbalking-guessingly.ngrok-free.dev/openai-realtime-dialer\")",
+      "Bash(npm run dev:local:*)"
     ],
     "additionalDirectories": [
       "C:\\Windows\\System32\\drivers\\etc"

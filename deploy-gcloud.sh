@@ -6,10 +6,10 @@ set -e
 # Configuration
 PROJECT_ID="${GCP_PROJECT_ID:-your-project-id}"
 REGION="${GCP_REGION:-us-central1}"
-SERVICE_NAME="demangent-api"
+SERVICE_NAME="demandgentic-api"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
-echo "🚀 Deploying DemanGent.ai to Google Cloud Run"
+echo "🚀 Deploying DemandGentic.ai to Google Cloud Run"
 echo "Project: ${PROJECT_ID}"
 echo "Region: ${REGION}"
 echo "Service: ${SERVICE_NAME}"

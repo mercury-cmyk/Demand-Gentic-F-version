@@ -3,14 +3,29 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Users, Filter, List, Globe, Eye, Save, ChevronRight, X, Loader2, FileText } from "lucide-react";
+import { Users, Filter, List, Globe, Eye, Save, ChevronRight, X, Loader2, FileText, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useQuery } from "@tanstack/react-query";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { FilterGroup } from "@shared/filter-types";
 import type { Segment, List as ListType, DomainSet } from "@shared/schema";
+
+interface Organization {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  isDefault: boolean;
+}
 
 interface Step1Props {
   data: any;
@@ -34,6 +49,26 @@ interface AudienceSelection {
 export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Props) {
   // Campaign Name
   const [campaignName, setCampaignName] = useState(data.name || "");
+
+  // Organization selection for problem intelligence
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(data.organizationId || null);
+
+  // Fetch organizations for dropdown
+  const { data: orgsData } = useQuery<{ organizations: Organization[] }>({
+    queryKey: ["/api/organizations/dropdown"],
+  });
+
+  // Auto-select default org on first load
+  useEffect(() => {
+    if (orgsData?.organizations && !selectedOrgId && !data.organizationId) {
+      const defaultOrg = orgsData.organizations.find((o) => o.isDefault);
+      if (defaultOrg) {
+        setSelectedOrgId(defaultOrg.id);
+      } else if (orgsData.organizations.length > 0) {
+        setSelectedOrgId(orgsData.organizations[0].id);
+      }
+    }
+  }, [orgsData?.organizations, selectedOrgId, data.organizationId]);
 
   const [audienceSource, setAudienceSource] = useState<"filters" | "segment" | "list" | "domain_set">(
     data.audience?.source || "filters"
@@ -86,6 +121,7 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
 
     onNext({
       name: campaignName,
+      organizationId: selectedOrgId,
       audience: audienceData,
     });
   };
@@ -178,15 +214,48 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
           <CardDescription>Give your campaign a descriptive name</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            <Label htmlFor="campaign-name">Name</Label>
-            <Input
-              id="campaign-name"
-              data-testid="input-campaign-name"
-              placeholder={campaignType === "email" ? "e.g., Q4 Product Launch Email" : "e.g., Q4 Outbound Dialer Campaign"}
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-            />
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="campaign-name">Name</Label>
+              <Input
+                id="campaign-name"
+                data-testid="input-campaign-name"
+                placeholder={campaignType === "email" ? "e.g., Q4 Product Launch Email" : "e.g., Q4 Outbound Dialer Campaign"}
+                value={campaignName}
+                onChange={(e) => setCampaignName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="organization-select" className="flex items-center gap-2">
+                <Building2 className="w-4 h-4" />
+                Organization
+              </Label>
+              <Select
+                value={selectedOrgId || ""}
+                onValueChange={(value) => setSelectedOrgId(value)}
+              >
+                <SelectTrigger id="organization-select" data-testid="select-organization">
+                  <SelectValue placeholder="Select organization..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {orgsData?.organizations?.map((org) => (
+                    <SelectItem key={org.id} value={org.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{org.name}</span>
+                        {org.isDefault && (
+                          <Badge variant="secondary" className="text-[10px] h-4">
+                            Default
+                          </Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Used for problem intelligence and service catalog matching
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

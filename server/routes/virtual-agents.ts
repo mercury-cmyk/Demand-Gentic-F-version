@@ -178,6 +178,16 @@ const refineSystemPromptSchema = z.object({
   provider: z.enum(["auto", "openai", "gemini"]).optional(),
 });
 
+import { GoogleGenAI } from '@google/genai';
+
+const genai = new GoogleGenAI({
+  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || '',
+  httpOptions: {
+    apiVersion: "", // use default
+    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '',
+  },
+});
+
 const previewConversationSchema = z.object({
   sessionId: z.string().optional(),    // Session ID for persisting conversation state (prevents resets)
   virtualAgentId: z.string().optional(),
@@ -188,6 +198,9 @@ const previewConversationSchema = z.object({
     role: z.enum(["user", "assistant"]),
     content: z.string().min(1),
   })).optional(),
+  provider: z.string().optional(),
+  envVars: z.record(z.string()).optional(),
+  promptVariant: z.string().optional(), // For final system prompt variants
 });
 
 function detectIdentityConfirmedPreview(
@@ -349,16 +362,28 @@ router.get("/preview-voice", requireAuth, async (req, res) => {
       res.set('Content-Type', 'audio/mpeg');
       res.send(Buffer.from(audioBuffer));
 
-    } else if (provider === 'google') {
+    } else if (provider === 'google' || provider === 'gemini') {
       // Google Cloud TTS
       const { TextToSpeechClient } = await import('@google-cloud/text-to-speech');
       const client = new TextToSpeechClient();
 
+      // Map Gemini Live voices to approx Neural2 voices for preview
+      const voiceMap: Record<string, string> = {
+        'Puck': 'en-US-Neural2-A',
+        'Charon': 'en-US-Neural2-D',
+        'Kore': 'en-US-Neural2-C',
+        'Fenrir': 'en-US-Neural2-J',
+        'Aoede': 'en-US-Neural2-F',
+      };
+      
+      const targetVoice = voiceMap[String(voice)] || String(voice);
+      const isNeural = targetVoice.includes('Neural2');
+
       const [response] = await client.synthesizeSpeech({
         input: { text: previewText },
         voice: { 
-          languageCode: voice.startsWith('en-US') ? 'en-US' : 'en-GB',
-          name: String(voice) 
+          languageCode: isNeural ? (targetVoice.startsWith('en-GB') ? 'en-GB' : 'en-US') : 'en-US',
+          name: targetVoice
         },
         audioConfig: { audioEncoding: 'MP3' },
       });
@@ -487,11 +512,15 @@ router.post("/:id/refine-system", requireAuth, requireRole("admin"), async (req,
   }
 });
 
+// DEPRECATED: This endpoint is deprecated in favor of /api/preview-studio/simulation/chat
+// The Preview Studio now provides a unified simulation experience with personalization.
+// This endpoint will be removed in a future release.
 // Preview conversation without placing a call
 // Supports optional sessionId for persisting conversation state across turns (prevents resets)
 router.post("/preview-conversation", requireAuth, async (req, res) => {
+  console.warn("[Virtual Agents] DEPRECATED: /preview-conversation is deprecated. Use /api/preview-studio/simulation/chat instead.");
   try {
-    const { sessionId, virtualAgentId, campaignId, systemPrompt, firstMessage, messages } = previewConversationSchema.parse(req.body ?? {});
+    const { sessionId, virtualAgentId, campaignId, systemPrompt, firstMessage, messages, provider, envVars } = previewConversationSchema.parse(req.body ?? {});
     const historyLimit = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_HISTORY || "16", 10);
     const maxTokens = Number.parseInt(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MAX_TOKENS || "320", 10);
     const temperature = Number.parseFloat(process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_TEMPERATURE || "0.2");
@@ -593,21 +622,60 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
       resolvedSystemPrompt += `\n\n---\n\n[Conversation State]\nIdentity is already confirmed. Do not ask to confirm identity again. Continue the conversation without restarting the opening.`;
     }
 
+    // Append custom environment variables if provided
+    if (envVars && Object.keys(envVars).length > 0) {
+      const envString = Object.entries(envVars)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('\n');
+      resolvedSystemPrompt += `\n\n---\n\n[Environment Variables]\nThe following environment variables are active for this simulation:\n${envString}`;
+    }
+
     const fullSystemPrompt = await buildAgentSystemPrompt(resolvedSystemPrompt);
 
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MODEL || "gpt-4o-mini",
-      temperature: safeTemperature,
-      max_tokens: safeMaxTokens,
-      messages: [
-        { role: "system", content: fullSystemPrompt },
-        ...trimmedMessages,
-      ],
-    });
+    let reply = "";
 
-    const reply = response.choices?.[0]?.message?.content?.trim();
+    if (provider === 'gemini' || provider === 'google') {
+      try {
+        const { GoogleGenerativeAI } = await import("@google/generative-ai");
+        const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+        const model = genai.getGenerativeModel({ 
+          model: "gemini-2.0-flash-exp", 
+          systemInstruction: fullSystemPrompt
+        });
+        
+        const geminiMessages = trimmedMessages.map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.content }]
+        }));
+
+        const result = await model.generateContent({
+          contents: geminiMessages,
+          generationConfig: {
+              temperature: safeTemperature,
+              maxOutputTokens: safeMaxTokens,
+          }
+        });
+        
+        reply = result.response.text()?.trim() || "";
+      } catch (geminierr) {
+         console.error('[Virtual Agents] Gemini Preview Error:', geminierr);
+         throw new Error(`Gemini Preview Error: ${geminierr instanceof Error ? geminierr.message : geminierr}`);
+      }
+    } else {
+      const response = await openai.chat.completions.create({
+        model: process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MODEL || "gpt-4o-mini",
+        temperature: safeTemperature,
+        max_tokens: safeMaxTokens,
+        messages: [
+          { role: "system", content: fullSystemPrompt },
+          ...trimmedMessages,
+        ],
+      });
+      reply = response.choices?.[0]?.message?.content?.trim() || "";
+    }
+
     if (!reply) {
-      return res.status(502).json({ message: "OpenAI returned an empty preview response" });
+      return res.status(502).json({ message: `${provider || 'OpenAI'} returned an empty preview response` });
     }
 
     // Persist conversation to session if we have one
@@ -639,8 +707,10 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
   }
 });
 
+// DEPRECATED: This endpoint is deprecated. Preview sessions are now managed by Preview Studio.
 // Delete a preview session
 router.delete("/preview-session/:sessionId", requireAuth, async (req, res) => {
+  console.warn("[Virtual Agents] DEPRECATED: /preview-session/:sessionId is deprecated.");
   try {
     const { sessionId } = req.params;
     await deletePreviewSession(sessionId);
@@ -1280,6 +1350,47 @@ router.patch("/:id", requireAuth, requireRole('admin'), async (req, res) => {
       return res.status(400).json({ message: "Validation error", errors: error.errors });
     }
     res.status(500).json({ message: "Failed to update virtual agent" });
+  }
+});
+
+// Apply foundation prompt template to an agent
+// This updates the agent to use the standard three-layer architecture
+router.post("/:id/apply-foundation-template", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { FOUNDATION_AGENT_PROMPT_TEMPLATE } = await import('../services/voice-agent-control-defaults');
+
+    const [existing] = await db
+      .select()
+      .from(virtualAgents)
+      .where(eq(virtualAgents.id, req.params.id))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ message: "Virtual agent not found" });
+    }
+
+    const [updated] = await db
+      .update(virtualAgents)
+      .set({
+        systemPrompt: FOUNDATION_AGENT_PROMPT_TEMPLATE,
+        isFoundationAgent: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(virtualAgents.id, req.params.id))
+      .returning();
+
+    res.json({
+      message: "Foundation template applied successfully",
+      agent: updated,
+      architecture: {
+        layer1: "Foundation (Personality, Tone, Turn-Taking, Compliance)",
+        layer2: "Campaign (Injected at runtime from campaign config)",
+        layer3: "Contact (Per-call personalization)",
+      },
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error applying foundation template:", error);
+    res.status(500).json({ message: "Failed to apply foundation template" });
   }
 });
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# DemanGent.ai - Complete Production Reset Script (Windows PowerShell)
+# DemandGentic.ai - Complete Production Reset Script (Windows PowerShell)
 # =============================================================================
 # This script will:
 # 1. Delete the existing Cloud Run service
@@ -15,10 +15,10 @@ $ErrorActionPreference = "Stop"
 # Configuration
 $PROJECT_ID = if ($env:GCP_PROJECT_ID) { $env:GCP_PROJECT_ID } else { "pivotal-b2b" }
 $REGION = "us-central1"
-$SERVICE_NAME = "demangent-api"
+$SERVICE_NAME = "demandgentic-api"
 
 Write-Host "=============================================" -ForegroundColor Blue
-Write-Host "   DemanGent.ai Production Reset Script     " -ForegroundColor Blue
+Write-Host "   DemandGentic.ai Production Reset Script     " -ForegroundColor Blue
 Write-Host "=============================================" -ForegroundColor Blue
 Write-Host ""
 
@@ -89,8 +89,8 @@ Write-Host "Updating Telnyx call control secrets..." -ForegroundColor Yellow
 Update-Secret "TELNYX_API_KEY" "KEY019B9E220AD4E7C897383A1910A6F795_RQx78cB0g22pI48lGY0uu2"
 Update-Secret "TELNYX_CALL_CONTROL_APP_ID" "2853482451592807572"
 Update-Secret "TELNYX_FROM_NUMBER" "+13023601514"
-Update-Secret "TELNYX_WEBHOOK_URL" "https://demangent.ai/"
-Update-Secret "PUBLIC_WEBSOCKET_URL" "wss://demangent.ai/openai-realtime-dialer"
+Update-Secret "TELNYX_WEBHOOK_URL" "https://demandgentic.ai/"
+Update-Secret "PUBLIC_WEBSOCKET_URL" "wss://demandgentic.ai/openai-realtime-dialer"
 Update-Secret "TELNYX_SIP_CONNECTION_ID" "2845920641004078445"
 Update-Secret "TELNYX_SIP_USERNAME" "usermercury63270"
 Update-Secret "TELNYX_SIP_PASSWORD" "Z0lra,7%r4Wn"

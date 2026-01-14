@@ -2,7 +2,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: demangent-api
+  name: demandgentic-api
   labels:
     cloud.googleapis.com/location: us-central1
   annotations:
@@ -18,9 +18,9 @@ spec:
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
-      serviceAccountName: demangent-sa@PROJECT_ID.iam.gserviceaccount.com
+      serviceAccountName: demandgentic-sa@PROJECT_ID.iam.gserviceaccount.com
       containers:
-        - image: gcr.io/PROJECT_ID/demangent-api:latest
+        - image: gcr.io/PROJECT_ID/demandgentic-api:latest
           ports:
             - containerPort: 8080
           env:

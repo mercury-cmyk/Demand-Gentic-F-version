@@ -1,5 +1,10 @@
 import { storage } from './storage';
 import { hashPassword } from './auth';
+import { seedDefaultKnowledgeBlocks, areKnowledgeBlocksInitialized } from './services/knowledge-block-service';
+import {
+  initializeSuperOrganization,
+  setupAdminAsSuperOrgOwner,
+} from './services/super-organization-service';
 
 /**
  * Initialize database with default admin user for production
@@ -8,12 +13,25 @@ import { hashPassword } from './auth';
 export async function initializeDatabase() {
   try {
     console.log('[DB-INIT] Checking database initialization status...');
-    
+
+    // Initialize knowledge blocks if not already done
+    await initializeKnowledgeBlocks();
+
+    // Initialize Super Organization (Pivotal B2B)
+    await initializeSuperOrganizationData();
+
     // Check if any users exist
     const users = await storage.getUsers();
-    
+
     if (users.length > 0) {
       console.log('[DB-INIT] Database already initialized with', users.length, 'users');
+
+      // Ensure admin users are super org owners
+      const adminUsers = users.filter(u => u.role === 'admin');
+      for (const admin of adminUsers) {
+        await setupAdminAsSuperOrgOwner(admin.id);
+      }
+
       return;
     }
 
@@ -42,6 +60,9 @@ export async function initializeDatabase() {
     // Assign admin role in multi-role system
     await storage.assignUserRole(adminUser.id, 'admin', adminUser.id);
 
+    // Add admin as super organization owner
+    await setupAdminAsSuperOrgOwner(adminUser.id);
+
     console.log('[DB-INIT] ✅ Default admin user created successfully');
     console.log('[DB-INIT] Username:', adminUsername);
     console.log('[DB-INIT] Email:', adminEmail);
@@ -50,5 +71,48 @@ export async function initializeDatabase() {
   } catch (error) {
     console.error('[DB-INIT] ❌ Failed to initialize database:', error);
     // Don't throw - let the app continue even if init fails
+  }
+}
+
+/**
+ * Initialize the Super Organization (Pivotal B2B)
+ * This creates the persistent super organization that owns the platform
+ */
+async function initializeSuperOrganizationData() {
+  try {
+    console.log('[DB-INIT] Initializing super organization...');
+    await initializeSuperOrganization();
+    console.log('[DB-INIT] ✅ Super organization initialized');
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to initialize super organization:', error);
+    // Don't throw - super org init is important but shouldn't block startup
+  }
+}
+
+/**
+ * Initialize knowledge blocks with default system blocks
+ * Seeds the knowledge_blocks table with core agent knowledge
+ */
+async function initializeKnowledgeBlocks() {
+  try {
+    console.log('[DB-INIT] Checking knowledge blocks initialization...');
+
+    const initialized = await areKnowledgeBlocksInitialized();
+    if (initialized) {
+      console.log('[DB-INIT] Knowledge blocks already initialized');
+      return;
+    }
+
+    console.log('[DB-INIT] Seeding default knowledge blocks...');
+    const result = await seedDefaultKnowledgeBlocks();
+
+    if (result.errors.length > 0) {
+      console.warn('[DB-INIT] ⚠️ Some knowledge blocks failed to seed:', result.errors);
+    }
+
+    console.log(`[DB-INIT] ✅ Knowledge blocks seeded: ${result.created} created, ${result.existing} existing`);
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to initialize knowledge blocks:', error);
+    // Don't throw - knowledge blocks are optional for basic functionality
   }
 }

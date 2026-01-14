@@ -11,18 +11,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus } from "lucide-react";
+import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus, Layers } from "lucide-react";
 import { HybridAgentAssignment } from "@/components/hybrid-agent-assignment";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhoneCampaignSuppressionManager } from "@/components/phone-campaign-suppression-manager";
+import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowledge-config";
 
 export default function PhoneCampaignEditPage() {
-  const [, params] = useRoute("/campaigns/phone/:id/edit");
+  const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
+  const [, paramsB] = useRoute("/phone-campaigns/:id/edit");
   const [, setLocation] = useLocation();
-  const campaignId = params?.id;
+  const campaignId = paramsA?.id || paramsB?.id;
   const { toast } = useToast();
 
   // State for campaign fields
@@ -50,6 +52,9 @@ export default function PhoneCampaignEditPage() {
 
   // Lead Delivery state
   const [deliveryTemplateId, setDeliveryTemplateId] = useState<string | null>(null);
+
+  // Max Call Duration state (in seconds, default 240 = 4 minutes)
+  const [maxCallDurationSeconds, setMaxCallDurationSeconds] = useState<number>(240);
 
   // Fetch campaign data
   const { data: campaign, isLoading: campaignLoading } = useQuery<any>({
@@ -117,6 +122,9 @@ export default function PhoneCampaignEditPage() {
 
       // Initialize delivery template
       setDeliveryTemplateId(campaign.deliveryTemplateId || null);
+
+      // Initialize max call duration
+      setMaxCallDurationSeconds(campaign.maxCallDurationSeconds || 240);
     }
   }, [campaign]);
 
@@ -204,6 +212,8 @@ export default function PhoneCampaignEditPage() {
       accountCap,
       qaParameters,
       deliveryTemplateId,
+      // Max call duration enforcement
+      maxCallDurationSeconds,
       // Campaign Context fields
       campaignObjective,
       productServiceInfo,
@@ -279,7 +289,7 @@ export default function PhoneCampaignEditPage() {
 
       {/* Tabs for different sections */}
       <Tabs defaultValue="basic" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="basic" data-testid="tab-basic">
             <Phone className="w-4 h-4 mr-2" />
             Basic Info
@@ -291,6 +301,10 @@ export default function PhoneCampaignEditPage() {
           <TabsTrigger value="agents" data-testid="tab-agents">
             <Bot className="w-4 h-4 mr-2" />
             Agents
+          </TabsTrigger>
+          <TabsTrigger value="knowledge" data-testid="tab-knowledge">
+            <Layers className="w-4 h-4 mr-2" />
+            Knowledge
           </TabsTrigger>
           <TabsTrigger value="qa-parameters" data-testid="tab-qa-parameters">
             <Brain className="w-4 h-4 mr-2" />
@@ -564,6 +578,11 @@ export default function PhoneCampaignEditPage() {
           <HybridAgentAssignment campaignId={campaignId!} />
         </TabsContent>
 
+        {/* Knowledge Blocks Tab */}
+        <TabsContent value="knowledge" className="space-y-4">
+          {campaignId && <CampaignKnowledgeConfig campaignId={campaignId} />}
+        </TabsContent>
+
         {/* QA Parameters Tab */}
         <TabsContent value="qa-parameters" className="space-y-4">
           <StepQAParameters
@@ -652,7 +671,43 @@ export default function PhoneCampaignEditPage() {
               )}
             </CardContent>
           </Card>
-          
+
+          {/* Max Call Duration */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Max Call Duration</CardTitle>
+              <CardDescription>
+                Strictly enforce a maximum call duration for all AI voice calls in this campaign
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="max-call-duration">Maximum Duration (seconds)</Label>
+                <Input
+                  id="max-call-duration"
+                  type="number"
+                  min="60"
+                  max="1800"
+                  step="30"
+                  value={maxCallDurationSeconds}
+                  onChange={(e) => setMaxCallDurationSeconds(Math.max(60, Math.min(1800, parseInt(e.target.value) || 240)))}
+                  data-testid="input-max-call-duration"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Calls will be automatically ended after this duration. Range: 60-1800 seconds (1-30 minutes).
+                  Current: {Math.floor(maxCallDurationSeconds / 60)} min {maxCallDurationSeconds % 60} sec
+                </p>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={() => setMaxCallDurationSeconds(120)}>2 min</Button>
+                <Button variant="outline" size="sm" onClick={() => setMaxCallDurationSeconds(180)}>3 min</Button>
+                <Button variant="outline" size="sm" onClick={() => setMaxCallDurationSeconds(240)}>4 min</Button>
+                <Button variant="outline" size="sm" onClick={() => setMaxCallDurationSeconds(300)}>5 min</Button>
+                <Button variant="outline" size="sm" onClick={() => setMaxCallDurationSeconds(600)}>10 min</Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Lead Delivery Template</CardTitle>

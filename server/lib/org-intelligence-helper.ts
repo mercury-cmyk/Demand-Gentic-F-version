@@ -179,21 +179,24 @@ async function buildLearningSnapshot(windowDays: number): Promise<CampaignLearni
       .where(gte(leads.createdAt, startAt)),
   ]);
 
-  const delivered = emailStats?.delivered ?? 0;
-  const opened = emailStats?.opened ?? 0;
-  const clicked = emailStats?.clicked ?? 0;
-  const bounced = emailStats?.bounced ?? 0;
-  const complained = emailStats?.complained ?? 0;
-  const unsubscribed = emailStats?.unsubscribed ?? 0;
+  const emailRow = emailStats?.[0];
+  const delivered = emailRow?.delivered ?? 0;
+  const opened = emailRow?.opened ?? 0;
+  const clicked = emailRow?.clicked ?? 0;
+  const bounced = emailRow?.bounced ?? 0;
+  const complained = emailRow?.complained ?? 0;
+  const unsubscribed = emailRow?.unsubscribed ?? 0;
 
-  const attempts = callStats?.attempts ?? 0;
-  const connected = callStats?.connected ?? 0;
-  const qualified = callStats?.qualified ?? 0;
-  const notInterested = callStats?.notInterested ?? 0;
-  const dnc = callStats?.dnc ?? 0;
+  const callRow = callStats?.[0];
+  const attempts = callRow?.attempts ?? 0;
+  const connected = callRow?.connected ?? 0;
+  const qualified = callRow?.qualified ?? 0;
+  const notInterested = callRow?.notInterested ?? 0;
+  const dnc = callRow?.dnc ?? 0;
 
-  const leadsCreated = leadStats?.created ?? 0;
-  const leadsQualified = leadStats?.qualified ?? 0;
+  const leadRow = leadStats?.[0];
+  const leadsCreated = leadRow?.created ?? 0;
+  const leadsQualified = leadRow?.qualified ?? 0;
 
   return {
     windowDays,

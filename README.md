@@ -1,4 +1,4 @@
-# DemandEarn-AI
+# DemandGentic.ai
 
 Full-stack application with Cloud Run deployment support.
 
@@ -31,5 +31,5 @@ npm run start     # Start production build
 ## Deployment
 
 ```bash
-gcloud run deploy demangent-api --source . --region us-central1 --allow-unauthenticated
+gcloud run deploy demandgentic-api --source . --region us-central1 --allow-unauthenticated
 ```

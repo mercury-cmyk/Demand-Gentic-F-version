@@ -51,19 +51,55 @@ async function resolveVirtualAgentId(params: {
   virtualAgentId?: string | null;
 }): Promise<string | null> {
   if (params.virtualAgentId) {
+    console.log(`[Preview Studio] Using provided virtualAgentId: ${params.virtualAgentId}`);
     return params.virtualAgentId;
   }
 
+  console.log(`[Preview Studio] Looking up virtual agent for campaign: ${params.campaignId}`);
+
+  // First, check all assignments for this campaign (for debugging)
+  const allAssignments = await db
+    .select({
+      id: campaignAgentAssignments.id,
+      virtualAgentId: campaignAgentAssignments.virtualAgentId,
+      agentId: campaignAgentAssignments.agentId,
+      agentType: campaignAgentAssignments.agentType,
+      isActive: campaignAgentAssignments.isActive,
+    })
+    .from(campaignAgentAssignments)
+    .where(eq(campaignAgentAssignments.campaignId, params.campaignId));
+
+  console.log(`[Preview Studio] Found ${allAssignments.length} assignments for campaign:`,
+    allAssignments.map(a => ({
+      id: a.id,
+      virtualAgentId: a.virtualAgentId,
+      agentId: a.agentId,
+      agentType: a.agentType,
+      isActive: a.isActive
+    }))
+  );
+
+  // Now query for active virtual agent assignment
+  // Virtual agents are assigned with agentType: 'ai' (not 'virtual')
   const [assignment] = await db
     .select({ virtualAgentId: campaignAgentAssignments.virtualAgentId })
     .from(campaignAgentAssignments)
     .where(
       and(
         eq(campaignAgentAssignments.campaignId, params.campaignId),
-        eq(campaignAgentAssignments.isActive, true)
+        eq(campaignAgentAssignments.isActive, true),
+        eq(campaignAgentAssignments.agentType, 'ai')
       )
     )
     .limit(1);
+
+  console.log(`[Preview Studio] Active AI agent assignment query result:`, assignment);
+
+  if (!assignment?.virtualAgentId) {
+    console.log(`[Preview Studio] No active virtual agent found for campaign ${params.campaignId}`);
+  } else {
+    console.log(`[Preview Studio] Found virtual agent: ${assignment.virtualAgentId}`);
+  }
 
   return assignment?.virtualAgentId ?? null;
 }
@@ -105,7 +141,7 @@ const getContextSchema = z.object({
 const generateCallPlanSchema = z.object({
   campaignId: z.string(),
   accountId: z.string(),
-  contactId: z.string(),
+  contactId: z.string().optional(),
   attemptNumber: z.number().optional().default(1),
   regenerate: z.boolean().optional().default(false),
 });
@@ -123,6 +159,8 @@ const startSimulationSchema = z.object({
   accountId: z.string(),
   contactId: z.string(),
   virtualAgentId: z.string().optional(),
+  voice: z.string().optional(),
+  provider: z.string().optional(),
 });
 
 const getAssembledPromptSchema = z.object({
@@ -130,6 +168,23 @@ const getAssembledPromptSchema = z.object({
   accountId: z.string(),
   contactId: z.string().optional(),
   virtualAgentId: z.string().optional(),
+});
+
+const initiatePhoneTestSchema = z.object({
+  campaignId: z.string(),
+  accountId: z.string(),
+  contactId: z.string().optional(),
+  virtualAgentId: z.string().optional(),
+  testPhoneNumber: z.string().min(10, "Valid phone number required"),
+  voiceProvider: z.enum(["openai", "google"]).optional().default("openai"),
+  voice: z.string().optional(),
+  // OpenAI Realtime configuration
+  turnDetection: z.enum(["server_vad", "semantic", "disabled"]).optional().default("server_vad"),
+  eagerness: z.enum(["low", "medium", "high"]).optional().default("medium"),
+  maxTokens: z.number().min(256).max(16384).optional().default(4096),
+  // Custom prompt overrides
+  customSystemPrompt: z.string().optional(),
+  customFirstMessage: z.string().optional(),
 });
 
 // ==================== RESPONSE TYPES ====================
@@ -163,8 +218,8 @@ export interface PreviewContextResponse {
 export interface CallPlanPreviewResponse {
   sessionId: string;
   accountCallBrief: AccountCallBriefPayload;
-  participantCallPlan: ParticipantCallPlanPayload;
-  participantContext: ParticipantCallContext;
+  participantCallPlan: ParticipantCallPlanPayload | null;
+  participantContext: ParticipantCallContext | null;
   memoryNotes: Array<{ content: string; createdAt: Date }>;
 }
 
@@ -182,6 +237,7 @@ export interface AssembledPromptResponse {
   virtualAgentId: string | null;
   agentSettings: VirtualAgentSettings;
   agentSettingsSource: AgentSettingsSource;
+  hasAgent: boolean;
 }
 
 export interface SimulationStartResponse {
@@ -194,6 +250,18 @@ export interface SimulationStartResponse {
   agentSettingsSource: AgentSettingsSource;
   agentVoice: string | null;
   agentProvider: string | null;
+}
+
+export interface PhoneTestStartResponse {
+  success: boolean;
+  message: string;
+  sessionId: string;
+  testCallId: string;
+  callControlId: string;
+  phoneNumber: string;
+  campaignName: string | null;
+  agentName: string | null;
+  voiceProvider: string;
 }
 
 // ==================== ENDPOINTS ====================
@@ -229,7 +297,7 @@ router.get("/context", requireAuth, async (req, res) => {
         id: accounts.id,
         name: accounts.name,
         domain: accounts.domain,
-        industry: accounts.industry,
+        industry: accounts.industryStandardized,
       })
       .from(accounts)
       .where(eq(accounts.id, accountId))
@@ -264,7 +332,14 @@ router.get("/context", requireAuth, async (req, res) => {
       sessionType: 'context',
       status: 'active',
       metadata: { source: 'preview-studio' },
-    }).returning();
+    }).returning({
+      id: previewStudioSessions.id,
+      campaignId: previewStudioSessions.campaignId,
+      accountId: previewStudioSessions.accountId,
+      contactId: previewStudioSessions.contactId,
+      userId: previewStudioSessions.userId,
+      createdAt: previewStudioSessions.createdAt,
+    });
 
     // Get account intelligence
     let accountIntelligence: AccountIntelligencePayload | null = null;
@@ -377,15 +452,20 @@ router.post("/generate-call-plan", requireAuth, async (req, res) => {
     });
     const accountCallBrief = callBriefRecord?.payloadJson as AccountCallBriefPayload;
 
-    const participantContext = await buildParticipantCallContext(contactId);
+    let participantContext: ParticipantCallContext | null = null;
+    let participantCallPlan: ParticipantCallPlanPayload | null = null;
 
-    const planRecord = await getOrBuildParticipantCallPlan({
-      contactId,
-      accountId,
-      campaignId,
-      attemptNumber,
-    });
-    const participantCallPlan = planRecord?.payloadJson as ParticipantCallPlanPayload;
+    // Only build participant-specific context if contactId is provided
+    if (contactId) {
+      participantContext = await buildParticipantCallContext(contactId);
+      const planRecord = await getOrBuildParticipantCallPlan({
+        contactId,
+        accountId,
+        campaignId,
+        attemptNumber,
+      });
+      participantCallPlan = planRecord?.payloadJson as ParticipantCallPlanPayload;
+    }
 
     // Get memory notes (TODO: implement getCallMemoryNotes if not available)
     const memoryNotes: Array<{ content: string; createdAt: Date }> = [];
@@ -448,14 +528,40 @@ router.get("/assembled-prompt", requireAuth, async (req, res) => {
       campaignId,
       virtualAgentId,
     });
-    const { agentConfig, mergedSettings, settingsSource } =
-      await getAgentSimulationSettings(resolvedVirtualAgentId);
+
+    // Get agent settings (may be null if no agent assigned)
+    let agentConfig: Awaited<ReturnType<typeof getVirtualAgentConfig>> = null;
+    let mergedSettings = mergeAgentSettings(undefined);
+    let settingsSource: AgentSettingsSource = 'default';
+
+    if (resolvedVirtualAgentId) {
+      const result = await getAgentSimulationSettings(resolvedVirtualAgentId);
+      agentConfig = result.agentConfig;
+      mergedSettings = result.mergedSettings;
+      settingsSource = result.settingsSource;
+    }
+
     const useCondensedPrompt =
       mergedSettings.advanced.costOptimization.useCondensedPrompt !== false;
 
+    // Build default foundation prompt if no agent assigned
+    const defaultFoundation = !resolvedVirtualAgentId
+      ? `You are a professional sales development representative making outbound calls on behalf of the company. Your goal is to have a natural, helpful conversation and qualify the prospect for a follow-up meeting.
+
+Be conversational, friendly, and professional. Listen actively and respond appropriately. Focus on understanding the prospect's needs and challenges. If they show interest, work to schedule a follow-up meeting.
+
+Key guidelines:
+- Introduce yourself and the company clearly
+- Ask open-ended questions to understand their situation
+- Listen more than you talk
+- Handle objections gracefully
+- Aim to schedule a meeting if there's mutual interest
+- Be respectful of their time`
+      : '';
+
     // Build prompt sections
     const sections = {
-      foundation: agentConfig?.systemPrompt || '',
+      foundation: agentConfig?.systemPrompt || defaultFoundation,
       campaign: buildCampaignContextSection(campaign),
       account: '',
       contact: '',
@@ -487,11 +593,7 @@ router.get("/assembled-prompt", requireAuth, async (req, res) => {
           sections.contact = buildContactContextSection(contact);
         }
 
-        const participantContext = await buildParticipantCallContext({
-          contactId,
-          accountId,
-          campaignId,
-        });
+        const participantContext = await buildParticipantCallContext(contactId);
         const planRecord = await getOrBuildParticipantCallPlan({
           contactId,
           accountId,
@@ -529,9 +631,10 @@ router.get("/assembled-prompt", requireAuth, async (req, res) => {
       firstMessage,
       sections,
       tokenCount,
-      virtualAgentId: resolvedVirtualAgentId,
+      virtualAgentId: resolvedVirtualAgentId || null,
       agentSettings: mergedSettings,
       agentSettingsSource: settingsSource,
+      hasAgent: !!resolvedVirtualAgentId,
     };
 
     res.json(response);
@@ -544,6 +647,140 @@ router.get("/assembled-prompt", requireAuth, async (req, res) => {
   }
 });
 
+// Schema for text simulation chat
+const simulationChatSchema = z.object({
+  sessionId: z.string().optional(),
+  campaignId: z.string(),
+  accountId: z.string(),
+  contactId: z.string().optional(),
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string(),
+  })).default([]),
+  userMessage: z.string(),
+  provider: z.enum(['openai', 'gemini']).default('openai'),
+});
+
+/**
+ * POST /api/preview-studio/simulation/chat
+ * Text-based simulation chat using Preview Studio personalization
+ */
+router.post("/simulation/chat", requireAuth, async (req, res) => {
+  try {
+    const body = simulationChatSchema.parse(req.body);
+    const { sessionId, campaignId, accountId, contactId, messages, userMessage, provider } = body;
+
+    const historyLimit = 16;
+    const maxTokens = 320;
+    const temperature = 0.2;
+
+    // Build the assembled prompt using Preview Studio's personalization
+    const resolvedVirtualAgentId = await resolveVirtualAgentId({ campaignId });
+    const { agentConfig, mergedSettings } = await getAgentSimulationSettings(resolvedVirtualAgentId);
+
+    const promptResult = await buildAssembledPrompt({
+      campaignId,
+      accountId,
+      contactId,
+      virtualAgentId: resolvedVirtualAgentId || undefined,
+      agentConfig,
+      agentSettings: mergedSettings,
+    });
+
+    // Build message history
+    const rawMessages = [
+      ...messages.filter(msg => msg.content.trim().length > 0),
+      { role: 'user' as const, content: userMessage.trim() },
+    ];
+
+    // Check if identity is confirmed (simple detection)
+    const confirmPhrases = ['yes', 'yeah', 'speaking', 'this is', 'i am'];
+    const userMessages = rawMessages.filter(m => m.role === 'user');
+    const identityConfirmed = userMessages.some(m =>
+      confirmPhrases.some(p => m.content.toLowerCase().includes(p))
+    );
+
+    // Build full system prompt
+    let systemPrompt = promptResult.systemPrompt;
+    if (identityConfirmed) {
+      systemPrompt += `\n\n---\n\n[Conversation State]\nIdentity is already confirmed. Do not ask to confirm identity again. Continue the conversation without restarting the opening.`;
+    }
+
+    // Limit messages
+    const trimmedMessages = rawMessages.slice(-historyLimit);
+    if (trimmedMessages.length === 0 && promptResult.firstMessage) {
+      trimmedMessages.push({ role: 'assistant' as const, content: promptResult.firstMessage });
+    }
+
+    let reply = "";
+
+    if (provider === 'gemini') {
+      try {
+        const { GoogleGenerativeAI } = await import("@google/generative-ai");
+        const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+        const model = genai.getGenerativeModel({
+          model: "gemini-2.0-flash-exp",
+          systemInstruction: systemPrompt,
+        });
+
+        const geminiMessages = trimmedMessages.map(m => ({
+          role: m.role === 'user' ? 'user' as const : 'model' as const,
+          parts: [{ text: m.content }],
+        }));
+
+        const result = await model.generateContent({
+          contents: geminiMessages,
+          generationConfig: {
+            temperature,
+            maxOutputTokens: maxTokens,
+          },
+        });
+
+        reply = result.response.text()?.trim() || "";
+      } catch (geminiErr) {
+        console.error('[Preview Studio] Gemini chat error:', geminiErr);
+        throw new Error(`Gemini error: ${geminiErr instanceof Error ? geminiErr.message : geminiErr}`);
+      }
+    } else {
+      // Use OpenAI
+      const openai = (await import("../lib/openai")).default;
+      const response = await openai.chat.completions.create({
+        model: process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MODEL || "gpt-4o-mini",
+        temperature,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...trimmedMessages.map(m => ({ role: m.role, content: m.content })),
+        ],
+      });
+      reply = response.choices?.[0]?.message?.content?.trim() || "";
+    }
+
+    if (!reply) {
+      return res.status(502).json({ message: `${provider} returned an empty response` });
+    }
+
+    // Generate session ID if not provided
+    const responseSessionId = sessionId || `sim_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+    res.json({
+      reply,
+      sessionId: responseSessionId,
+      conversationState: {
+        identityConfirmed,
+        currentStage: messages.length < 2 ? 'opening' : 'discovery',
+      },
+    });
+  } catch (error) {
+    console.error("[Preview Studio] Simulation chat error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Validation error", errors: error.errors });
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ message: "Failed to generate response", error: message });
+  }
+});
+
 /**
  * POST /api/preview-studio/simulation/start
  * Start a browser-based voice simulation session
@@ -552,7 +789,7 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
   try {
     const userId = (req as any).user?.id;
     const body = startSimulationSchema.parse(req.body);
-    const { campaignId, accountId, contactId, virtualAgentId } = body;
+    const { campaignId, accountId, contactId, virtualAgentId, voice, provider } = body;
 
     const resolvedVirtualAgentId = await resolveVirtualAgentId({
       campaignId,
@@ -560,6 +797,10 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
     });
     const { agentConfig, mergedSettings, settingsSource } =
       await getAgentSimulationSettings(resolvedVirtualAgentId);
+
+    // Apply voice overrides if provided
+    const finalVoice = voice || agentConfig?.voice || null;
+    const finalProvider = provider || agentConfig?.provider || null;
 
   // Create preview session
   const [session] = await db.insert(previewStudioSessions).values({
@@ -576,8 +817,8 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
       agentSettingsSource: settingsSource,
       agentSystemPrompt: agentConfig?.systemPrompt || null,
       agentFirstMessage: agentConfig?.firstMessage || null,
-      agentVoice: agentConfig?.voice || null,
-      agentProvider: agentConfig?.provider || null,
+      agentVoice: finalVoice,
+      agentProvider: finalProvider,
     },
   }).returning();
 
@@ -612,14 +853,460 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
       virtualAgentId: resolvedVirtualAgentId,
       agentSettings: mergedSettings,
       agentSettingsSource: settingsSource,
-      agentVoice: agentConfig?.voice || null,
-      agentProvider: agentConfig?.provider || null,
+      agentVoice: finalVoice,
+      agentProvider: finalProvider,
     };
 
     res.json(response);
   } catch (error) {
     console.error("Error starting simulation:", error);
     res.status(500).json({ message: "Failed to start simulation" });
+  }
+});
+
+/**
+ * POST /api/preview-studio/phone-test/start
+ * Initiate a real phone call test (same flow as campaign test calls)
+ * This uses Telnyx TeXML to place a real call and connects to OpenAI Realtime
+ */
+router.post("/phone-test/start", requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.id;
+    const body = initiatePhoneTestSchema.parse(req.body);
+    const {
+      campaignId,
+      accountId,
+      contactId,
+      virtualAgentId,
+      testPhoneNumber,
+      voiceProvider,
+      voice: voiceOverride,
+      turnDetection,
+      eagerness,
+      maxTokens,
+      customSystemPrompt,
+      customFirstMessage,
+    } = body;
+
+    console.log("[Preview Studio Phone Test] Request received:", {
+      campaignId,
+      accountId,
+      contactId,
+      userId,
+      voiceProvider,
+      voiceOverride,
+      turnDetection,
+      eagerness,
+      maxTokens,
+      hasCustomPrompt: !!customSystemPrompt,
+      hasCustomFirstMessage: !!customFirstMessage,
+    });
+
+    // Check environment configuration
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    const fromNumber = process.env.TELNYX_FROM_NUMBER;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
+
+    if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER." });
+    }
+    if (!openaiApiKey) {
+      return res.status(500).json({ message: "OpenAI API key not configured" });
+    }
+    if (!texmlAppId) {
+      return res.status(500).json({ message: "Telnyx TeXML Application ID not configured." });
+    }
+
+    // Get campaign
+    const [campaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    if (!campaign) {
+      return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    // Resolve virtual agent (optional for Preview Studio - can use custom prompts)
+    const resolvedVirtualAgentId = await resolveVirtualAgentId({
+      campaignId,
+      virtualAgentId,
+    });
+
+    // In Preview Studio, we allow testing without an agent if custom prompt is provided
+    const hasCustomPrompt = !!customSystemPrompt && customSystemPrompt.trim().length > 0;
+
+    if (!resolvedVirtualAgentId && !hasCustomPrompt) {
+      return res.status(400).json({
+        message: "No AI agent assigned to this campaign",
+        suggestion: "Please assign a virtual agent to the campaign, or load and customize a prompt in Preview Studio before testing"
+      });
+    }
+
+    // Get agent config (may be null if no agent assigned)
+    const agentConfig = resolvedVirtualAgentId
+      ? await getVirtualAgentConfig(resolvedVirtualAgentId)
+      : null;
+    const mergedSettings = mergeAgentSettings(agentConfig?.settings ?? undefined);
+
+    // Get account and contact info for context
+    const [account] = await db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, accountId))
+      .limit(1);
+
+    let contact = null;
+    if (contactId) {
+      const [contactResult] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, contactId))
+        .limit(1);
+      contact = contactResult || null;
+    }
+
+    // Normalize phone number to E.164
+    let normalizedPhone = testPhoneNumber.replace(/[^\d+]/g, '');
+    if (!normalizedPhone.startsWith('+')) {
+      if (normalizedPhone.startsWith('0')) {
+        normalizedPhone = '+44' + normalizedPhone.substring(1);
+      } else {
+        normalizedPhone = '+' + normalizedPhone;
+      }
+    }
+
+    // Create preview session
+    const testCallId = `preview-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const runId = `run-preview-${Date.now()}`;
+
+    const [session] = await db.insert(previewStudioSessions).values({
+      campaignId,
+      accountId,
+      contactId: contactId || null,
+      userId,
+      virtualAgentId: resolvedVirtualAgentId || null,
+      sessionType: 'simulation',
+      status: 'active',
+      metadata: {
+        type: 'phone_test',
+        testCallId,
+        testPhoneNumber: normalizedPhone,
+        voiceProvider,
+        startedAt: new Date().toISOString(),
+        agentSettings: mergedSettings,
+        accountName: account?.name || null,
+        contactName: contact?.fullName || null,
+        hasCustomPrompt,
+      },
+    }).returning();
+
+    // Build the system prompt with full context (same as campaign test calls)
+    // If custom prompt is provided and no agent, we use a simplified prompt builder
+    let promptResponse: { systemPrompt: string; firstMessage: string };
+
+    if (hasCustomPrompt && !resolvedVirtualAgentId) {
+      // Use custom prompts directly (no agent to pull from)
+      promptResponse = {
+        systemPrompt: customSystemPrompt!,
+        firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
+      };
+    } else {
+      // Build assembled prompt from agent config
+      promptResponse = await buildAssembledPrompt({
+        campaignId,
+        accountId,
+        contactId: contactId || undefined,
+        virtualAgentId: resolvedVirtualAgentId!,
+        agentConfig,
+        agentSettings: mergedSettings,
+      });
+    }
+
+    // Use custom prompts if provided, otherwise use assembled prompt
+    const finalSystemPrompt = customSystemPrompt || promptResponse.systemPrompt;
+    const finalFirstMessage = customFirstMessage || agentConfig?.firstMessage || promptResponse.firstMessage;
+
+    // Prepare voice selection
+    let voice = 'marin';
+
+    if (voiceProvider === 'google') {
+      // Google Gemini voices - preserve case
+      voice = (voiceOverride || agentConfig?.voice || 'Puck').toString().trim();
+    } else {
+      // OpenAI voices - strict validation
+      const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse']);
+      const rawVoice = (voiceOverride || agentConfig?.voice || '').toString().trim().toLowerCase();
+      voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
+    }
+
+    // Map provider selection
+    const providerForClientState = voiceProvider === 'google' ? 'google' : 'openai_realtime';
+    const providerForSession = voiceProvider === 'google' ? 'google' : 'openai';
+
+    // OpenAI Realtime configuration
+    const openaiConfig = voiceProvider === 'openai' ? {
+      turn_detection: turnDetection,
+      eagerness,
+      max_tokens: maxTokens,
+    } : undefined;
+
+    // Determine agent name based on context
+    const agentName = hasCustomPrompt
+      ? 'Custom Prompt Agent'
+      : (agentConfig?.systemPrompt ? 'Preview Agent' : 'Default Agent');
+
+    // Custom parameters for WebSocket
+    const customParams = {
+      call_id: testCallId,
+      run_id: runId,
+      campaign_id: campaignId,
+      queue_item_id: `preview-queue-${testCallId}`,
+      call_attempt_id: `preview-attempt-${testCallId}`,
+      contact_id: contactId || `preview-contact-${testCallId}`,
+      virtual_agent_id: resolvedVirtualAgentId || undefined,
+      is_test_call: true,
+      is_preview_test: true,
+      test_call_id: testCallId,
+      preview_session_id: session.id,
+      first_message: finalFirstMessage,
+      voice,
+      agent_name: agentName,
+      test_contact: {
+        name: contact?.fullName || account?.name || 'Preview Contact',
+        company: account?.name || 'Preview Company',
+        title: contact?.jobTitle || 'Contact',
+        email: contact?.email || undefined,
+      },
+      provider: providerForClientState,
+      openai_config: openaiConfig,
+    };
+
+    // Store full session data in Redis
+    const { callSessionStore } = await import("../services/call-session-store");
+    await callSessionStore.setSession(testCallId, {
+      call_id: testCallId,
+      run_id: runId,
+      campaign_id: campaignId,
+      queue_item_id: customParams.queue_item_id,
+      call_attempt_id: customParams.call_attempt_id,
+      contact_id: customParams.contact_id,
+      virtual_agent_id: resolvedVirtualAgentId || undefined,
+      is_test_call: true,
+      is_preview_test: true,
+      test_call_id: testCallId,
+      preview_session_id: session.id,
+      first_message: finalFirstMessage || undefined,
+      voice,
+      agent_name: agentName,
+      test_contact: customParams.test_contact,
+      provider: providerForSession,
+      system_prompt: finalSystemPrompt,
+      openai_config: openaiConfig,
+    });
+
+    const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+
+    // Prepare webhook URL
+    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+
+    console.log('[Preview Studio Phone Test] Initiating Telnyx call to:', normalizedPhone);
+
+    // Initiate Telnyx TeXML call
+    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+    const telnyxResponse = await fetch(telnyxEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${telnyxApiKey}`,
+      },
+      body: JSON.stringify({
+        To: normalizedPhone,
+        From: fromNumber,
+        Url: texmlUrl,
+        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+      }),
+    });
+
+    if (!telnyxResponse.ok) {
+      const errorText = await telnyxResponse.text();
+      console.error(`[Preview Studio Phone Test] Telnyx API error: ${telnyxResponse.status} - ${errorText}`);
+
+      let friendlyMessage = `Telnyx API error: ${telnyxResponse.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.errors && errorJson.errors.length > 0) {
+          const firstError = errorJson.errors[0];
+          friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+
+      await db.update(previewStudioSessions)
+        .set({
+          status: 'error',
+          endedAt: new Date(),
+          metadata: { ...(session.metadata as Record<string, unknown> || {}), error: friendlyMessage },
+        })
+        .where(eq(previewStudioSessions.id, session.id));
+
+      return res.status(400).json({ message: friendlyMessage, error: errorText });
+    }
+
+    const telnyxResult = await telnyxResponse.json();
+    const callControlId = telnyxResult.data?.call_control_id;
+
+    // Update session with call control ID
+    await db.update(previewStudioSessions)
+      .set({
+        metadata: { ...(session.metadata as Record<string, unknown> || {}), callControlId },
+      })
+      .where(eq(previewStudioSessions.id, session.id));
+
+    console.log(`[Preview Studio Phone Test] Call initiated successfully: ${callControlId}`);
+
+    const response: PhoneTestStartResponse = {
+      success: true,
+      message: "Phone test initiated - your phone should ring shortly",
+      sessionId: session.id,
+      testCallId,
+      callControlId,
+      phoneNumber: normalizedPhone,
+      campaignName: campaign.name,
+      agentName: agentConfig?.systemPrompt ? 'Custom Agent' : 'Preview Agent',
+      voiceProvider,
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error("[Preview Studio Phone Test] Error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: "Validation error", errors: error.errors });
+    }
+    res.status(500).json({ message: "Failed to initiate phone test", error: String(error) });
+  }
+});
+
+/**
+ * GET /api/preview-studio/phone-test/:sessionId
+ * Get phone test session status and results
+ */
+router.get("/phone-test/:sessionId", requireAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const [session] = await db
+      .select()
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    // Get transcripts if available
+    const transcripts = await db
+      .select()
+      .from(previewSimulationTranscripts)
+      .where(eq(previewSimulationTranscripts.sessionId, sessionId))
+      .orderBy(previewSimulationTranscripts.timestampMs);
+
+    res.json({
+      session,
+      transcripts,
+    });
+  } catch (error) {
+    console.error("[Preview Studio Phone Test] Error fetching session:", error);
+    res.status(500).json({ message: "Failed to fetch phone test session" });
+  }
+});
+
+/**
+ * POST /api/preview-studio/phone-test/:sessionId/hangup
+ * End an active phone test call
+ */
+router.post("/phone-test/:sessionId/hangup", requireAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const [session] = await db
+      .select()
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    const metadata = session.metadata as any;
+    const callControlId = metadata?.callControlId;
+
+    if (!callControlId) {
+      // No call control ID - just mark as ended
+      await db.update(previewStudioSessions)
+        .set({
+          status: 'completed',
+          endedAt: new Date(),
+          metadata: { ...metadata, endReason: 'user_hangup_no_call_control' },
+        })
+        .where(eq(previewStudioSessions.id, sessionId));
+
+      return res.json({ success: true, message: "Session ended (no active call)" });
+    }
+
+    // Call Telnyx to hang up the call
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    if (!telnyxApiKey) {
+      return res.status(500).json({ message: "Telnyx API key not configured" });
+    }
+
+    console.log(`[Preview Studio] Hanging up call with call_control_id: ${callControlId}`);
+
+    try {
+      const hangupResponse = await fetch(
+        `https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${telnyxApiKey}`,
+          },
+          body: JSON.stringify({}),
+        }
+      );
+
+      if (!hangupResponse.ok) {
+        const errorText = await hangupResponse.text();
+        console.error(`[Preview Studio] Telnyx hangup error: ${hangupResponse.status} - ${errorText}`);
+        // Still mark as ended even if Telnyx fails (call might have already ended)
+      } else {
+        console.log(`[Preview Studio] Telnyx hangup successful for ${callControlId}`);
+      }
+    } catch (telnyxError) {
+      console.error("[Preview Studio] Telnyx hangup request failed:", telnyxError);
+      // Continue to mark session as ended
+    }
+
+    // Update session status
+    await db.update(previewStudioSessions)
+      .set({
+        status: 'completed',
+        endedAt: new Date(),
+        metadata: { ...metadata, endReason: 'user_hangup' },
+      })
+      .where(eq(previewStudioSessions.id, sessionId));
+
+    res.json({ success: true, message: "Call ended successfully" });
+  } catch (error) {
+    console.error("[Preview Studio] Error hanging up call:", error);
+    res.status(500).json({ message: "Failed to hang up call" });
   }
 });
 

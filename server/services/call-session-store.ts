@@ -494,6 +494,15 @@ export interface CallCustomParams {
     email?: string;
   };
   provider?: string;
+  // OpenAI Realtime configuration (from Preview Studio)
+  openai_config?: {
+    turn_detection?: 'server_vad' | 'semantic' | 'disabled';
+    eagerness?: 'low' | 'medium' | 'high';
+    max_tokens?: number;
+  };
+  // Preview test specific
+  is_preview_test?: boolean;
+  preview_session_id?: string;
   [key: string]: unknown;
 }
 

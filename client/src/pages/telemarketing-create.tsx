@@ -109,6 +109,7 @@ export default function TelemarketingCreatePage() {
         name: data.name || `Dialer Campaign ${new Date().toISOString()}`,
         type: "call",
         status: data.action === "draft" ? "draft" : "active",
+        problemIntelligenceOrgId: data.organizationId || null,
         audienceRefs,
         callScript: data.content?.script,
         qualificationQuestions: data.content?.qualificationFields,

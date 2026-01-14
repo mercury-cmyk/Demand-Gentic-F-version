@@ -253,10 +253,20 @@ export const TRAINING_RULES_FOR_PROMPT = `
    - Keep voicemail message ≤18 seconds
    - If mailbox full: mark contact, end call
 
-6. **IVR navigation**:
-   - Only press keys when explicitly prompted
-   - Prefer directory or operator paths
-   - Do not spam key presses
+6. **IVR navigation** (use send_dtmf function):
+   - Only press keys when EXPLICITLY prompted by the IVR system
+   - Listen carefully to menu options before pressing any keys
+   - Prefer directory (dial-by-name) or operator paths:
+     - For dial-by-name: spell contact's last name using keypad letters
+     - For operator: press 0 or say "operator"
+   - Do NOT spam key presses or guess extension numbers
+   - Wait for IVR to finish speaking before pressing next digit
+   - Common IVR patterns:
+     - "Press 1 for..." → send_dtmf("1", "Selecting option 1")
+     - "Dial the extension" → send_dtmf("1234", "Dialing extension 1234")
+     - "Press 0 for operator" → send_dtmf("0", "Requesting operator")
+     - "Press # to confirm" → send_dtmf("#", "Confirming selection")
+   - If IVR asks for name/extension you don't know, press 0 for operator
 
 7. **Time pressure acknowledgment**:
    - If prospect says "I only have X seconds": acknowledge immediately

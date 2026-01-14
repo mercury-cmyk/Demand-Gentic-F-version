@@ -29,7 +29,7 @@ const DEFAULT_MAX_CHARS_PER_PAGE = 4000;
 const DEFAULT_MAX_SITEMAPS = 5;
 const DEFAULT_MAX_SITEMAP_URLS = 300;
 
-const USER_AGENT = "OrgIntelligenceBot/1.0 (+https://demangent.ai)";
+const USER_AGENT = "OrgIntelligenceBot/1.0 (+https://demandgentic.ai)";
 
 const PRIORITY_PATTERNS: Array<{ pattern: RegExp; score: number }> = [
   { pattern: /about|company|who-we-are|mission|vision|leadership|team|our-story/i, score: 10 },
@@ -333,14 +333,14 @@ export async function collectWebsiteContent(domain: string, options?: {
   const requestedMaxPages = options?.maxPages;
   const requestedMaxChars = options?.maxCharsPerPage;
 
-  const timeoutMs = Number.isFinite(requestedTimeout) && (requestedTimeout ?? 0) > 0
-    ? requestedTimeout
+  const timeoutMs: number = (Number.isFinite(requestedTimeout) && (requestedTimeout ?? 0) > 0)
+    ? requestedTimeout!
     : DEFAULT_TIMEOUT_MS;
-  const maxPages = Number.isFinite(requestedMaxPages) && (requestedMaxPages ?? 0) > 0
-    ? requestedMaxPages
+  const maxPages: number = (Number.isFinite(requestedMaxPages) && (requestedMaxPages ?? 0) > 0)
+    ? requestedMaxPages!
     : DEFAULT_MAX_PAGES;
-  const maxCharsPerPage = Number.isFinite(requestedMaxChars) && (requestedMaxChars ?? 0) > 200
-    ? requestedMaxChars
+  const maxCharsPerPage: number = (Number.isFinite(requestedMaxChars) && (requestedMaxChars ?? 0) > 200)
+    ? requestedMaxChars!
     : DEFAULT_MAX_CHARS_PER_PAGE;
 
   const errors: string[] = [];

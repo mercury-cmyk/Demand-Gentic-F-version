@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -10,6 +10,8 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { TopBar } from "@/components/layout/top-bar";
 import { ProtectedRoute } from "@/components/protected-route";
 import { CommandPalette } from "@/components/patterns/command-palette";
+import { DeprecatedRedirect } from "@/components/deprecated-redirect";
+import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -32,6 +34,7 @@ import EmailTemplatesPage from "@/pages/email-templates";
 import TelemarketingCreatePage from "@/pages/telemarketing-create";
 import PhoneCampaignsPage from "@/pages/phone-campaigns";
 import PhoneCampaignEditPage from "@/pages/phone-campaign-edit";
+import CampaignQueuePage from "@/pages/campaign-queue";
 import CampaignConfigPage from "@/pages/campaign-config";
 import CampaignSuppressionsPage from "@/pages/campaign-suppressions";
 import LeadsPage from "@/pages/leads";
@@ -46,6 +49,7 @@ import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
 import CallReportsDetailsPage from "@/pages/call-reports-details";
+import ConversationQualityPage from "@/pages/conversation-quality";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
 import CampaignAnalyticsPage from "@/pages/campaign-analytics";
 import AiCallAnalyticsPage from "@/pages/ai-call-analytics";
@@ -60,7 +64,6 @@ import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
 import ResourcesCentrePage from "@/pages/resources-centre";
-import CampaignQueuePage from "@/pages/campaign-queue";
 import VerificationCampaignsPage from "@/pages/verification-campaigns";
 import VerificationCampaignConfigPage from "@/pages/verification-campaign-config";
 import VerificationCampaignStatsPage from "@/pages/verification-campaign-stats";
@@ -86,10 +89,19 @@ import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
 import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
+import IntelligenceStudioDashboard from "@/pages/ai-studio/dashboard";
+import CampaignIntelligencePage from "@/pages/ai-studio/campaign-intelligence";
 import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
 import PreviewStudioPage from "@/pages/preview-studio";
+
+// Settings Hub Pages
+import SettingsIndexPage from "@/pages/settings/index";
+import ProfileSettingsPage from "@/pages/settings/profile";
+import UsersSettingsPage from "@/pages/settings/users";
+import TelephonySettingsPage from "@/pages/settings/telephony";
+import SuperOrgSettingsPage from "@/pages/settings/super-org";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -232,6 +244,10 @@ function AuthenticatedApp() {
               <Route path="/campaigns/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-campaigns" component={PhoneCampaignsPage} />
               <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Added explicit routes for /campaigns/phone path used in navigations */}
+              <Route path="/campaigns/phone" component={PhoneCampaignsPage} />
+              <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
               
@@ -239,7 +255,8 @@ function AuthenticatedApp() {
               <Route path="/leads" component={LeadsPage} />
               <Route path="/leads/:id" component={LeadDetailPage} />
               <Route path="/lead-forms" component={LeadFormsPage} />
-              
+              <Route path="/conversation-quality" component={ConversationQualityPage} />
+
               {/* Content & Marketing */}
               <Route path="/content-studio" component={ContentStudioPage} />
               <Route path="/content-studio/ai-generator" component={AIContentGeneratorPage} />
@@ -273,16 +290,24 @@ function AuthenticatedApp() {
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               
-              {/* Settings & Administration */}
-              <Route path="/settings" component={SettingsPage} />
-              <Route path="/settings/telephony" component={SipTrunkSettingsPage} />
-              <Route path="/settings/users" component={UserManagementPage} />
-              <Route path="/settings/compliance" component={SettingsPage} />
+              {/* Settings Hub */}
+              <Route path="/settings" component={SettingsIndexPage} />
+              <Route path="/settings/profile" component={ProfileSettingsPage} />
+              <Route path="/settings/users" component={UsersSettingsPage} />
+              <Route path="/settings/telephony" component={TelephonySettingsPage} />
+              <Route path="/settings/custom-fields" component={SettingsPage} />
+              <Route path="/settings/notifications" component={SettingsPage} />
+              <Route path="/settings/security" component={SettingsPage} />
               <Route path="/settings/integrations" component={SettingsPage} />
-              <Route path="/user-management" component={UserManagementPage} />
+              <Route path="/settings/background-jobs" component={SettingsPage} />
+              <Route path="/settings/compliance" component={SettingsPage} />
+              <Route path="/settings/super-org" component={SuperOrgSettingsPage} />
+
+              {/* Legacy settings routes (kept for backwards compatibility) */}
+              <Route path="/user-management" component={UsersSettingsPage} />
               <Route path="/sender-profiles" component={SenderProfilesPage} />
               <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
-              <Route path="/telephony/sip-trunks" component={SipTrunkSettingsPage} />
+              <Route path="/telephony/sip-trunks" component={TelephonySettingsPage} />
               
               {/* Resources */}
               <Route path="/events" component={EventsPage} />
@@ -311,9 +336,11 @@ function AuthenticatedApp() {
               
               {/* AI Studio */}
               <Route path="/ai-project-creator" component={AIProjectCreatorPage} />
+              <Route path="/ai-studio/dashboard" component={IntelligenceStudioDashboard} />
               <Route path="/ai-studio/intelligence" component={OrganizationIntelligencePage} />
               <Route path="/ai-studio/agents" component={AIAgentsPage} />
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
+              <Route path="/ai-studio/campaign-intelligence" component={CampaignIntelligencePage} />
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               
               {/* Client Portal */}
@@ -323,7 +350,45 @@ function AuthenticatedApp() {
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
-              
+
+              {/* AI Studio Dashboard (new) */}
+              <Route path="/ai-studio">
+                <Redirect to="/ai-studio/dashboard" />
+              </Route>
+
+              {/* ================================================
+                  DEPRECATED ROUTES - Redirect to new locations
+                  These routes are maintained for backwards compatibility
+                  and will log deprecation warnings to the console.
+                  ================================================ */}
+
+              {/* Legacy SIP trunk settings → Settings Hub */}
+              <Route path="/sip-trunk-settings">
+                <DeprecatedRedirect routeKey="SIP_TRUNK_SETTINGS" />
+              </Route>
+
+              {/* Legacy user management → Settings Hub */}
+              <Route path="/user-management">
+                {/* Note: /user-management is still being used, redirect handled above */}
+              </Route>
+
+              {/* Settings Hub routes that go to specific pages */}
+              <Route path="/settings/profile" component={SettingsPage} />
+              <Route path="/settings/custom-fields" component={SettingsPage} />
+              <Route path="/settings/notifications" component={SettingsPage} />
+              <Route path="/settings/security" component={SettingsPage} />
+              <Route path="/settings/background-jobs" component={SettingsPage} />
+
+              {/* Verification routes consolidation */}
+              <Route path="/verification/campaigns" component={VerificationCampaignsPage} />
+              <Route path="/verification/campaigns/:id/config" component={VerificationCampaignConfigPage} />
+              <Route path="/verification/console" component={VerificationConsolePage} />
+
+              {/* Data Integrity (placeholder for future) */}
+              <Route path="/data-integrity">
+                <Redirect to="/verification/campaigns" />
+              </Route>
+
               {/* 404 */}
               <Route component={NotFound} />
             </Switch>

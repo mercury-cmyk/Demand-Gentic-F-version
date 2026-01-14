@@ -41,6 +41,11 @@ import { eq, and, desc } from "drizzle-orm";
 import { createHash } from "crypto";
 import { AGENT_DEFAULT_KNOWLEDGE, AGENT_TYPE_KNOWLEDGE } from "./agent-brain-service";
 import { stripVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+import {
+  getCampaignIntelligencePackage,
+  buildProblemIntelligencePromptSection,
+  buildCondensedProblemIntelligenceSection,
+} from "./problem-intelligence";
 
 // ==================== LAYER 1: UNIVERSAL AGENT KNOWLEDGE ====================
 
@@ -98,6 +103,36 @@ export const UNIVERSAL_AGENT_KNOWLEDGE = `
 - Transfer to human immediately when requested.
 - Remain calm with upset prospects.
 - Never engage in arguments or confrontations.
+
+## Human Touch & Positivity (Core Personality)
+
+### Mindset
+- Always think positive — approach every conversation with optimism and possibility.
+- Be genuinely confident — not arrogant, but assured in your purpose and ability to help.
+- Stay professional while being warm and approachable.
+- Believe in the value you're offering and let that conviction come through naturally.
+
+### Natural Conversation Style
+- Speak like a real person, not a script reader.
+- Use natural pauses — let moments breathe; silence is comfortable, not awkward.
+- Vary your rhythm and pacing based on the conversation flow.
+- Occasionally use soft verbal affirmations like "mm-hmm" or "I see" when listening.
+- Allow your voice to have natural inflections and warmth.
+
+### The Human Touch
+- Bring a subtle warmth and genuine care to every interaction.
+- When appropriate, let a gentle smile come through in your voice — people can hear warmth.
+- Show authentic interest in what the other person is saying.
+- Make the person feel heard, valued, and respected.
+- Treat every conversation as a human-to-human connection, not a transaction.
+- Small moments of genuine acknowledgment ("That makes total sense" or "I appreciate you sharing that") create real connection.
+
+### Emotional Intelligence
+- Read the emotional temperature of the conversation and adapt.
+- Match energy appropriately — mirror enthusiasm, acknowledge concern, respect hesitation.
+- Stay grounded and composed even when the other person is frustrated.
+- Never sound robotic, rushed, or dismissive.
+- Your positivity should be authentic, not performative or over-the-top.
 `;
 
 /**
@@ -355,9 +390,11 @@ ${contact.industry ? `Industry: ${contact.industry}` : ''}`;
 export interface AssemblyInput {
   agentId: string;
   campaignId?: string;
+  accountId?: string; // For problem intelligence injection
   campaignContext?: CampaignContext;
   contactContext?: ContactContext;
   includeAgentTypeKnowledge?: boolean;
+  includeProblemIntelligence?: boolean; // Default: true if accountId provided
 }
 
 export interface AssembledPrompt {
@@ -366,6 +403,7 @@ export interface AssembledPrompt {
   metadata: {
     universalKnowledgeHash: string;
     organizationContextHash: string | null;
+    problemIntelligenceHash: string | null;
     orgIntelligenceMode: OrgIntelligenceMode | null;
     layers: string[];
     assembledAt: Date;
@@ -446,6 +484,27 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
     }
   }
 
+  // ========== LAYER 2.5: Problem Intelligence (Account-Scoped) ==========
+  let problemIntelligenceHash: string | null = null;
+
+  if (input.accountId && input.campaignId && input.includeProblemIntelligence !== false) {
+    try {
+      const intelligencePackage = await getCampaignIntelligencePackage(input.campaignId, input.accountId);
+
+      if (intelligencePackage) {
+        const problemContext = buildProblemIntelligencePromptSection(intelligencePackage);
+        if (problemContext) {
+          promptParts.push(`\n# Problem Intelligence\n${problemContext}`);
+          problemIntelligenceHash = createHash('md5').update(problemContext).digest('hex').slice(0, 8);
+          layers.push('problem_intelligence');
+        }
+      }
+    } catch (error) {
+      console.warn('[AgentAssembly] Failed to load problem intelligence:', error);
+      // Continue without problem intelligence - non-critical failure
+    }
+  }
+
   // ========== LAYER 3: Campaign Context ==========
   if (input.campaignContext) {
     promptParts.push(`\n# Campaign Context\n${buildCampaignContext(input.campaignContext)}`);
@@ -473,6 +532,7 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
     metadata: {
       universalKnowledgeHash: getUniversalKnowledgeHash(),
       organizationContextHash: orgContextHash,
+      problemIntelligenceHash,
       orgIntelligenceMode: orgMode,
       layers,
       assembledAt: new Date(),

@@ -34,6 +34,22 @@ export const userRoleEnum = pgEnum('user_role', [
   'campaign_manager'
 ]);
 
+/**
+ * Organization Type Enum
+ * - super: The master organization (Pivotal B2B) - owns the platform
+ * - client: Client organizations that use the platform services
+ */
+export const organizationTypeEnum = pgEnum('organization_type', ['super', 'client']);
+
+/**
+ * Organization Member Role Enum
+ * Defines the role a user has within a specific organization
+ * - owner: Full access to organization, can manage members and settings
+ * - admin: Can manage organization settings but not member roles
+ * - member: Standard access to organization resources
+ */
+export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
+
 export const campaignTypeEnum = pgEnum('campaign_type', ['email', 'call', 'combo']);
 export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
 export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
@@ -583,6 +599,12 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default('agent'), // Deprecated - use user_roles table instead
   firstName: text("first_name"),
   lastName: text("last_name"),
+  // TOTP/Google Authenticator MFA fields
+  mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+  totpSecret: text("totp_secret"), // Encrypted TOTP secret
+  backupCodes: jsonb("backup_codes").$type<string[]>(), // Array of backup codes
+  usedBackupCodes: jsonb("used_backup_codes").$type<string[]>().default([]), // Track used codes
+  mfaEnrolledAt: timestamp("mfa_enrolled_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
@@ -1203,6 +1225,12 @@ export const campaigns = pgTable("campaigns", {
   // Voice Provider Configuration (supports Google Gemini Live and OpenAI Realtime)
   voiceProvider: text("voice_provider"), // 'google' | 'openai' | null (uses default)
   voiceProviderFallback: boolean("voice_provider_fallback").default(true), // Enable automatic fallback to alternate provider
+
+  // Max Call Duration - strictly enforces call time limits per campaign
+  maxCallDurationSeconds: integer("max_call_duration_seconds").default(240), // Default 4 minutes, range: 60-1800 seconds
+
+  // Problem Intelligence Organization (links to campaign_organizations for problem framework)
+  problemIntelligenceOrgId: varchar("problem_intelligence_org_id"), // References campaignOrganizations.id
 
   // AI Agent Campaign Context (Foundation + Campaign Layer Architecture)
   // These fields are combined with the virtual agent's foundation prompt at runtime
@@ -6477,6 +6505,412 @@ export type InsertAgentInstanceContext = z.infer<typeof insertAgentInstanceConte
 
 export type OrgIntelligenceMode = 'use_existing' | 'fresh_research' | 'none';
 
+// ==================== PROBLEM INTELLIGENCE SYSTEM - Service Catalog & Problem Framework ====================
+
+/**
+ * Campaign Organizations
+ * Stores multiple organization profiles that can be selected when creating campaigns
+ * Each organization has its own service catalog, problem framework, and intelligence
+ *
+ * Super Organization (Pivotal B2B):
+ * - Always exists and cannot be deleted
+ * - Stores platform-level credentials and settings
+ * - Only accessible by organization owners
+ * - Client organizations are created under the super organization
+ */
+export const campaignOrganizations = pgTable('campaign_organizations', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+
+  // Organization Identity
+  name: text('name').notNull(), // e.g., "Pivotal B2B"
+  domain: text('domain'), // e.g., "pivotalb2b.com"
+  description: text('description'),
+  industry: text('industry'),
+  logoUrl: text('logo_url'),
+
+  // Organization Type & Hierarchy
+  organizationType: organizationTypeEnum('organization_type').notNull().default('client'),
+  // 'super' = Pivotal B2B (platform owner), 'client' = Client organizations
+
+  parentOrganizationId: varchar('parent_organization_id'),
+  // For client organizations, references the super organization
+  // Super organization has null parentOrganizationId
+
+  // Organization Intelligence (JSONB - structured)
+  identity: jsonb('identity').notNull().default('{}'),
+  // Structure: { legalName, description, industry, employees, regions, foundedYear }
+
+  offerings: jsonb('offerings').notNull().default('{}'),
+  // Structure: { coreProducts, useCases, problemsSolved, differentiators }
+
+  icp: jsonb('icp').notNull().default('{}'),
+  // Structure: { industries, personas, objections, companySize }
+
+  positioning: jsonb('positioning').notNull().default('{}'),
+  // Structure: { oneLiner, valueProposition, competitors, whyUs }
+
+  outreach: jsonb('outreach').notNull().default('{}'),
+  // Structure: { emailAngles, callOpeners, objectionHandlers }
+
+  // Compiled prompt-ready context
+  compiledOrgContext: text('compiled_org_context'),
+
+  // Status
+  isDefault: boolean('is_default').notNull().default(false), // Default org for new campaigns
+  isActive: boolean('is_active').notNull().default(true),
+
+  // Audit
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  nameIdx: index('campaign_organizations_name_idx').on(table.name),
+  domainIdx: index('campaign_organizations_domain_idx').on(table.domain),
+  activeIdx: index('campaign_organizations_active_idx').on(table.isActive),
+  defaultIdx: index('campaign_organizations_default_idx').on(table.isDefault),
+  typeIdx: index('campaign_organizations_type_idx').on(table.organizationType),
+  parentIdx: index('campaign_organizations_parent_idx').on(table.parentOrganizationId),
+}));
+
+/**
+ * Organization Members
+ * Junction table linking users to organizations with specific roles
+ * Controls who can access which organization and at what level
+ *
+ * For Super Organization: Only 'owner' role users can access admin settings
+ */
+export const organizationMembers = pgTable('organization_members', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+
+  // Foreign keys
+  organizationId: varchar('organization_id').notNull().references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  userId: varchar('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+
+  // Member role within this organization
+  role: organizationMemberRoleEnum('role').notNull().default('member'),
+
+  // Audit
+  invitedBy: varchar('invited_by').references(() => users.id, { onDelete: 'set null' }),
+  joinedAt: timestamp('joined_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  orgUserIdx: uniqueIndex('organization_members_org_user_idx').on(table.organizationId, table.userId),
+  orgIdx: index('organization_members_org_idx').on(table.organizationId),
+  userIdx: index('organization_members_user_idx').on(table.userId),
+  roleIdx: index('organization_members_role_idx').on(table.role),
+}));
+
+/**
+ * Super Organization Credentials
+ * Secure storage for platform-level API keys and credentials
+ * Only accessible by super organization owners
+ *
+ * These credentials are used for platform-wide integrations:
+ * - AI providers (OpenAI, Anthropic, Google)
+ * - Telephony providers (Telnyx, Twilio)
+ * - Email services (SendGrid, Mailgun)
+ * - Cloud storage (AWS, GCP)
+ */
+export const superOrgCredentials = pgTable('super_org_credentials', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+
+  // Reference to super organization
+  organizationId: varchar('organization_id').notNull().references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+
+  // Credential identity
+  name: text('name').notNull(), // Human-readable name (e.g., "OpenAI Production Key")
+  key: text('key').notNull(), // Unique key identifier (e.g., "OPENAI_API_KEY")
+  category: text('category').notNull(), // Category for grouping (e.g., "ai", "telephony", "email")
+
+  // Credential value (encrypted at rest)
+  value: text('value').notNull(), // The actual credential value
+
+  // Metadata
+  description: text('description'), // Optional description
+  isActive: boolean('is_active').notNull().default(true),
+  expiresAt: timestamp('expires_at'), // Optional expiration
+
+  // Audit
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at'),
+}, (table) => ({
+  orgIdx: index('super_org_credentials_org_idx').on(table.organizationId),
+  keyIdx: uniqueIndex('super_org_credentials_key_idx').on(table.organizationId, table.key),
+  categoryIdx: index('super_org_credentials_category_idx').on(table.category),
+  activeIdx: index('super_org_credentials_active_idx').on(table.isActive),
+}));
+
+/**
+ * Service Category Enum
+ * Categories for organizing services in the catalog
+ */
+export const serviceCategoryEnum = pgEnum('service_category', [
+  'platform',
+  'consulting',
+  'integration',
+  'managed_service',
+  'data',
+  'other'
+]);
+
+/**
+ * Problem Category Enum
+ * Categories for classifying business problems
+ */
+export const problemCategoryEnum = pgEnum('problem_category', [
+  'efficiency',
+  'growth',
+  'risk',
+  'cost',
+  'compliance',
+  'innovation'
+]);
+
+/**
+ * Problem Severity Enum
+ */
+export const problemSeverityEnum = pgEnum('problem_severity', [
+  'high',
+  'medium',
+  'low'
+]);
+
+/**
+ * Outreach Approach Enum
+ */
+export const outreachApproachEnum = pgEnum('outreach_approach', [
+  'exploratory',
+  'consultative',
+  'direct',
+  'educational'
+]);
+
+/**
+ * Organization Service Catalog
+ * Master organization-level service catalog with problem mappings
+ * Defines what services the organization offers and what problems they solve
+ */
+export const organizationServiceCatalog = pgTable('organization_service_catalog', {
+  id: serial('id').primaryKey(),
+
+  // Organization Reference (which org this service belongs to)
+  organizationId: varchar('organization_id').references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+
+  // Service/Capability Definition
+  serviceName: text('service_name').notNull(),
+  serviceCategory: serviceCategoryEnum('service_category').default('other'),
+  serviceDescription: text('service_description'),
+
+  // Problems This Service Solves (JSONB array)
+  // Structure: [{ id, problemStatement, symptoms: [{id, description, dataSource, detectionLogic}], impactAreas: [{id, area, description, severity}], severity }]
+  problemsSolved: jsonb('problems_solved').notNull().default('[]'),
+
+  // Differentiators for this specific service
+  // Structure: [{ id, claim, proof, competitorGap }]
+  differentiators: jsonb('differentiators').notNull().default('[]'),
+
+  // Value Propositions
+  // Structure: [{ id, headline, description, targetPersona, quantifiedValue }]
+  valuePropositions: jsonb('value_propositions').notNull().default('[]'),
+
+  // Target Industries/Verticals for this service
+  targetIndustries: text('target_industries').array(),
+  targetPersonas: text('target_personas').array(),
+
+  // Ordering and status
+  displayOrder: integer('display_order').default(0),
+  isActive: boolean('is_active').notNull().default(true),
+
+  // Audit
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  orgIdx: index('org_service_catalog_org_idx').on(table.organizationId),
+  serviceNameIdx: index('org_service_catalog_name_idx').on(table.serviceName),
+  categoryIdx: index('org_service_catalog_category_idx').on(table.serviceCategory),
+  activeIdx: index('org_service_catalog_active_idx').on(table.isActive),
+}));
+
+/**
+ * Problem Definitions
+ * Structured problem framework definitions with detection rules
+ * Used for automatic problem detection based on account signals
+ */
+export const problemDefinitions = pgTable('problem_definitions', {
+  id: serial('id').primaryKey(),
+
+  // Organization Reference (which org this problem belongs to)
+  organizationId: varchar('organization_id').references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+
+  // Problem Statement
+  problemStatement: text('problem_statement').notNull(),
+  problemCategory: problemCategoryEnum('problem_category').default('efficiency'),
+
+  // Symptoms/Indicators (how to detect this problem)
+  // Structure: [{ id, symptomDescription, dataSource: "firmographic"|"tech_stack"|"intent"|"behavioral"|"industry", detectionLogic }]
+  symptoms: jsonb('symptoms').notNull().default('[]'),
+
+  // Impact Areas
+  // Structure: [{ id, area: "Revenue"|"Cost"|"Risk"|"Efficiency"|"Growth"|"Compliance", description, severity }]
+  impactAreas: jsonb('impact_areas').notNull().default('[]'),
+
+  // Associated Services (many-to-many via serviceIds array)
+  serviceIds: integer('service_ids').array(),
+
+  // Messaging Templates for this problem
+  // Structure: [{ id, angle, openingLine, followUp, persona }]
+  messagingAngles: jsonb('messaging_angles').notNull().default('[]'),
+
+  // Detection Rules (for automated matching against account data)
+  // Structure: { industries: [], techStack: { required: [], absent: [] }, firmographics: { minRevenue, maxRevenue, minEmployees, maxEmployees, regions: [] }, intentSignals: [] }
+  detectionRules: jsonb('detection_rules').notNull().default('{}'),
+
+  // Status
+  isActive: boolean('is_active').notNull().default(true),
+
+  // Audit
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  orgIdx: index('problem_definitions_org_idx').on(table.organizationId),
+  categoryIdx: index('problem_definitions_category_idx').on(table.problemCategory),
+  activeIdx: index('problem_definitions_active_idx').on(table.isActive),
+}));
+
+/**
+ * Campaign Service Customizations
+ * Per-campaign customization of services (extends master catalog)
+ * Allows campaigns to override or extend master service definitions
+ */
+export const campaignServiceCustomizations = pgTable('campaign_service_customizations', {
+  id: serial('id').primaryKey(),
+
+  // Campaign & Service binding
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  serviceId: integer('service_id').references(() => organizationServiceCatalog.id, { onDelete: 'cascade' }).notNull(),
+
+  // Campaign-specific overrides (null = use master)
+  customProblemsSolved: jsonb('custom_problems_solved'), // Override or extend master problems
+  customDifferentiators: jsonb('custom_differentiators'),
+  customValuePropositions: jsonb('custom_value_propositions'),
+
+  // Campaign-specific focus
+  isPrimaryService: boolean('is_primary_service').default(false),
+  focusWeight: integer('focus_weight').default(50), // 0-100, how much to emphasize this service
+
+  // Audit
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignServiceUniq: uniqueIndex('campaign_service_customizations_uniq').on(table.campaignId, table.serviceId),
+  campaignIdx: index('campaign_service_customizations_campaign_idx').on(table.campaignId),
+}));
+
+/**
+ * Campaign Account Problems
+ * Generated problem intelligence per account per campaign
+ * Stores detected problems, gap analysis, and messaging recommendations
+ */
+export const campaignAccountProblems = pgTable('campaign_account_problems', {
+  id: serial('id').primaryKey(),
+
+  // Campaign & Account binding
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+
+  // Generated Problem Intelligence (JSONB)
+  // Structure: [{ problemId, problemStatement, confidence, detectionSignals: [{signalType, signalValue, matchedRule, contribution}], relevantServices: [], messagingAngles: [] }]
+  detectedProblems: jsonb('detected_problems').notNull().default('[]'),
+
+  // Gap Analysis Results
+  // Structure: { capabilities: [{ capability, accountGap, ourSolution, confidence }], prioritizedGaps: [] }
+  gapAnalysis: jsonb('gap_analysis').notNull().default('{}'),
+
+  // Messaging Package
+  // Structure: { primaryAngle, secondaryAngles: [], openingLines: [], objectionPrep: [{objection, response, proofPoint}], proofPoints: [] }
+  messagingPackage: jsonb('messaging_package').notNull().default('{}'),
+
+  // Outreach Strategy
+  // Structure: { recommendedApproach: "exploratory"|"consultative"|"direct"|"educational", talkingPoints: [], questionsToAsk: [], doNotMention: [] }
+  outreachStrategy: jsonb('outreach_strategy').notNull().default('{}'),
+
+  // Generation Metadata
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
+  generationModel: text('generation_model'),
+  sourceFingerprint: text('source_fingerprint'), // Hash of inputs for cache invalidation
+  confidence: real('confidence'),
+
+  // Refresh tracking
+  lastRefreshedAt: timestamp('last_refreshed_at'),
+  refreshCount: integer('refresh_count').default(0),
+
+  // Audit
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignAccountUniq: uniqueIndex('campaign_account_problems_uniq').on(table.campaignId, table.accountId),
+  campaignIdx: index('campaign_account_problems_campaign_idx').on(table.campaignId),
+  accountIdx: index('campaign_account_problems_account_idx').on(table.accountId),
+  generatedAtIdx: index('campaign_account_problems_generated_at_idx').on(table.generatedAt),
+}));
+
+// Insert schemas for Problem Intelligence System
+export const insertCampaignOrganizationSchema = createInsertSchema(campaignOrganizations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertOrganizationServiceCatalogSchema = createInsertSchema(organizationServiceCatalog).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertProblemDefinitionSchema = createInsertSchema(problemDefinitions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCampaignServiceCustomizationSchema = createInsertSchema(campaignServiceCustomizations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCampaignAccountProblemSchema = createInsertSchema(campaignAccountProblems).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Types for Problem Intelligence System
+export type CampaignOrganization = typeof campaignOrganizations.$inferSelect;
+export type InsertCampaignOrganization = z.infer<typeof insertCampaignOrganizationSchema>;
+
+export type OrganizationServiceCatalogEntry = typeof organizationServiceCatalog.$inferSelect;
+export type InsertOrganizationServiceCatalogEntry = z.infer<typeof insertOrganizationServiceCatalogSchema>;
+
+export type ProblemDefinition = typeof problemDefinitions.$inferSelect;
+export type InsertProblemDefinition = z.infer<typeof insertProblemDefinitionSchema>;
+
+export type CampaignServiceCustomization = typeof campaignServiceCustomizations.$inferSelect;
+export type InsertCampaignServiceCustomization = z.infer<typeof insertCampaignServiceCustomizationSchema>;
+
+export type CampaignAccountProblem = typeof campaignAccountProblems.$inferSelect;
+export type InsertCampaignAccountProblem = z.infer<typeof insertCampaignAccountProblemSchema>;
+
+// Enums as TypeScript types
+export type ServiceCategory = 'platform' | 'consulting' | 'integration' | 'managed_service' | 'data' | 'other';
+export type ProblemCategory = 'efficiency' | 'growth' | 'risk' | 'cost' | 'compliance' | 'innovation';
+export type ProblemSeverity = 'high' | 'medium' | 'low';
+export type OutreachApproach = 'exploratory' | 'consultative' | 'direct' | 'educational';
+
 // ==================== CAMPAIGN TEST CALLS - Test AI Agent Calls with Monitoring ====================
 
 /**
@@ -6754,4 +7188,350 @@ export type PreviewSessionType = 'context' | 'email' | 'call_plan' | 'simulation
 export type PreviewSessionStatus = 'active' | 'completed' | 'error';
 export type PreviewTranscriptRole = 'user' | 'assistant' | 'system';
 export type PreviewContentType = 'email' | 'call_plan' | 'prompt' | 'call_brief' | 'participant_plan';
+
+// ==================== KNOWLEDGE BLOCKS - Modular, Versioned Agent Knowledge ====================
+
+/**
+ * Knowledge Block Category Enum
+ * Categories for organizing knowledge blocks
+ */
+export const knowledgeBlockCategoryEnum = pgEnum('knowledge_block_category', [
+  'universal',       // Universal knowledge for all agents
+  'voice_control',   // Voice agent control instructions
+  'organization',    // Organization-specific context
+  'campaign',        // Campaign-specific context
+  'custom'           // User-defined custom blocks
+]);
+
+/**
+ * Knowledge Block Layer Enum
+ * Determines injection order in prompt assembly
+ */
+export const knowledgeBlockLayerEnum = pgEnum('knowledge_block_layer', [
+  'layer_1_universal',    // Foundation - always first
+  'layer_2_organization', // Organization context - second
+  'layer_3_campaign'      // Campaign-specific - third
+]);
+
+/**
+ * Knowledge Blocks - Modular, versioned knowledge units
+ * Core building blocks for agent prompts that can be edited at runtime
+ */
+export const knowledgeBlocks = pgTable('knowledge_blocks', {
+  id: serial('id').primaryKey(),
+
+  // Identity
+  name: varchar('name', { length: 255 }).notNull(),
+  slug: varchar('slug', { length: 100 }).notNull().unique(),
+  description: text('description'),
+
+  // Classification
+  category: knowledgeBlockCategoryEnum('category').notNull(),
+  layer: knowledgeBlockLayerEnum('layer').notNull(),
+
+  // Content
+  content: text('content').notNull(),
+  tokenEstimate: integer('token_estimate'),
+
+  // Status
+  isActive: boolean('is_active').notNull().default(true),
+  isSystem: boolean('is_system').notNull().default(false), // System blocks can't be deleted
+
+  // Versioning
+  version: integer('version').notNull().default(1),
+
+  // Audit
+  createdBy: varchar('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  slugIdx: uniqueIndex('knowledge_blocks_slug_idx').on(table.slug),
+  categoryIdx: index('knowledge_blocks_category_idx').on(table.category),
+  layerIdx: index('knowledge_blocks_layer_idx').on(table.layer),
+  activeIdx: index('knowledge_blocks_active_idx').on(table.isActive),
+}));
+
+/**
+ * Knowledge Block Versions - Version history for knowledge blocks
+ * Tracks all changes to knowledge blocks for audit and rollback
+ */
+export const knowledgeBlockVersions = pgTable('knowledge_block_versions', {
+  id: serial('id').primaryKey(),
+
+  // Block reference
+  blockId: integer('block_id').references(() => knowledgeBlocks.id, { onDelete: 'cascade' }).notNull(),
+  version: integer('version').notNull(),
+
+  // Content snapshot
+  content: text('content').notNull(),
+  tokenEstimate: integer('token_estimate'),
+
+  // Change metadata
+  changeReason: text('change_reason'),
+  changedBy: varchar('changed_by').references(() => users.id, { onDelete: 'set null' }),
+
+  // Audit
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  blockVersionIdx: uniqueIndex('knowledge_block_versions_block_version_idx').on(table.blockId, table.version),
+  blockIdx: index('knowledge_block_versions_block_idx').on(table.blockId),
+  createdAtIdx: index('knowledge_block_versions_created_at_idx').on(table.createdAt),
+}));
+
+/**
+ * Agent Knowledge Config - Per-agent knowledge block configuration
+ * Allows enabling/disabling blocks or overriding content per agent
+ */
+export const agentKnowledgeConfig = pgTable('agent_knowledge_config', {
+  id: serial('id').primaryKey(),
+
+  // Agent reference
+  virtualAgentId: varchar('virtual_agent_id').references(() => virtualAgents.id, { onDelete: 'cascade' }).notNull(),
+
+  // Block reference
+  blockId: integer('block_id').references(() => knowledgeBlocks.id, { onDelete: 'cascade' }).notNull(),
+
+  // Configuration
+  isEnabled: boolean('is_enabled').notNull().default(true),
+  overrideContent: text('override_content'), // Optional per-agent override
+  priority: integer('priority').notNull().default(0), // For ordering within same layer
+
+  // Audit
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  agentBlockIdx: uniqueIndex('agent_knowledge_config_agent_block_idx').on(table.virtualAgentId, table.blockId),
+  agentIdx: index('agent_knowledge_config_agent_idx').on(table.virtualAgentId),
+  blockIdx: index('agent_knowledge_config_block_idx').on(table.blockId),
+}));
+
+/**
+ * Prompt Execution Log - Audit trail for prompt executions
+ * Logs every prompt sent to models for debugging and compliance
+ */
+export const promptExecutionLogs = pgTable('prompt_execution_logs', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+
+  // Context
+  virtualAgentId: varchar('virtual_agent_id').references(() => virtualAgents.id, { onDelete: 'set null' }),
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'set null' }),
+  callSessionId: varchar('call_session_id'),
+
+  // Prompt details
+  promptHash: varchar('prompt_hash', { length: 64 }), // SHA-256 hash for deduplication
+  totalTokens: integer('total_tokens'),
+
+  // Block versions used
+  blockVersions: jsonb('block_versions'), // [{blockId, version, name}]
+
+  // Environment
+  environment: varchar('environment', { length: 20 }), // local, staging, production
+
+  // Audit
+  executedAt: timestamp('executed_at').notNull().defaultNow(),
+}, (table) => ({
+  agentIdx: index('prompt_execution_logs_agent_idx').on(table.virtualAgentId),
+  campaignIdx: index('prompt_execution_logs_campaign_idx').on(table.campaignId),
+  sessionIdx: index('prompt_execution_logs_session_idx').on(table.callSessionId),
+  executedAtIdx: index('prompt_execution_logs_executed_at_idx').on(table.executedAt),
+  hashIdx: index('prompt_execution_logs_hash_idx').on(table.promptHash),
+}));
+
+// Relations for Knowledge Blocks
+export const knowledgeBlocksRelations = relations(knowledgeBlocks, ({ one, many }) => ({
+  createdByUser: one(users, {
+    fields: [knowledgeBlocks.createdBy],
+    references: [users.id],
+  }),
+  versions: many(knowledgeBlockVersions),
+  agentConfigs: many(agentKnowledgeConfig),
+}));
+
+export const knowledgeBlockVersionsRelations = relations(knowledgeBlockVersions, ({ one }) => ({
+  block: one(knowledgeBlocks, {
+    fields: [knowledgeBlockVersions.blockId],
+    references: [knowledgeBlocks.id],
+  }),
+  changedByUser: one(users, {
+    fields: [knowledgeBlockVersions.changedBy],
+    references: [users.id],
+  }),
+}));
+
+export const agentKnowledgeConfigRelations = relations(agentKnowledgeConfig, ({ one }) => ({
+  virtualAgent: one(virtualAgents, {
+    fields: [agentKnowledgeConfig.virtualAgentId],
+    references: [virtualAgents.id],
+  }),
+  block: one(knowledgeBlocks, {
+    fields: [agentKnowledgeConfig.blockId],
+    references: [knowledgeBlocks.id],
+  }),
+}));
+
+export const promptExecutionLogsRelations = relations(promptExecutionLogs, ({ one }) => ({
+  virtualAgent: one(virtualAgents, {
+    fields: [promptExecutionLogs.virtualAgentId],
+    references: [virtualAgents.id],
+  }),
+  campaign: one(campaigns, {
+    fields: [promptExecutionLogs.campaignId],
+    references: [campaigns.id],
+  }),
+}));
+
+// Insert schemas for Knowledge Blocks
+export const insertKnowledgeBlockSchema = createInsertSchema(knowledgeBlocks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertKnowledgeBlockVersionSchema = createInsertSchema(knowledgeBlockVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAgentKnowledgeConfigSchema = createInsertSchema(agentKnowledgeConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPromptExecutionLogSchema = createInsertSchema(promptExecutionLogs).omit({
+  id: true,
+  executedAt: true,
+});
+
+// Types for Knowledge Blocks
+export type KnowledgeBlock = typeof knowledgeBlocks.$inferSelect;
+export type InsertKnowledgeBlock = z.infer<typeof insertKnowledgeBlockSchema>;
+
+export type KnowledgeBlockVersion = typeof knowledgeBlockVersions.$inferSelect;
+export type InsertKnowledgeBlockVersion = z.infer<typeof insertKnowledgeBlockVersionSchema>;
+
+export type AgentKnowledgeConfig = typeof agentKnowledgeConfig.$inferSelect;
+export type InsertAgentKnowledgeConfig = z.infer<typeof insertAgentKnowledgeConfigSchema>;
+
+export type PromptExecutionLog = typeof promptExecutionLogs.$inferSelect;
+export type InsertPromptExecutionLog = z.infer<typeof insertPromptExecutionLogSchema>;
+
+// Type aliases for enums
+export type KnowledgeBlockCategory = 'universal' | 'voice_control' | 'organization' | 'campaign' | 'custom';
+export type KnowledgeBlockLayer = 'layer_1_universal' | 'layer_2_organization' | 'layer_3_campaign';
+
+/**
+ * Voice Provider Enum
+ * Specifies which AI voice provider to use for prompt assembly
+ */
+export const voiceProviderEnum = pgEnum('voice_provider', [
+  'openai',       // OpenAI Realtime API
+  'google',       // Google Gemini / Vertex AI
+]);
+
+/**
+ * Campaign Knowledge Config - Per-campaign knowledge block configuration
+ * Allows campaigns to enable/disable or override knowledge blocks
+ */
+export const campaignKnowledgeConfig = pgTable('campaign_knowledge_config', {
+  id: serial('id').primaryKey(),
+
+  // Campaign reference
+  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+
+  // Block reference
+  blockId: integer('block_id').references(() => knowledgeBlocks.id, { onDelete: 'cascade' }).notNull(),
+
+  // Configuration
+  isEnabled: boolean('is_enabled').notNull().default(true),
+  overrideContent: text('override_content'), // Optional per-campaign override
+  priority: integer('priority').notNull().default(0), // For ordering within same layer
+
+  // Provider-specific overrides (optional)
+  openaiOverride: text('openai_override'), // Override for OpenAI provider
+  googleOverride: text('google_override'), // Override for Gemini/Vertex AI
+
+  // Audit
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignBlockIdx: uniqueIndex('campaign_knowledge_config_campaign_block_idx').on(table.campaignId, table.blockId),
+  campaignIdx: index('campaign_knowledge_config_campaign_idx').on(table.campaignId),
+  blockIdx: index('campaign_knowledge_config_block_idx').on(table.blockId),
+}));
+
+// Relations for Campaign Knowledge Config
+export const campaignKnowledgeConfigRelations = relations(campaignKnowledgeConfig, ({ one }) => ({
+  campaign: one(campaigns, {
+    fields: [campaignKnowledgeConfig.campaignId],
+    references: [campaigns.id],
+  }),
+  block: one(knowledgeBlocks, {
+    fields: [campaignKnowledgeConfig.blockId],
+    references: [knowledgeBlocks.id],
+  }),
+}));
+
+// Insert schema for Campaign Knowledge Config
+export const insertCampaignKnowledgeConfigSchema = createInsertSchema(campaignKnowledgeConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Types for Campaign Knowledge Config
+export type CampaignKnowledgeConfig = typeof campaignKnowledgeConfig.$inferSelect;
+export type InsertCampaignKnowledgeConfig = z.infer<typeof insertCampaignKnowledgeConfigSchema>;
+
+// Voice Provider type
+export type VoiceProvider = 'openai' | 'google';
+
+// ==================== SUPER ORGANIZATION TYPES ====================
+
+// Insert schemas for Organization Members
+export const insertOrganizationMemberSchema = createInsertSchema(organizationMembers).omit({
+  id: true,
+  joinedAt: true,
+  updatedAt: true,
+});
+
+// Insert schemas for Super Org Credentials
+export const insertSuperOrgCredentialSchema = createInsertSchema(superOrgCredentials).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastUsedAt: true,
+});
+
+// Types for Organization Members
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type InsertOrganizationMember = z.infer<typeof insertOrganizationMemberSchema>;
+
+// Types for Super Org Credentials
+export type SuperOrgCredential = typeof superOrgCredentials.$inferSelect;
+export type InsertSuperOrgCredential = z.infer<typeof insertSuperOrgCredentialSchema>;
+
+// Organization Type aliases
+export type OrganizationType = 'super' | 'client';
+export type OrganizationMemberRole = 'owner' | 'admin' | 'member';
+
+// Super Organization Constants
+export const SUPER_ORG_ID = 'pivotal-b2b-super-org';
+export const SUPER_ORG_NAME = 'Pivotal B2B';
+export const SUPER_ORG_DOMAIN = 'pivotalb2b.com';
+
+/**
+ * Credential categories for super organization
+ */
+export const CREDENTIAL_CATEGORIES = {
+  AI: 'ai',
+  TELEPHONY: 'telephony',
+  EMAIL: 'email',
+  STORAGE: 'storage',
+  DATABASE: 'database',
+  ANALYTICS: 'analytics',
+  OTHER: 'other',
+} as const;
+
+export type CredentialCategory = typeof CREDENTIAL_CATEGORIES[keyof typeof CREDENTIAL_CATEGORIES];
 

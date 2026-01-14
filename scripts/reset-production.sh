@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# DemanGent.ai - Complete Production Reset Script
+# DemandGentic.ai - Complete Production Reset Script
 # =============================================================================
 # This script will:
 # 1. Delete the existing Cloud Run service
@@ -22,10 +22,10 @@ NC='\033[0m' # No Color
 # Configuration
 PROJECT_ID="${GCP_PROJECT_ID:-pivotal-b2b}"
 REGION="us-central1"
-SERVICE_NAME="demangent-api"
+SERVICE_NAME="demandgentic-api"
 
 echo -e "${BLUE}=============================================${NC}"
-echo -e "${BLUE}   DemanGent.ai Production Reset Script     ${NC}"
+echo -e "${BLUE}   DemandGentic.ai Production Reset Script     ${NC}"
 echo -e "${BLUE}=============================================${NC}"
 echo ""
 
@@ -105,8 +105,8 @@ echo -e "${YELLOW}Updating Telnyx call control secrets...${NC}"
 update_secret "TELNYX_API_KEY" "KEY019B9E220AD4E7C897383A1910A6F795_RQx78cB0g22pI48lGY0uu2"
 update_secret "TELNYX_CALL_CONTROL_APP_ID" "2853482451592807572"
 update_secret "TELNYX_FROM_NUMBER" "+13023601514"
-update_secret "TELNYX_WEBHOOK_URL" "https://demangent.ai/"
-update_secret "PUBLIC_WEBSOCKET_URL" "wss://demangent.ai/openai-realtime-dialer"
+update_secret "TELNYX_WEBHOOK_URL" "https://demandgentic.ai/"
+update_secret "PUBLIC_WEBSOCKET_URL" "wss://demandgentic.ai/openai-realtime-dialer"
 update_secret "TELNYX_SIP_CONNECTION_ID" "2845920641004078445"
 update_secret "TELNYX_SIP_USERNAME" "usermercury63270"
 update_secret "TELNYX_SIP_PASSWORD" "Z0lra,7%r4Wn"

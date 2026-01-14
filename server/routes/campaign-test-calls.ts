@@ -13,6 +13,7 @@ import {
   type CampaignTestCall,
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
+import openai from "../lib/openai";
 
 const router = Router();
 
@@ -101,17 +102,32 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
     const telnyxApiKey = process.env.TELNYX_API_KEY;
     const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.OPENAI_API_KEY;
+    const googleApiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+    const googleProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     // For TeXML outbound calls, use ONLY TELNYX_TEXML_APP_ID
     const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
 
     if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
       return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
     }
-    if (!openaiApiKey) {
-      return res.status(500).json({ message: "OpenAI API key not configured" });
-    }
     if (!texmlAppId) {
       return res.status(500).json({ message: "Telnyx TeXML Application ID not configured. Please set TELNYX_TEXML_APP_ID in your .env.local file." });
+    }
+
+    // Validate provider-specific credentials
+    if (validatedData.voiceProvider === 'google') {
+      if (!googleApiKey && !googleProjectId) {
+        return res.status(500).json({
+          message: "Google/Gemini credentials not configured. Please set GEMINI_API_KEY or GOOGLE_AI_API_KEY in your .env.local file.",
+          provider: "google"
+        });
+      }
+      console.log("[Campaign Test Call] Using Google Gemini voice provider");
+    } else {
+      if (!openaiApiKey) {
+        return res.status(500).json({ message: "OpenAI API key not configured" });
+      }
+      console.log("[Campaign Test Call] Using OpenAI voice provider");
     }
 
     // Normalize phone number to E.164
@@ -236,6 +252,9 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
+    
+    console.log(`[Campaign Test Call] TeXML URL: ${texmlUrl}`);
+    console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
 
     const payload = {
       texml_application_id: texmlAppId,
@@ -495,8 +514,6 @@ router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireR
       });
     }
 
-    const openai = await import("../lib/" + "openai").then(m => m.default);
-
     const analysisPrompt = `Analyze this B2B cold call transcript and provide actionable feedback for improving the AI agent's performance.
 
 AGENT SYSTEM PROMPT (for context):
@@ -581,9 +598,15 @@ Analyze the call and return a JSON object with:
         summary: analysis.summary,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Campaign Test Calls] Error analyzing test call:", error);
-    res.status(500).json({ message: "Failed to analyze test call", error: String(error) });
+    // Include stack trace in development or strict detailed error
+    res.status(500).json({ 
+      message: "Failed to analyze test call", 
+      error: String(error),
+      details: error.message || "Unknown error",
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 

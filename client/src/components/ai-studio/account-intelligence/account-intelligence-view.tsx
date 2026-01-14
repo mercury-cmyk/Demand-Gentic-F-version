@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -9,8 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { 
-  Search, Sparkles, CheckCircle2, Loader2, Globe, Building2, 
+import {
+  Search, Sparkles, CheckCircle2, Loader2, Globe, Building2,
   Users, Target, ShieldCheck, FileText, Upload, Link as LinkIcon,
   Edit2, RotateCcw, Lock, Save, AlertCircle, Check, Zap
 } from "lucide-react";
@@ -158,6 +159,7 @@ const SmartField = ({
 };
 
 export function AccountIntelligenceView() {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<"idle" | "analyzing" | "review">("idle");
   const [domain, setDomain] = useState("");
   const [context, setContext] = useState("");
@@ -206,7 +208,8 @@ export function AccountIntelligenceView() {
         payload.context = trimmedContext;
       }
 
-      const response = await apiRequest("POST", "/api/org-intelligence/analyze", payload);
+      // Extended timeout for AI analysis (3 minutes) since multi-model analysis takes time
+      const response = await apiRequest("POST", "/api/org-intelligence/analyze", payload, { timeout: 180000 });
 
       const data = await response.json();
 
@@ -276,7 +279,7 @@ export function AccountIntelligenceView() {
 
   const handleSave = async () => {
     if (!profile || !domain) return;
-    
+
     try {
       const response = await apiRequest("POST", "/api/org-intelligence/save", {
         domain,
@@ -288,6 +291,9 @@ export function AccountIntelligenceView() {
       if (data.error) {
         throw new Error(data.error);
       }
+
+      // Invalidate organizations query so the selector refreshes
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
 
       toast({
         title: "Profile Saved",

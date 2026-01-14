@@ -7,7 +7,7 @@ set -euo pipefail
 
 PROJECT_ID=${PROJECT_ID:-pivotalcrm-2026}
 REGION=${REGION:-us-central1}
-SERVICE=${SERVICE:-demangent-ai}
+SERVICE=${SERVICE:-demandgentic-api}
 REPOSITORY=${REPOSITORY:-pivotal-artifacts}
 IMAGE_TAG=${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo 'latest')}
 

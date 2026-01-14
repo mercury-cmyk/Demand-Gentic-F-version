@@ -41,10 +41,14 @@ router.post("/ai-call", (req, res) => {
   const escapedWsUrl = finalWsUrl.replace(/&/g, '&amp;');
 
   res.set("Content-Type", "application/xml");
-  // Match official Telnyx OpenAI demo - let Telnyx auto-detect codec
-  // Do NOT specify codec - official demo doesn't and it works
+  // Enable AMD (Answering Machine Detection) before connecting to AI
+  // AMD will fire call.machine.detection.ended webhook with result
+  // If machine detected, webhook handler will hang up immediately
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+    <AnswerMachine>
+        <Config machineDetection="DetectMessageEnd" machineDetectionTimeout="30" machineDetectionSpeechThreshold="3500" machineDetectionSpeechEndThreshold="1200" machineDetectionSilenceTimeout="5000" />
+    </AnswerMachine>
     <Connect>
         <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" />
     </Connect>
@@ -60,7 +64,10 @@ router.post("/incoming", (req, res) => {
   res.set("Content-Type", "application/xml");
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Connecting you to the Demand Earn AI assistant.</Say>
+    <AnswerMachine>
+        <Config machineDetection="DetectMessageEnd" machineDetectionTimeout="30" />
+    </AnswerMachine>
+    <Say>Connecting you to the DemandGentic AI assistant.</Say>
     <Connect>
         <Stream url="wss://${req.get('host')}/openai-realtime-dialer" bidirectionalMode="rtp" />
     </Connect>
