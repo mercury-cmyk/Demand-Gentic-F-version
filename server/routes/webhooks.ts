@@ -206,9 +206,18 @@ router.post("/telnyx", async (req, res) => {
 
     // Extract event data - handle different Telnyx payload formats
     const eventData = req.body.data || req.body;
-    const eventType = eventData.event_type || req.body.event_type;
+    let eventType = eventData.event_type || req.body.event_type;
     const payload = eventData.payload || eventData;
-    
+    const callbackSource = payload.CallbackSource || payload.callback_source;
+
+    if (!eventType && callbackSource === 'call-progress-events') {
+      console.log(`[Telnyx Webhook] call-progress event detected (CallStatus=${payload.CallStatus}) - normalizing to call.hangup`);
+      payload.call_control_id = payload.call_control_id || payload.CallSid || payload.CallSidLegacy || payload.CallSid;
+      payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
+      payload.status = payload.CallStatus || payload.CallStatus;
+      eventType = 'call.hangup';
+    }
+
     // Handle Cost/Billing events (no event_type)
     if (!eventType && payload.CallbackSource === 'call-cost-events') {
       return res.json({ status: "ignored", reason: "cost_event" });

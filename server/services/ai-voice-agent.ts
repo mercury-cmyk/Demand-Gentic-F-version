@@ -7,8 +7,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "./account-messaging-service";
 import {
   buildCallPlanContextSection,
@@ -71,6 +73,8 @@ export interface CallContext {
   contactId?: string;
   elevenLabsAgentId?: string; // Campaign-specific ElevenLabs agent ID (overrides env var)
   virtualAgentId?: string; // Virtual agent ID for tracking in reports
+  runId?: string; // Dialer run ID for unified tracking
+  callAttemptId?: string; // Dialer call attempt ID for unified tracking
 }
 
 type ConversationPhase = "opening" | "gatekeeper" | "pitch" | "objection_handling" | "closing" | "handoff";
@@ -128,9 +132,14 @@ export class AiVoiceAgent extends EventEmitter {
         campaignId: this.context.campaignId || null,
         intelligenceRecord: accountIntelligenceRecord,
       });
+
+      // Load account profile data for including in context
+      const accountProfile = await getAccountProfileData(accountId);
+
       accountContextSection = buildAccountContextSection(
         accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
-        accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+        accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload,
+        accountProfile
       );
 
       const accountCallBriefRecord = await getOrBuildAccountCallBrief({

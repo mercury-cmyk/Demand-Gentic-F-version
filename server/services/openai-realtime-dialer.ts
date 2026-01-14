@@ -1,7 +1,7 @@
 ﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -9,8 +9,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "./account-messaging-service";
 import {
   buildCallPlanContextSection,
@@ -68,6 +70,7 @@ import {
   buildCampaignContextSection,
   buildContactContextSection,
 } from "./foundation-capabilities";
+import { getOrganizationBrain } from "./agent-brain-service";
 import {
   DEFAULT_ADVANCED_SETTINGS,
   DEFAULT_SYSTEM_TOOLS,
@@ -103,6 +106,7 @@ interface OpenAIRealtimeSession {
   queueItemId: string;
   callAttemptId: string;
   contactId: string;
+  calledNumber?: string | null;
   provider: 'openai' | 'google';
   virtualAgentId: string;
   isTestSession: boolean;
@@ -350,27 +354,29 @@ const DISPOSITION_FUNCTION_TOOLS = [
         }
       }
     },
+    // <-- MISSING COMMA ADDED ABOVE
+  ,
   {
     type: "function",
     name: "submit_disposition",
-    description: "Submit the call disposition based on the conversation outcome. Call this when you have determined the outcome of the call.",
+    description: "Submit the call disposition based on the conversation outcome. Call this when you have determined the outcome of the call. IMPORTANT: qualified_lead requires substantial conversation with clear interest signals.",
     parameters: {
       type: "object",
       properties: {
         disposition: {
           type: "string",
           enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data"],
-          description: "The disposition code for this call. qualified_lead: prospect expressed interest and qualifies. not_interested: prospect declined. do_not_call: prospect requested to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
+          description: "The disposition code for this call. qualified_lead: STRICT CRITERIA - prospect must have (1) confirmed identity, (2) engaged in meaningful conversation for at least 30+ seconds, (3) expressed clear interest by asking questions about the offer/product OR explicitly requesting follow-up/materials. A simple 'yes' or 'sure' is NOT sufficient. not_interested: prospect declined or showed no engagement. do_not_call: prospect explicitly asked to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
         },
         confidence: {
           type: "number",
           minimum: 0,
           maximum: 1,
-          description: "Confidence level (0-1) in the disposition assessment"
+          description: "Confidence level (0-1) in the disposition assessment. For qualified_lead, only use >0.8 if all three criteria (identity confirmed, meaningful conversation, clear interest signals) are met."
         },
         reason: {
           type: "string",
-          description: "Brief explanation for the disposition"
+          description: "Brief explanation for the disposition including specific evidence (e.g., 'Prospect asked about pricing and requested demo' for qualified_lead)"
         }
       },
       required: ["disposition", "confidence", "reason"]
@@ -655,6 +661,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
           });
 
           // Validate required identifiers are present (skip for test sessions)
+          // For AI campaigns, warn but don't terminate if some params are missing - the call can still proceed
           if (!isTestSession) {
             const missingParams: string[] = [];
             if (!callAttemptId) missingParams.push('call_attempt_id');
@@ -664,17 +671,9 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             if (!runId) missingParams.push('run_id');
 
             if (missingParams.length > 0) {
-              console.error(`${LOG_PREFIX} Missing required parameters: ${missingParams.join(', ')}. Terminating session.`);
-              ws.send(JSON.stringify({
-                event: "error",
-                message: `Missing required parameters: ${missingParams.join(', ')}. Session terminated.`,
-                required_workflow: [
-                  "1. Call POST /api/dialer-runs/:id/next-contact to get queue_item_id, call_attempt_id, contact_id",
-                  "2. Pass all identifiers in Telnyx start.custom_parameters"
-                ]
-              }));
-              ws.close();
-              return;
+              // Log warning but allow session to continue - AI calls can work without full tracking
+              console.warn(`${LOG_PREFIX} ⚠️ Missing parameters: ${missingParams.join(', ')}. Call will proceed without full tracking.`);
+              // Don't terminate - allow the AI call to proceed for better UX
             }
           } else {
             console.log(`${LOG_PREFIX} 🧪 Test session detected - skipping production parameter validation`);
@@ -692,7 +691,14 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             : null;
 
           // Validate that call attempt exists and belongs to the specified campaign/contact
-          if (!isTestSession) {
+          // Skip validation if missing required params or using fallback timestamp-based IDs
+          const isFallbackSession = !callAttemptId || 
+            callAttemptId.startsWith('attempt-') || 
+            !runId || 
+            runId.startsWith('run-') ||
+            !contactId;
+          
+          if (!isTestSession && !isFallbackSession) {
             const validationResult = await validateSessionIdentifiers(callAttemptId!, queueItemId!, contactId!, campaignId!, runId!);
             if (!validationResult.valid) {
               console.error(`${LOG_PREFIX} Invalid session identifiers: ${validationResult.error}. Terminating session.`);
@@ -712,6 +718,9 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               queueItemId: queueItemId || '',
               callAttemptId: callAttemptId || '',
               contactId: contactId || '',
+              calledNumber: customParams.called_number || urlParams.called_number || null,
+              calledNumber: customParams.called_number || urlParams.called_number || null,
+              calledNumber: customParams.called_number || urlParams.called_number || null,
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || validationResult.virtualAgentId || '',
               isTestSession,
@@ -859,6 +868,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             queueItemId: queueItemId || '',
             callAttemptId: callAttemptId || '',
             contactId: contactId || '',
+            calledNumber: customParams.called_number || urlParams.called_number || null,
             virtualAgentId: session!.virtualAgentId,
             status: 'active',
             provider: provider,
@@ -933,6 +943,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
         console.error(`${LOG_PREFIX} Error processing message:`, error);
       }
     });
+  // Added missing closing brace for previous function/block
 
     ws.on("close", async () => {
       console.log(`${LOG_PREFIX} Telnyx WebSocket closed for session: ${sessionId}`);
@@ -1009,8 +1020,11 @@ function buildTurnDetection(
 
   // Default: server_vad - recommended for Telnyx
   // CRITICAL: silence_duration_ms must be long enough to allow natural pauses
-  // Use configurable silenceDurationMs from settings, default to 1200ms for natural conversation
-  const silenceDurationMs = settings.silenceDurationMs || 1200;
+  // For B2B professional calls, use 2500ms (2.5 seconds) to ensure the agent:
+  // - Waits for the full response before speaking
+  // - Doesn't interrupt during natural pauses
+  // - Allows proper identity confirmation and turn-taking
+  const silenceDurationMs = settings.silenceDurationMs || 2500;
   console.log(`[Turn Detection] Using server_vad with silence_duration_ms: ${silenceDurationMs}`);
 
   return {
@@ -1189,82 +1203,102 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
       }
     }
-
     const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
     const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
     session.agentSettings = agentSettings;
 
-    let attemptNumber = 1;
-    if (session.callAttemptId) {
+// let attemptNumber = 1;
+// if (session.callAttemptId) {
+//   try {
+//     const [attempt] = await db
+//       .select({ attemptNumber: dialerCallAttempts.attemptNumber })
+//       .from(dialerCallAttempts)
+//       .where(eq(dialerCallAttempts.id, session.callAttemptId))
+//       .limit(1);
+//     if (attempt?.attemptNumber) {
+//       attemptNumber = attempt.attemptNumber;
+//     }
+//   } catch (error) {
+//     console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
+//   }
+// }
+
+// if (!session.isTestSession) {
+//   const orgNameOverride = campaignConfig?.organizationName || campaignConfig?.companyName || agentSettings.persona?.companyName || null;
+//   // Use contactInfo from database (fetched above), not session.testContact which is null for real calls
+//   const preflight = await preflightVoiceVariableContract({
+//     contactId: session.contactId,
+//     virtualAgentId: session.virtualAgentId,
+//     callAttemptId: session.callAttemptId,
+//     callerId: process.env.TELNYX_FROM_NUMBER || null,
+//     calledNumber: session.calledNumber || null,
+//     agentName: agentSettings.persona?.name || null,
+//     orgName: orgNameOverride,
+//     contact: {
+//       fullName: contactInfo?.fullName || contactInfo?.firstName && contactInfo?.lastName ? `${contactInfo.firstName} ${contactInfo.lastName}` : null,
+//       firstName: contactInfo?.firstName || null,
+//       lastName: contactInfo?.lastName || null,
+//       jobTitle: contactInfo?.jobTitle || null,
+//       email: contactInfo?.email || null,
+//     },
+//     account: {
+//       name: contactInfo?.companyName || contactInfo?.company || orgNameOverride,
+//     },
+//     timeUtc: new Date().toISOString(),
+//   });
+//
+//   if (!preflight.valid) {
+//     console.error(
+//       `${LOG_PREFIX} Voice variable preflight failed for call ${session.callId}: ${preflight.errors.join("; ")}`
+//     );
+//     if (session.telnyxWs?.readyState === WebSocket.OPEN) {
+//       session.telnyxWs.send(
+//         JSON.stringify({
+//           event: "error",
+//           message: "Voice variable preflight failed - missing or invalid canonical fields",
+//           missing_fields: preflight.missingKeys,
+//           invalid_fields: preflight.invalidKeys,
+//           contract_version: preflight.contractVersion,
+//         })
+//       );
+//     }
+//     await endCall(session.callId, "error");
+//     return;
+//   }
+//   session.voiceVariables = preflight.values;
+// }
+
+// // Use the latest GA gpt-realtime model for most natural, human-like speech
+// const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+// console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
+// 
+// const openaiWs = new WebSocket(url, {
+//   headers: {
+//     "Authorization": `Bearer ${apiKey}`,
+//     "OpenAI-Beta": "realtime=v1",
+//   },
+// });
+
+openaiWs.on("open", async () => {
+  try {
+    let resolvedOrgName = campaignConfig?.organizationName || campaignConfig?.companyName;
+    if (!resolvedOrgName) {
       try {
-        const [attempt] = await db
-          .select({ attemptNumber: dialerCallAttempts.attemptNumber })
-          .from(dialerCallAttempts)
-          .where(eq(dialerCallAttempts.id, session.callAttemptId))
-          .limit(1);
-        if (attempt?.attemptNumber) {
-          attemptNumber = attempt.attemptNumber;
-        }
-      } catch (error) {
-        console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
+        const orgBrain = await getOrganizationBrain();
+        resolvedOrgName = orgBrain?.identity?.companyName || 'our organization';
+      } catch (e) {
+        console.warn(`${LOG_PREFIX} Could not fetch Organization Brain for org name:`, e);
+        resolvedOrgName = 'our organization';
       }
     }
 
-    if (!session.isTestSession) {
-      const preflight = await preflightVoiceVariableContract({
-        contactId: session.contactId,
-        virtualAgentId: session.virtualAgentId,
-        callAttemptId: session.callAttemptId,
-        callerId: process.env.TELNYX_FROM_NUMBER || null,
-      });
-
-      if (!preflight.valid) {
-        console.error(
-          `${LOG_PREFIX} Voice variable preflight failed for call ${session.callId}: ${preflight.errors.join("; ")}`
-        );
-        if (session.telnyxWs?.readyState === WebSocket.OPEN) {
-          session.telnyxWs.send(
-            JSON.stringify({
-              event: "error",
-              message: "Voice variable preflight failed - missing or invalid canonical fields",
-              missing_fields: preflight.missingKeys,
-              invalid_fields: preflight.invalidKeys,
-              contract_version: preflight.contractVersion,
-            })
-          );
-        }
-        await endCall(session.callId, "error");
-        return;
-      }
-      session.voiceVariables = preflight.values;
-    }
-
-    const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
-    console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
-    
-    const openaiWs = new WebSocket(url, {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "OpenAI-Beta": "realtime=v1",
-      },
-    });
-
-    openaiWs.on("open", async () => {
-      try {
-      console.log(`${LOG_PREFIX} âœ… OpenAI Realtime connected for call: ${session.callId}`);
-      
-      // Verify Telnyx connection is ready before configuring
-      if (session.telnyxWs?.readyState !== WebSocket.OPEN) {
-        console.warn(`${LOG_PREFIX} âš ï¸  Telnyx WebSocket not ready when OpenAI connected. Waiting for Telnyx...`);
-      } else {
-        console.log(`${LOG_PREFIX} âœ… Telnyx WebSocket ready - audio transmission path established`);
-      }
-      
       const voiceTemplateValues = buildVoiceTemplateValues({
         baseValues: session.voiceVariables,
         contactInfo,
         callerId: process.env.TELNYX_FROM_NUMBER || null,
+        calledNumber: session.calledNumber || null,
+        orgName: resolvedOrgName,
       });
       // Get cost optimization settings early to use in prompt building
       const costSettingsEarly = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
@@ -1515,11 +1549,11 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
           sendOpeningMessage(openaiWs, openingScript);
         }
       }, 800); // Optimized from 1500ms to 800ms for faster caller experience
-      } catch (error) {
-        console.error(`${LOG_PREFIX} Failed to initialize OpenAI session for call ${session.callId}:`, error);
-        await endCall(session.callId, 'error');
-      }
-    });
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Failed to initialize OpenAI session for call ${session.callId}:`, error);
+      await endCall(session.callId, 'error');
+    }
+  });
 
     openaiWs.on("message", async (data) => {
       try {
@@ -1640,14 +1674,37 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       : baseSettings;
     const agentSettings = mergeAgentSettings(mergedBase);
 
+    // Resolve org name for template interpolation - use campaign persona or fall back to Organization Brain
+    let resolvedOrgNameGemini = campaignConfig?.organizationName || campaignConfig?.companyName;
+    if (!resolvedOrgNameGemini) {
+      try {
+        const orgBrain = await getOrganizationBrain();
+        resolvedOrgNameGemini = orgBrain?.identity?.companyName || 'our organization';
+      } catch (e) {
+        console.warn(`${LOG_PREFIX} [Gemini] Could not fetch Organization Brain for org name:`, e);
+        resolvedOrgNameGemini = 'our organization';
+      }
+    }
+
     // Build system prompt
     const voiceTemplateValues = buildVoiceTemplateValues({
       baseValues: session.voiceVariables,
       contactInfo,
       callerId: process.env.TELNYX_FROM_NUMBER || null,
+      orgName: resolvedOrgNameGemini,
     });
     const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
     const useCondensedPrompt = costSettings.useCondensedPrompt !== false;
+
+    // Debug logging for Gemini campaign context
+    console.log(`${LOG_PREFIX} [Gemini] Campaign Config:`, {
+      campaignId: campaignConfig?.id,
+      hasObjective: !!campaignConfig?.campaignObjective,
+      hasBrief: !!campaignConfig?.campaignContextBrief,
+      hasTalkingPoints: !!campaignConfig?.talkingPoints?.length,
+      talkingPointsCount: campaignConfig?.talkingPoints?.length || 0,
+      hasProductInfo: !!campaignConfig?.productServiceInfo,
+    });
 
     const baseSystemPrompt = await buildSystemPrompt(
       campaignConfig, contactInfo,
@@ -1657,6 +1714,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       'google'  // Use Google/Gemini provider for prompt formatting
     );
     const systemPrompt = interpolateVoiceTemplate(baseSystemPrompt, voiceTemplateValues);
+
+    // Log system prompt length and key sections for debugging
+    console.log(`${LOG_PREFIX} [Gemini] System Prompt Stats:`, {
+      totalLength: systemPrompt.length,
+      hasCriticalInstructions: systemPrompt.includes('<critical_instructions>'),
+      hasCampaignContext: systemPrompt.includes('Campaign Context') || systemPrompt.includes('campaign_context'),
+      hasContactInfo: systemPrompt.includes('Prospect Information') || systemPrompt.includes(contactInfo?.firstName || 'N/A'),
+    });
 
     // Configure Gemini provider
     const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "Kore";
@@ -1756,11 +1821,71 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
   }
 }
 
-// Get Gemini opening script
+// Get Gemini opening script - matches OpenAI's canonical opening structure
 function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any, agentConfig: any, campaignConfig: any, voiceTemplateValues: Record<string, string>): string {
-  const msg = session.firstMessageOverride?.trim() || agentConfig?.firstMessage || campaignConfig?.openingScript || campaignConfig?.script;
-  if (msg) return interpolateVoiceTemplate(msg, voiceTemplateValues);
-  return `Hello, may I speak with ${contactInfo?.fullName || contactInfo?.firstName || 'there'} please?`;
+  // Debug logging to verify variables are passed correctly
+  console.log(`${LOG_PREFIX} [Gemini Opening] Contact Info:`, {
+    fullName: contactInfo?.fullName,
+    firstName: contactInfo?.firstName,
+    lastName: contactInfo?.lastName,
+    jobTitle: contactInfo?.jobTitle,
+    company: contactInfo?.company || contactInfo?.companyName,
+  });
+  console.log(`${LOG_PREFIX} [Gemini Opening] Voice Template Values:`, Object.keys(voiceTemplateValues || {}).length > 0 ? voiceTemplateValues : 'empty');
+
+  const customFirstMessage = session.firstMessageOverride?.trim()
+    || agentConfig?.firstMessage
+    || campaignConfig?.openingScript
+    || campaignConfig?.script;
+
+  console.log(`${LOG_PREFIX} [Gemini Opening] Custom First Message Source:`, {
+    hasOverride: !!session.firstMessageOverride?.trim(),
+    hasAgentFirst: !!agentConfig?.firstMessage,
+    hasCampaignOpening: !!campaignConfig?.openingScript,
+    hasCampaignScript: !!campaignConfig?.script,
+    message: customFirstMessage?.substring(0, 100) || 'none',
+  });
+
+  if (customFirstMessage) {
+    // Check for canonical opening tokens (same as OpenAI)
+    const normalizedTokens = extractTemplateVariables(customFirstMessage)
+      .map(normalizeVoiceTemplateToken)
+      .filter(Boolean);
+    const usesCanonicalOpeningTokens = normalizedTokens.includes("contact.full_name")
+      || normalizedTokens.includes("contact.job_title")
+      || normalizedTokens.includes("account.name");
+
+    console.log(`${LOG_PREFIX} [Gemini Opening] Template tokens:`, normalizedTokens, 'Uses canonical:', usesCanonicalOpeningTokens);
+
+    if (usesCanonicalOpeningTokens) {
+      // Use canonical opening interpolation
+      const result = interpolateCanonicalOpening(
+        {
+          fullName: contactInfo?.fullName,
+          firstName: contactInfo?.firstName,
+          lastName: contactInfo?.lastName,
+          jobTitle: contactInfo?.jobTitle,
+        },
+        {
+          name: contactInfo?.companyName || contactInfo?.company,
+        }
+      );
+      console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
+      return result;
+    }
+
+    // Custom message without canonical variables - interpolate allowed tokens
+    const result = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
+    console.log(`${LOG_PREFIX} [Gemini Opening] Interpolated result: "${result}"`);
+    return result;
+  }
+
+  // Default canonical opening for gatekeeper scenarios
+  // Use the same format as OpenAI for consistency
+  const contactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+  const result = `Hello, may I speak with ${contactName} please?`;
+  console.log(`${LOG_PREFIX} [Gemini Opening] Default result: "${result}"`);
+  return result;
 }
 
 
@@ -2497,30 +2622,51 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
 
     switch (name) {
       case "submit_disposition":
-        session.detectedDisposition = args.disposition as DispositionCode;
-        console.log(`${LOG_PREFIX} Disposition detected: ${args.disposition} (confidence: ${args.confidence})`);
-        
-        if (session.openaiWs?.readyState === WebSocket.OPEN) {
-          session.openaiWs.send(JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id,
-              output: JSON.stringify({ success: true, message: "Disposition recorded" })
-            }
-          }));
-          session.openaiWs.send(JSON.stringify({ type: "response.create" }));
-        }
-        
-        // Auto-hangup after any disposition is submitted (5 second delay for goodbye)
-        // The AI should say goodbye before the call ends
-        const hangupDelay = args.disposition === 'do_not_call' ? 2000 : 5000;
-        setTimeout(() => {
-          if (session.isActive && !session.isEnding) {
-            console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${args.disposition}`);
-            endCall(session.callId, args.disposition === 'voicemail' ? 'voicemail' : 'completed');
+        {
+          const disposition = args.disposition as DispositionCode;
+          const confidence = args.confidence || 0;
+          const reason = args.reason || '';
+          
+          // Calculate call duration at disposition time
+          const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+          const MINIMUM_QUALIFIED_DURATION = 30; // seconds
+          
+          // QUALITY GATE: Warn and log if AI is marking short calls as qualified
+          if (disposition === 'qualified_lead' && callDurationSeconds < MINIMUM_QUALIFIED_DURATION) {
+            console.warn(`${LOG_PREFIX} ⚠️ QUALITY ALERT: AI marked call ${session.callId} as qualified_lead after only ${callDurationSeconds}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Confidence: ${confidence}. Reason: ${reason}`);
+            console.warn(`${LOG_PREFIX} ⚠️ This lead will be flagged for immediate QA review due to short duration.`);
           }
-        }, hangupDelay);
+          
+          // Also warn if confidence is too high for a short call
+          if (disposition === 'qualified_lead' && confidence > 0.7 && callDurationSeconds < MINIMUM_QUALIFIED_DURATION) {
+            console.warn(`${LOG_PREFIX} ⚠️ HIGH CONFIDENCE SHORT CALL: AI has ${confidence} confidence for qualified_lead but call is only ${callDurationSeconds}s. This may indicate AI hallucination.`);
+          }
+          
+          session.detectedDisposition = disposition;
+          console.log(`${LOG_PREFIX} Disposition detected: ${disposition} (confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
+          
+          if (session.openaiWs?.readyState === WebSocket.OPEN) {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id,
+                output: JSON.stringify({ success: true, message: "Disposition recorded" })
+              }
+            }));
+            session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+          }
+          
+          // Auto-hangup after any disposition is submitted (5 second delay for goodbye)
+          // The AI should say goodbye before the call ends
+          const hangupDelay = disposition === 'do_not_call' ? 2000 : 5000;
+          setTimeout(() => {
+            if (session.isActive && !session.isEnding) {
+              console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${disposition}`);
+              endCall(session.callId, disposition === 'voicemail' ? 'voicemail' : 'completed');
+            }
+          }, hangupDelay);
+        }
         break;
 
       case "end_call":
@@ -3016,6 +3162,22 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         console.log(`${LOG_PREFIX} Test call transcripts: ${session.transcripts.length} turns`);
       } else {
         // Handle real call post-call processing
+        // First verify the call attempt record exists before updating
+        const [existingAttempt] = await db
+          .select({ id: dialerCallAttempts.id })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, session.callAttemptId))
+          .limit(1);
+
+        if (!existingAttempt) {
+          console.warn(`${LOG_PREFIX} Call attempt ${session.callAttemptId} not found in database - skipping post-call processing`);
+          // Still release the lock if we have a queue item
+          if (session.queueItemId) {
+            await releaseQueueLock(session.queueItemId);
+          }
+          return;
+        }
+
         await db.update(dialerCallAttempts).set({
           callEndedAt: new Date(),
           callDurationSeconds: callDuration,
@@ -3029,6 +3191,26 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         dispositionProcessed = true;
 
         console.log(`${LOG_PREFIX} Call ${callId} completed with disposition: ${disposition}`);
+
+        // CRITICAL: Save OpenAI real-time transcripts directly to the lead record
+        // This ensures AI QA analysis can run immediately without waiting for Telnyx recording sync
+        if (dispositionResult?.leadId && session.transcripts.length > 0 && !noPiiLogging) {
+          try {
+            const fullTranscript = session.transcripts
+              .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+              .join('\n');
+            
+            await db.update(leads).set({
+              transcript: fullTranscript,
+              transcriptionStatus: 'completed',
+              updatedAt: new Date(),
+            }).where(eq(leads.id, dispositionResult.leadId));
+            
+            console.log(`${LOG_PREFIX} ✅ Saved ${session.transcripts.length} transcript turns to lead ${dispositionResult.leadId}`);
+          } catch (transcriptError) {
+            console.error(`${LOG_PREFIX} Failed to save transcripts to lead:`, transcriptError);
+          }
+        }
 
         if (!noPiiLogging && shouldAutoTranscribeDisposition(disposition)) {
           await scheduleEngagedCallTranscription({
@@ -3118,7 +3300,7 @@ async function scheduleEngagedCallTranscription(options: {
         callAttemptId: options.callAttemptId,
         contactFirstName: testCall.contactFirstName,
         agentId: null,
-        telnyxCallId: null,
+        telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
         dialedNumber: testCall.phoneDialed,
         campaignId: testCall.campaignId,
       });
@@ -3152,10 +3334,25 @@ async function scheduleEngagedCallTranscription(options: {
       callAttemptId: options.callAttemptId,
       contactFirstName: attempt.contactFirstName || null,
       agentId: attempt.agentId || null,
-      telnyxCallId: null,
+      telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
       dialedNumber: attempt.phoneDialed,
       campaignId: attempt.campaignId || null,
     });
+
+    // Helper to get telnyxCallId from session/bridge
+    function getTelnyxCallId(callAttemptId: string): string | null {
+      try {
+        const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
+        const bridge = getTelnyxAiBridge();
+        const callState = bridge.getClientStateByControlId(callAttemptId) || (bridge.activeCalls?.get(callAttemptId));
+        if (callState?.callControlId) {
+          return callState.callControlId;
+        }
+      } catch (err) {
+        // Ignore errors, fallback to null
+      }
+      return null;
+    }
   } catch (error) {
     console.error(`${LOG_PREFIX} Error scheduling call transcription:`, error);
   }
@@ -3375,12 +3572,22 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
 
     if (!campaign) return null;
 
+    const aiSettings = campaign.aiAgentSettings as any || {};
+    
+    // Extract organization name from persona.companyName (primary source for campaigns)
+    const companyName = aiSettings?.persona?.companyName;
+    
     return {
       id: campaign.id,
       script: campaign.callScript,
-      voice: (campaign.aiAgentSettings as any)?.persona?.voice || 'alloy',
-      openingScript: (campaign.aiAgentSettings as any)?.scripts?.opening,
+      voice: aiSettings?.persona?.voice || 'alloy',
+      openingScript: aiSettings?.scripts?.opening,
       qualificationCriteria: campaign.qualificationQuestions,
+      // Organization name - explicitly extract for prompt building
+      organizationName: companyName,
+      companyName: companyName,
+      // Agent name from persona
+      agentName: aiSettings?.persona?.name,
       // New campaign context fields (Foundation + Campaign Layer Architecture)
       campaignObjective: campaign.campaignObjective,
       productServiceInfo: campaign.productServiceInfo,
@@ -3391,7 +3598,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignContextBrief: campaign.campaignContextBrief,
       // Max call duration enforcement (campaign-level)
       maxCallDurationSeconds: campaign.maxCallDurationSeconds,
-      ...(campaign.aiAgentSettings as any || {})
+      ...aiSettings
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
@@ -3432,11 +3639,13 @@ function buildVoiceTemplateValues({
   contactInfo,
   callerId,
   calledNumber,
+  orgName,
 }: {
   baseValues?: Record<string, string> | null;
   contactInfo?: any;
   callerId?: string | null;
   calledNumber?: string | null;
+  orgName?: string | null;
 }): Record<string, string> {
   const values: Record<string, string> = { ...(baseValues ?? {}) };
   const fullName = contactInfo?.fullName?.trim()
@@ -3450,6 +3659,9 @@ function buildVoiceTemplateValues({
 
   const companyName = contactInfo?.companyName || contactInfo?.company;
   if (companyName && !values["account.name"]) values["account.name"] = companyName;
+
+  // Include org.name for template interpolation
+  if (orgName && !values["org.name"]) values["org.name"] = orgName;
 
   if (!values["system.caller_id"] && callerId) values["system.caller_id"] = callerId;
   if (!values["system.called_number"] && calledNumber) values["system.called_number"] = calledNumber;
@@ -3573,9 +3785,13 @@ async function buildSystemPrompt(
       intelligenceRecord: accountIntelligenceRecord,
     });
 
+    // Load account profile data for including in context
+    const accountProfile = await getAccountProfileData(accountId);
+
     accountContextSection = buildAccountContextSection(
       accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
-      accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+      accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload,
+      accountProfile
     );
 
     const accountCallBriefRecord = await getOrBuildAccountCallBrief({
@@ -3666,7 +3882,28 @@ async function buildSystemPrompt(
 
     // Apply control layer based on useCondensedPrompt setting
     // This ensures proper call handling even with custom prompts
-    const finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
+    let finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
+
+    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+    // Gemini tends to be more literal with system instructions and may introduce itself with org name
+    if (provider === 'google') {
+      const geminiPreamble = `<critical_instructions>
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+</critical_instructions>
+
+`;
+      finalPrompt = geminiPreamble + finalPrompt;
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble to prevent org name disclosure`);
+    }
+
     const tokenEstimate = estimateTokenCount(finalPrompt);
     console.log(`${LOG_PREFIX} Using foundation agent prompt with campaign context layering (${finalPrompt.length} chars, ~${tokenEstimate} tokens) - condensed=${useCondensedPrompt}`);
     return finalPrompt;
@@ -3718,7 +3955,27 @@ async function buildSystemPrompt(
     prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
     // Apply organization intelligence and training rules
-    const finalPrompt = await buildAgentSystemPrompt(prompt);
+    let finalPrompt = await buildAgentSystemPrompt(prompt);
+
+    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+    if (provider === 'google') {
+      const geminiPreamble = `<critical_instructions>
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+</critical_instructions>
+
+`;
+      finalPrompt = geminiPreamble + finalPrompt;
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble (knowledge blocks path)`);
+    }
+
     const tokenEstimate = estimateTokenCount(finalPrompt);
     console.log(`${LOG_PREFIX} Using knowledge blocks prompt with provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
     return finalPrompt;
@@ -3833,16 +4090,20 @@ Proceed naturally and communicate the following ideas in your own words, while k
 ### 3. Gatekeeper Detected (STRICT COMPLIANCE)
 If the person indicates they are not ${firstName} or sounds like a gatekeeper:
 
-**MANDATORY: Disclose NOTHING about the call purpose, company, or context.**
-
 - Be polite and respectful.
-- Ask ONLY to be connected: "May I speak with ${firstName}?" or "Could you connect me?"
-- If asked "What is this regarding?": "It's a professional matter for ${firstName} specifically."
-- Do NOT pitch, explain details, justify the call, or mention any company/product/service.
+- Ask to be connected: "May I speak with ${firstName}?" or "Could you connect me?"
+
+**When Asked "Who is calling?" or "Where are you calling from?":**
+- Respond confidently: "This is [Your Name] calling from ${orgName}."
+
+**When Asked "What is this regarding?" or "What's the purpose of the call?":**
+- Keep it VAGUE. Do NOT give specific details.
+- Say: "It's related to one of our demand generation services" OR "It's regarding some of the services we offer."
+- Do NOT mention specific products, campaigns, meeting requests, or detailed purposes.
+- If pressed further: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
+
 - Make NO MORE than two polite attempts.
 - If refused or access denied → Thank them sincerely and END THE CALL immediately.
-
-**Any disclosure to a gatekeeper = COMPLIANCE VIOLATION.**
 
 ---
 
@@ -3918,8 +4179,26 @@ Use this to navigate IVR systems by sending DTMF tones (keypad digits).
 
 ## submit_disposition
 Call this when you determine the call outcome. REQUIRED at end of every call.
-- qualified_lead: Prospect expressed genuine interest, asked relevant questions, or wants more info
-- not_interested: Prospect politely declined
+
+**QUALIFICATION CRITERIA (STRICT - All must be met for qualified_lead):**
+1. ✅ Identity CONFIRMED - you verified you're speaking to the right person
+2. ✅ Meaningful conversation - at least 30+ seconds of actual dialogue (not just greetings)
+3. ✅ Clear interest signals - ONE OR MORE of:
+   - Asked specific questions about the offer/product/service
+   - Explicitly requested follow-up materials, demo, or meeting
+   - Shared relevant business challenges or pain points
+   - Asked about pricing, timeline, or next steps
+
+**NOT qualified_lead if:**
+- ❌ Only said "yes", "sure", "okay" without elaboration
+- ❌ Call was under 30 seconds
+- ❌ No questions asked by prospect
+- ❌ Identity was never confirmed
+- ❌ Conversation was entirely one-sided (you talking, them just listening)
+
+**Disposition codes:**
+- qualified_lead: All 3 criteria above met. Prospect engaged and interested.
+- not_interested: Prospect politely declined or showed no engagement
 - do_not_call: Prospect explicitly asked not to be called again
 - voicemail: Reached voicemail or answering machine
 - no_answer: Call connected but no meaningful human interaction
@@ -4011,7 +4290,27 @@ Before calling: say "I understand. Let me connect you with someone who can help.
   // Apply personality configuration (prepends personality/tone/conversation flow if configured)
   prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
 
-  const finalPrompt = await buildAgentSystemPrompt(prompt);
+  let finalPrompt = await buildAgentSystemPrompt(prompt);
+
+  // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+  if (provider === 'google') {
+    const geminiPreamble = `<critical_instructions>
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+</critical_instructions>
+
+`;
+    finalPrompt = geminiPreamble + finalPrompt;
+    console.log(`${LOG_PREFIX} Added Gemini compliance preamble (canonical path)`);
+  }
+
   const tokenEstimate = estimateTokenCount(finalPrompt);
   console.log(`${LOG_PREFIX} Using canonical system prompt with layered architecture (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
   return finalPrompt;

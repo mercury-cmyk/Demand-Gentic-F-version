@@ -74,7 +74,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
+    // Use the latest Gemini 2.5 Flash Native Audio model for most natural, human-like speech
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-preview-native-audio-dialog';
 
     // Check for API key (Google AI Studio) or use ADC (Vertex AI)
     // Accept multiple env var names for flexibility
@@ -229,7 +230,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
+    // Use the latest Gemini 2.5 Flash Native Audio model for most natural, human-like speech
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-preview-native-audio-dialog';
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
     const useVertexAI = !!projectId && !apiKey;
 

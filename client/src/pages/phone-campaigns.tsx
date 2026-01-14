@@ -224,22 +224,31 @@ export default function PhoneCampaignsPage() {
     },
   });
 
-  const duplicateMutation = useMutation({
-    mutationFn: async (campaign: Campaign) => {
-      const duplicateData = {
-        ...campaign,
-        name: `${campaign.name} (Copy)`,
-        status: 'draft',
-        launchedAt: null,
-      };
-      delete (duplicateData as any).id;
-      delete (duplicateData as any).createdAt;
-      delete (duplicateData as any).updatedAt;
+  // Clone dialog state
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [campaignToClone, setCampaignToClone] = useState<Campaign | null>(null);
+  const [cloneOrganizationId, setCloneOrganizationId] = useState<string>("");
+  const [cloneName, setCloneName] = useState<string>("");
 
-      return await apiRequest('POST', '/api/campaigns', duplicateData);
+  // Fetch organizations for clone dialog
+  const { data: orgsData } = useQuery<{ organizations: { id: string; name: string }[] }>({
+    queryKey: ["/api/organizations/dropdown"],
+    enabled: cloneDialogOpen,
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async ({ campaignId, name, organizationId }: { campaignId: string; name?: string; organizationId?: string }) => {
+      return await apiRequest('POST', `/api/campaigns/${campaignId}/clone`, {
+        name,
+        organizationId,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      setCloneDialogOpen(false);
+      setCampaignToClone(null);
+      setCloneOrganizationId("");
+      setCloneName("");
       toast({
         title: "Campaign Duplicated",
         description: "A copy of the campaign has been created.",
@@ -253,6 +262,22 @@ export default function PhoneCampaignsPage() {
       });
     },
   });
+
+  const handleCloneCampaign = (campaign: Campaign) => {
+    setCampaignToClone(campaign);
+    setCloneName(`${campaign.name} (Copy)`);
+    setCloneOrganizationId("");
+    setCloneDialogOpen(true);
+  };
+
+  const confirmClone = () => {
+    if (!campaignToClone) return;
+    duplicateMutation.mutate({
+      campaignId: campaignToClone.id.toString(),
+      name: cloneName || undefined,
+      organizationId: cloneOrganizationId || undefined,
+    });
+  };
 
   const toggleStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -835,7 +860,7 @@ export default function PhoneCampaignsPage() {
                           </>
                         )}
                         <DropdownMenuItem
-                          onClick={() => duplicateMutation.mutate(campaign)}
+                          onClick={() => handleCloneCampaign(campaign)}
                           disabled={duplicateMutation.isPending}
                           data-testid={`menu-duplicate-${campaign.id}`}
                         >
@@ -977,6 +1002,75 @@ export default function PhoneCampaignsPage() {
               data-testid="button-assign-agents"
             >
               {assignAgentsMutation.isPending ? "Assigning..." : "Assign Agents"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clone Campaign Dialog */}
+      <Dialog open={cloneDialogOpen} onOpenChange={setCloneDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Duplicate Campaign</DialogTitle>
+            <DialogDescription>
+              Create a copy of this campaign. You can optionally assign it to a different organization.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="clone-name">Campaign Name</Label>
+              <Input
+                id="clone-name"
+                value={cloneName}
+                onChange={(e) => setCloneName(e.target.value)}
+                placeholder="Enter campaign name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clone-org">Organization (Optional)</Label>
+              <select
+                id="clone-org"
+                className="w-full h-10 px-3 py-2 border rounded-md bg-background text-sm"
+                value={cloneOrganizationId}
+                onChange={(e) => setCloneOrganizationId(e.target.value)}
+              >
+                <option value="">Keep original organization</option>
+                {orgsData?.organizations?.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Select a different organization to use for this campaign's context and intelligence.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCloneDialogOpen(false);
+                setCampaignToClone(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmClone}
+              disabled={duplicateMutation.isPending}
+            >
+              {duplicateMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Duplicating...
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Duplicate
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

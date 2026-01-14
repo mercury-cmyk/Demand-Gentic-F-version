@@ -34,6 +34,9 @@ import {
   getCredentialByKey,
   getClientOrganizations,
   createClientOrganization,
+  updateSuperOrganization,
+  updateClientOrganization,
+  deleteClientOrganization,
   hasOrganizationRole,
 } from '../services/super-organization-service';
 import { storage } from '../storage';
@@ -79,6 +82,50 @@ router.get('/', requireAuth, requireSuperOrgOwner, async (req: Request, res: Res
   } catch (error) {
     console.error('[SUPER-ORG-ROUTES] Error getting super org:', error);
     res.status(500).json({ error: 'Failed to get super organization' });
+  }
+});
+
+/**
+ * PUT /api/super-org
+ * Update super organization information
+ */
+router.put('/', requireAuth, requireSuperOrgOwner, async (req: Request, res: Response) => {
+  try {
+    const {
+      name,
+      domain,
+      description,
+      industry,
+      logoUrl,
+      identity,
+      offerings,
+      icp,
+      positioning,
+      outreach,
+      compiledOrgContext,
+    } = req.body;
+
+    const updated = await updateSuperOrganization({
+      name,
+      domain,
+      description,
+      industry,
+      logoUrl,
+      identity,
+      offerings,
+      icp,
+      positioning,
+      outreach,
+      compiledOrgContext,
+    });
+
+    res.json({
+      success: true,
+      organization: updated,
+    });
+  } catch (error) {
+    console.error('[SUPER-ORG-ROUTES] Error updating super org:', error);
+    res.status(500).json({ error: 'Failed to update super organization' });
   }
 });
 
@@ -372,7 +419,145 @@ router.post('/clients', requireAuth, requireSuperOrgOwner, async (req: Request, 
   }
 });
 
+/**
+ * PUT /api/super-org/clients/:id
+ * Update a client organization
+ */
+router.put('/clients/:id', requireAuth, requireSuperOrgOwner, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      domain,
+      description,
+      industry,
+      logoUrl,
+      isActive,
+      identity,
+      offerings,
+      icp,
+      positioning,
+      outreach,
+      compiledOrgContext,
+    } = req.body;
+
+    const updated = await updateClientOrganization(id, {
+      name,
+      domain,
+      description,
+      industry,
+      logoUrl,
+      isActive,
+      identity,
+      offerings,
+      icp,
+      positioning,
+      outreach,
+      compiledOrgContext,
+    });
+
+    res.json({
+      success: true,
+      organization: updated,
+    });
+  } catch (error: any) {
+    console.error('[SUPER-ORG-ROUTES] Error updating client:', error);
+    res.status(500).json({ error: error.message || 'Failed to update client organization' });
+  }
+});
+
+/**
+ * DELETE /api/super-org/clients/:id
+ * Delete (deactivate) a client organization
+ */
+router.delete('/clients/:id', requireAuth, requireSuperOrgOwner, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await deleteClientOrganization(id);
+
+    res.json({
+      success: true,
+      message: 'Client organization deleted successfully',
+    });
+  } catch (error: any) {
+    console.error('[SUPER-ORG-ROUTES] Error deleting client:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete client organization' });
+  }
+});
+
 // ==================== CREDENTIAL CATEGORIES ====================
+
+/**
+ * POST /api/super-org/claim-ownership
+ * Bootstrap endpoint: Allows an admin user to claim super org ownership
+ * This is useful if no owners exist yet or if owner setup was missed during initialization
+ */
+router.post('/claim-ownership', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.userId;
+    console.log('[SUPER-ORG-ROUTES] Claim ownership request from userId:', userId);
+
+    if (!userId) {
+      console.log('[SUPER-ORG-ROUTES] No userId found in request');
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Get the user
+    const user = await storage.getUser(userId);
+    console.log('[SUPER-ORG-ROUTES] User lookup result:', user ? { id: user.id, username: user.username, role: user.role } : 'not found');
+
+    if (!user) {
+      return res.status(403).json({
+        error: 'User not found'
+      });
+    }
+
+    // Get super organization
+    const superOrg = await getSuperOrganization();
+    if (!superOrg) {
+      return res.status(404).json({ error: 'Super organization not found' });
+    }
+
+    // Check current membership
+    const members = await getOrganizationMembers(superOrg.id);
+    const existingOwners = members.filter(m => m.role === 'owner');
+
+    // Bootstrap mode: If no owners exist, any authenticated user can claim ownership
+    // This is necessary for initial setup
+    if (existingOwners.length === 0) {
+      console.log(`[SUPER-ORG-ROUTES] Bootstrap mode: No owners exist, allowing ${user.username} to claim ownership`);
+    } else if (user.role !== 'admin') {
+      // If owners exist, require admin role
+      console.log(`[SUPER-ORG-ROUTES] User ${user.username} has role "${user.role}", not "admin". Existing owners: ${existingOwners.length}`);
+      return res.status(403).json({
+        error: `Only system admins can claim super organization ownership. Your role: ${user.role}`
+      });
+    }
+
+    // Also upgrade user to admin if they're not already (bootstrap)
+    if (user.role !== 'admin') {
+      console.log(`[SUPER-ORG-ROUTES] Upgrading user ${user.username} to admin role`);
+      await storage.updateUser(userId, { role: 'admin' });
+    }
+
+    // Add user as owner (will update role if already a member)
+    const member = await addOrganizationMember(superOrg.id, userId, 'owner');
+
+    console.log(`[SUPER-ORG-ROUTES] User ${user.username} (${userId}) claimed super org ownership. Previous owners: ${existingOwners.length}`);
+
+    res.json({
+      success: true,
+      message: 'Successfully claimed super organization ownership',
+      member,
+      existingOwners: existingOwners.length,
+      userRoleUpgraded: user.role !== 'admin',
+    });
+  } catch (error) {
+    console.error('[SUPER-ORG-ROUTES] Error claiming ownership:', error);
+    res.status(500).json({ error: 'Failed to claim ownership' });
+  }
+});
 
 /**
  * GET /api/super-org/credential-categories

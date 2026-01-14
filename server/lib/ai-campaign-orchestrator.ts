@@ -13,7 +13,7 @@ import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
-import { campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents } from '@shared/schema';
+import { campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns } from '@shared/schema';
 import { eq, sql, inArray, and } from 'drizzle-orm';
 import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
@@ -30,6 +30,39 @@ const DEFAULT_MAX_CONCURRENT_CALLS = 30; // Increased to 30 as requested
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - reset items stuck in_progress longer than this
+
+// Telnyx error codes that should pause the campaign (account-level issues)
+const TELNYX_ACCOUNT_DISABLED_CODE = 10010; // "Account is disabled D17"
+const TELNYX_FATAL_ERROR_CODES = [10010]; // Account disabled - don't retry, pause campaign
+
+/**
+ * Check if an error indicates a Telnyx account-level issue that requires pausing
+ * Returns the error code if it's a fatal error, null otherwise
+ */
+function isTelnyxFatalError(error: any): { code: number; detail: string } | null {
+  if (!error || !error.message) return null;
+
+  const message = String(error.message);
+
+  // Parse Telnyx API error format: "Telnyx API error: 403 - {"errors":[{"code":10010,"detail":"Account is disabled D17"}]}"
+  const jsonMatch = message.match(/\{[\s\S]*"errors"[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const errorData = JSON.parse(jsonMatch[0]);
+    if (errorData.errors && Array.isArray(errorData.errors)) {
+      for (const err of errorData.errors) {
+        if (err.code && TELNYX_FATAL_ERROR_CODES.includes(err.code)) {
+          return { code: err.code, detail: err.detail || 'Unknown error' };
+        }
+      }
+    }
+  } catch {
+    // JSON parsing failed, not a structured Telnyx error
+  }
+
+  return null;
+}
 
 /**
  * Check if a contact is within their local business hours based on country
@@ -219,6 +252,59 @@ async function getInProgressCount(campaignId: string): Promise<number> {
       eq(campaignQueue.status, 'in_progress')
     ));
   return result[0]?.count || 0;
+}
+
+/**
+ * STARTUP RESUME: Reset ALL in_progress items immediately on server start
+ * This ensures campaigns can continue after a server restart/crash
+ */
+async function startupResumeStuckCalls(): Promise<void> {
+  try {
+    // Reset all in_progress items back to queued (server restart means all active calls are dead)
+    const result = await db.execute(sql`
+      UPDATE campaign_queue 
+      SET status = 'queued', 
+          next_attempt_at = NOW() + INTERVAL '5 seconds',
+          enqueued_reason = COALESCE(enqueued_reason, '') || '|startup_reset:' || to_char(NOW(), 'HH24:MI:SS'),
+          updated_at = NOW()
+      WHERE status = 'in_progress'
+      RETURNING id, campaign_id
+    `);
+    
+    const resetCount = result.rows?.length || 0;
+    if (resetCount > 0) {
+      console.log(`[AI Orchestrator] STARTUP RESUME: Reset ${resetCount} in_progress items back to queued`);
+      
+      // Log affected campaigns
+      const affectedCampaigns = new Set(result.rows?.map((r: any) => r.campaign_id).filter(Boolean));
+      if (affectedCampaigns.size > 0) {
+        console.log(`[AI Orchestrator] STARTUP RESUME: Affected campaigns: ${[...affectedCampaigns].join(', ')}`);
+      }
+    } else {
+      console.log('[AI Orchestrator] STARTUP RESUME: No stuck in_progress items found');
+    }
+
+    // Log current campaign statuses for debugging
+    const campaignStats = await db.execute(sql`
+      SELECT c.id, c.name, c.status, c.dial_mode,
+             COUNT(CASE WHEN q.status = 'queued' THEN 1 END) as queued_count,
+             COUNT(CASE WHEN q.status = 'in_progress' THEN 1 END) as in_progress_count
+      FROM campaigns c
+      LEFT JOIN campaign_queue q ON q.campaign_id = c.id
+      WHERE c.dial_mode = 'ai_agent'
+      GROUP BY c.id, c.name, c.status, c.dial_mode
+      ORDER BY c.status
+    `);
+    
+    if (campaignStats.rows?.length) {
+      console.log('[AI Orchestrator] STARTUP: AI Campaign Status Summary:');
+      for (const row of campaignStats.rows as any[]) {
+        console.log(`  - ${row.name}: ${row.status} (${row.queued_count || 0} queued, ${row.in_progress_count || 0} in-progress)`);
+      }
+    }
+  } catch (error) {
+    console.error('[AI Orchestrator] STARTUP RESUME error:', error);
+  }
 }
 
 /**
@@ -649,6 +735,49 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   const bridge = getTelnyxAiBridge();
   let initiated = 0;
 
+  // Create or reuse a dialer run for this orchestration batch
+  // This ensures all calls have proper tracking in dialerCallAttempts
+  let dialerRunId: string | null = null;
+  try {
+    // Check if there's an active run for this campaign/agent combination
+    // Use proper NULL comparison for virtualAgentId
+    const virtualAgentIdValue = virtualAgent?.id || null;
+    const existingRuns = await db
+      .select()
+      .from(dialerRuns)
+      .where(and(
+        eq(dialerRuns.campaignId, campaignId),
+        eq(dialerRuns.status, 'active'),
+        virtualAgentIdValue 
+          ? eq(dialerRuns.virtualAgentId, virtualAgentIdValue)
+          : sql`${dialerRuns.virtualAgentId} IS NULL`
+      ))
+      .limit(1);
+
+    if (existingRuns.length > 0) {
+      dialerRunId = existingRuns[0].id;
+    } else {
+      // Create a new dialer run
+      const [newRun] = await db
+        .insert(dialerRuns)
+        .values({
+          campaignId,
+          runType: 'power_dial',
+          agentType: 'ai',
+          virtualAgentId: virtualAgentIdValue,
+          status: 'active',
+          maxConcurrentCalls: maxConcurrent,
+          startedAt: new Date(),
+        })
+        .returning();
+      dialerRunId = newRun.id;
+      console.log(`[AI Orchestrator] Created new dialer run ${dialerRunId} for campaign ${campaignId}`);
+    }
+  } catch (error) {
+    console.error(`[AI Orchestrator] Failed to create/get dialer run:`, error);
+    // Continue without run tracking - calls will still work but without proper tracking
+  }
+
   // Process in batches for parallelism
   for (let i = 0; i < eligibleItems.length; i += PARALLEL_CALL_BATCH_SIZE) {
     const batch = eligibleItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
@@ -659,11 +788,43 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
         const phoneNumber = item._resolvedPhone || item.dialedNumber || item.phone || item.phoneNumber;
         const contactId = item.contact_id || item.contactId;
 
+        // CRITICAL: Skip items without contact_id - they can't be tracked properly
+        if (!contactId) {
+          console.warn(`[AI Orchestrator] Skipping queue item ${item.id} - missing contact_id`);
+          return { success: false, itemId: item.id, error: 'missing_contact_id' };
+        }
+
         // Contact data comes from the SQL query (snake_case)
         // Use virtual agent name if available, fall back to aiSettings persona
         const agentName = virtualAgent?.name || aiSettings.persona?.name || "your representative";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
         
+        // Create call attempt record for proper tracking
+        let callAttemptId: string | null = null;
+        if (dialerRunId) {
+          try {
+            const [callAttempt] = await db
+              .insert(dialerCallAttempts)
+              .values({
+                dialerRunId,
+                campaignId,
+                contactId,
+                queueItemId: item.id,
+                agentType: 'ai',
+                virtualAgentId: virtualAgent?.id || null,
+                phoneDialed: phoneNumber,
+                attemptNumber: (item.attempt_count || 0) + 1,
+              })
+              .returning();
+            callAttemptId = callAttempt.id;
+            console.log(`[AI Orchestrator] Created call attempt ${callAttemptId} for contact ${contactId}`);
+          } catch (err) {
+            console.error(`[AI Orchestrator] Failed to create call attempt record:`, err);
+          }
+        } else {
+          console.warn(`[AI Orchestrator] No dialerRunId available - call will lack proper tracking`);
+        }
+
         const context: CallContext = {
           contactFirstName: item.contact_first_name || "there",
           contactLastName: item.contact_last_name || "",
@@ -678,6 +839,8 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
           contactId: contactId || undefined,
           elevenLabsAgentId: virtualAgent?.externalAgentId || (aiSettings as any).elevenLabsAgentId || undefined,
           virtualAgentId: virtualAgent?.id || undefined,
+          runId: dialerRunId || undefined,
+          callAttemptId: callAttemptId || undefined,
         };
 
         const callResult = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
@@ -717,13 +880,47 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
           return { success: false, itemId: item.id, error };
         }
 
+        // Check for Telnyx account-level errors (should pause campaign, not retry)
+        const telnyxFatalError = isTelnyxFatalError(error);
+        if (telnyxFatalError) {
+          console.error(`[AI Orchestrator] ⚠️ FATAL TELNYX ERROR detected: code=${telnyxFatalError.code}, detail="${telnyxFatalError.detail}"`);
+          console.error(`[AI Orchestrator] ⚠️ Pausing campaign ${campaignId} due to Telnyx account issue - please check your Telnyx account status`);
+
+          // Pause the campaign to stop further call attempts
+          try {
+            await storage.updateCampaign(campaignId, { status: 'paused' });
+            console.log(`[AI Orchestrator] ✅ Campaign ${campaignId} has been PAUSED due to Telnyx account error`);
+            console.log(`[AI Orchestrator] ℹ️ Reason: Telnyx Error ${telnyxFatalError.code}: ${telnyxFatalError.detail}`);
+            console.log(`[AI Orchestrator] ℹ️ Action Required: Check your Telnyx account status at https://portal.telnyx.com`);
+          } catch (pauseError) {
+            console.error(`[AI Orchestrator] Failed to pause campaign ${campaignId}:`, pauseError);
+          }
+
+          // Mark item as failed (not retryable)
+          try {
+            await db.execute(sql`
+              UPDATE campaign_queue
+              SET status = 'removed',
+                  removed_reason = ${'telnyx_account_disabled'},
+                  enqueued_reason = COALESCE(enqueued_reason, '') || '|telnyx_fatal:' || ${telnyxFatalError.detail.substring(0, 50)},
+                  updated_at = NOW()
+              WHERE id = ${item.id}
+            `);
+          } catch (updateError) {
+            console.error(`[AI Orchestrator] Failed to update queue item ${item.id}:`, updateError);
+          }
+
+          // Return with special flag to stop processing this campaign
+          return { success: false, itemId: item.id, error, fatalError: true };
+        }
+
         console.error(`[AI Orchestrator] Failed to initiate call for ${item.id}:`, error?.message || error);
-        
+
         // IMMEDIATE ERROR RECOVERY: Reset the queue item for retry
         // This prevents slots from being consumed by failed initiations
         try {
           await db.execute(sql`
-            UPDATE campaign_queue 
+            UPDATE campaign_queue
             SET status = 'queued',
                 next_attempt_at = NOW() + INTERVAL '2 minutes',
                 enqueued_reason = COALESCE(enqueued_reason, '') || '|init_fail:' || ${String(error?.message || 'unknown').substring(0, 50)},
@@ -734,7 +931,7 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
         } catch (resetError) {
           console.error(`[AI Orchestrator] Failed to reset queue item ${item.id}:`, resetError);
         }
-        
+
         return { success: false, itemId: item.id, error };
       }
     });
@@ -744,6 +941,13 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
     initiated += batchSuccess;
 
     console.log(`[AI Orchestrator] Batch ${Math.floor(i / PARALLEL_CALL_BATCH_SIZE) + 1}: ${batchSuccess}/${batch.length} calls initiated (total: ${initiated}/${eligibleItems.length})`);
+
+    // Check if any result has a fatal error - if so, stop processing this campaign
+    const fatalResult = results.find((r: any) => r.fatalError);
+    if (fatalResult) {
+      console.log(`[AI Orchestrator] Stopping campaign ${campaignId} processing due to fatal Telnyx error`);
+      return { initiated, skipped, fatalError: true };
+    }
 
     // Short delay between batches to avoid rate limits
     if (i + PARALLEL_CALL_BATCH_SIZE < eligibleItems.length) {
@@ -846,6 +1050,11 @@ export function initializeAiCampaignOrchestrator(): void {
     console.log(`[AI Orchestrator] Started - checking every ${ORCHESTRATOR_INTERVAL_MS / 1000}s`);
   }).catch(err => {
     console.error('[AI Orchestrator] Failed to add repeatable job:', err);
+  });
+
+  // Run startup resume to clear any stuck items from previous server instance
+  startupResumeStuckCalls().catch(err => {
+    console.error('[AI Orchestrator] Startup resume failed:', err);
   });
 
   console.log('[AI Orchestrator] Initialized successfully');

@@ -25,8 +25,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "./account-messaging-service";
 
 // ==================== INTERFACES ====================
@@ -283,6 +285,9 @@ export async function generatePersonalizedEmail(
     intelligenceRecord: accountIntelligenceRecord,
   });
 
+  // Load account profile data for including in context
+  const accountProfile = await getAccountProfileData(accountId);
+
   const accountIntelligencePayload =
     accountIntelligenceRecord.payloadJson as AccountIntelligencePayload;
   const accountMessagingBriefPayload =
@@ -332,6 +337,7 @@ export async function generatePersonalizedEmail(
       accountIntelligence: accountIntelligencePayload,
       accountMessagingBrief: accountMessagingBriefPayload,
       participantContext,
+      accountProfile,
     }
   );
 
@@ -568,11 +574,12 @@ async function generateEmailWithAI(
     accountIntelligence: AccountIntelligencePayload;
     accountMessagingBrief: AccountMessagingBriefPayload;
     participantContext: ParticipantContext;
+    accountProfile?: AccountProfileData | null;
   }
 ): Promise<PersonalizedEmail> {
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   const accountContextSection = accountContext
-    ? buildAccountContextSection(accountContext.accountIntelligence, accountContext.accountMessagingBrief)
+    ? buildAccountContextSection(accountContext.accountIntelligence, accountContext.accountMessagingBrief, accountContext.accountProfile)
     : '';
 
   const systemPrompt = await buildAgentSystemPrompt(`

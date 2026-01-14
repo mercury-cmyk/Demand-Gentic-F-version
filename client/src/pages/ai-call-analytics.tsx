@@ -1,16 +1,12 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
 import { 
   Bot, 
   Phone, 
@@ -25,8 +21,7 @@ import {
   PhoneForwarded,
   BarChart3,
   Activity,
-  PhoneCall,
-  Loader2
+  PhoneCall
 } from "lucide-react";
 import { 
   BarChart, 
@@ -73,88 +68,11 @@ const PIE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7
 
 export default function AiCallAnalyticsPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
-  const [testPhoneNumber, setTestPhoneNumber] = useState<string>('');
-  const [testContactName, setTestContactName] = useState<string>('');
-  const [batchLimit, setBatchLimit] = useState<number>(10);
   const { toast } = useToast();
 
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
   });
-
-  const testCallMutation = useMutation({
-    mutationFn: async (data: { phoneNumber: string; contactFirstName: string; campaignId?: string }) => {
-      const response = await apiRequest('POST', '/api/ai-calls/test-call', data);
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Test Call Initiated",
-        description: `Calling ${testPhoneNumber}... Your phone should ring shortly!`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Test Call Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const batchCallMutation = useMutation({
-    mutationFn: async (data: { campaignId: string; limit: number; delayBetweenCalls?: number }) => {
-      const response = await apiRequest('POST', '/api/ai-calls/batch-start', data);
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Campaign Launched!",
-        description: `Started ${data.callsInitiated || 0} AI calls. ${data.message || ''}`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Campaign Launch Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleLaunchCampaign = () => {
-    if (selectedCampaign === 'all') {
-      toast({
-        title: "Select a Campaign",
-        description: "Please select a specific AI campaign to launch",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    batchCallMutation.mutate({
-      campaignId: selectedCampaign,
-      limit: batchLimit,
-      delayBetweenCalls: 5000,
-    });
-  };
-
-  const handleTestCall = () => {
-    if (!testPhoneNumber || testPhoneNumber.length < 10) {
-      toast({
-        title: "Invalid Phone Number",
-        description: "Please enter a valid phone number with country code",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    testCallMutation.mutate({
-      phoneNumber: testPhoneNumber.startsWith('+') ? testPhoneNumber : `+1${testPhoneNumber}`,
-      contactFirstName: testContactName || "Test",
-      campaignId: selectedCampaign !== 'all' ? selectedCampaign : undefined,
-    });
-  };
 
   const aiCampaigns = campaigns.filter((c) => c.dialMode === 'ai_agent');
 
@@ -268,131 +186,6 @@ export default function AiCallAnalyticsPage() {
           </Select>
         </div>
       </div>
-
-      {/* Test Call Section */}
-      <Card className="border-primary/30 bg-primary/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2">
-            <PhoneCall className="h-5 w-5" />
-            Test AI Call
-          </CardTitle>
-          <CardDescription>
-            Make a test call to verify AI scripts and voice quality
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="space-y-2 flex-1 min-w-[200px]">
-              <Label htmlFor="test-phone">Phone Number</Label>
-              <Input
-                id="test-phone"
-                placeholder="+14175551234"
-                value={testPhoneNumber}
-                onChange={(e) => setTestPhoneNumber(e.target.value)}
-                data-testid="input-test-phone"
-              />
-            </div>
-            <div className="space-y-2 flex-1 min-w-[150px]">
-              <Label htmlFor="test-name">Contact Name (optional)</Label>
-              <Input
-                id="test-name"
-                placeholder="John"
-                value={testContactName}
-                onChange={(e) => setTestContactName(e.target.value)}
-                data-testid="input-test-name"
-              />
-            </div>
-            <Button 
-              onClick={handleTestCall}
-              disabled={testCallMutation.isPending}
-              data-testid="button-test-call"
-            >
-              {testCallMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Calling...
-                </>
-              ) : (
-                <>
-                  <Phone className="mr-2 h-4 w-4" />
-                  Make Test Call
-                </>
-              )}
-            </Button>
-          </div>
-          {selectedCampaign !== 'all' && (
-            <p className="text-xs text-muted-foreground mt-3">
-              Using scripts from: {aiCampaigns.find(c => c.id === selectedCampaign)?.name || 'Selected campaign'}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Launch Campaign Section */}
-      <Card className="border-green-500/30 bg-green-500/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2">
-            <PhoneForwarded className="h-5 w-5" />
-            Launch AI Campaign
-          </CardTitle>
-          <CardDescription>
-            Start batch AI calls from your campaign queue
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="space-y-2 flex-1 min-w-[200px]">
-              <Label htmlFor="launch-campaign">Select Campaign</Label>
-              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger data-testid="select-launch-campaign">
-                  <SelectValue placeholder="Select AI campaign" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">-- Select a campaign --</SelectItem>
-                  {aiCampaigns.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2 w-32">
-              <Label htmlFor="batch-limit">Calls to Make</Label>
-              <Input
-                id="batch-limit"
-                type="number"
-                min={1}
-                max={50}
-                value={batchLimit}
-                onChange={(e) => setBatchLimit(Math.min(50, Math.max(1, parseInt(e.target.value) || 10)))}
-                data-testid="input-batch-limit"
-              />
-            </div>
-            <Button 
-              onClick={handleLaunchCampaign}
-              disabled={batchCallMutation.isPending || selectedCampaign === 'all'}
-              className="bg-green-600 hover:bg-green-700"
-              data-testid="button-launch-campaign"
-            >
-              {batchCallMutation.isPending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Launching...
-                </>
-              ) : (
-                <>
-                  <PhoneForwarded className="mr-2 h-4 w-4" />
-                  Launch Campaign
-                </>
-              )}
-            </Button>
-          </div>
-          {selectedCampaign !== 'all' && (
-            <p className="text-xs text-muted-foreground mt-3">
-              Will call up to {batchLimit} contacts from: {aiCampaigns.find(c => c.id === selectedCampaign)?.name || 'Selected campaign'}
-            </p>
-          )}
-        </CardContent>
-      </Card>
 
       {activeCalls.length > 0 && (
         <Card className="border-green-500/50 bg-green-500/5">

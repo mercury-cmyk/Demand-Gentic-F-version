@@ -43,7 +43,8 @@ router.post("/ephemeral-token", requireAuth, async (req: Request, res: Response)
       return res.status(500).json({ error: "OpenAI not configured" });
     }
 
-    const selectedModel = model || "gpt-4o-realtime-preview-2024-12-17";
+    // Use the latest GA gpt-realtime model for most natural, human-like speech
+    const selectedModel = model || "gpt-realtime";
     
     console.log(`${LOG_PREFIX} Creating ephemeral token for user ${(req as any).user?.id || 'unknown'}`);
 

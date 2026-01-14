@@ -56,6 +56,9 @@ export default function PhoneCampaignEditPage() {
   // Max Call Duration state (in seconds, default 240 = 4 minutes)
   const [maxCallDurationSeconds, setMaxCallDurationSeconds] = useState<number>(240);
 
+  // Organization selection state
+  const [problemIntelligenceOrgId, setProblemIntelligenceOrgId] = useState<string | null>(null);
+
   // Fetch campaign data
   const { data: campaign, isLoading: campaignLoading } = useQuery<any>({
     queryKey: [`/api/campaigns/${campaignId}`],
@@ -80,6 +83,11 @@ export default function PhoneCampaignEditPage() {
   // Fetch export templates for lead delivery
   const { data: exportTemplates = [] } = useQuery<any[]>({
     queryKey: ['/api/export-templates'],
+  });
+
+  // Fetch organizations for organization selection
+  const { data: organizationsData } = useQuery<{ organizations: { id: string; name: string }[] }>({
+    queryKey: ['/api/organizations/dropdown'],
   });
 
   // Initialize form with campaign data
@@ -125,6 +133,9 @@ export default function PhoneCampaignEditPage() {
 
       // Initialize max call duration
       setMaxCallDurationSeconds(campaign.maxCallDurationSeconds || 240);
+
+      // Initialize organization
+      setProblemIntelligenceOrgId(campaign.problemIntelligenceOrgId || null);
     }
   }, [campaign]);
 
@@ -214,6 +225,8 @@ export default function PhoneCampaignEditPage() {
       deliveryTemplateId,
       // Max call duration enforcement
       maxCallDurationSeconds,
+      // Organization assignment
+      problemIntelligenceOrgId,
       // Campaign Context fields
       campaignObjective,
       productServiceInfo,
@@ -326,7 +339,7 @@ export default function PhoneCampaignEditPage() {
             <CardHeader>
               <CardTitle>Basic Information</CardTitle>
               <CardDescription>
-                Update campaign name
+                Update campaign name and organization
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -339,6 +352,29 @@ export default function PhoneCampaignEditPage() {
                   placeholder="Enter campaign name"
                   data-testid="input-name"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="organization">Organization</Label>
+                <Select
+                  value={problemIntelligenceOrgId || "none"}
+                  onValueChange={(value) => setProblemIntelligenceOrgId(value === "none" ? null : value)}
+                >
+                  <SelectTrigger data-testid="select-organization">
+                    <SelectValue placeholder="Select organization (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No organization</SelectItem>
+                    {organizationsData?.organizations?.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>
+                        {org.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Link this campaign to an organization to use its Problem Intelligence and messaging context
+                </p>
               </div>
             </CardContent>
           </Card>

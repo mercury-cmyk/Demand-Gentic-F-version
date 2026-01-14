@@ -991,7 +991,7 @@ router.get("/openai-realtime/status", async (req, res) => {
       activeSessions: getActiveSessionCount(),
       websocketPath: "/openai-realtime-dialer",
       provider: "openai",
-      model: "gpt-4o-realtime-preview-2024-12-17"
+      model: "gpt-realtime"
     });
   } catch (error) {
     console.error("[Dialer Runs] OpenAI Realtime status error:", error);

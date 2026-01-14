@@ -18,8 +18,10 @@ import {
 import {
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "../services/account-messaging-service";
 import {
   getOrBuildAccountCallBrief,
@@ -572,9 +574,11 @@ Key guidelines:
     try {
       const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
       const messagingBriefRecord = await getOrBuildAccountMessagingBrief({ accountId, campaignId });
+      const accountProfile = await getAccountProfileData(accountId);
       sections.account = buildAccountContextSection(
         intelligenceRecord?.payloadJson as AccountIntelligencePayload,
-        messagingBriefRecord?.payloadJson as AccountMessagingBriefPayload
+        messagingBriefRecord?.payloadJson as AccountMessagingBriefPayload,
+        accountProfile
       );
     } catch (e) {
       console.warn("Failed to build account context:", e);
@@ -1417,23 +1421,71 @@ router.post("/transcript", requireAuth, async (req, res) => {
 
 // ==================== HELPER FUNCTIONS ====================
 
+/**
+ * Build campaign context section with PRIORITIZED talking points and key messages
+ *
+ * Priority Order:
+ * 1. Campaign Objective (PRIMARY GOAL)
+ * 2. Key Talking Points (MUST DELIVER)
+ * 3. Campaign Brief (context)
+ * 4. Product/Service Info
+ * 5. Target Audience
+ * 6. Success Criteria
+ */
 function buildCampaignContextSection(campaign: any): string {
   const parts = ['## Campaign Context'];
 
+  // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL
   if (campaign.campaignObjective) {
-    parts.push(`**Objective:** ${campaign.campaignObjective}`);
+    parts.push(`### PRIMARY OBJECTIVE (Critical)\n${campaign.campaignObjective}\n\n**You MUST work toward this objective in every conversation.**`);
   }
+
+  // KEY TALKING POINTS - HIGHEST PRIORITY for message delivery
+  // These are placed early and emphasized to ensure the agent delivers them
+  // Following OpenAI/Gemini voice best practices for natural delivery
+  if (campaign.talkingPoints && Array.isArray(campaign.talkingPoints) && campaign.talkingPoints.length > 0) {
+    const points = campaign.talkingPoints.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n');
+    parts.push(`### KEY TALKING POINTS (Must Deliver)
+
+**CRITICAL: You MUST naturally weave these points into the conversation. These are the core messages to communicate:**
+
+${points}
+
+**Delivery Guidelines (Voice-Optimized):**
+- Introduce these points conversationally, NOT as a reading list
+- Look for natural moments to bring up each point based on conversation flow
+- Prioritize points 1-3 as most critical if time is limited
+- VARY your phrasing — do not repeat identical phrases
+- Use natural pauses after important points to let them land
+- Adapt your enthusiasm level to match the prospect's energy
+- If interrupted mid-point, acknowledge and return naturally when appropriate`);
+  }
+
+  // Campaign brief provides additional context for intelligent delivery
+  if (campaign.campaignContextBrief) {
+    parts.push(`### Campaign Brief\n${campaign.campaignContextBrief}`);
+  }
+
+  // Product/Service info for context
   if (campaign.productServiceInfo) {
-    parts.push(`**Product/Service:** ${campaign.productServiceInfo}`);
+    parts.push(`### Product/Service Information\n${campaign.productServiceInfo}`);
   }
+
+  // Target audience helps agent adapt their approach
   if (campaign.targetAudienceDescription) {
-    parts.push(`**Target Audience:** ${campaign.targetAudienceDescription}`);
+    parts.push(`### Target Audience\n${campaign.targetAudienceDescription}`);
   }
+
+  // Success criteria defines what a good outcome looks like
   if (campaign.successCriteria) {
-    parts.push(`**Success Criteria:** ${campaign.successCriteria}`);
+    parts.push(`### Success Criteria\n${campaign.successCriteria}`);
   }
-  if (campaign.talkingPoints && Array.isArray(campaign.talkingPoints)) {
-    parts.push(`**Key Points:**\n${campaign.talkingPoints.map((p: string) => `- ${p}`).join('\n')}`);
+
+  // Log if no campaign context was added
+  if (parts.length === 1) {
+    console.warn('[Preview Studio] ⚠️ Campaign has no context fields populated (objective, brief, talking points, etc.)');
+  } else {
+    console.log(`[Preview Studio] ✅ Built campaign context with ${parts.length - 1} sections (talking points: ${campaign.talkingPoints?.length || 0})`);
   }
 
   return parts.join('\n\n');
@@ -1441,9 +1493,32 @@ function buildCampaignContextSection(campaign: any): string {
 
 function buildAccountContextSection(
   intelligence: AccountIntelligencePayload | null,
-  brief: AccountMessagingBriefPayload | null
+  brief: AccountMessagingBriefPayload | null,
+  accountProfile?: AccountProfileData | null
 ): string {
   const parts = ['## Account Context'];
+
+  // Add account profile info first
+  if (accountProfile) {
+    if (accountProfile.name) {
+      parts.push(`**Company:** ${accountProfile.name}`);
+    }
+    if (accountProfile.domain) {
+      parts.push(`**Domain:** ${accountProfile.domain}`);
+    }
+    if (accountProfile.industry) {
+      parts.push(`**Industry:** ${accountProfile.industry}`);
+    }
+    if (accountProfile.description) {
+      parts.push(`**Description:** ${accountProfile.description}`);
+    }
+    if (accountProfile.employeeCount) {
+      parts.push(`**Employee Count:** ${accountProfile.employeeCount}`);
+    }
+    if (accountProfile.revenue) {
+      parts.push(`**Revenue:** ${accountProfile.revenue}`);
+    }
+  }
 
   if (intelligence) {
     if (intelligence.problem_hypothesis) {
@@ -1577,9 +1652,11 @@ async function buildAssembledPrompt(params: {
   try {
     const intelligenceRecord = await getOrBuildAccountIntelligence(accountId);
     const messagingBriefRecord = await getOrBuildAccountMessagingBrief({ accountId, campaignId });
+    const accountProfile = await getAccountProfileData(accountId);
     sections.push(buildAccountContextSection(
       intelligenceRecord?.payloadJson as AccountIntelligencePayload,
-      messagingBriefRecord?.payloadJson as AccountMessagingBriefPayload
+      messagingBriefRecord?.payloadJson as AccountMessagingBriefPayload,
+      accountProfile
     ));
   } catch (e) {
     // Ignore

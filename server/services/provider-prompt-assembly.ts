@@ -105,6 +105,20 @@ function formatForGoogle(blocks: KnowledgeBlock[], providerOverrides: Map<number
   const sections: string[] = [];
   let currentLayer: string | null = null;
 
+  // CRITICAL: Add Gemini-specific preamble to prevent premature org name disclosure
+  // Gemini tends to be more literal with system instructions and may introduce itself with org name
+  sections.push(`<critical_instructions>
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+</critical_instructions>
+`);
+
   for (const block of blocks) {
     // Check for provider-specific override
     const override = providerOverrides.get(block.id);
@@ -289,8 +303,21 @@ function assembleLegacyPrompt(
 
   // Apply provider-specific formatting for legacy prompts
   if (provider === "google") {
-    // Wrap in tags for Gemini
-    prompt = `<system_instructions>\n${prompt}\n</system_instructions>`;
+    // Add critical preamble and wrap in tags for Gemini
+    // Gemini needs explicit instructions to prevent premature org name disclosure
+    const geminiPreamble = `<critical_instructions>
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+</critical_instructions>
+
+`;
+    prompt = `${geminiPreamble}<system_instructions>\n${prompt}\n</system_instructions>`;
   }
 
   const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);

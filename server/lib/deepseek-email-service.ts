@@ -8,8 +8,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from '../services/account-messaging-service';
 
 interface EmailContentRequest {
@@ -77,9 +79,13 @@ async function resolveAccountContext(
     intelligenceRecord: accountIntelligence,
   });
 
+  // Load account profile data for including in context
+  const accountProfile = await getAccountProfileData(accountId);
+
   return buildAccountContextSection(
     accountIntelligence.payloadJson as AccountIntelligencePayload,
-    accountMessagingBrief.payloadJson as AccountMessagingBriefPayload
+    accountMessagingBrief.payloadJson as AccountMessagingBriefPayload,
+    accountProfile
   );
 }
 

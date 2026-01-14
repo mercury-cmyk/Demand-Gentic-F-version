@@ -271,6 +271,9 @@ export function validateCapabilityIds(ids: string[]): { valid: string[]; invalid
 
 /**
  * Build campaign context section from campaign fields
+ *
+ * PRIORITY ORDER: Key Talking Points and Critical Messages are placed FIRST
+ * to ensure the agent prioritizes delivering these during the conversation.
  */
 export function buildCampaignContextSection(config: {
   objective?: string | null;
@@ -283,23 +286,48 @@ export function buildCampaignContextSection(config: {
 }): string {
   const sections: string[] = [];
 
+  // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL
   if (config.objective) {
-    sections.push(`### Campaign Objective\n${config.objective}`);
+    sections.push(`### PRIMARY OBJECTIVE (Critical)\n${config.objective}\n\n**You MUST work toward this objective in every conversation.**`);
   }
 
+  // KEY TALKING POINTS - HIGHEST PRIORITY for message delivery
+  // These are placed early and emphasized to ensure the agent delivers them
+  // Following OpenAI/Gemini voice best practices for natural delivery
+  if (config.talkingPoints && config.talkingPoints.length > 0) {
+    const points = config.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n');
+    sections.push(`### KEY TALKING POINTS (Must Deliver)
+
+**CRITICAL: You MUST naturally weave these points into the conversation. These are the core messages to communicate:**
+
+${points}
+
+**Delivery Guidelines (Voice-Optimized):**
+- Introduce these points conversationally, NOT as a reading list
+- Look for natural moments to bring up each point based on conversation flow
+- Prioritize points 1-3 as most critical if time is limited
+- VARY your phrasing — do not repeat identical phrases
+- Use natural pauses after important points to let them land
+- Adapt your enthusiasm level to match the prospect's energy
+- If interrupted mid-point, acknowledge and return naturally when appropriate`);
+  }
+
+  // Campaign brief provides additional context for intelligent delivery
+  if (config.brief) {
+    sections.push(`### Campaign Brief\n${config.brief}`);
+  }
+
+  // Product/Service info for context
   if (config.productInfo) {
     sections.push(`### Product/Service Information\n${config.productInfo}`);
   }
 
-  if (config.talkingPoints && config.talkingPoints.length > 0) {
-    const points = config.talkingPoints.map(p => `- ${p}`).join('\n');
-    sections.push(`### Key Talking Points\n${points}`);
-  }
-
+  // Target audience helps agent adapt their approach
   if (config.targetAudience) {
     sections.push(`### Target Audience\n${config.targetAudience}`);
   }
 
+  // Campaign-specific objections with prepared responses
   if (config.objections && config.objections.length > 0) {
     const objectionText = config.objections
       .map(o => `**"${o.objection}"**\nResponse: ${o.response}`)
@@ -307,12 +335,17 @@ export function buildCampaignContextSection(config: {
     sections.push(`### Campaign-Specific Objections\n${objectionText}`);
   }
 
+  // Success criteria defines what a good outcome looks like
   if (config.successCriteria) {
     sections.push(`### Success Criteria\n${config.successCriteria}`);
   }
 
-  if (sections.length === 0) return '';
+  if (sections.length === 0) {
+    console.warn('[Foundation Capabilities] ⚠️ Campaign context is empty - no objective, brief, or talking points configured');
+    return '';
+  }
 
+  console.log(`[Foundation Capabilities] ✅ Built campaign context with ${sections.length} sections (talking points: ${config.talkingPoints?.length || 0})`);
   return `## Campaign Context\n\n${sections.join('\n\n')}`;
 }
 

@@ -1166,6 +1166,10 @@ export default function VirtualAgentsPage() {
   const [creationMode, setCreationMode] = useState<'skill' | 'manual'>('skill');
   const [editingAgent, setEditingAgent] = useState<VirtualAgent | null>(null);
   const [deleteAgent, setDeleteAgent] = useState<VirtualAgent | null>(null);
+  // Clone/Duplicate dialog state
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [agentToClone, setAgentToClone] = useState<VirtualAgent | null>(null);
+  const [cloneName, setCloneName] = useState("");
   const [formData, setFormData] = useState<VirtualAgentFormData>(defaultFormData);
   const [orgPromptData, setOrgPromptData] = useState<OrgPromptData>({
     orgIntelligence: [],
@@ -1577,6 +1581,24 @@ export default function VirtualAgentsPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // Clone/Duplicate mutation
+  const cloneMutation = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name?: string }) => {
+      const response = await apiRequest('POST', `/api/virtual-agents/${id}/clone`, { name });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/virtual-agents'] });
+      setCloneDialogOpen(false);
+      setAgentToClone(null);
+      setCloneName("");
+      toast({ title: "Virtual agent duplicated", description: `Created "${data.agent.name}"` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to duplicate agent", description: error.message, variant: "destructive" });
     },
   });
 
@@ -3513,7 +3535,7 @@ export default function VirtualAgentsPage() {
               </DialogHeader>
             </div>
 
-            <Tabs value={creationMode} onValueChange={(v) => setCreationMode(v as 'skill' | 'manual')} className="w-full flex-1 flex flex-col min-h-0 overflow-hidden">
+            <Tabs value={creationMode} onValueChange={(v) => setCreationMode(v as 'skill' | 'manual')} className="w-full flex-1 flex flex-col overflow-hidden">
               <div className="px-6 pt-4">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="skill">
@@ -3534,7 +3556,7 @@ export default function VirtualAgentsPage() {
                 />
               </TabsContent>
 
-              <TabsContent value="manual" className="mt-0 flex flex-col flex-1 min-h-0 overflow-hidden">
+              <TabsContent value="manual" className="mt-0 h-full data-[state=active]:flex data-[state=active]:flex-col">
                 <div className="px-6 py-3 border-b flex-shrink-0 flex items-start justify-between">
                   <div className="flex-1">
                     <h3 className="font-semibold text-sm">Manual Agent Configuration</h3>
@@ -3559,7 +3581,7 @@ export default function VirtualAgentsPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto min-h-0">
                   <AgentForm
                     formData={formData}
                     setFormData={setFormData}
@@ -3572,6 +3594,7 @@ export default function VirtualAgentsPage() {
                     orgPromptLoading={orgPromptLoading}
                     trainingCenter={trainingCenter}
                     activeTrainingType={activeTrainingType}
+                    editingAgent={null}
                   />
                 </div>
               </TabsContent>
@@ -3737,10 +3760,18 @@ export default function VirtualAgentsPage() {
                             <Pencil className="h-4 w-4 mr-2" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => toggleActiveMutation.mutate({ 
-                              id: agent.id, 
-                              isActive: !agent.isActive 
+                          <DropdownMenuItem onClick={() => {
+                            setAgentToClone(agent);
+                            setCloneName(`${agent.name} (Copy)`);
+                            setCloneDialogOpen(true);
+                          }}>
+                            <Copy className="h-4 w-4 mr-2" />
+                            Duplicate
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => toggleActiveMutation.mutate({
+                              id: agent.id,
+                              isActive: !agent.isActive
                             })}
                           >
                             {agent.isActive ? (
@@ -3816,6 +3847,7 @@ export default function VirtualAgentsPage() {
             orgPromptLoading={orgPromptLoading}
             trainingCenter={trainingCenter}
             activeTrainingType={activeTrainingType}
+            editingAgent={editingAgent}
           />
         </DialogContent>
       </Dialog>
@@ -3844,6 +3876,54 @@ export default function VirtualAgentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Clone/Duplicate Dialog */}
+      <Dialog open={cloneDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setCloneDialogOpen(false);
+          setAgentToClone(null);
+          setCloneName("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Duplicate Virtual Agent</DialogTitle>
+            <DialogDescription>
+              Create a copy of "{agentToClone?.name}" with all its settings.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="clone-name">New Agent Name</Label>
+              <Input
+                id="clone-name"
+                value={cloneName}
+                onChange={(e) => setCloneName(e.target.value)}
+                placeholder="Enter name for the new agent"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloneDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => agentToClone && cloneMutation.mutate({
+                id: agentToClone.id,
+                name: cloneName || undefined,
+              })}
+              disabled={cloneMutation.isPending}
+            >
+              {cloneMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Copy className="h-4 w-4 mr-2" />
+              )}
+              Duplicate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Agent Preview Lab Dialog */}
       <Dialog
@@ -5510,6 +5590,7 @@ function AgentForm({
   orgPromptLoading,
   trainingCenter,
   activeTrainingType,
+  editingAgent,
 }: {
   formData: VirtualAgentFormData;
   setFormData: (data: VirtualAgentFormData) => void;
@@ -5522,8 +5603,14 @@ function AgentForm({
   orgPromptLoading: boolean;
   trainingCenter: TrainingCenter;
   activeTrainingType: 'generic' | 'demand_intel' | 'demand_qual' | 'demand_engage';
+  editingAgent?: VirtualAgent | null;
 }) {
   const [agentGoal, setAgentGoal] = useState('');
+  // Local state for preview-only settings (not persisted to agent)
+  const [previewPromptId, setPreviewPromptId] = useState<string>('');
+  const [previewPromptVersion, setPreviewPromptVersion] = useState<string>('');
+  const [previewPromptVariables, setPreviewPromptVariables] = useState<Record<string, string>>({});
+  const [previewTools, setPreviewTools] = useState<string[]>(['detect_voicemail_and_hangup']);
   const [promptSources, setPromptSources] = useState<PromptSources>({
     goal: '',
     orgIntelligence: [],
@@ -5707,7 +5794,7 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
     promptSources.trainingDefaults.length;
 
   return (
-    <div className="flex-1 overflow-y-auto min-h-0">
+    <div className="overflow-y-auto">
       <div className="px-6 py-4">
         <Tabs defaultValue="essentials" className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-4">

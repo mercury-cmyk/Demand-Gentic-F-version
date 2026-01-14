@@ -4545,6 +4545,15 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
+  async findLeadByAiCallId(aiCallId: string): Promise<Lead | undefined> {
+    const [lead] = await db
+      .select()
+      .from(leads)
+      .where(sql`(${leads.customFields}->>'aiCallId') = ${aiCallId}`)
+      .limit(1);
+    return lead || undefined;
+  }
+
   async expandDomainSetToContacts(domainSetId: string, filters?: any): Promise<Contact[]> {
     // Get all items with matched accounts
     const items = await this.getDomainSetItems(domainSetId);

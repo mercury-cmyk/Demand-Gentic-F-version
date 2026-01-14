@@ -4,6 +4,9 @@ import { AiVoiceAgent, AiAgentSettings, CallContext, createAiVoiceAgent } from "
 import { storage } from "../storage";
 import { uploadToS3, getPresignedDownloadUrl } from "../lib/s3";
 import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./voice-variable-contract";
+import { db } from "../db";
+import { dialerCallAttempts } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 /**
  * Normalize phone number to E.164 format required by Telnyx/OpenAI
@@ -13,6 +16,8 @@ import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./v
  *   +441733712345 -> +441733712345 (already valid)
  *   001234567890 -> +1234567890 (US format)
  *   441733712345 -> +441733712345 (missing + only)
+ *   6506468370 -> +16506468370 (US number without country code)
+ *   3126072391 -> +13126072391 (US number without country code)
  */
 function normalizeToE164(phoneNumber: string): string {
   // Remove all non-digit characters except leading +
@@ -23,6 +28,11 @@ function normalizeToE164(phoneNumber: string): string {
     return normalized;
   }
   
+  // Handle 00 prefix (international format used in UK/EU)
+  if (normalized.startsWith('00')) {
+    return '+' + normalized.substring(2);
+  }
+  
   // Handle UK numbers starting with 0 (national format)
   // UK mobiles: 07xxx, UK landlines: 01xxx, 02xxx, 03xxx
   if (/^0[1-9]/.test(normalized)) {
@@ -31,25 +41,42 @@ function normalizeToE164(phoneNumber: string): string {
   }
   
   // Handle numbers that already have country code but missing +
-  // e.g., 441234567890 or 12125551234
-  if (normalized.length >= 10) {
-    // Check for common country codes at start
-    if (normalized.startsWith('44') && normalized.length >= 12) {
-      // UK number without +
-      return '+' + normalized;
-    }
-    if (normalized.startsWith('1') && normalized.length === 11) {
-      // US/Canada number without +
+  // Check for common country codes at start based on length patterns
+  
+  // UK numbers (44) - typically 12-13 digits with country code
+  if (normalized.startsWith('44') && normalized.length >= 12 && normalized.length <= 13) {
+    return '+' + normalized;
+  }
+  
+  // US/Canada (1) - 11 digits with country code
+  if (normalized.startsWith('1') && normalized.length === 11) {
+    return '+' + normalized;
+  }
+  
+  // Germany (49), France (33), Netherlands (31), etc - check for common EU codes
+  const euCountryCodes = ['49', '33', '31', '34', '39', '46', '47', '48', '32', '43', '41'];
+  for (const code of euCountryCodes) {
+    if (normalized.startsWith(code) && normalized.length >= 10 && normalized.length <= 14) {
       return '+' + normalized;
     }
   }
   
-  // Handle 00 prefix (international format used in UK/EU)
-  if (normalized.startsWith('00')) {
-    return '+' + normalized.substring(2);
+  // Japan (81), India (91), Australia (61), etc
+  const asiaPacificCodes = ['81', '91', '61', '86', '82', '65', '60', '63', '62'];
+  for (const code of asiaPacificCodes) {
+    if (normalized.startsWith(code) && normalized.length >= 10 && normalized.length <= 15) {
+      return '+' + normalized;
+    }
+  }
+  
+  // If 10 digits and looks like US/Canada area code (not starting with 0 or 1)
+  // US area codes start with 2-9, so 10-digit numbers starting with 2-9 are likely US
+  if (normalized.length === 10 && /^[2-9]/.test(normalized)) {
+    return '+1' + normalized;
   }
   
   // Default: assume missing + and add it
+  // This handles cases where country code is present but + is missing
   return '+' + normalized;
 }
 
@@ -75,8 +102,11 @@ export interface ActiveAiCall {
   mediaWs: WebSocket | null;
   campaignId: string;
   queueItemId: string;
+  callAttemptId?: string;
+  dialedNumber?: string;
   startTime: Date;
   disposition?: string;
+  isAnswered?: boolean;
 }
 
 export interface QueuedCall {
@@ -161,6 +191,13 @@ export class TelnyxAiBridge extends EventEmitter {
     this.telnyxApiKey = process.env.TELNYX_API_KEY || "";
     this.webhookUrl = process.env.TELNYX_WEBHOOK_URL || "";
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
+  }
+  
+  // Format phone number to E.164 format (required by Telnyx)
+  private formatToE164(phoneNumber: string): string {
+    const formatted = normalizeToE164(phoneNumber);
+    console.log(`[TelnyxAiBridge] Formatted phone: ${phoneNumber} -> ${formatted}`);
+    return formatted;
   }
   
   // Get client state for a call by control ID (for AMD webhook processing)
@@ -249,6 +286,10 @@ export class TelnyxAiBridge extends EventEmitter {
     context: CallContext,
     provider: string = 'openai_realtime'
   ): Promise<{ callId: string; callControlId: string }> {
+    // Format phone numbers to E.164 format (required by Telnyx)
+    phoneNumber = this.formatToE164(phoneNumber);
+    fromNumber = this.formatToE164(fromNumber);
+    
     console.log(`[TelnyxAiBridge] Using Telnyx direct call with provider: ${provider}`);
     
     const contactFullName = [context.contactFirstName, context.contactLastName]
@@ -311,14 +352,52 @@ export class TelnyxAiBridge extends EventEmitter {
 
       // Build comprehensive client_state for OpenAI Realtime Dialer
       // This data will be passed through TeXML -> WebSocket connection
+      // Use actual IDs from context if available, otherwise generate placeholders for test calls
+      const callAttemptIdFromContext = (context as any).callAttemptId;
+      const metadata = {
+        contactId: context.contactId,
+        campaignId: context.campaignId,
+        queueItemId: context.queueItemId,
+        runId: (context as any).runId,
+        virtualAgentId: context.virtualAgentId,
+      };
+
+      if (callAttemptIdFromContext) {
+        try {
+          const [attempt] = await db
+            .select({
+              contactId: dialerCallAttempts.contactId,
+              campaignId: dialerCallAttempts.campaignId,
+              queueItemId: dialerCallAttempts.queueItemId,
+              dialerRunId: dialerCallAttempts.dialerRunId,
+              virtualAgentId: dialerCallAttempts.virtualAgentId,
+            })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, callAttemptIdFromContext))
+            .limit(1);
+          if (attempt) {
+            metadata.contactId ||= attempt.contactId;
+            metadata.campaignId ||= attempt.campaignId;
+            metadata.queueItemId ||= attempt.queueItemId || metadata.queueItemId;
+            metadata.runId ||= attempt.dialerRunId;
+            metadata.virtualAgentId ||= attempt.virtualAgentId || metadata.virtualAgentId;
+          }
+        } catch (error) {
+          console.warn(`[TelnyxAiBridge] Failed to resolve call attempt metadata:`, error);
+        }
+      }
+
+      const resolvedCallAttemptId = callAttemptIdFromContext;
+      const fallbackCallAttemptId = resolvedCallAttemptId || `attempt-${Date.now()}`;
       const customParams = {
         call_id: callId,
-        run_id: `run-${Date.now()}`,
-        campaign_id: context.campaignId,
-        queue_item_id: context.queueItemId,
-        call_attempt_id: `attempt-${Date.now()}`,
-        contact_id: (context as any).contactId || '',
-        virtual_agent_id: (context as any).virtualAgentId || '',
+        run_id: metadata.runId || `run-${Date.now()}`,
+        campaign_id: metadata.campaignId,
+        queue_item_id: metadata.queueItemId,
+        call_attempt_id: fallbackCallAttemptId,
+        contact_id: metadata.contactId || '',
+        called_number: phoneNumber,
+        virtual_agent_id: metadata.virtualAgentId || '',
         provider: provider,
         // Include agent configuration for WebSocket session
         // system_prompt is built by OpenAI Realtime Dialer from agent_settings
@@ -430,6 +509,17 @@ export class TelnyxAiBridge extends EventEmitter {
       // Store client state by call_control_id for AMD webhook lookups
       // AMD webhook fires before WebSocket connection, so we need this mapping
       this.callStateByControlId.set(callControlId, customParams);
+
+      if (context.callAttemptId) {
+        try {
+          await db
+            .update(dialerCallAttempts)
+            .set({ telnyxCallId: callControlId })
+            .where(eq(dialerCallAttempts.id, context.callAttemptId));
+        } catch (error) {
+          console.warn(`[TelnyxAiBridge] Failed to persist telnyxCallId for call attempt ${context.callAttemptId}:`, error);
+        }
+      }
       
       this.activeCalls.set(callId, {
         callControlId,
@@ -438,7 +528,10 @@ export class TelnyxAiBridge extends EventEmitter {
         mediaWs: null,
         campaignId: context.campaignId,
         queueItemId: context.queueItemId,
+        callAttemptId: context.callAttemptId || undefined,
+        dialedNumber: phoneNumber,
         startTime: new Date(),
+        isAnswered: false,
       });
 
       console.log(`[TelnyxAiBridge] AI call initiated: ${callId} -> ${phoneNumber}`);
@@ -499,6 +592,7 @@ export class TelnyxAiBridge extends EventEmitter {
 
   private async handleCallAnswered(callId: string, call: ActiveAiCall): Promise<void> {
     console.log(`[TelnyxAiBridge] Call answered: ${callId}`);
+    call.isAnswered = true;
 
     // With TeXML, streaming is handled automatically via <Stream bidirectionalMode="rtp" />
     // The opening message will be sent through the OpenAI Realtime WebSocket connection
@@ -585,6 +679,10 @@ export class TelnyxAiBridge extends EventEmitter {
 
   private async speakText(callControlId: string, text: string, voice?: string): Promise<void> {
     // Prefer OpenAI TTS, fall back to Telnyx basic TTS
+    if (!text || !text.trim()) {
+      console.warn(`[TelnyxAiBridge] Skipping speakText because payload is empty for ${callControlId}`);
+      return;
+    }
     const openaiApiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
     
     if (openaiApiKey) {
@@ -724,25 +822,49 @@ export class TelnyxAiBridge extends EventEmitter {
       if (queueItem) {
         const disposition = this.mapPhaseToDisposition(call.disposition || "completed", phase);
         
-        await storage.createLead({
-          campaignId: call.campaignId,
-          contactId: queueItem.contactId,
-          agentId: null,
-          qaStatus: "new",
-          notes: `[AI Agent Call] ${summary}\n\nPhase: ${phase}\nGatekeeper Attempts: ${gatekeeperAttempts}\nDuration: ${Math.round(duration / 1000)}s\n\nTranscript:\n${transcript}`,
-          callDuration: Math.round(duration / 1000),
-          customFields: {
-            aiCallId: callId,
-            aiPhase: phase,
-            aiDisposition: disposition,
-            aiGatekeeperAttempts: gatekeeperAttempts,
-            aiHandoff: call.disposition === "handoff",
-          },
-        });
+        // Fetch contact info for lead record
+        const contact = await storage.getContact(queueItem.contactId);
+        const contactName = contact?.fullName || 
+          (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
+           contact?.firstName || contact?.lastName || 'Unknown');
+        
+        const shouldCreateLead = disposition === "qualified";
+        if (!shouldCreateLead) {
+          console.log(
+            `[TelnyxAiBridge] Skipping lead creation for AI call ${callId} (disposition=${disposition})`
+          );
+        } else {
+          const existingLead = await storage.findLeadByAiCallId(callId);
+          if (existingLead) {
+            console.log(`[TelnyxAiBridge] Lead already exists for AI call ${callId}, skipping duplicate`);
+          } else {
+          await storage.createLead({
+            campaignId: call.campaignId,
+            contactId: queueItem.contactId,
+            contactName: contactName,
+            contactEmail: contact?.email || undefined,
+            companyName: contact?.companyName || undefined,
+            callAttemptId: call.callAttemptId || undefined,
+            agentId: null,
+            qaStatus: "new",
+            notes: `[AI Agent Call] ${summary}\n\nPhase: ${phase}\nGatekeeper Attempts: ${gatekeeperAttempts}\nDuration: ${Math.round(duration / 1000)}s\n\nTranscript:\n${transcript}`,
+            callDuration: Math.round(duration / 1000),
+            dialedNumber: call.dialedNumber || undefined,
+            telnyxCallId: call.callControlId,
+            customFields: {
+              aiCallId: callId,
+              aiPhase: phase,
+              aiDisposition: disposition,
+              aiGatekeeperAttempts: gatekeeperAttempts,
+                aiHandoff: call.disposition === "handoff",
+              },
+            });
+
+            console.log(`[TelnyxAiBridge] Lead created for AI call ${callId}`);
+          }
+        }
 
         await storage.updateQueueStatus(call.queueItemId, "done");
-
-        console.log(`[TelnyxAiBridge] Lead created for AI call ${callId}`);
       }
     } catch (error) {
       console.error(`[TelnyxAiBridge] Failed to create lead for AI call:`, error);
@@ -914,6 +1036,12 @@ export class TelnyxAiBridge extends EventEmitter {
 
   // Start gathering speech input from the caller
   private async startGather(callControlId: string): Promise<void> {
+    const callId = this.getCallIdByControlId(callControlId);
+    const call = callId ? this.activeCalls.get(callId) : undefined;
+    if (!call || !call.isAnswered) {
+      console.warn(`[TelnyxAiBridge] Skipping gather; call ${callControlId} not answered yet or no active call`);
+      return;
+    }
     console.log(`[TelnyxAiBridge] Starting gather on call: ${callControlId}`);
     
     const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/gather`, {

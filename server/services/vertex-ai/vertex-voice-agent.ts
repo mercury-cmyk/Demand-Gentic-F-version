@@ -31,8 +31,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "../account-messaging-service";
 import {
   buildCallPlanContextSection,
@@ -224,9 +226,14 @@ export class VertexVoiceAgent extends EventEmitter {
         campaignId: this.context.campaignId || null,
         intelligenceRecord: accountIntelligenceRecord,
       });
+
+      // Load account profile data for including in context
+      const accountProfile = await getAccountProfileData(accountId);
+
       accountContextSection = buildAccountContextSection(
         accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
-        accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload
+        accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload,
+        accountProfile
       );
 
       // Build call plan context

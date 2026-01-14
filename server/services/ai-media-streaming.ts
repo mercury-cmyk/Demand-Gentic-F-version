@@ -270,7 +270,8 @@ async function handleTelnyxMessage(
 
 async function initializeOpenAISession(session: MediaSession): Promise<void> {
   try {
-    const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+    // Use the latest GA gpt-realtime model for most natural, human-like speech
+    const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
     
     const openaiWs = new WebSocket(url, {
       headers: {
@@ -289,7 +290,9 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
       // If noise bursts followed by silence, try disabling VAD to rule out gating issues
       const vadDisabled = process.env.OPENAI_VAD_DISABLED === 'true';
       const vadThreshold = parseFloat(process.env.OPENAI_VAD_THRESHOLD || '0.5');
-      const vadSilenceMs = parseInt(process.env.OPENAI_VAD_SILENCE_MS || '500', 10);
+      // Use 2500ms (2.5 seconds) silence for proper turn-taking in B2B calls
+      // This ensures the agent waits for the full response and doesn't interrupt
+      const vadSilenceMs = parseInt(process.env.OPENAI_VAD_SILENCE_MS || '2500', 10);
 
       console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadThreshold=${vadThreshold}, vadSilenceMs=${vadSilenceMs}`);
 

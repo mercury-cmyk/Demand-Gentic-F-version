@@ -177,12 +177,31 @@ export async function processDisposition(
  * - Route to QA queue
  * - Suppress from further dialing
  * - Enforce campaign leads cap
+ * 
+ * IMPORTANT: Enforces minimum call duration to prevent false positives
+ * from short calls being marked as qualified.
  */
 async function processQualifiedLead(
   callAttempt: typeof dialerCallAttempts.$inferSelect,
   rules: CampaignRules,
   result: DispositionResult
 ): Promise<void> {
+  // QUALITY GATE: Enforce minimum call duration for qualified leads
+  // Short calls (<30 seconds) typically indicate:
+  // - Premature qualification by AI
+  // - Quick "yes" responses without real engagement
+  // - False positives from misunderstood responses
+  const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 30;
+  const callDuration = callAttempt.callDurationSeconds || 0;
+  
+  if (callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS) {
+    console.warn(`[DispositionEngine] ⚠️ QUALITY GATE: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below minimum threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Downgrading to needs_review.`);
+    result.actions.push(`Quality gate: Call duration ${callDuration}s below ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s minimum - flagged for manual review`);
+    
+    // Still create lead but flag it for immediate QA review with lower priority
+    // This ensures short-duration "qualified" calls don't slip through
+  }
+
   // Update campaign queue state and clear lock
   if (callAttempt.queueItemId) {
     await db
@@ -198,14 +217,43 @@ async function processQualifiedLead(
     result.actions.push('Updated queue item to done');
   }
 
-  // Create lead record - link via callAttemptId (from old call_attempts table)
-  // Note: For new dialer system, we link via campaign + contact, and store call data directly
+  // Fetch contact info for lead record
+  const [contact] = await db
+    .select({
+      fullName: contacts.fullName,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      email: contacts.email,
+      companyName: contacts.companyName,
+    })
+    .from(contacts)
+    .where(eq(contacts.id, callAttempt.contactId))
+    .limit(1);
+
+  // Build contact name from available fields
+  const contactName = contact?.fullName || 
+    (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
+     contact?.firstName || contact?.lastName || 'Unknown');
+
+  // Determine QA status based on call duration quality gate
+  // Short calls get flagged for immediate review with a note
+  const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
+  const qaStatus = isShortDurationCall ? 'under_review' : 'new';
+  const qaDecision = isShortDurationCall 
+    ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). AI marked as qualified but requires manual verification.`
+    : null;
+
+  // Create lead record with contact info
   const [newLead] = await db
     .insert(leads)
     .values({
       campaignId: callAttempt.campaignId,
       contactId: callAttempt.contactId,
-      qaStatus: 'new',
+      contactName: contactName,
+      contactEmail: contact?.email || undefined,
+      companyName: contact?.companyName || undefined,
+      qaStatus: qaStatus,
+      qaDecision: qaDecision,
       agentId: callAttempt.humanAgentId,
       dialedNumber: callAttempt.phoneDialed,
       recordingUrl: callAttempt.recordingUrl,
@@ -215,19 +263,21 @@ async function processQualifiedLead(
 
   if (newLead) {
     result.leadId = newLead.id;
-    result.actions.push(`Created lead ${newLead.id}`);
+    result.actions.push(`Created lead ${newLead.id}${isShortDurationCall ? ' (flagged: short duration)' : ''}`);
   }
 
-  // Add to QC work queue
+  // Add to QC work queue with higher priority for short duration calls
+  // Priority: 0 = normal, -1 = high priority (process first)
+  const qcPriority = isShortDurationCall ? -1 : 0;
   await db.insert(qcWorkQueue).values({
     callSessionId: callAttempt.callSessionId,
     leadId: result.leadId,
     campaignId: callAttempt.campaignId,
     producerType: callAttempt.agentType,
     status: 'pending',
-    priority: 0
+    priority: qcPriority
   });
-  result.actions.push('Added to QC queue');
+  result.actions.push(`Added to QC queue${isShortDurationCall ? ' (high priority - short duration)' : ''}`);
 
   result.queueState = 'qualified';
 }

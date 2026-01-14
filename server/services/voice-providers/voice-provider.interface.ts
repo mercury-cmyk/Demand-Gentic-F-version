@@ -265,6 +265,8 @@ export abstract class BaseVoiceProvider extends EventEmitter implements IVoicePr
 
 // ==================== VOICE MAPPING ====================
 
+// OpenAI voices: alloy, echo, fable, nova, shimmer, onyx (legacy), plus cedar & marin (new, most natural)
+// Cedar: warm, confident, engaging | Marin: calm, professional, soothing
 export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
   'alloy': 'Aoede',
   'echo': 'Charon',
@@ -272,7 +274,9 @@ export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
   'nova': 'Kore',
   'shimmer': 'Puck',
   'onyx': 'Charon',
-  'marin': 'Kore', // Default DemandEarn voice
+  // New OpenAI voices with most natural speech (gpt-realtime exclusive)
+  'cedar': 'Aoede',   // Cedar: warm, confident - maps to Aoede (bright and warm)
+  'marin': 'Kore',    // Marin: calm, professional - maps to Kore (soft and friendly)
 };
 
 export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {

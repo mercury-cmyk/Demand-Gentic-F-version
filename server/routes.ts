@@ -5068,9 +5068,11 @@ export function registerRoutes(app: Express) {
   });
 
   // Clone/Requeue campaign - creates a new draft copy of an existing campaign
+  // Supports optional body params: { name?: string, organizationId?: string }
   app.post("/api/campaigns/:id/clone", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const campaignId = req.params.id;
+      const { name: customName, organizationId: newOrganizationId } = req.body || {};
 
       // Get the original campaign
       const originalCampaign = await storage.getCampaign(campaignId);
@@ -5078,23 +5080,86 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      // Create a new campaign based on the original
+      // Create a new campaign based on the original with ALL important fields
       const newCampaign = await db.insert(campaigns)
         .values({
-          name: `${originalCampaign.name} (Copy)`,
+          // Basic info
+          name: customName || `${originalCampaign.name} (Copy)`,
           type: originalCampaign.type,
           status: 'draft', // Always create as draft
+
+          // Organization - use new one if provided, otherwise copy from original
+          problemIntelligenceOrgId: newOrganizationId || originalCampaign.problemIntelligenceOrgId,
+
+          // Audience & Email
           audienceRefs: originalCampaign.audienceRefs,
           emailSubject: originalCampaign.emailSubject,
           emailHtmlContent: originalCampaign.emailHtmlContent,
           emailPreheader: originalCampaign.emailPreheader,
           senderProfileId: originalCampaign.senderProfileId,
+
+          // Call Scripts & Qualification
+          callScript: originalCampaign.callScript,
+          scriptId: originalCampaign.scriptId,
+          qualificationQuestions: originalCampaign.qualificationQuestions,
+
+          // AI Agent Settings
+          dialMode: originalCampaign.dialMode,
+          aiAgentSettings: originalCampaign.aiAgentSettings,
+          voiceProvider: originalCampaign.voiceProvider,
+          voiceProviderFallback: originalCampaign.voiceProviderFallback,
+          maxCallDurationSeconds: originalCampaign.maxCallDurationSeconds,
+
+          // Campaign Context (Foundation + Campaign Layer)
+          campaignObjective: originalCampaign.campaignObjective,
+          productServiceInfo: originalCampaign.productServiceInfo,
+          talkingPoints: originalCampaign.talkingPoints,
+          targetAudienceDescription: originalCampaign.targetAudienceDescription,
+          campaignObjections: originalCampaign.campaignObjections,
+          successCriteria: originalCampaign.successCriteria,
+          campaignContextBrief: originalCampaign.campaignContextBrief,
+
+          // Power Dialer & Retry Settings
+          powerSettings: originalCampaign.powerSettings,
+          retryRules: originalCampaign.retryRules,
+          timezone: originalCampaign.timezone,
+          businessHoursConfig: originalCampaign.businessHoursConfig,
+
+          // QA Settings
+          qaParameters: originalCampaign.qaParameters,
+          customQaFields: originalCampaign.customQaFields,
+          customQaRules: originalCampaign.customQaRules,
+          parsedQaRules: originalCampaign.parsedQaRules,
+          clientSubmissionConfig: originalCampaign.clientSubmissionConfig,
+          recordingAutoSyncEnabled: originalCampaign.recordingAutoSyncEnabled,
+          companiesHouseValidation: originalCampaign.companiesHouseValidation,
+          deliveryTemplateId: originalCampaign.deliveryTemplateId,
+
+          // Account Cap Settings
+          accountCapEnabled: originalCampaign.accountCapEnabled,
+          accountCapValue: originalCampaign.accountCapValue,
+          accountCapMode: originalCampaign.accountCapMode,
+
+          // Goals (but clear schedule for requeue)
+          targetQualifiedLeads: originalCampaign.targetQualifiedLeads,
+          costPerLead: originalCampaign.costPerLead,
           scheduleJson: null, // Clear schedule for requeue
+          startDate: null, // Clear dates for requeue
+          endDate: null,
+
+          // Owner
+          ownerId: originalCampaign.ownerId,
+          brandId: originalCampaign.brandId,
           mode: originalCampaign.mode,
+          throttlingConfig: originalCampaign.throttlingConfig,
+          assignedTeams: originalCampaign.assignedTeams,
         })
         .returning();
 
-      console.log(`[CLONE CAMPAIGN] Created new campaign ${newCampaign[0].id} from ${campaignId}`);
+      console.log(`[CLONE CAMPAIGN] Created new campaign ${newCampaign[0].id} from ${campaignId}`, {
+        newOrganizationId: newOrganizationId || 'same as original',
+        originalOrgId: originalCampaign.problemIntelligenceOrgId,
+      });
 
       invalidateDashboardCache();
       res.status(201).json(newCampaign[0]);
@@ -10516,9 +10581,11 @@ export function registerRoutes(app: Express) {
   });
 
   // Agent-specific dashboard stats
+  // UNIFIED: Combines legacy callSessions and new dialerCallAttempts for accurate stats
   app.get("/api/dashboard/agent-stats", requireAuth, async (req, res) => {
     try {
       const agentId = req.user!.userId;
+      const { dialerCallAttempts: dca, dialerRuns } = await import('@shared/schema');
 
       // Get today and this month dates for filtering
       const today = new Date();
@@ -10528,57 +10595,82 @@ export function registerRoutes(app: Express) {
       thisMonth.setDate(1);
       thisMonth.setHours(0, 0, 0, 0);
 
-      // Get call sessions for this agent
-      const allCallJobs = await db
-        .select()
-        .from(callJobs)
+      // ========== DIALER CALL ATTEMPTS (Primary source for new calls) ==========
+      const dialerCallsToday = await db
+        .select({
+          count: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
+          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
+        })
+        .from(dca)
+        .where(and(
+          eq(dca.humanAgentId, agentId),
+          gte(dca.createdAt, today)
+        ));
+
+      const dialerCallsThisMonth = await db
+        .select({
+          count: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
+          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
+        })
+        .from(dca)
+        .where(and(
+          eq(dca.humanAgentId, agentId),
+          gte(dca.createdAt, thisMonth)
+        ));
+
+      const dialerCallsTotal = await db
+        .select({
+          count: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
+          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
+        })
+        .from(dca)
+        .where(eq(dca.humanAgentId, agentId));
+
+      // ========== LEGACY CALL SESSIONS (For backwards compatibility) ==========
+      const legacyStats = await db
+        .select({
+          todayCount: sql<number>`COUNT(CASE WHEN ${callSessions.startedAt} >= ${today} THEN 1 END)::int`,
+          monthCount: sql<number>`COUNT(CASE WHEN ${callSessions.startedAt} >= ${thisMonth} THEN 1 END)::int`,
+          totalCount: sql<number>`COUNT(*)::int`,
+          totalDuration: sql<number>`SUM(COALESCE(${callSessions.durationSec}, 0))::int`,
+        })
+        .from(callSessions)
+        .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
         .where(eq(callJobs.agentId, agentId));
 
-      const callJobIds = allCallJobs.map(j => j.id);
+      // Legacy qualified count
+      const legacyQualified = await db
+        .select({
+          count: sql<number>`COUNT(*)::int`,
+        })
+        .from(callDispositions)
+        .innerJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
+        .innerJoin(callSessions, eq(callDispositions.callSessionId, callSessions.id))
+        .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
+        .where(and(
+          eq(callJobs.agentId, agentId),
+          eq(dispositions.systemAction, 'converted_qualified')
+        ));
 
-      let callSessions = [];
-      if (callJobIds.length > 0) {
-        callSessions = await db
-          .select()
-          .from(callSessions as any)
-          .where(inArray((callSessions as any).callJobId, callJobIds));
-      }
+      // ========== MERGE STATS ==========
+      const todayDialer = dialerCallsToday[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
+      const monthDialer = dialerCallsThisMonth[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
+      const totalDialer = dialerCallsTotal[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
+      const legacy = legacyStats[0] || { todayCount: 0, monthCount: 0, totalCount: 0, totalDuration: 0 };
+      const legacyQual = legacyQualified[0]?.count || 0;
 
-      // Get disposition details for call sessions
-      const sessionIds = callSessions.map((s: any) => s.id);
-      let dispositionsData = [];
-      if (sessionIds.length > 0) {
-        dispositionsData = await db
-          .select({
-            sessionId: callDispositions.callSessionId,
-            dispositionId: callDispositions.dispositionId,
-            label: dispositions.label,
-            systemAction: dispositions.systemAction,
-          })
-          .from(callDispositions)
-          .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
-          .where(inArray(callDispositions.callSessionId, sessionIds));
-      }
-
-      // Calculate stats
-      const todaySessions = callSessions.filter((s: any) =>
-        s.startedAt && new Date(s.startedAt) >= today
-      );
-      const thisMonthSessions = callSessions.filter((s: any) =>
-        s.startedAt && new Date(s.startedAt) >= thisMonth
-      );
-
-      const totalDuration = callSessions.reduce((sum: number, s: any) =>
-        sum + (s.durationSec || 0), 0
-      );
-      const avgDuration = callSessions.length > 0
-        ? Math.round(totalDuration / callSessions.length)
-        : 0;
-
-      // Count qualified leads (dispositions with converted_qualified action)
-      const qualifiedCount = dispositionsData.filter(d =>
-        d.systemAction === 'converted_qualified'
-      ).length;
+      const callsToday = todayDialer.count + legacy.todayCount;
+      const callsThisMonth = monthDialer.count + legacy.monthCount;
+      const totalCalls = totalDialer.count + legacy.totalCount;
+      const totalDuration = totalDialer.totalDuration + legacy.totalDuration;
+      const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
+      const qualifiedCount = totalDialer.qualified + legacyQual;
 
       // Get leads created by this agent
       const agentLeads = await db
@@ -10603,9 +10695,9 @@ export function registerRoutes(app: Express) {
         );
 
       res.json({
-        callsToday: todaySessions.length,
-        callsThisMonth: thisMonthSessions.length,
-        totalCalls: callSessions.length,
+        callsToday,
+        callsThisMonth,
+        totalCalls,
         avgDuration,
         qualified: qualifiedCount,
         leadsApproved: approvedLeads,
@@ -13946,11 +14038,12 @@ Provide JSON response with:
   // ==================== CALL ANALYTICS ====================
 
   // Get comprehensive call analytics (overall, per-campaign, per-agent)
+  // UNIFIED: Combines legacy callAttempts and new dialerCallAttempts for accurate stats
   app.get("/api/analytics/call-stats", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { callAttempts, dispositions, campaigns: campaignsTable, users } = await import('@shared/schema');
+      const { callAttempts, dispositions, campaigns: campaignsTable, users, dialerCallAttempts, virtualAgents } = await import('@shared/schema');
 
-      // Get qualified disposition labels (systemAction = 'converted_qualified')
+      // ========== LEGACY CALL ATTEMPTS STATS ==========
       const qualifiedDisps = await db
         .select({ label: dispositions.label })
         .from(dispositions)
@@ -13958,8 +14051,7 @@ Provide JSON response with:
 
       const qualifiedLabels = qualifiedDisps.map(d => d.label);
 
-      // Calculate overall stats using SQL aggregation
-      const [overallStats] = await db
+      const [legacyOverall] = await db
         .select({
           attempted: sql<number>`COUNT(*)::int`,
           connected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IS NOT NULL OR ${callAttempts.duration} > 0 THEN 1 END)::int`,
@@ -13969,8 +14061,37 @@ Provide JSON response with:
         })
         .from(callAttempts);
 
-      // Calculate per-campaign stats using SQL GROUP BY
-      const campaignStats = await db
+      // ========== NEW DIALER CALL ATTEMPTS STATS ==========
+      const [dialerOverall] = await db
+        .select({
+          attempted: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.voicemailDetected} = true THEN 1 END)::int`,
+          noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
+          dnc: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
+          avgDuration: sql<number>`AVG(COALESCE(${dialerCallAttempts.callDurationSeconds}, 0))::int`,
+        })
+        .from(dialerCallAttempts);
+
+      // Merge overall stats
+      const legacy = legacyOverall || { attempted: 0, connected: 0, qualified: 0 };
+      const dialer = dialerOverall || { attempted: 0, connected: 0, qualified: 0, voicemail: 0, noAnswer: 0, notInterested: 0, dnc: 0, avgDuration: 0 };
+
+      const overallStats = {
+        attempted: legacy.attempted + dialer.attempted,
+        connected: legacy.connected + dialer.connected,
+        qualified: legacy.qualified + dialer.qualified,
+        voicemail: dialer.voicemail,
+        noAnswer: dialer.noAnswer,
+        notInterested: dialer.notInterested,
+        dnc: dialer.dnc,
+        avgDuration: dialer.avgDuration
+      };
+
+      // ========== PER-CAMPAIGN STATS (UNIFIED) ==========
+      const legacyCampaignStats = await db
         .select({
           campaignId: callAttempts.campaignId,
           campaignName: campaignsTable.name,
@@ -13984,8 +14105,55 @@ Provide JSON response with:
         .leftJoin(campaignsTable, eq(callAttempts.campaignId, campaignsTable.id))
         .groupBy(callAttempts.campaignId, campaignsTable.name);
 
-      // Calculate per-agent stats using SQL GROUP BY
-      const agentStats = await db
+      const dialerCampaignStats = await db
+        .select({
+          campaignId: dialerCallAttempts.campaignId,
+          campaignName: campaignsTable.name,
+          attempted: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+        })
+        .from(dialerCallAttempts)
+        .leftJoin(campaignsTable, eq(dialerCallAttempts.campaignId, campaignsTable.id))
+        .groupBy(dialerCallAttempts.campaignId, campaignsTable.name);
+
+      // Merge campaign stats
+      const campaignMap = new Map<string, { id: string; name: string; attempted: number; connected: number; qualified: number }>();
+      for (const stat of legacyCampaignStats) {
+        campaignMap.set(stat.campaignId, {
+          id: stat.campaignId,
+          name: stat.campaignName || 'Unknown',
+          attempted: stat.attempted,
+          connected: stat.connected,
+          qualified: stat.qualified
+        });
+      }
+      for (const stat of dialerCampaignStats) {
+        const existing = campaignMap.get(stat.campaignId);
+        if (existing) {
+          existing.attempted += stat.attempted;
+          existing.connected += stat.connected;
+          existing.qualified += stat.qualified;
+        } else {
+          campaignMap.set(stat.campaignId, {
+            id: stat.campaignId,
+            name: stat.campaignName || 'Unknown',
+            attempted: stat.attempted,
+            connected: stat.connected,
+            qualified: stat.qualified
+          });
+        }
+      }
+      const campaignStats = Array.from(campaignMap.values()).map(c => ({
+        campaignId: c.id,
+        campaignName: c.name,
+        attempted: c.attempted,
+        connected: c.connected,
+        qualified: c.qualified
+      }));
+
+      // ========== PER-AGENT STATS (UNIFIED) ==========
+      const legacyAgentStats = await db
         .select({
           agentId: callAttempts.agentId,
           agentName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
@@ -13999,8 +14167,85 @@ Provide JSON response with:
         .leftJoin(users, eq(callAttempts.agentId, users.id))
         .groupBy(callAttempts.agentId, users.firstName, users.lastName);
 
+      const dialerHumanAgentStats = await db
+        .select({
+          agentId: dialerCallAttempts.humanAgentId,
+          agentName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+          attempted: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+        })
+        .from(dialerCallAttempts)
+        .innerJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
+        .where(isNotNull(dialerCallAttempts.humanAgentId))
+        .groupBy(dialerCallAttempts.humanAgentId, users.firstName, users.lastName);
+
+      const dialerAIAgentStats = await db
+        .select({
+          agentId: dialerCallAttempts.virtualAgentId,
+          agentName: virtualAgents.name,
+          attempted: sql<number>`COUNT(*)::int`,
+          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
+          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+        })
+        .from(dialerCallAttempts)
+        .innerJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
+        .where(isNotNull(dialerCallAttempts.virtualAgentId))
+        .groupBy(dialerCallAttempts.virtualAgentId, virtualAgents.name);
+
+      // Merge agent stats
+      const agentMap = new Map<string, { id: string; name: string; type: string; attempted: number; connected: number; qualified: number }>();
+      for (const stat of legacyAgentStats) {
+        if (!stat.agentId) continue;
+        agentMap.set(stat.agentId, {
+          id: stat.agentId,
+          name: stat.agentName || 'Unknown',
+          type: 'human',
+          attempted: stat.attempted,
+          connected: stat.connected,
+          qualified: stat.qualified
+        });
+      }
+      for (const stat of dialerHumanAgentStats) {
+        if (!stat.agentId) continue;
+        const existing = agentMap.get(stat.agentId);
+        if (existing) {
+          existing.attempted += stat.attempted;
+          existing.connected += stat.connected;
+          existing.qualified += stat.qualified;
+        } else {
+          agentMap.set(stat.agentId, {
+            id: stat.agentId,
+            name: stat.agentName || 'Unknown',
+            type: 'human',
+            attempted: stat.attempted,
+            connected: stat.connected,
+            qualified: stat.qualified
+          });
+        }
+      }
+      for (const stat of dialerAIAgentStats) {
+        if (!stat.agentId) continue;
+        agentMap.set(`ai_${stat.agentId}`, {
+          id: stat.agentId,
+          name: `🤖 ${stat.agentName}`,
+          type: 'ai',
+          attempted: stat.attempted,
+          connected: stat.connected,
+          qualified: stat.qualified
+        });
+      }
+      const agentStats = Array.from(agentMap.values()).map(a => ({
+        agentId: a.id,
+        agentName: a.name,
+        agentType: a.type,
+        attempted: a.attempted,
+        connected: a.connected,
+        qualified: a.qualified
+      }));
+
       res.json({
-        overall: overallStats || { attempted: 0, connected: 0, qualified: 0 },
+        overall: overallStats,
         byCampaign: campaignStats,
         byAgent: agentStats,
       });

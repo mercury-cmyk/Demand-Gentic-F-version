@@ -423,6 +423,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/settings/integrations',
             roles: [USER_ROLES.ADMIN],
           },
+          {
+            id: 'settings-platform',
+            title: 'Platform Admin',
+            url: '/settings/super-org',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Super organization management',
+          },
         ],
       },
     ],

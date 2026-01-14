@@ -260,6 +260,15 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     const minScore = qaParams.min_score || 70;
     const autoRejectThreshold = 30; // Balanced threshold - not too aggressive, not too permissive
     
+    // QUALITY GATE: Check call duration - short calls require manual review
+    const MINIMUM_QUALIFIED_DURATION = 30; // seconds
+    const callDuration = lead.callDuration || 0;
+    const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_DURATION && callDuration > 0;
+    
+    if (isShortDurationCall) {
+      console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Forcing manual review.`);
+    }
+    
     // Check for EXPLICIT callback/interest signals using conservative patterns
     // These must be prospect-initiated phrases, not common AI agent script lines
     const transcriptLower = (lead.transcript || '').toLowerCase();
@@ -275,8 +284,13 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
     
     const hasPositiveEngagement = (hasCallbackSignal || hasInterestSignal) && !hasNegativeSignal;
     
-    if (normalizedAnalysis.qualification_status === 'qualified' && normalizedAnalysis.score >= minScore) {
-      // Auto-approve high-scoring qualified leads
+    // SHORT DURATION CALLS: Always require manual review regardless of AI score
+    if (isShortDurationCall) {
+      qaStatus = 'under_review';
+      qaDecisionComment = `⚠️ SHORT DURATION REVIEW: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_DURATION}s). AI Score: ${normalizedAnalysis.score}/100. Requires manual verification of qualification.`;
+      console.log(`[AI-QA] Lead ${leadId} FORCED REVIEW (short duration ${callDuration}s): ${qaDecisionComment}`);
+    } else if (normalizedAnalysis.qualification_status === 'qualified' && normalizedAnalysis.score >= minScore) {
+      // Auto-approve high-scoring qualified leads (only if not short duration)
       qaStatus = 'approved';
       qaDecisionComment = `Auto-approved: AI score ${normalizedAnalysis.score}/100 (threshold: ${minScore})`;
       console.log(`[AI-QA] Lead ${leadId} AUTO-APPROVED with score ${normalizedAnalysis.score}`);

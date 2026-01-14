@@ -104,8 +104,10 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
       throw new Error("OpenAI API key not configured");
     }
 
+    // Use the latest GA gpt-realtime model for most natural, human-like speech
+    // gpt-realtime has better natural speech, instruction following, and tool calling
     const url = process.env.OPENAI_REALTIME_MODEL_URL ||
-      "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+      "wss://api.openai.com/v1/realtime?model=gpt-realtime";
 
     return new Promise((resolve, reject) => {
       console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime API...`);
@@ -207,11 +209,12 @@ export class OpenAIRealtimeProvider extends BaseVoiceProvider {
     } : undefined;
 
     // Build turn detection config
+    // Use 2500ms silence duration for proper B2B conversation turn-taking
     const turnDetection = {
       type: config.turnDetection.type === 'none' ? 'server_vad' : config.turnDetection.type,
       threshold: config.turnDetection.threshold ?? 0.5,
       prefix_padding_ms: config.turnDetection.prefixPaddingMs ?? 300,
-      silence_duration_ms: config.turnDetection.silenceDurationMs ?? 200,
+      silence_duration_ms: config.turnDetection.silenceDurationMs ?? 2500,
     };
 
     const message: OpenAISessionConfig = {

@@ -16,8 +16,10 @@ import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
   getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
   type AccountIntelligencePayload,
   type AccountMessagingBriefPayload,
+  type AccountProfileData,
 } from "./account-messaging-service";
 
 // ==================== TYPES ====================
@@ -49,7 +51,7 @@ export interface AgentPromptPreview {
 }
 
 export interface MultiProviderPromptPreview {
-  agentType: 'email' | 'research';
+  agentType: 'email' | 'research' | 'voice';
   providers: Record<string, AgentPromptPreview>;
   assembledAt: string;
 }
@@ -203,9 +205,13 @@ export async function buildEmailAgentPrompts(
         intelligenceRecord: accountIntelligence,
       });
 
+      // Load account profile data for including in context
+      const accountProfile = await getAccountProfileData(options.accountId);
+
       accountContext = buildAccountContextSection(
         accountIntelligence.payloadJson as AccountIntelligencePayload,
-        accountMessagingBrief.payloadJson as AccountMessagingBriefPayload
+        accountMessagingBrief.payloadJson as AccountMessagingBriefPayload,
+        accountProfile
       );
 
       // Get account name
@@ -756,7 +762,7 @@ export async function buildVoiceAgentPrompts(
     agentId?: string;
     useCondensed?: boolean;
   } = {}
-): Promise<MultiProviderPromptPreview & { agentType: 'voice' }> {
+): Promise<MultiProviderPromptPreview> {
   const now = new Date().toISOString();
   const useCondensed = options.useCondensed !== false; // Default to condensed
 
@@ -795,7 +801,7 @@ We are DemandGentic, a B2B demand generation platform that helps companies impro
   const providers: Record<string, AgentPromptPreview> = {
     openai: {
       provider: 'openai',
-      model: 'gpt-4o-realtime-preview',
+      model: 'gpt-realtime',
       systemPrompt: openaiSystemPrompt,
       userPromptTemplate: userPromptTemplate,
       sampleUserPrompt: sampleUserPrompt,
@@ -812,7 +818,7 @@ We are DemandGentic, a B2B demand generation platform that helps companies impro
     },
     gemini: {
       provider: 'gemini',
-      model: 'gemini-2.0-flash-live-001',
+      model: 'gemini-2.5-flash-preview-native-audio-dialog',
       systemPrompt: geminiSystemPrompt,
       userPromptTemplate: userPromptTemplate,
       sampleUserPrompt: sampleUserPrompt,

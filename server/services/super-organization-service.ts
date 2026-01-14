@@ -100,6 +100,111 @@ export async function getSuperOrganization(): Promise<CampaignOrganization | nul
 }
 
 /**
+ * Update the Super Organization
+ */
+export async function updateSuperOrganization(
+  data: {
+    name?: string;
+    domain?: string;
+    description?: string;
+    industry?: string;
+    logoUrl?: string;
+    identity?: any;
+    offerings?: any;
+    icp?: any;
+    positioning?: any;
+    outreach?: any;
+    compiledOrgContext?: string;
+  }
+): Promise<CampaignOrganization | null> {
+  const superOrg = await getSuperOrganization();
+  if (!superOrg) {
+    throw new Error('Super organization not found');
+  }
+
+  const [updated] = await db
+    .update(campaignOrganizations)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+    })
+    .where(eq(campaignOrganizations.id, superOrg.id))
+    .returning();
+
+  return updated || null;
+}
+
+/**
+ * Update a client organization
+ */
+export async function updateClientOrganization(
+  organizationId: string,
+  data: {
+    name?: string;
+    domain?: string;
+    description?: string;
+    industry?: string;
+    logoUrl?: string;
+    isActive?: boolean;
+    identity?: any;
+    offerings?: any;
+    icp?: any;
+    positioning?: any;
+    outreach?: any;
+    compiledOrgContext?: string;
+  }
+): Promise<CampaignOrganization | null> {
+  // Verify it's a client organization
+  const [org] = await db
+    .select()
+    .from(campaignOrganizations)
+    .where(eq(campaignOrganizations.id, organizationId))
+    .limit(1);
+
+  if (!org) {
+    throw new Error('Organization not found');
+  }
+
+  if (org.organizationType === 'super') {
+    throw new Error('Use updateSuperOrganization for super organization');
+  }
+
+  const [updated] = await db
+    .update(campaignOrganizations)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+    })
+    .where(eq(campaignOrganizations.id, organizationId))
+    .returning();
+
+  return updated || null;
+}
+
+/**
+ * Delete a client organization
+ */
+export async function deleteClientOrganization(organizationId: string): Promise<boolean> {
+  // Verify it's a client organization
+  const canDelete = await canDeleteOrganization(organizationId);
+  if (!canDelete.allowed) {
+    throw new Error(canDelete.reason || 'Cannot delete organization');
+  }
+
+  // Soft delete by setting isActive to false
+  const [updated] = await db
+    .update(campaignOrganizations)
+    .set({ 
+      isActive: false, 
+      updatedAt: new Date() 
+    })
+    .where(eq(campaignOrganizations.id, organizationId))
+    .returning();
+
+  return !!updated;
+}
+
+/**
  * Ensure super organization cannot be deleted
  */
 export async function canDeleteOrganization(organizationId: string): Promise<{ allowed: boolean; reason?: string }> {

@@ -139,7 +139,10 @@ If the person indicates they are not the contact or sounds like a gatekeeper:
 
 - Be polite and respectful.
 - Ask to be connected to the contact.
-- Do not pitch, explain details, or justify the call.
+- If asked "Who is calling?" or "Where are you calling from?": Respond with your name and the organization name.
+- If asked "What is this regarding?": Keep it vague — say "It's related to one of our demand generation services" or "It's regarding some of the services we offer."
+- Do NOT mention specific products, campaigns, or detailed purposes to gatekeepers.
+- If pressed further: "I'd be happy to discuss the details with [Name] directly. Is [Name] available?"
 - Make no more than two polite attempts.
 - If refused, thank them sincerely and end the call.
 
@@ -1350,6 +1353,59 @@ router.patch("/:id", requireAuth, requireRole('admin'), async (req, res) => {
       return res.status(400).json({ message: "Validation error", errors: error.errors });
     }
     res.status(500).json({ message: "Failed to update virtual agent" });
+  }
+});
+
+// Clone/duplicate a virtual agent
+router.post("/:id/clone", requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { name: customName } = req.body || {};
+
+    // Get the original agent
+    const [original] = await db
+      .select()
+      .from(virtualAgents)
+      .where(eq(virtualAgents.id, req.params.id))
+      .limit(1);
+
+    if (!original) {
+      return res.status(404).json({ message: "Virtual agent not found" });
+    }
+
+    // Create the cloned agent with all fields copied
+    const [cloned] = await db
+      .insert(virtualAgents)
+      .values({
+        name: customName || `${original.name} (Copy)`,
+        description: original.description,
+        provider: original.provider,
+        externalAgentId: null, // Don't copy external IDs - new agent needs new external registration if needed
+        voice: original.voice,
+        systemPrompt: original.systemPrompt,
+        firstMessage: original.firstMessage,
+        settings: original.settings,
+        isActive: original.isActive,
+        demandAgentType: original.demandAgentType,
+        specializationConfig: original.specializationConfig,
+        skillId: original.skillId,
+        skillInputs: original.skillInputs,
+        compiledPromptMetadata: original.compiledPromptMetadata,
+        isFoundationAgent: original.isFoundationAgent,
+        foundationCapabilities: original.foundationCapabilities,
+        createdBy: req.user!.userId,
+      })
+      .returning();
+
+    console.log(`[Virtual Agents] Cloned agent ${original.id} -> ${cloned.id} by user ${req.user!.userId}`);
+
+    res.status(201).json({
+      message: "Virtual agent cloned successfully",
+      agent: cloned,
+      originalId: original.id,
+    });
+  } catch (error) {
+    console.error("[Virtual Agents] Error cloning agent:", error);
+    res.status(500).json({ message: "Failed to clone virtual agent" });
   }
 });
 

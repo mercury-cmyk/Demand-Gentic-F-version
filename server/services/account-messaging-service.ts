@@ -79,22 +79,49 @@ type CampaignIntent = {
   talkingPoints: string[] | null;
 };
 
+export type AccountProfileData = {
+  name: string;
+  domain?: string | null;
+  industry?: string | null;
+  description?: string | null;
+  employeeCount?: number | string | null;
+  revenue?: string | null;
+};
+
 export function buildAccountContextSection(
   intelligence: AccountIntelligencePayload,
-  brief: AccountMessagingBriefPayload
+  brief: AccountMessagingBriefPayload,
+  accountProfile?: AccountProfileData | null
 ): string {
-  return [
-    "# Account Intelligence (Required)",
-    JSON.stringify(intelligence, null, 2),
-    "",
-    "# Account Messaging Brief (Required)",
-    JSON.stringify(brief, null, 2),
-    "",
-    "Rules:",
-    "- Do not introduce ideas beyond the Account Messaging Brief.",
-    "- Avoid sales language, promotion, or assumptive pain statements.",
-    `- If confidence < ${ACCOUNT_CONFIDENCE_THRESHOLD}, remain exploratory and ask a clarifying question.`,
-  ].join("\n");
+  const sections: string[] = [];
+
+  // Add account profile if provided
+  if (accountProfile) {
+    const profileParts: string[] = [];
+    profileParts.push(`Company: ${accountProfile.name}`);
+    if (accountProfile.domain) profileParts.push(`Domain: ${accountProfile.domain}`);
+    if (accountProfile.industry) profileParts.push(`Industry: ${accountProfile.industry}`);
+    if (accountProfile.description) profileParts.push(`Description: ${accountProfile.description}`);
+    if (accountProfile.employeeCount) profileParts.push(`Employee Count: ${accountProfile.employeeCount}`);
+    if (accountProfile.revenue) profileParts.push(`Revenue: ${accountProfile.revenue}`);
+
+    sections.push("# Account Profile");
+    sections.push(profileParts.join("\n"));
+    sections.push("");
+  }
+
+  sections.push("# Account Intelligence (Required)");
+  sections.push(JSON.stringify(intelligence, null, 2));
+  sections.push("");
+  sections.push("# Account Messaging Brief (Required)");
+  sections.push(JSON.stringify(brief, null, 2));
+  sections.push("");
+  sections.push("Rules:");
+  sections.push("- Do not introduce ideas beyond the Account Messaging Brief.");
+  sections.push("- Avoid sales language, promotion, or assumptive pain statements.");
+  sections.push(`- If confidence < ${ACCOUNT_CONFIDENCE_THRESHOLD}, remain exploratory and ask a clarifying question.`);
+
+  return sections.join("\n");
 }
 
 export async function getOrBuildAccountIntelligence(
@@ -661,4 +688,41 @@ function clampConfidence(value: any): number {
 function maxDate(a: Date | null, b: Date | null): Date | null {
   if (a && b) return a > b ? a : b;
   return a || b || null;
+}
+
+/**
+ * Load account profile data for including in agent prompts
+ */
+export async function getAccountProfileData(accountId: string): Promise<AccountProfileData | null> {
+  const [account] = await db
+    .select({
+      id: accounts.id,
+      name: accounts.name,
+      domain: accounts.domain,
+      websiteDomain: accounts.websiteDomain,
+      industryStandardized: accounts.industryStandardized,
+      industryRaw: accounts.industryRaw,
+      industryAiSuggested: accounts.industryAiSuggested,
+      description: accounts.description,
+      employeeCount: accounts.employeeCount,
+      revenue: accounts.revenue,
+    })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+    .limit(1);
+
+  if (!account) {
+    return null;
+  }
+
+  const industry = account.industryStandardized || account.industryRaw || account.industryAiSuggested;
+
+  return {
+    name: account.name,
+    domain: account.domain || account.websiteDomain,
+    industry: industry || null,
+    description: account.description,
+    employeeCount: account.employeeCount,
+    revenue: account.revenue,
+  };
 }

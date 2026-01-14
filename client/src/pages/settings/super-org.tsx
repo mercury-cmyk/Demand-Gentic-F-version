@@ -76,6 +76,8 @@ import {
   RefreshCw,
   AlertTriangle,
   ChevronRight,
+  Save,
+  X,
 } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
 
@@ -128,38 +130,67 @@ interface ClientOrganization {
   createdAt: string;
 }
 
-// API functions
+// Helper to get auth headers
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('authToken');
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+// API functions with proper auth
 async function checkSuperOrgAccess(): Promise<{ hasAccess: boolean }> {
-  const response = await fetch('/api/super-org/check-access', { credentials: 'include' });
+  const response = await fetch('/api/super-org/check-access', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
+  if (!response.ok) return { hasAccess: false };
   return response.json();
 }
 
 async function getSuperOrg(): Promise<{ organization: SuperOrganization }> {
-  const response = await fetch('/api/super-org', { credentials: 'include' });
+  const response = await fetch('/api/super-org', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
   if (!response.ok) throw new Error('Failed to fetch super organization');
   return response.json();
 }
 
 async function getMembers(): Promise<{ members: OrganizationMember[] }> {
-  const response = await fetch('/api/super-org/members', { credentials: 'include' });
+  const response = await fetch('/api/super-org/members', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
   if (!response.ok) throw new Error('Failed to fetch members');
   return response.json();
 }
 
 async function getCredentials(): Promise<{ credentials: Credential[] }> {
-  const response = await fetch('/api/super-org/credentials', { credentials: 'include' });
+  const response = await fetch('/api/super-org/credentials', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
   if (!response.ok) throw new Error('Failed to fetch credentials');
   return response.json();
 }
 
 async function getClients(): Promise<{ organizations: ClientOrganization[] }> {
-  const response = await fetch('/api/super-org/clients', { credentials: 'include' });
+  const response = await fetch('/api/super-org/clients', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
   if (!response.ok) throw new Error('Failed to fetch client organizations');
   return response.json();
 }
 
 async function getCredentialCategories(): Promise<{ categories: Array<{ id: string; name: string; description: string }> }> {
-  const response = await fetch('/api/super-org/credential-categories', { credentials: 'include' });
+  const response = await fetch('/api/super-org/credential-categories', {
+    headers: getAuthHeaders(),
+    credentials: 'include',
+  });
   if (!response.ok) throw new Error('Failed to fetch categories');
   return response.json();
 }
@@ -228,7 +259,48 @@ export default function SuperOrgSettingsPage() {
     enabled: accessData?.hasAccess,
   });
 
-  // Access denied screen
+  // Claim ownership mutation - must be before any conditional returns (Rules of Hooks)
+  const claimOwnershipMutation = useMutation({
+    mutationFn: async () => {
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+
+      const response = await fetch('/api/super-org/claim-ownership', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      // Handle non-JSON responses (like error pages)
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        if (response.status === 401) {
+          throw new Error('Session expired. Please log in again.');
+        }
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to claim ownership');
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['super-org-access'] });
+      toast({ title: 'Ownership claimed successfully', description: 'You now have access to super organization settings.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to claim ownership', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  // Loading screen
   if (accessLoading) {
     return (
       <SettingsLayout title="Super Organization" description="Loading...">
@@ -241,22 +313,44 @@ export default function SuperOrgSettingsPage() {
 
   if (!accessData?.hasAccess) {
     return (
-      <SettingsLayout title="Access Denied" description="You don't have permission to access this page">
-        <Card className="border-destructive">
+      <SettingsLayout title="Platform Admin" description="Super organization management">
+        <Card className="border-amber-300 bg-amber-50/50">
           <CardContent className="pt-6">
             <div className="flex flex-col items-center text-center space-y-4">
-              <div className="p-3 rounded-full bg-destructive/10">
-                <Shield className="h-8 w-8 text-destructive" />
+              <div className="p-3 rounded-full bg-amber-100">
+                <Crown className="h-8 w-8 text-amber-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Owner Access Required</h3>
+                <h3 className="text-lg font-semibold">Super Organization Access Required</h3>
                 <p className="text-muted-foreground mt-1">
-                  Only super organization owners can access these settings.
+                  You need owner access to the super organization to manage platform settings.
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  If you are a system admin, you can claim ownership below.
                 </p>
               </div>
-              <Button variant="outline" onClick={() => setLocation(ROUTES.SETTINGS)}>
-                Back to Settings
-              </Button>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setLocation(ROUTES.SETTINGS)}>
+                  Back to Settings
+                </Button>
+                <Button
+                  onClick={() => claimOwnershipMutation.mutate()}
+                  disabled={claimOwnershipMutation.isPending}
+                  className="bg-amber-600 hover:bg-amber-700"
+                >
+                  {claimOwnershipMutation.isPending ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Claiming...
+                    </>
+                  ) : (
+                    <>
+                      <Crown className="h-4 w-4 mr-2" />
+                      Claim Ownership
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -297,86 +391,7 @@ export default function SuperOrgSettingsPage() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Crown className="h-5 w-5 text-yellow-500" />
-                {org?.name || 'Pivotal B2B'}
-              </CardTitle>
-              <CardDescription>
-                Platform owner organization - enterprise-level settings and configuration
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Domain</Label>
-                  <p className="font-medium">{org?.domain || 'pivotalb2b.com'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Industry</Label>
-                  <p className="font-medium">{org?.industry || 'Technology / B2B Services'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Organization Type</Label>
-                  <Badge variant="default" className="mt-1">Super Organization</Badge>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Status</Label>
-                  <Badge variant="outline" className="mt-1 bg-green-100 text-green-800">Active</Badge>
-                </div>
-              </div>
-              {org?.description && (
-                <div>
-                  <Label className="text-muted-foreground">Description</Label>
-                  <p className="text-sm mt-1">{org.description}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Quick Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-100">
-                    <Users className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{members.length}</p>
-                    <p className="text-sm text-muted-foreground">Team Members</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-purple-100">
-                    <Key className="h-5 w-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{credentials.length}</p>
-                    <p className="text-sm text-muted-foreground">API Credentials</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-green-100">
-                    <Building className="h-5 w-5 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{clients.length}</p>
-                    <p className="text-sm text-muted-foreground">Client Organizations</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <SuperOrgOverviewSection org={org} members={members} credentials={credentials} clients={clients} />
         </TabsContent>
 
         {/* Members Tab */}
@@ -402,6 +417,227 @@ export default function SuperOrgSettingsPage() {
   );
 }
 
+// Super Org Overview Section with Edit capability
+function SuperOrgOverviewSection({
+  org,
+  members,
+  credentials,
+  clients,
+}: {
+  org: SuperOrganization | undefined;
+  members: OrganizationMember[];
+  credentials: Credential[];
+  clients: ClientOrganization[];
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editData, setEditData] = useState({
+    name: '',
+    domain: '',
+    description: '',
+    industry: '',
+  });
+
+  // Initialize edit data when org loads
+  useEffect(() => {
+    if (org) {
+      setEditData({
+        name: org.name || '',
+        domain: org.domain || '',
+        description: org.description || '',
+        industry: org.industry || '',
+      });
+    }
+  }, [org]);
+
+  // Update mutation
+  const updateMutation = useMutation({
+    mutationFn: async (data: typeof editData) => {
+      const response = await fetch('/api/super-org', {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Failed to update organization');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['super-org'] });
+      setIsEditing(false);
+      toast({ title: 'Organization updated successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to update organization', variant: 'destructive' });
+    },
+  });
+
+  const handleSave = () => {
+    updateMutation.mutate(editData);
+  };
+
+  const handleCancel = () => {
+    if (org) {
+      setEditData({
+        name: org.name || '',
+        domain: org.domain || '',
+        description: org.description || '',
+        industry: org.industry || '',
+      });
+    }
+    setIsEditing(false);
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Crown className="h-5 w-5 text-yellow-500" />
+              {org?.name || 'Pivotal B2B'}
+            </CardTitle>
+            <CardDescription>
+              Platform owner organization - enterprise-level settings and configuration
+            </CardDescription>
+          </div>
+          {!isEditing ? (
+            <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleCancel}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={updateMutation.isPending}>
+                <Save className="h-4 w-4 mr-2" />
+                Save
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isEditing ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input
+                  value={editData.name}
+                  onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                  placeholder="Organization name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Domain</Label>
+                <Input
+                  value={editData.domain}
+                  onChange={(e) => setEditData({ ...editData, domain: e.target.value })}
+                  placeholder="pivotalb2b.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Industry</Label>
+                <Input
+                  value={editData.industry}
+                  onChange={(e) => setEditData({ ...editData, industry: e.target.value })}
+                  placeholder="Technology / B2B Services"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Badge variant="outline" className="mt-1 bg-green-100 text-green-800">Active</Badge>
+              </div>
+              <div className="col-span-2 space-y-2">
+                <Label>Description</Label>
+                <Textarea
+                  value={editData.description}
+                  onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                  placeholder="Organization description"
+                  rows={3}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-muted-foreground">Domain</Label>
+                  <p className="font-medium">{org?.domain || 'pivotalb2b.com'}</p>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Industry</Label>
+                  <p className="font-medium">{org?.industry || 'Technology / B2B Services'}</p>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Organization Type</Label>
+                  <Badge variant="default" className="mt-1">Super Organization</Badge>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Status</Label>
+                  <Badge variant="outline" className="mt-1 bg-green-100 text-green-800">Active</Badge>
+                </div>
+              </div>
+              {org?.description && (
+                <div>
+                  <Label className="text-muted-foreground">Description</Label>
+                  <p className="text-sm mt-1">{org.description}</p>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-100">
+                <Users className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{members.length}</p>
+                <p className="text-sm text-muted-foreground">Team Members</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-purple-100">
+                <Key className="h-5 w-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{credentials.length}</p>
+                <p className="text-sm text-muted-foreground">API Credentials</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-green-100">
+                <Building className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{clients.length}</p>
+                <p className="text-sm text-muted-foreground">Client Organizations</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 // Members Section Component
 function MembersSection({ members, isLoading }: { members: OrganizationMember[]; isLoading: boolean }) {
   const { toast } = useToast();
@@ -415,7 +651,7 @@ function MembersSection({ members, isLoading }: { members: OrganizationMember[];
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
       const response = await fetch('/api/super-org/members', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ userId, role }),
       });
@@ -438,7 +674,7 @@ function MembersSection({ members, isLoading }: { members: OrganizationMember[];
     mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
       const response = await fetch(`/api/super-org/members/${userId}/role`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ role }),
       });
@@ -459,6 +695,7 @@ function MembersSection({ members, isLoading }: { members: OrganizationMember[];
     mutationFn: async (userId: string) => {
       const response = await fetch(`/api/super-org/members/${userId}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
         credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to remove member');
@@ -647,7 +884,7 @@ function CredentialsSection({
     mutationFn: async (data: typeof newCredential) => {
       const response = await fetch('/api/super-org/credentials', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(data),
       });
@@ -670,6 +907,7 @@ function CredentialsSection({
     mutationFn: async (id: string) => {
       const response = await fetch(`/api/super-org/credentials/${id}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
         credentials: 'include',
       });
       if (!response.ok) throw new Error('Failed to delete credential');
@@ -923,7 +1161,15 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const [editClientOpen, setEditClientOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState<ClientOrganization | null>(null);
   const [newClient, setNewClient] = useState({
+    name: '',
+    domain: '',
+    description: '',
+    industry: '',
+  });
+  const [editClient, setEditClient] = useState({
     name: '',
     domain: '',
     description: '',
@@ -935,7 +1181,7 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
     mutationFn: async (data: typeof newClient) => {
       const response = await fetch('/api/super-org/clients', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(data),
       });
@@ -952,6 +1198,60 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
       toast({ title: 'Failed to create client organization', variant: 'destructive' });
     },
   });
+
+  // Update client mutation
+  const updateClientMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: typeof editClient }) => {
+      const response = await fetch(`/api/super-org/clients/${id}`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Failed to update client');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['super-org-clients'] });
+      setEditClientOpen(false);
+      setEditingClient(null);
+      toast({ title: 'Client organization updated successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to update client organization', variant: 'destructive' });
+    },
+  });
+
+  // Delete client mutation
+  const deleteClientMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/super-org/clients/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Failed to delete client');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['super-org-clients'] });
+      toast({ title: 'Client organization deleted successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to delete client organization', variant: 'destructive' });
+    },
+  });
+
+  const handleEditClick = (client: ClientOrganization) => {
+    setEditingClient(client);
+    setEditClient({
+      name: client.name || '',
+      domain: client.domain || '',
+      description: client.description || '',
+      industry: client.industry || '',
+    });
+    setEditClientOpen(true);
+  };
 
   if (isLoading) {
     return (
@@ -1050,6 +1350,7 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
                 <TableHead>Industry</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1069,12 +1370,105 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
                     </Badge>
                   </TableCell>
                   <TableCell>{new Date(client.createdAt).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => handleEditClick(client)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete "{client.name}"? This will deactivate the organization.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => deleteClientMutation.mutate(client.id)}
+                              className="bg-destructive text-destructive-foreground"
+                            >
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         )}
       </CardContent>
+
+      {/* Edit Client Dialog */}
+      <Dialog open={editClientOpen} onOpenChange={setEditClientOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Client Organization</DialogTitle>
+            <DialogDescription>
+              Update the details for {editingClient?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Organization Name *</Label>
+              <Input
+                placeholder="e.g., Acme Corp"
+                value={editClient.name}
+                onChange={(e) => setEditClient({ ...editClient, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Domain</Label>
+              <Input
+                placeholder="e.g., acmecorp.com"
+                value={editClient.domain}
+                onChange={(e) => setEditClient({ ...editClient, domain: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Industry</Label>
+              <Input
+                placeholder="e.g., Technology"
+                value={editClient.industry}
+                onChange={(e) => setEditClient({ ...editClient, industry: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                placeholder="Brief description of the organization"
+                value={editClient.description}
+                onChange={(e) => setEditClient({ ...editClient, description: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditClientOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editingClient && updateClientMutation.mutate({ id: editingClient.id, data: editClient })}
+              disabled={!editClient.name || updateClientMutation.isPending}
+            >
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -104,7 +104,7 @@ export const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
     },
     functions: [],
     mcpServers: [],
-    model: 'gpt-4o-realtime-preview',
+    model: 'gpt-realtime',
     userTranscriptModel: '',
     noiseReduction: 'enabled',
     modelConfig: '',
