@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { getRedisUrl, getRedisConnectionOptions } from './redis-config';
 
 interface PendingAuthorization {
   codeVerifier: string;
@@ -11,8 +12,11 @@ export class OAuthStateStore {
   private readonly prefix: string;
   private readonly ttlSeconds: number;
 
-  constructor(redisUrl: string, options: { prefix?: string; ttlSeconds?: number } = {}) {
-    this.redis = new Redis(redisUrl, {
+  constructor(redisUrl?: string, options: { prefix?: string; ttlSeconds?: number } = {}) {
+    // Use provided URL or get from environment-aware config
+    const url = redisUrl || getRedisUrl();
+    this.redis = new Redis(url, {
+      ...getRedisConnectionOptions(),
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 2000)),
     });

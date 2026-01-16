@@ -3,8 +3,10 @@ import { db } from '../db';
 import { scheduledEmails } from '@shared/schema';
 import { eq, and, lte } from 'drizzle-orm';
 import IORedis from 'ioredis';
+import { getRedisUrl, getRedisConnectionOptions } from './redis-config';
 
-const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
+const redisConnection = new IORedis(getRedisUrl(), {
+  ...getRedisConnectionOptions(),
   maxRetriesPerRequest: null,
 });
 

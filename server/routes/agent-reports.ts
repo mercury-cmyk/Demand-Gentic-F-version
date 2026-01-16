@@ -12,14 +12,16 @@ import {
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import Redis from 'ioredis';
+import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured } from '../lib/redis-config';
 
 const router = Router();
 
 // Redis client for caching (graceful degradation if unavailable)
 let redisClient: Redis | null = null;
 try {
-  if (process.env.REDIS_URL) {
-    redisClient = new Redis(process.env.REDIS_URL, {
+  if (isRedisConfigured()) {
+    redisClient = new Redis(getRedisUrl(), {
+      ...getRedisConnectionOptions(),
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 2000)),
     });

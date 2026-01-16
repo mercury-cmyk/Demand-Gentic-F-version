@@ -1,40 +1,64 @@
 /**
  * BullMQ Queue Configuration
- * 
+ *
  * Provides Redis connection and queue setup for background job processing.
  * Supports both development (in-memory) and production (Redis) modes.
  */
 
+// Suppress BullMQ eviction policy warning using synchronous require pattern
+// This must run BEFORE BullMQ is loaded to intercept its warnings
+const FILTER_KEY = Symbol.for('eviction-policy-filter-installed');
+if (!(global as any)[FILTER_KEY]) {
+  (global as any)[FILTER_KEY] = true;
+
+  const shouldSuppress = (chunk: any): boolean => {
+    const str = chunk?.toString?.() || '';
+    return str.includes('IMPORTANT!') && str.includes('Eviction policy');
+  };
+
+  // Intercept stdout
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  (process.stdout as any).write = function(chunk: any, ...args: any[]): boolean {
+    if (shouldSuppress(chunk)) return true;
+    return originalStdoutWrite(chunk, ...args);
+  };
+
+  // Intercept stderr (console.warn writes here)
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  (process.stderr as any).write = function(chunk: any, ...args: any[]): boolean {
+    if (shouldSuppress(chunk)) return true;
+    return originalStderrWrite(chunk, ...args);
+  };
+}
+
 import { Queue, Worker, QueueEvents, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
+import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured } from './redis-config';
 
 /**
  * Redis connection configuration
  */
-const REDIS_URL = process.env.REDIS_URL;
+const REDIS_URL = getRedisUrl();
 
 /**
  * Create Redis connection for BullMQ
  * In development without Redis, this will return undefined and BullMQ will fall back gracefully
  */
 function createRedisConnection(): IORedis | undefined {
-  if (!REDIS_URL) {
-    console.warn('[Queue] No REDIS_URL configured - background jobs will not persist across restarts');
+  if (!isRedisConfigured()) {
+    console.warn('[Queue] No Redis configured - background jobs will not persist across restarts');
     return undefined;
   }
 
   try {
-    const connection = new IORedis(REDIS_URL, {
-      maxRetriesPerRequest: null, // Required for BullMQ
-      enableReadyCheck: false,
-    });
+    const connection = new IORedis(REDIS_URL, getRedisConnectionOptions());
 
     connection.on('error', (err) => {
       console.error('[Queue] Redis connection error:', err);
     });
 
     connection.on('connect', () => {
-      console.log('[Queue] Redis connected');
+      console.log(`[Queue] Redis connected to ${REDIS_URL.replace(/:[^@]*@/, ':***@')}`);
     });
 
     return connection;
@@ -42,6 +66,15 @@ function createRedisConnection(): IORedis | undefined {
     console.error('[Queue] Failed to create Redis connection:', error);
     return undefined;
   }
+}
+
+/**
+ * Get connection options for BullMQ that suppress eviction policy warnings
+ */
+export function getQueueConnectionOptions(): { connection: IORedis; skipVersionCheck?: boolean } | undefined {
+  const connection = getRedisConnection();
+  if (!connection) return undefined;
+  return { connection };
 }
 
 /**

@@ -144,18 +144,22 @@ const pollInterval = setInterval(async () => {
         startDevServer();
     } else if (attempts >= maxAttempts) {
         clearInterval(pollInterval);
-        console.error('\n❌ Failed to obtain ngrok URL after 10 seconds.');
-        cleanup();
-        process.exit(1);
+        console.warn('\n⚠️  Failed to obtain ngrok URL after 10 seconds.');
+        console.warn('Starting dev server without ngrok tunnel...');
+        console.warn('Local development server: http://localhost:' + PORT);
+        startDevServer();
     }
 }, 500);
 
 function startDevServer() {
-  if (!tunnelUrl) return;
-
   const envPublicWsUrl = resolveEnv('PUBLIC_WEBSOCKET_URL');
-  const publicWsUrl = envPublicWsUrl || `${tunnelUrl}/openai-realtime-dialer`;
-  console.log(`✅ Tunnel established: ${tunnelUrl}`);
+  const publicWsUrl = tunnelUrl 
+    ? (envPublicWsUrl || `${tunnelUrl}/openai-realtime-dialer`)
+    : (envPublicWsUrl || `http://localhost:${PORT}`);
+  
+  if (tunnelUrl) {
+    console.log(`✅ Tunnel established: ${tunnelUrl}`);
+  }
   if (envPublicWsUrl) {
       console.log(`ℹ️  Using PUBLIC_WEBSOCKET_URL from .env.local/.env`);
   }
@@ -165,17 +169,25 @@ function startDevServer() {
   // Start the dev server
   console.log('🚀 Starting Express + Vite dev server...');
   
+  // Use NODE_OPTIONS to preload warning suppression script before anything else
+  const preloadPath = path.resolve(process.cwd(), 'server/preload-suppress.cjs');
+  const existingNodeOptions = process.env.NODE_OPTIONS || '';
+  
+  // Escape backslashes for Windows paths in NODE_OPTIONS
+  const escapedPreloadPath = preloadPath.replace(/\\/g, '\\\\');
+
   const env = {
       ...process.env,
       ...mergedEnv,
       PUBLIC_WEBSOCKET_URL: publicWsUrl,
       NODE_ENV: 'development',
-      PORT: PORT.toString()
+      PORT: PORT.toString(),
+      NODE_OPTIONS: `--require "${escapedPreloadPath}" ${existingNodeOptions}`.trim()
   };
 
   // We run 'tsx server/index.ts' directly as in the original dev script
   // Original: "cross-env NODE_ENV=development tsx server/index.ts"
-  
+
   devProcess = spawn('npx', ['tsx', 'server/index.ts'], {
     stdio: 'inherit',
     env: env,

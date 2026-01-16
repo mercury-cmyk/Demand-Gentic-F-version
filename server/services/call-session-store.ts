@@ -11,6 +11,7 @@
  */
 
 import Redis from 'ioredis';
+import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured } from '../lib/redis-config';
 
 const LOG_PREFIX = '[CallSessionStore]';
 
@@ -81,15 +82,15 @@ const PREVIEW_SESSION_TTL = 1800; // 30 minutes for preview sessions
  * Initialize Redis connection
  */
 export async function initializeCallSessionStore(): Promise<boolean> {
-  const redisUrl = process.env.REDIS_URL;
-  
-  if (!redisUrl) {
-    console.log(`${LOG_PREFIX} REDIS_URL not configured - using in-memory store (not suitable for production)`);
+  if (!isRedisConfigured()) {
+    console.log(`${LOG_PREFIX} Redis not configured - using in-memory store (suitable for development)`);
     return false;
   }
 
   try {
+    const redisUrl = getRedisUrl();
     redisClient = new Redis(redisUrl, {
+      ...getRedisConnectionOptions(),
       maxRetriesPerRequest: 3,
       enableReadyCheck: true,
       lazyConnect: true,
@@ -101,7 +102,8 @@ export async function initializeCallSessionStore(): Promise<boolean> {
     await redisClient.ping();
     redisAvailable = true;
     
-    console.log(`${LOG_PREFIX} ✅ Redis connected - call sessions will persist across instances`);
+    const displayUrl = redisUrl.replace(/:[^@]*@/, ':***@');
+    console.log(`${LOG_PREFIX} ✅ Redis connected (${process.env.NODE_ENV || 'development'}) - call sessions will persist across instances`);
     return true;
   } catch (error) {
     console.error(`${LOG_PREFIX} ⚠️ Redis connection failed - falling back to in-memory store:`, error);
@@ -117,6 +119,7 @@ export async function initializeCallSessionStore(): Promise<boolean> {
 export function isRedisAvailable(): boolean {
   return redisAvailable && redisClient !== null;
 }
+
 
 // ============================================================================
 // CALL SESSION MANAGEMENT

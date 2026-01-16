@@ -167,31 +167,48 @@ export class AiVoiceAgent extends EventEmitter {
     const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}. 
 You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.`;
 
+    // Default scripts if not provided
+    const defaultScripts = {
+      opening: `Hi, this is {{agentName}} from {{agentCompany}}. Am I speaking with {{firstName}}?`,
+      gatekeeper: `I'm calling to discuss how we can help {{companyName}} with their business needs.`,
+      pitch: `I wanted to reach out because we've been helping companies like {{companyName}} achieve their goals. I'd love to learn more about your current challenges and see if there might be a fit.`,
+      closing: `Would you be open to a brief conversation to explore this further?`,
+      objections: ``,
+    };
+    const scripts = {
+      opening: this.settings.scripts?.opening || defaultScripts.opening,
+      gatekeeper: this.settings.scripts?.gatekeeper || defaultScripts.gatekeeper,
+      pitch: this.settings.scripts?.pitch || defaultScripts.pitch,
+      closing: this.settings.scripts?.closing || defaultScripts.closing,
+      objections: this.settings.scripts?.objections || defaultScripts.objections,
+    };
+    const maxGatekeeperAttempts = this.settings.gatekeeperLogic?.maxAttempts || 3;
+
     const gatekeeperInstructions = `
 GATEKEEPER HANDLING:
 If you encounter a gatekeeper (receptionist, assistant, or anyone who isn't ${this.context.contactFirstName}):
 - Be professional and courteous
 - State your name and company clearly
 - Ask to be connected to ${this.context.contactFirstName}
-- If asked "What is this regarding?", respond: "${this.interpolateScript(this.settings.scripts.gatekeeper)}"
-- You have ${this.settings.gatekeeperLogic.maxAttempts} attempts to reach the decision maker
+- If asked "What is this regarding?", respond: "${this.interpolateScript(scripts.gatekeeper)}"
+- You have ${maxGatekeeperAttempts} attempts to reach the decision maker
 - If the gatekeeper refuses, ask for the best time to call back or offer to leave a message`;
 
     const pitchInstructions = `
 WHEN YOU REACH ${this.context.contactFirstName.toUpperCase()}:
-Opening: ${this.interpolateScript(this.settings.scripts.opening)}
+Opening: ${this.interpolateScript(scripts.opening)}
 
-Main Pitch: ${this.interpolateScript(this.settings.scripts.pitch)}
+Main Pitch: ${this.interpolateScript(scripts.pitch)}
 
-Closing: ${this.interpolateScript(this.settings.scripts.closing)}`;
+Closing: ${this.interpolateScript(scripts.closing)}`;
 
-    const objectionHandling = this.settings.scripts.objections
+    const objectionHandling = scripts.objections
       ? `
 OBJECTION HANDLING:
-${this.interpolateScript(this.settings.scripts.objections)}`
+${this.interpolateScript(scripts.objections)}`
       : "";
 
-    const handoffInstructions = this.settings.handoff.enabled
+    const handoffInstructions = this.settings.handoff?.enabled && this.settings.handoff?.triggers?.length
       ? `
 HANDOFF TRIGGERS:
 Transfer the call to a human agent if any of these occur:
@@ -468,7 +485,9 @@ IMPORTANT:
   }
 
   getOpeningMessage(): string {
-    return this.interpolateScript(this.settings.scripts.opening);
+    const defaultOpening = `Hi, this is {{agentName}} from {{agentCompany}}. Am I speaking with {{firstName}}?`;
+    const opening = this.settings.scripts?.opening || defaultOpening;
+    return this.interpolateScript(opening);
   }
 
   getCurrentPhase(): ConversationPhase {

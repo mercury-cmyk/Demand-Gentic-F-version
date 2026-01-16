@@ -32,11 +32,13 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
   let geminiWs: WebSocket | null = null;
   let streamSid: string | null = null;
+  let callControlId: string | null = null;
   let callId: string | null = null;
   
   // Default configuration
   let voiceName: string = 'Pumice'; 
   let systemPrompt: string = 'You are a helpful AI assistant.';
+  let aiTranscript: string = "";
 
   // 1. Handle messages from Telnyx (Inbound from PSTN)
   ws.on('message', (data: any) => {
@@ -47,6 +49,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
         case 'start':
           streamSid = msg.stream_id || msg.start?.stream_id;
           callId = msg.start?.call_id;
+          callControlId = msg.start?.call_control_id;
           
           // Extract dynamic configuration from client_state
           const clientStateB64 = msg.start?.custom_parameters?.client_state;
@@ -135,7 +138,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
             }
           ],
           generation_config: {
-            response_modalities: ["audio"],
+            response_modalities: ["audio", "text"],
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: {
@@ -160,6 +163,10 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
         // Handle Audio Output from Gemini
         if (response.serverContent?.modelTurn?.parts) {
           for (const part of response.serverContent.modelTurn.parts) {
+            if (part.text) {
+              aiTranscript += part.text;
+            }
+
             if (part.inlineData?.data) {
               // Send audio back to Telnyx
               ws.send(JSON.stringify({
@@ -258,9 +265,39 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
           }
         }
 
+        // Handle Turn Completion (AI finished speaking/generating)
+        // This acts as the 'audio:done' signal for the AI's response turn.
+        if (response.serverContent?.turnComplete) {
+          const text = aiTranscript.toLowerCase();
+          const goodbyeKeywords = ['goodbye', 'bye bye', 'have a great day', 'have a nice day', 'talk soon'];
+          const saidGoodbye = goodbyeKeywords.some(keyword => text.includes(keyword));
+
+          if (saidGoodbye && callControlId) {
+            console.log(`[Gemini Live] 👋 Goodbye detected in transcript: "${aiTranscript}". Hanging up...`);
+            
+            try {
+              await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+                  'Content-Type': 'application/json'
+                }
+              });
+            } catch (error) {
+              console.error('[Gemini Live] Failed to execute Telnyx hangup:', error);
+            }
+          } else {
+            console.log('[Gemini Live] ✨ AI turn complete');
+          }
+
+          // Reset transcript for the next turn
+          aiTranscript = "";
+        }
+
         // Handle Interruptions
         if (response.serverContent?.interrupted) {
           console.log('[Gemini Live] ✋ Model interrupted by user');
+          aiTranscript = ""; // Clear transcript on interruption
           // Send clear event to Telnyx to stop playback of buffered audio immediately
           if (streamSid && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({

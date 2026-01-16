@@ -155,4 +155,53 @@ router.get('/health', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/cloud-logs/advanced
+ * Get logs with advanced filtering (severities, resources, search)
+ */
+router.post('/advanced', requireAuth, async (req, res) => {
+  try {
+    const {
+      hours = 24,
+      severities = [],
+      resources = [],
+      search,
+      limit = 100
+    } = req.body;
+
+    const logs = await cloudLoggingService.getAdvancedLogs({
+      hours: parseInt(hours as string),
+      severities,
+      resources,
+      search,
+      limit: parseInt(limit as string)
+    });
+
+    res.json({
+      logs,
+      count: logs.length,
+      filters: { hours, severities, resources, search }
+    });
+  } catch (error: any) {
+    console.error('Error fetching advanced logs:', error);
+    res.status(500).json({ message: error.message || 'Failed to fetch logs' });
+  }
+});
+
+/**
+ * GET /api/cloud-logs/statistics
+ * Get log statistics (counts by severity, resource, etc.)
+ */
+router.get('/statistics', requireAuth, async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours as string) || 24;
+    const stats = await cloudLoggingService.getLogStatistics(hours);
+
+    res.json(stats);
+  } catch (error: any) {
+    console.error('Error fetching log statistics:', error);
+    res.status(500).json({ message: error.message || 'Failed to fetch statistics' });
+  }
+});
+
 export default router;

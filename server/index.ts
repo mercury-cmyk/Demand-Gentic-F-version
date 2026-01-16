@@ -1,3 +1,6 @@
+// Suppress noisy warnings FIRST (before any other imports)
+import "./suppress-warnings";
+
 import { config } from "dotenv";
 // Load environment variables from .env.local
 config({ path: ".env.local" });
@@ -144,8 +147,9 @@ app.use((req, res, next) => {
   // Initialize Log Streaming Service (optional - requires GCP Pub/Sub permissions)
   // Disabled by default since cloud-logs API endpoints work without it
   const enableLogStreaming = process.env.ENABLE_LOG_STREAMING === 'true';
+  let logStreamingService: LogStreamingService | null = null;
   if (enableLogStreaming) {
-    const logStreamingService = new LogStreamingService(server);
+    logStreamingService = new LogStreamingService(server);
     logStreamingService.initialize().catch((err) => {
       console.warn('[LogStreaming] Service initialization failed (non-blocking):', err.message);
     });
@@ -209,7 +213,12 @@ app.use((req, res, next) => {
     } else if (pathname === '/log-stream') {
       console.log('[WebSocket Upgrade] Handling Log Stream connection');
       
-      logStreamingService.handleUpgrade(req, socket, head);
+      if (logStreamingService) {
+        logStreamingService.handleUpgrade(req, socket, head);
+      } else {
+        console.warn('[WebSocket Upgrade] Log streaming service not initialized');
+        socket.destroy();
+      }
     } else {
       // Let Vite HMR handle its own WebSocket connections (protocol: vite-hmr)
       // Don't destroy unknown paths - they may be handled by other middleware

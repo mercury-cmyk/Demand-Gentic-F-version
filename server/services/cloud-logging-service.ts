@@ -205,6 +205,105 @@ export class CloudLoggingService {
   }
 
   /**
+   * Get logs with advanced filtering
+   */
+  async getAdvancedLogs(options: {
+    hours?: number;
+    severities?: string[];
+    resources?: string[];
+    search?: string;
+    limit?: number;
+  } = {}): Promise<LogEntry[]> {
+    const {
+      hours = 24,
+      severities = [],
+      resources = [],
+      search,
+      limit = 100
+    } = options;
+
+    const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    // Build filter query
+    let filter = `
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="${SERVICE_NAME}"
+      resource.labels.location="${REGION}"
+      timestamp>="${startTime.toISOString()}"
+    `.replace(/\s+/g, ' ').trim();
+
+    // Add severity filters
+    if (severities.length > 0) {
+      const severityFilter = severities.map(s => `severity="${s}"`).join(' OR ');
+      filter += ` (${severityFilter})`;
+    }
+
+    // Add resource filters
+    if (resources.length > 0) {
+      const resourceFilter = resources.map(r => `resource.type="${r}"`).join(' OR ');
+      filter += ` (${resourceFilter})`;
+    }
+
+    // Add text search
+    if (search) {
+      filter += ` textPayload=~"${search}"`;
+    }
+
+    try {
+      const log = this.logging.log('projects/' + PROJECT_ID + '/logs/run.googleapis.com%2Fstderr');
+      const [entries] = await log.getEntries({
+        filter,
+        pageSize: limit,
+        orderBy: 'timestamp desc'
+      });
+
+      return entries.map((entry: GCloudLogEntry) => ({
+        timestamp: entry.metadata.timestamp?.toString() || new Date().toISOString(),
+        severity: entry.metadata.severity || 'INFO',
+        message: this.extractMessage(entry),
+        resource: entry.metadata.resource?.type,
+        labels: entry.metadata.labels,
+        jsonPayload: entry.metadata.jsonPayload,
+        textPayload: entry.metadata.textPayload
+      }));
+    } catch (error: any) {
+      console.error('Error fetching advanced logs:', error);
+      throw new Error(`Failed to fetch logs: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get log statistics for dashboard
+   */
+  async getLogStatistics(hours: number = 24): Promise<{
+    bySeverity: Record<string, number>;
+    byResource: Record<string, number>;
+    totalCount: number;
+    timeRange: { start: Date; end: Date };
+  }> {
+    const logs = await this.fetchLogs({ hours, limit: 5000 });
+    const endTime = new Date();
+    const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
+
+    const bySeverity: Record<string, number> = {};
+    const byResource: Record<string, number> = {};
+
+    for (const log of logs) {
+      bySeverity[log.severity] = (bySeverity[log.severity] || 0) + 1;
+      if (log.resource) {
+        byResource[log.resource] = (byResource[log.resource] || 0) + 1;
+      }
+    }
+
+    return {
+      bySeverity,
+      byResource,
+      totalCount: logs.length,
+      timeRange: { start: startTime, end: endTime }
+    };
+  }
+
+  /**
    * Helper: Extract message from log entry
    */
   private extractMessage(entry: GCloudLogEntry): string {

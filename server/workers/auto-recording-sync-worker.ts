@@ -6,8 +6,10 @@ import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
 import { submitTranscription } from '../services/assemblyai-transcription';
+import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 
-const connection = new Redis(process.env.REDIS_URL || '', {
+const connection = new Redis(getRedisUrl(), {
+  ...getRedisConnectionOptions(),
   maxRetriesPerRequest: null,
 });
 
