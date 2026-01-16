@@ -383,11 +383,24 @@ export function getVertexModelName(config: GeminiLiveConfig): string {
  * Available Gemini voices for audio output
  */
 export const GEMINI_VOICES = {
+  // Original voices
   AOEDE: 'Aoede',     // Bright and warm
   CHARON: 'Charon',   // Deep and authoritative
   FENRIR: 'Fenrir',   // Calm and measured
   KORE: 'Kore',       // Soft and friendly (default)
   PUCK: 'Puck',       // Light and expressive
+
+  // Newer voices (from Gemini App)
+  ORION: 'Orion',
+  VEGA: 'Vega',
+  PEGASUS: 'Pegasus',
+  URSA: 'Ursa',
+  NOVA: 'Nova',
+  DIPPER: 'Dipper',
+  CAPELLA: 'Capella',
+  ORBIT: 'Orbit',
+  LYRA: 'Lyra',
+  ECLIPSE: 'Eclipse',
 } as const;
 
 export type GeminiVoice = typeof GEMINI_VOICES[keyof typeof GEMINI_VOICES];

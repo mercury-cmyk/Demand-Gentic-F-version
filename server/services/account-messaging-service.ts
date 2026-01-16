@@ -704,8 +704,8 @@ export async function getAccountProfileData(accountId: string): Promise<AccountP
       industryRaw: accounts.industryRaw,
       industryAiSuggested: accounts.industryAiSuggested,
       description: accounts.description,
-      employeeCount: accounts.employeeCount,
-      revenue: accounts.revenue,
+      employeeCount: accounts.staffCount,
+      revenue: accounts.annualRevenue,
     })
     .from(accounts)
     .where(eq(accounts.id, accountId))

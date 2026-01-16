@@ -223,6 +223,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       campaignId,
       queueItemId,
       agentFullName: aiSettings.persona?.name || "your representative",
+      virtualAgentId: aiSettings.id || undefined,
     };
 
     const bridge = getTelnyxAiBridge();
@@ -232,19 +233,49 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       return res.status(500).json({ message: "Outbound phone number not configured" });
     }
 
-    const { callId, callControlId } = await bridge.initiateAiCall(
-      phoneNumber,
-      fromNumber,
-      aiSettings,
-      context
-    );
+    // PRE-LOCK if queueItemId is present
+    if (queueItemId && queueItemId !== 'test-queue-item') {
+      await db.execute(sql`
+        UPDATE campaign_queue 
+        SET status = 'in_progress', updated_at = NOW()
+        WHERE id = ${queueItemId}
+      `);
+    }
 
-    res.json({
-      success: true,
-      callId,
-      callControlId,
-      message: "AI call initiated successfully",
-    });
+    try {
+      const { callId, callControlId } = await bridge.initiateAiCall(
+        phoneNumber,
+        fromNumber,
+        aiSettings,
+        context
+      );
+
+      res.json({
+        success: true,
+        callId,
+        callControlId,
+        message: "AI call initiated successfully",
+      });
+    } catch (error) {
+      // Revert lock on failure
+      if (queueItemId && queueItemId !== 'test-queue-item') {
+        const isWhitelistError = error instanceof Error && error.message.includes('Whitelist Error');
+        if (isWhitelistError) {
+          await db.execute(sql`
+            UPDATE campaign_queue 
+            SET status = 'removed', removed_reason = 'country_not_whitelisted', updated_at = NOW()
+            WHERE id = ${queueItemId}
+          `);
+        } else {
+          await db.execute(sql`
+            UPDATE campaign_queue 
+            SET status = 'queued', updated_at = NOW()
+            WHERE id = ${queueItemId}
+          `);
+        }
+      }
+      throw error;
+    }
   } catch (error) {
     console.error("[AI Calls] Error initiating call:", error);
     if (isVoiceVariablePreflightError(error)) {
@@ -495,24 +526,54 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
           campaignId,
           queueItemId: item.id,
           agentFullName: aiSettings.persona?.name || "your representative",
+          virtualAgentId: aiSettings.id || undefined, // Important for lock validation
         };
 
-        const { callId } = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
-        
-        // Update queue status to 'in_progress' to prevent re-calling
+        // PRE-LOCK: Lock the queue item before initiating the call to prevent race conditions
+        // where the call is answered and tries to connect to WebSocket before we update status.
         await db.execute(sql`
           UPDATE campaign_queue 
-          SET status = 'in_progress', updated_at = NOW()
+          SET status = 'in_progress', 
+              updated_at = NOW(),
+              enqueued_reason = COALESCE(enqueued_reason, '') || '|locking:' || to_char(NOW(), 'HH24:MI:SS')
           WHERE id = ${item.id}
         `);
-        
-        results.push({ contactId: contactId || item.id, queueItemId: item.id, status: "initiated", callId });
-        callsInitiated++;
-        
-        console.log(`[AI Batch] Call ${callsInitiated}/${limit} initiated for queue item ${item.id}`);
 
-        if (callsInitiated < eligibleItems.length) {
-          await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
+        try {
+          const { callId } = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
+          
+          results.push({ contactId: contactId || item.id, queueItemId: item.id, status: "initiated", callId });
+          callsInitiated++;
+          
+          console.log(`[AI Batch] Call ${callsInitiated}/${limit} initiated for queue item ${item.id}`);
+
+          if (callsInitiated < eligibleItems.length) {
+            await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
+          }
+        } catch (initiateError: any) {
+          // If initiation failed, we MUST release the lock or mark as permanently failed
+          const isWhitelistError = initiateError.message?.includes('Whitelist Error');
+          
+          if (isWhitelistError) {
+            console.error(`[AI Batch] Permanent failure for ${item.id}: ${initiateError.message}`);
+            await db.execute(sql`
+              UPDATE campaign_queue 
+              SET status = 'removed', 
+                  removed_reason = 'country_not_whitelisted',
+                  updated_at = NOW()
+              WHERE id = ${item.id}
+            `);
+            results.push({ contactId: contactId || item.id, queueItemId: item.id, status: "failed_whitelist", error: initiateError.message });
+          } else {
+            // Revert to queued for transient errors
+            await db.execute(sql`
+              UPDATE campaign_queue 
+              SET status = 'queued', 
+                  updated_at = NOW()
+              WHERE id = ${item.id}
+            `);
+            throw initiateError; // Let the outer catch handle and log it
+          }
         }
       } catch (error) {
         if (isVoiceVariablePreflightError(error)) {

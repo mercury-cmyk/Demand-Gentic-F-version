@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-01-16T03:26:29.300Z",
+  "stats": {
+    "total": 101,
+    "analyzed": 101,
+    "qualifiedLeads": 2,
+    "notInterested": 0,
+    "voicemails": 24,
+    "noAnswer": 75,
+    "leadsCreated": 0,
+    "sessionsCreated": 0,
+    "errors": 0
+  },
+  "leadsCreated": []
+}

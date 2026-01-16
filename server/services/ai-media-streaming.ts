@@ -550,7 +550,7 @@ async function synthesizeAndSendAudio(session: MediaSession, text: string): Prom
     const voice = getVoiceForCall(session.callId);
     const response = await getOpenAI().audio.speech.create({
       model: "tts-1",
-      voice: voice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer",
+      voice: voice as "alloy" | "ash" | "ballad" | "coral" | "echo" | "sage" | "shimmer" | "verse",
       input: text,
       response_format: "pcm",
     });

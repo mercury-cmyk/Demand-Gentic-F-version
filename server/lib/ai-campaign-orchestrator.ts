@@ -26,23 +26,28 @@ import {
 } from '../utils/business-hours';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 30; // Increased to 30 as requested
+const DEFAULT_MAX_CONCURRENT_CALLS = 50; // Increased to 50 concurrent calls
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
-const STUCK_ITEM_TIMEOUT_MS = 180000; // 3 minutes - reset items stuck in_progress longer than this
+const STUCK_ITEM_TIMEOUT_MS = 600000; // 10 minutes - increased to allow long AI conversations without reset
 
 // Telnyx error codes that should pause the campaign (account-level issues)
 const TELNYX_ACCOUNT_DISABLED_CODE = 10010; // "Account is disabled D17"
-const TELNYX_FATAL_ERROR_CODES = [10010]; // Account disabled - don't retry, pause campaign
+const TELNYX_FATAL_ERROR_CODES = [10010]; // Account-level policy/status errors
 
 /**
  * Check if an error indicates a Telnyx account-level issue that requires pausing
- * Returns the error code if it's a fatal error, null otherwise
+ * Returns the error code and detail if it's a fatal error, null otherwise
  */
-function isTelnyxFatalError(error: any): { code: number; detail: string } | null {
+function isTelnyxFatalError(error: any): { code: number; detail: string; isWhitelist?: boolean } | null {
   if (!error || !error.message) return null;
 
   const message = String(error.message);
+
+  // Check for our enriched error format from telnyx-ai-bridge.ts
+  if (message.includes('Telnyx Whitelist Error:')) {
+    return { code: 10010, detail: message.replace('Telnyx Whitelist Error: ', ''), isWhitelist: true };
+  }
 
   // Parse Telnyx API error format: "Telnyx API error: 403 - {"errors":[{"code":10010,"detail":"Account is disabled D17"}]}"
   const jsonMatch = message.match(/\{[\s\S]*"errors"[\s\S]*\}/);
@@ -53,7 +58,8 @@ function isTelnyxFatalError(error: any): { code: number; detail: string } | null
     if (errorData.errors && Array.isArray(errorData.errors)) {
       for (const err of errorData.errors) {
         if (err.code && TELNYX_FATAL_ERROR_CODES.includes(err.code)) {
-          return { code: err.code, detail: err.detail || 'Unknown error' };
+          const isWhitelist = err.detail?.toLowerCase().includes('whitelist');
+          return { code: err.code, detail: err.detail || 'Unknown error', isWhitelist };
         }
       }
     }
@@ -843,14 +849,28 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
           callAttemptId: callAttemptId || undefined,
         };
 
+        // PRE-LOCK: Mark as in_progress BEFORE initiation to prevent race conditions
+        // if the WebSocket connects before this function returns.
+        // CRITICAL: Also set virtual_agent_id here to prevent validation errors in openai-realtime-dialer
+        const virtualAgentIdValue = virtualAgent?.id || null;
+        console.log(`[AI Orchestrator] PRE-LOCK: Setting queue item ${item.id} to in_progress with virtual_agent_id=${virtualAgentIdValue}`);
+        await db.execute(sql`
+          UPDATE campaign_queue
+          SET status = 'in_progress',
+              virtual_agent_id = ${virtualAgentIdValue},
+              updated_at = NOW(),
+              enqueued_reason = COALESCE(enqueued_reason, '') || '|locking:' || to_char(NOW(), 'HH24:MI:SS')
+          WHERE id = ${item.id}
+        `);
+        console.log(`[AI Orchestrator] PRE-LOCK: Queue item ${item.id} updated successfully`);
+
         const callResult = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
         const conversationId = callResult?.callControlId || callResult?.callId || '';
 
-        // Mark as in_progress and store conversation_id for webhook lookup
+        // POST-LOCK UPDATE: Add the actual conversation ID for webhook matching
         await db.execute(sql`
           UPDATE campaign_queue 
-          SET status = 'in_progress', 
-              updated_at = NOW(),
+          SET updated_at = NOW(),
               enqueued_reason = COALESCE(enqueued_reason, '') || ' ai_conv:' || ${conversationId}
           WHERE id = ${item.id}
         `);
@@ -883,6 +903,24 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
         // Check for Telnyx account-level errors (should pause campaign, not retry)
         const telnyxFatalError = isTelnyxFatalError(error);
         if (telnyxFatalError) {
+          if (telnyxFatalError.isWhitelist) {
+            console.error(`[AI Orchestrator] ⚠️ Whitelist error for contact: ${telnyxFatalError.detail}`);
+            // For whitelist errors, just remove the contact, DON'T pause the whole campaign
+            try {
+              await db.execute(sql`
+                UPDATE campaign_queue
+                SET status = 'removed',
+                    removed_reason = 'country_not_whitelisted',
+                    enqueued_reason = COALESCE(enqueued_reason, '') || '|whitelist_fail',
+                    updated_at = NOW()
+                WHERE id = ${item.id}
+              `);
+            } catch (updateError) {
+              console.error(`[AI Orchestrator] Failed to update queue item ${item.id}:`, updateError);
+            }
+            return { success: false, itemId: item.id, error };
+          }
+
           console.error(`[AI Orchestrator] ⚠️ FATAL TELNYX ERROR detected: code=${telnyxFatalError.code}, detail="${telnyxFatalError.detail}"`);
           console.error(`[AI Orchestrator] ⚠️ Pausing campaign ${campaignId} due to Telnyx account issue - please check your Telnyx account status`);
 

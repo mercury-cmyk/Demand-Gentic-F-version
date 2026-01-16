@@ -1242,6 +1242,9 @@ export const campaigns = pgTable("campaigns", {
   successCriteria: text("success_criteria"), // e.g., "Meeting booked with decision maker"
   campaignContextBrief: text("campaign_context_brief"), // Short summary for AI context injection
 
+  // Account Intelligence Toggle - allows campaigns to work without intelligence generation delays
+  requireAccountIntelligence: boolean("require_account_intelligence").default(false), // When false, skips intelligence lookup for immediate call start
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   launchedAt: timestamp("launched_at"),
@@ -1322,6 +1325,84 @@ export const virtualAgents = pgTable("virtual_agents", {
   activeIdx: index("virtual_agents_active_idx").on(table.isActive),
   demandTypeIdx: index("virtual_agents_demand_type_idx").on(table.demandAgentType),
   skillIdIdx: index("virtual_agents_skill_id_idx").on(table.skillId),
+}));
+
+// Prompt Perspectives Enum - Different approaches to the same context
+export const promptPerspectiveEnum = pgEnum('prompt_perspective', [
+  'consultative',      // Ask questions, diagnose first
+  'direct_value',      // Lead with ROI/benefits
+  'pain_point',        // Address specific pain points
+  'social_proof',      // Lead with case studies/results
+  'educational',       // Teach/inform first
+  'urgent',            // Create sense of urgency
+  'relationship',      // Focus on building relationship
+]);
+
+// Prompt Variants table - Store multiple prompt variations for testing
+// Variants can be created at agent level (template) or campaign level (specific)
+export const promptVariants = pgTable("prompt_variants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Hierarchical scope: account > campaign > agent
+  // At least one should be set; variants inherit from parent level if not specified
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
+  virtualAgentId: varchar("virtual_agent_id").references(() => virtualAgents.id, { onDelete: 'cascade' }),
+  variantName: text("variant_name").notNull(), // e.g., "aggressive", "consultative", "educational"
+  perspective: promptPerspectiveEnum("perspective").notNull(),
+  systemPrompt: text("system_prompt").notNull(),
+  firstMessage: text("first_message"),
+  context: jsonb("context"), // Store generation context: {goal, tone, targetAudience, ...}
+  isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  // Scope level: 'account', 'campaign', 'agent'
+  variantScope: text("variant_scope").notNull().default('campaign'),
+  // Performance tracking
+  testResults: jsonb("test_results"), // {successRate, engagementScore, callDuration, sampleSize, notes}
+  // Provenance
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  accountIdx: index("prompt_variants_account_idx").on(table.accountId),
+  campaignIdx: index("prompt_variants_campaign_idx").on(table.campaignId),
+  agentIdx: index("prompt_variants_agent_idx").on(table.virtualAgentId),
+  perspectiveIdx: index("prompt_variants_perspective_idx").on(table.perspective),
+  activeIdx: index("prompt_variants_active_idx").on(table.isActive),
+  defaultIdx: index("prompt_variants_default_idx").on(table.isDefault),
+  scopeIdx: index("prompt_variants_scope_idx").on(table.variantScope),
+}));
+
+// Prompt Variant Tests - Track A/B test performance for each variant
+export const promptVariantTests = pgTable("prompt_variant_tests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  variantId: varchar("variant_id").references(() => promptVariants.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  callAttemptId: varchar("call_attempt_id").references(() => callAttempts.id, { onDelete: 'set null' }),
+  // Call metrics
+  disposition: callDispositionEnum("disposition"),
+  duration: integer("duration"), // seconds
+  engagementScore: real("engagement_score"), // 0-1 score
+  successful: boolean("successful"),
+  notes: text("notes"),
+  // Metadata
+  testedAt: timestamp("tested_at").notNull().defaultNow(),
+}, (table) => ({
+  variantIdx: index("prompt_variant_tests_variant_idx").on(table.variantId),
+  campaignIdx: index("prompt_variant_tests_campaign_idx").on(table.campaignId),
+  callAttemptIdx: index("prompt_variant_tests_call_attempt_idx").on(table.callAttemptId),
+}));
+
+// Variant Selection History - Track which variant was used for each call
+export const variantSelectionHistory = pgTable("variant_selection_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callAttemptId: varchar("call_attempt_id").references(() => callAttempts.id, { onDelete: 'cascade' }).notNull(),
+  variantId: varchar("variant_id").references(() => promptVariants.id, { onDelete: 'set null' }),
+  perspective: promptPerspectiveEnum("perspective"),
+  selectionMethod: text("selection_method"), // 'manual', 'ab_test', 'dynamic', 'default'
+  selectedAt: timestamp("selected_at").notNull().defaultNow(),
+}, (table) => ({
+  callAttemptIdx: index("variant_selection_history_call_attempt_idx").on(table.callAttemptId),
+  variantIdx: index("variant_selection_history_variant_idx").on(table.variantId),
 }));
 
 export const campaignAgentAssignments = pgTable("campaign_agent_assignments", {
@@ -6091,6 +6172,7 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   // Additional data
   notes: text("notes"),
   recordingUrl: text("recording_url"),
+  telnyxCallId: text("telnyx_call_id"), // CRITICAL: Link to Telnyx call control ID for recordings/webhooks
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
@@ -6099,6 +6181,7 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   contactIdx: index("dialer_call_attempts_contact_idx").on(table.contactId),
   agentTypeIdx: index("dialer_call_attempts_agent_type_idx").on(table.agentType),
   dispositionIdx: index("dialer_call_attempts_disposition_idx").on(table.disposition),
+  telnyxCallIdIdx: index("dialer_call_attempts_telnyx_call_id_idx").on(table.telnyxCallId),
   createdAtIdx: index("dialer_call_attempts_created_at_idx").on(table.createdAt),
   pendingDispositionIdx: index("dialer_call_attempts_pending_disposition_idx")
     .on(table.disposition, table.dispositionProcessed),

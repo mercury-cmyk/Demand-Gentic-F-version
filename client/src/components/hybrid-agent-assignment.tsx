@@ -117,7 +117,7 @@ export function HybridAgentAssignment({ campaignId }: Props) {
 
   const removeMutation = useMutation({
     mutationFn: async ({ agentId, agentType }: { agentId: string; agentType: 'human' | 'ai' }) => {
-      const response = await apiRequest('DELETE', `/api/campaigns/${campaignId}/hybrid-agents/${agentId}?type=${agentType}`);
+      const response = await apiRequest('DELETE', `/api/campaigns/${campaignId}/hybrid-agents/${agentType}/${agentId}`);
       return response.json();
     },
     onSuccess: () => {

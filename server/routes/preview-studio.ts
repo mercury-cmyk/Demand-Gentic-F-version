@@ -177,6 +177,7 @@ const initiatePhoneTestSchema = z.object({
   accountId: z.string(),
   contactId: z.string().optional(),
   virtualAgentId: z.string().optional(),
+  variantId: z.string().optional(), // Prompt variant ID for A/B testing
   testPhoneNumber: z.string().min(10, "Valid phone number required"),
   voiceProvider: z.enum(["openai", "google"]).optional().default("openai"),
   voice: z.string().optional(),
@@ -882,6 +883,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       accountId,
       contactId,
       virtualAgentId,
+      variantId,
       testPhoneNumber,
       voiceProvider,
       voice: voiceOverride,
@@ -897,6 +899,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       accountId,
       contactId,
       userId,
+      variantId,
       voiceProvider,
       voiceOverride,
       turnDetection,
@@ -1010,8 +1013,58 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     // Build the system prompt with full context (same as campaign test calls)
     // If custom prompt is provided and no agent, we use a simplified prompt builder
     let promptResponse: { systemPrompt: string; firstMessage: string };
+    let variantInfo = { variantId: null, perspective: null, selectionMethod: 'default' };
 
-    if (hasCustomPrompt && !resolvedVirtualAgentId) {
+    // Load variant if specified (for A/B testing)
+    if (variantId) {
+      try {
+        const { getVariantWithTests } = await import('../services/prompt-variant-service');
+        const variantData = await getVariantWithTests(variantId);
+        if (variantData) {
+          promptResponse = {
+            systemPrompt: variantData.variant.systemPrompt,
+            firstMessage: variantData.variant.firstMessage || "Hello, may I speak with the person responsible for technology decisions?",
+          };
+          variantInfo = {
+            variantId: variantData.variant.id,
+            perspective: variantData.variant.perspective,
+            selectionMethod: 'manual',
+          };
+          console.log(`[Preview Studio Phone Test] Using prompt variant: ${variantData.variant.variantName} (${variantData.variant.perspective})`);
+        } else {
+          console.warn(`[Preview Studio Phone Test] Variant ${variantId} not found, falling back to default`);
+          hasCustomPrompt && !resolvedVirtualAgentId ? {
+            systemPrompt: customSystemPrompt!,
+            firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
+          } : await buildAssembledPrompt({
+            campaignId,
+            accountId,
+            contactId: contactId || undefined,
+            virtualAgentId: resolvedVirtualAgentId!,
+            agentConfig,
+            agentSettings: mergedSettings,
+          });
+        }
+      } catch (err) {
+        console.warn('[Preview Studio Phone Test] Error loading variant:', err);
+        // Fall through to default
+        if (hasCustomPrompt && !resolvedVirtualAgentId) {
+          promptResponse = {
+            systemPrompt: customSystemPrompt!,
+            firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
+          };
+        } else {
+          promptResponse = await buildAssembledPrompt({
+            campaignId,
+            accountId,
+            contactId: contactId || undefined,
+            virtualAgentId: resolvedVirtualAgentId!,
+            agentConfig,
+            agentSettings: mergedSettings,
+          });
+        }
+      }
+    } else if (hasCustomPrompt && !resolvedVirtualAgentId) {
       // Use custom prompts directly (no agent to pull from)
       promptResponse = {
         systemPrompt: customSystemPrompt!,

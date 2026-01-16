@@ -282,7 +282,7 @@ const createSmartAgentSchema = z.object({
   firstMessage: z.string().min(5, "First message must be at least 5 characters"),
   agentType: z.enum(["voice", "text", "research", "qa"]).optional().default("voice"),
   additionalContext: z.string().optional(),
-  voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).optional().default("nova"),
+  voice: z.enum(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]).optional().default("alloy"),
   autoGeneratePrompt: z.boolean().optional().default(true),
 });
 
@@ -1272,7 +1272,7 @@ router.post("/create-from-skill", requireAuth, requireRole('admin'), async (req,
           compiledAt: compiled.compiledAt.toISOString(),
           skillMetadata: compiled.skillMetadata,
         },
-        voice: voice || "nova",
+        voice: voice || "alloy",
         provider: provider || "openai",
         isActive: true,
         createdBy: req.user!.userId,

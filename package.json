@@ -16,6 +16,7 @@
     "test-audio": "tsx test-audio-transmission.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@google-cloud/aiplatform": "^3.35.0",
     "@google-cloud/functions": "^4.2.1",
     "@google-cloud/speech": "^7.2.1",

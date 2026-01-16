@@ -23,8 +23,22 @@ function normalizeToE164(phoneNumber: string): string {
   // Remove all non-digit characters except leading +
   let normalized = phoneNumber.replace(/[^\d+]/g, '');
   
-  // If already starts with +, it should be valid E.164
+  // If starts with +, check for invalid formats and fix them
   if (normalized.startsWith('+')) {
+    // CRITICAL FIX: Handle bad data like "+07818517774" or "+0012026888819"
+    // These are invalid E.164 - no country code starts with 0
+    if (normalized.startsWith('+00')) {
+      // International dial prefix was included: +0012345... -> +12345...
+      normalized = '+' + normalized.substring(3);
+    } else if (normalized.startsWith('+0')) {
+      // UK national format with + added: +07818... -> +447818...
+      // Check if it looks like a UK number (07=mobile, 01/02/03=landline)
+      const withoutPlus = normalized.substring(1);
+      if (/^0[1-9]/.test(withoutPlus)) {
+        // UK national format - convert to +44
+        normalized = '+44' + withoutPlus.substring(1);
+      }
+    }
     return normalized;
   }
   
@@ -173,8 +187,8 @@ export class TelnyxAiBridge extends EventEmitter {
   // AMD webhook fires before WebSocket connection, so we need to track state separately
   private callStateByControlId: Map<string, any> = new Map();
   
-  // Concurrency control - max 10 concurrent calls for AI agents
-  private readonly MAX_CONCURRENT_CALLS = 10;
+  // Concurrency control - max 1 concurrent call for testing
+  private readonly MAX_CONCURRENT_CALLS = 1;
   private semaphore: Semaphore;
   private callQueue: QueuedCall[] = [];
   
@@ -405,7 +419,13 @@ export class TelnyxAiBridge extends EventEmitter {
         voice: settings.persona?.voice || 'nova',
         agent_name: settings.persona?.name || '',
         agent_settings: settings,
-        // Contact context for personalization
+        // Contact context for personalization (using canonical field names)
+        'contact.full_name': contactFullName || `${context.contactFirstName || ''} ${context.contactLastName || ''}`.trim(),
+        'contact.first_name': context.contactFirstName || '',
+        'contact.last_name': context.contactLastName || '',
+        'contact.job_title': context.contactTitle || '',
+        'account.name': context.companyName || '',
+        // Legacy field names for backward compatibility
         contact_first_name: context.contactFirstName,
         contact_last_name: context.contactLastName,
         company_name: context.companyName,
@@ -493,7 +513,19 @@ export class TelnyxAiBridge extends EventEmitter {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Telnyx API error: ${response.status} - ${errorText}`);
+        let errorMessage = `Telnyx API error: ${response.status} - ${errorText}`;
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          const telnyxError = errorJson.errors?.[0];
+          if (telnyxError?.code === 10010) {
+            errorMessage = `Telnyx Whitelist Error: ${telnyxError.detail || 'Dialed number is not included in whitelisted countries'}`;
+          }
+        } catch (e) {
+          // Fallback to original error message
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
@@ -687,7 +719,7 @@ export class TelnyxAiBridge extends EventEmitter {
     
     if (openaiApiKey) {
       try {
-        await this.speakWithOpenAI(callControlId, text, voice || "nova", openaiApiKey);
+        await this.speakWithOpenAI(callControlId, text, voice || "alloy", openaiApiKey);
         return;
       } catch (error) {
         console.error(`[TelnyxAiBridge] OpenAI TTS failed:`, error);
@@ -701,8 +733,8 @@ export class TelnyxAiBridge extends EventEmitter {
 
   private async speakWithOpenAI(callControlId: string, text: string, voice: string, apiKey: string): Promise<void> {
     // OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
-    const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
-    const selectedVoice = validVoices.includes(voice) ? voice : "nova";
+    const validVoices = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse"];
+    const selectedVoice = validVoices.includes(voice) ? voice : "alloy";
     
     console.log(`[TelnyxAiBridge] Generating natural speech with OpenAI TTS (voice: ${selectedVoice})`);
     

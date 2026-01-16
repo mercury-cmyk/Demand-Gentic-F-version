@@ -75,11 +75,24 @@ const OPENAI_VOICES: VoiceOption[] = [
 ];
 
 const GEMINI_VOICES: VoiceOption[] = [
+  // Original voices
   { id: 'Aoede', name: 'Aoede', gender: 'female', language: 'en' },
   { id: 'Charon', name: 'Charon', gender: 'male', language: 'en' },
   { id: 'Fenrir', name: 'Fenrir', gender: 'male', language: 'en' },
   { id: 'Kore', name: 'Kore', gender: 'female', language: 'en' },
   { id: 'Puck', name: 'Puck', gender: 'male', language: 'en' },
+
+  // Newer voices (from Gemini App)
+  { id: 'Orion', name: 'Orion', gender: 'neutral', language: 'en' },
+  { id: 'Vega', name: 'Vega', gender: 'neutral', language: 'en' },
+  { id: 'Pegasus', name: 'Pegasus', gender: 'neutral', language: 'en' },
+  { id: 'Ursa', name: 'Ursa', gender: 'neutral', language: 'en' },
+  { id: 'Nova', name: 'Nova', gender: 'neutral', language: 'en' },
+  { id: 'Dipper', name: 'Dipper', gender: 'neutral', language: 'en' },
+  { id: 'Capella', name: 'Capella', gender: 'neutral', language: 'en' },
+  { id: 'Orbit', name: 'Orbit', gender: 'neutral', language: 'en' },
+  { id: 'Lyra', name: 'Lyra', gender: 'neutral', language: 'en' },
+  { id: 'Eclipse', name: 'Eclipse', gender: 'neutral', language: 'en' },
 ];
 
 export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConfigPanelProps) {

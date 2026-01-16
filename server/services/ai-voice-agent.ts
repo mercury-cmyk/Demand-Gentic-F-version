@@ -39,7 +39,7 @@ export interface AiAgentSettings {
     name: string;
     companyName: string;
     role: string;
-    voice: "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
+    voice: "alloy" | "ash" | "ballad" | "coral" | "echo" | "sage" | "shimmer" | "verse";
   };
   scripts: {
     opening: string;

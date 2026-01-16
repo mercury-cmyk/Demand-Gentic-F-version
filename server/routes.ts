@@ -71,6 +71,7 @@ import vertexAiRouter from './routes/vertex-ai';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import agentPromptVisibilityRouter from './routes/agent-prompt-visibility-routes';
 import superOrganizationRouter from './routes/super-organization-routes';
+import promptVariantsRouter from './routes/prompt-variants';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -4771,16 +4772,16 @@ export function registerRoutes(app: Express) {
       const [callStats] = await db
         .select({
           callsMade: sql<number>`COUNT(*)::int`,
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IN (${sql.join(
+          callsConnected: sql<number>`COUNT(CASE WHEN ${calls.disposition} IN (${sql.join(
             connectedDispositions.map((value) => sql`${value}`),
             sql`, `
           )}) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'qualified' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'dnc-request' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'qualified' THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'dnc-request' THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'not_interested' THEN 1 END)::int`,
         })
-        .from(callAttempts)
-        .where(eq(callAttempts.campaignId, campaignId));
+        .from(calls)
+        .where(eq(calls.campaignId, campaignId));
 
       res.json({
         campaignId,
@@ -13323,6 +13324,10 @@ Provide JSON response with:
   // Modular, versioned agent knowledge management
   app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
   app.use("/api/agent-prompts", agentPromptVisibilityRouter);
+
+  // ==================== PROMPT VARIANTS ====================
+  // A/B testing and multi-perspective prompt generation
+  app.use("/api", promptVariantsRouter);
 
   // ==================== SUPER ORGANIZATION ====================
   // Platform owner organization (Pivotal B2B) management

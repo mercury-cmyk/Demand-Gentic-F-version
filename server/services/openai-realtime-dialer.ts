@@ -1,9 +1,10 @@
 ﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition } from "./disposition-engine";
+import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import {
   buildAccountContextSection,
@@ -178,6 +179,21 @@ interface OpenAIRealtimeSession {
   };
   // Campaign-level max call duration (enforced strictly)
   campaignMaxCallDurationSeconds: number | null;
+  // Intelligent audio detection state (IVR, hold music, human detection)
+  audioDetection: {
+    hasGreetingSent: boolean; // Track if AI has sent its opening greeting
+    humanDetected: boolean; // True once we confirm human speech
+    humanDetectedAt: Date | null;
+    audioPatterns: Array<{ // Track patterns of detected audio
+      timestamp: Date;
+      transcript: string;
+      type: 'unknown' | 'ivr' | 'music' | 'human' | 'silence';
+      confidence: number;
+    }>;
+    lastTranscriptCheckTime: Date | null;
+    ivrMenuRepeatCount: number; // Track repeated IVR menu patterns
+    lastIvrMenuHash: string | null; // Hash of last IVR menu heard
+  };
 }
 
 interface DispositionFunctionResult {
@@ -203,6 +219,8 @@ type ClientStateParseResult = {
 };
 
 function tryParseJson(value: string): any | null {
+  let attemptNumber = 1;
+
   try {
     return JSON.parse(value);
   } catch {
@@ -779,6 +797,16 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
               },
+              // Intelligent audio detection state
+              audioDetection: {
+                hasGreetingSent: false,
+                humanDetected: false,
+                humanDetectedAt: null,
+                audioPatterns: [],
+                lastTranscriptCheckTime: null,
+                ivrMenuRepeatCount: 0,
+                lastIvrMenuHash: null,
+              },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
             };
@@ -850,6 +878,16 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
                 identityConfirmedAt: null,
                 currentState: 'IDENTITY_CHECK',
                 stateHistory: ['IDENTITY_CHECK'],
+              },
+              // Intelligent audio detection state
+              audioDetection: {
+                hasGreetingSent: false,
+                humanDetected: false,
+                humanDetectedAt: null,
+                audioPatterns: [],
+                lastTranscriptCheckTime: null,
+                ivrMenuRepeatCount: 0,
+                lastIvrMenuHash: null,
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
@@ -995,16 +1033,16 @@ function buildTurnDetection(
   const turnDetectionType = configOverride?.turn_detection || 'server_vad';
 
   // Map eagerness levels from override or settings
-  // IMPORTANT: For compliance-focused B2B calls, we need LOW eagerness to ensure
-  // the agent waits for the full response before speaking
+  // OPTIMIZED: Use medium eagerness for more natural, responsive conversation
+  // Medium eagerness provides good balance between responsiveness and accuracy
   let eagernessValue: string;
   if (configOverride?.eagerness) {
     // Map 'medium' to 'normal' for OpenAI API compatibility
     eagernessValue = configOverride.eagerness === 'medium' ? 'normal' : configOverride.eagerness;
   } else {
-    // Use LOW eagerness by default to ensure proper turn-taking and identity verification
-    // High eagerness causes the agent to assume responses and skip verification
-    eagernessValue = settings.eagerness || 'low';
+    // Use MEDIUM (normal) eagerness by default for natural conversation flow
+    // Can be overridden per-agent if needed for compliance-focused scenarios
+    eagernessValue = settings.eagerness || 'normal';
   }
 
   console.log(`[Turn Detection] Using ${turnDetectionType} with eagerness: ${eagernessValue}`);
@@ -1019,19 +1057,18 @@ function buildTurnDetection(
   }
 
   // Default: server_vad - recommended for Telnyx
-  // CRITICAL: silence_duration_ms must be long enough to allow natural pauses
-  // For B2B professional calls, use 2500ms (2.5 seconds) to ensure the agent:
-  // - Waits for the full response before speaking
-  // - Doesn't interrupt during natural pauses
-  // - Allows proper identity confirmation and turn-taking
-  const silenceDurationMs = settings.silenceDurationMs || 2500;
+  // OPTIMIZED: Reduced silence duration for more responsive, natural conversation
+  // - 800ms provides good balance between responsiveness and not interrupting
+  // - Allows natural pauses without excessive waiting
+  // - Faster turn-taking improves conversation flow
+  const silenceDurationMs = settings.silenceDurationMs || 800;
   console.log(`[Turn Detection] Using server_vad with silence_duration_ms: ${silenceDurationMs}`);
 
   return {
     type: "server_vad",
     threshold: 0.5,
     prefix_padding_ms: 300,
-    silence_duration_ms: silenceDurationMs, // Configurable: prevents mid-sentence cutoffs
+    silence_duration_ms: silenceDurationMs, // Optimized from 2500ms -> 800ms for natural conversation flow
   };
 }
 
@@ -1208,21 +1245,21 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
     session.agentSettings = agentSettings;
 
-// let attemptNumber = 1;
-// if (session.callAttemptId) {
-//   try {
-//     const [attempt] = await db
-//       .select({ attemptNumber: dialerCallAttempts.attemptNumber })
-//       .from(dialerCallAttempts)
-//       .where(eq(dialerCallAttempts.id, session.callAttemptId))
-//       .limit(1);
-//     if (attempt?.attemptNumber) {
-//       attemptNumber = attempt.attemptNumber;
-//     }
-//   } catch (error) {
-//     console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
-//   }
-// }
+    let attemptNumber = 1;
+    if (session.callAttemptId) {
+      try {
+        const [attempt] = await db
+          .select({ attemptNumber: dialerCallAttempts.attemptNumber })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, session.callAttemptId))
+          .limit(1);
+        if (attempt?.attemptNumber) {
+          attemptNumber = attempt.attemptNumber;
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
+      }
+    }
 
 // if (!session.isTestSession) {
 //   const orgNameOverride = campaignConfig?.organizationName || campaignConfig?.companyName || agentSettings.persona?.companyName || null;
@@ -1269,16 +1306,16 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
 //   session.voiceVariables = preflight.values;
 // }
 
-// // Use the latest GA gpt-realtime model for most natural, human-like speech
-// const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
-// console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
-// 
-// const openaiWs = new WebSocket(url, {
-//   headers: {
-//     "Authorization": `Bearer ${apiKey}`,
-//     "OpenAI-Beta": "realtime=v1",
-//   },
-// });
+// Use the latest GA gpt-realtime model for most natural, human-like speech
+const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
+
+const openaiWs = new WebSocket(url, {
+  headers: {
+    "Authorization": `Bearer ${apiKey}`,
+    "OpenAI-Beta": "realtime=v1",
+  },
+});
 
 openaiWs.on("open", async () => {
   try {
@@ -1320,7 +1357,14 @@ openaiWs.on("open", async () => {
         baseSystemPrompt,
         voiceTemplateValues
       );
-      const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
+      
+      const VALID_VOICES = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse"];
+      let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "alloy";
+      if (!VALID_VOICES.includes(voice)) {
+        console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'alloy'.`);
+        voice = "alloy";
+      }
+
       const modalities = ["text", "audio"];
       // Use OpenAI config override from session (used by Preview Studio for custom configuration)
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational, session.openaiConfig || undefined);
@@ -1520,35 +1564,64 @@ openaiWs.on("open", async () => {
         }
       }
 
-      // Wait longer before sending greeting to ensure Telnyx stream is fully established
-      // This prevents audio being generated before the stream is ready
-      setTimeout(() => {
+      if (!openingScript || !openingScript.trim()) {
+        const fallbackName = contactInfo?.fullName || contactInfo?.firstName || "there";
+        openingScript = `Hello, may I speak with ${fallbackName} please?`;
+        console.warn(`${LOG_PREFIX} Opening script empty after interpolation; using fallback greeting`);
+      }
+
+      // INTELLIGENT GREETING SYSTEM
+      // Wait for human speech detection before greeting to avoid talking to voicemail/IVR
+      console.log(`${LOG_PREFIX} Intelligent greeting enabled - waiting for human speech detection...`);
+
+      let greetingCheckInterval: NodeJS.Timeout | null = null;
+      let safetyTimeout: NodeJS.Timeout | null = null;
+
+      const sendGreetingNow = () => {
+        if (greetingCheckInterval) clearInterval(greetingCheckInterval);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
+
         if (!session.isActive) {
           console.log(`${LOG_PREFIX} Session no longer active, skipping greeting`);
           return;
         }
-        
+
         if (openaiWs.readyState !== WebSocket.OPEN) {
-          console.warn(`${LOG_PREFIX} âš ï¸  OpenAI WebSocket closed before greeting sent`);
+          console.warn(`${LOG_PREFIX} OpenAI WebSocket closed before greeting sent`);
           return;
         }
-        
+
         if (session.telnyxWs?.readyState !== WebSocket.OPEN) {
-          console.warn(`${LOG_PREFIX} âš ï¸  Telnyx WebSocket not ready, delaying greeting...`);
-          // Retry after another delay
-          setTimeout(() => {
-            if (session.isActive && openaiWs.readyState === WebSocket.OPEN && session.telnyxWs?.readyState === WebSocket.OPEN) {
-              console.log(`${LOG_PREFIX} ???????  Sending greeting (delayed): "${openingScript.substring(0, 50)}..."`);
-              sendOpeningMessage(openaiWs, openingScript);
-            } else {
-              console.error(`${LOG_PREFIX} âŒ Stream still not ready after delay, greeting aborted`);
-            }
-          }, 1000);
-        } else {
-          console.log(`${LOG_PREFIX} ???????  Sending greeting: "${openingScript.substring(0, 50)}..."`);
-          sendOpeningMessage(openaiWs, openingScript);
+          console.warn(`${LOG_PREFIX} Telnyx WebSocket not ready for greeting`);
+          return;
         }
-      }, 800); // Optimized from 1500ms to 800ms for faster caller experience
+
+        console.log(`${LOG_PREFIX} Sending greeting: "${openingScript.substring(0, 50)}..."`);
+        session.audioDetection.hasGreetingSent = true;
+        sendOpeningMessage(openaiWs, openingScript);
+      };
+
+      greetingCheckInterval = setInterval(() => {
+        if (!session.isActive) {
+          if (greetingCheckInterval) clearInterval(greetingCheckInterval);
+          if (safetyTimeout) clearTimeout(safetyTimeout);
+          return;
+        }
+
+        // Check if we should send greeting based on intelligent audio detection
+        if (shouldSendGreeting(session)) {
+          console.log(`${LOG_PREFIX} Human detected - sending greeting after ${session.audioDetection.audioPatterns.length} audio patterns analyzed`);
+          sendGreetingNow();
+        }
+      }, 1000); // Check every second
+
+      // Safety timeout: Send greeting after 30s if no detection
+      safetyTimeout = setTimeout(() => {
+        if (session.isActive && !session.audioDetection.hasGreetingSent) {
+          console.warn(`${LOG_PREFIX} No human detected after 30s - sending greeting anyway (fallback)`);
+          sendGreetingNow();
+        }
+      }, 30000);
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to initialize OpenAI session for call ${session.callId}:`, error);
       await endCall(session.callId, 'error');
@@ -1740,7 +1813,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       inputAudioFormat: session.audioFormat,
       outputAudioFormat: session.audioFormat,
       tools: providerTools,
-      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 700 }, // Increased for proper turn-taking
+      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 800 }, // Optimized for natural conversation flow
       temperature: 0.7,
       maxResponseTokens: costSettings.maxResponseTokens || 512,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
@@ -1786,7 +1859,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     (session as any).geminiProvider = provider;
 
     // Send opening message
-    const openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    if (!openingScript || !openingScript.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      openingScript = `Hello, may I speak with ${fallbackName} please?`;
+      console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
+    }
     // Wait briefly for setup to complete (usually fast)
     setTimeout(() => {
       if (session.isActive && provider.isConnected) {
@@ -1859,24 +1937,32 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
 
     if (usesCanonicalOpeningTokens) {
       // Use canonical opening interpolation
-      const result = interpolateCanonicalOpening(
-        {
-          fullName: contactInfo?.fullName,
-          firstName: contactInfo?.firstName,
-          lastName: contactInfo?.lastName,
-          jobTitle: contactInfo?.jobTitle,
-        },
-        {
-          name: contactInfo?.companyName || contactInfo?.company,
-        }
-      );
-      console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
-      return result;
+    const result = interpolateCanonicalOpening(
+      {
+        fullName: contactInfo?.fullName,
+        firstName: contactInfo?.firstName,
+        lastName: contactInfo?.lastName,
+        jobTitle: contactInfo?.jobTitle,
+      },
+      {
+        name: contactInfo?.companyName || contactInfo?.company,
+      }
+    );
+    console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
+    if (!result?.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      return `Hello, may I speak with ${fallbackName} please?`;
     }
+    return result;
+  }
 
     // Custom message without canonical variables - interpolate allowed tokens
     const result = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
     console.log(`${LOG_PREFIX} [Gemini Opening] Interpolated result: "${result}"`);
+    if (!result?.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      return `Hello, may I speak with ${fallbackName} please?`;
+    }
     return result;
   }
 
@@ -2156,11 +2242,96 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
     case "conversation.item.input_audio_transcription.completed":
       if (message.transcript && allowTranscripts && settings.advanced.clientEvents.userTranscript) {
         console.log(`${LOG_PREFIX} User: ${message.transcript}`);
-        session.transcripts.push({
-          role: 'user',
-          text: message.transcript,
-          timestamp: new Date()
+
+        // INTELLIGENT AUDIO DETECTION - Determine if this is human, IVR, or music
+        const audioType = detectAudioType(message.transcript, session);
+        session.audioDetection.audioPatterns.push({
+          timestamp: new Date(),
+          transcript: message.transcript,
+          type: audioType.type,
+          confidence: audioType.confidence,
         });
+        session.audioDetection.lastTranscriptCheckTime = new Date();
+
+        // INTELLIGENT VOICEMAIL DETECTION - Check FIRST before anything else
+        // This must run before we decide to ignore IVR audio
+        if (audioType.type === 'ivr') {
+          const lowerTranscript = message.transcript.toLowerCase();
+          const voicemailIndicators = [
+            'leave a message',
+            'leave your message',
+            'after the beep',
+            'after the tone',
+            'not available',
+            'cannot take your call',
+            'can\'t take your call',
+            'unable to answer',
+            'please leave',
+            'record your message',
+            'voicemail',
+            'mailbox',
+            'reached the voicemail',
+            'no one is available',
+            'at the tone please record',
+            'press pound when finished',
+            'beep'
+          ];
+
+          const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+          if (isVoicemail && !session.detectedDisposition) {
+            console.log(`${LOG_PREFIX} VOICEMAIL DETECTED via transcript: "${message.transcript.substring(0, 60)}..."`);
+            console.log(`${LOG_PREFIX} Immediately ending call ${session.callId} - NO voicemail will be left`);
+            session.detectedDisposition = 'voicemail';
+            session.callOutcome = 'voicemail';
+            await endCall(session.callId, 'voicemail');
+            break;
+          }
+
+          // CRITICAL FIX: Detect repeating IVR menu patterns (voicemail message management)
+          // Pattern: "To listen to your message press 1, to re-record press 2..."
+          if (lowerTranscript.includes('press') && lowerTranscript.includes('message')) {
+            // Create a simple hash of the IVR menu for comparison
+            const menuHash = lowerTranscript.replace(/\s+/g, ' ').substring(0, 100);
+
+            if (session.audioDetection.lastIvrMenuHash === menuHash) {
+              session.audioDetection.ivrMenuRepeatCount++;
+              console.log(`${LOG_PREFIX} IVR menu repeated ${session.audioDetection.ivrMenuRepeatCount} times`);
+
+              // If same IVR menu repeats 2+ times, it's likely voicemail message management
+              if (session.audioDetection.ivrMenuRepeatCount >= 2 && !session.detectedDisposition) {
+                console.log(`${LOG_PREFIX} VOICEMAIL DETECTED - IVR menu repeating (likely voicemail message options)`);
+                console.log(`${LOG_PREFIX} Immediately ending call ${session.callId}`);
+                session.detectedDisposition = 'voicemail';
+                session.callOutcome = 'voicemail';
+                await endCall(session.callId, 'voicemail');
+                break;
+              }
+            } else {
+              session.audioDetection.lastIvrMenuHash = menuHash;
+              session.audioDetection.ivrMenuRepeatCount = 1;
+            }
+          }
+        }
+
+        // Only process transcript if it's human speech
+        if (audioType.type === 'human') {
+          session.transcripts.push({
+            role: 'user',
+            text: message.transcript,
+            timestamp: new Date()
+          });
+
+          // Mark human as detected for the first time
+          if (!session.audioDetection.humanDetected) {
+            session.audioDetection.humanDetected = true;
+            session.audioDetection.humanDetectedAt = new Date();
+            console.log(`${LOG_PREFIX} ✅ HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
+          }
+        } else if (audioType.type === 'ivr' || audioType.type === 'music') {
+          console.log(`${LOG_PREFIX} Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
+          // Don't add to transcripts, don't respond - AI stays silent
+          break;
+        }
 
         // Check for identity confirmation in user response
         // This prevents the agent from re-asking identity mid-conversation
@@ -2171,7 +2342,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.conversationState.identityConfirmedAt = new Date();
             session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
             session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
-            console.log(`${LOG_PREFIX} ✅ Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
+            console.log(`${LOG_PREFIX} Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
 
             // Inject a system reminder to prevent identity re-verification
             // Use setImmediate to not block the audio processing pipeline
@@ -2182,10 +2353,6 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             });
           }
         }
-
-        // Voicemail detection is now handled by the agent via disposition function call
-        // Disabling aggressive string matching to avoid false positives
-        // await checkForVoicemailDetection(session, message.transcript);
       }
       break;
 
@@ -2480,6 +2647,192 @@ function detectIdentityConfirmation(transcript: string): boolean {
 }
 
 /**
+ * Intelligent Audio Detection - Determines if audio is human speech, IVR, music, or hold
+ * Returns the audio type and confidence level
+ * VOICEMAIL detection takes highest priority to ensure immediate hangup
+ */
+function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { type: 'human' | 'ivr' | 'music' | 'silence' | 'unknown'; confidence: number } {
+  const normalizedText = transcript.toLowerCase().trim();
+  const LOG_TAG = `[AudioDetect]`;
+
+  // Empty or very short transcripts - likely silence or noise
+  if (!normalizedText || normalizedText.length < 3) {
+    return { type: 'silence', confidence: 0.9 };
+  }
+
+  console.log(`${LOG_PREFIX} ${LOG_TAG} Analyzing: "${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '...' : ''}"`);
+
+  // VOICEMAIL Detection - CHECK FIRST (highest priority)
+  // These patterns indicate the call went to voicemail - we must hang up immediately
+  const voicemailPatterns = [
+    /leave\s+(a\s+)?message/i,               // "Please leave a message"
+    /leave\s+your\s+message/i,               // "Leave your message"
+    /after\s+the\s+(beep|tone)/i,            // "After the beep"
+    /at\s+the\s+(beep|tone)/i,               // "At the tone"
+    /not\s+(available|able)\s+to/i,          // "Not available to take your call"
+    /can(')?t\s+(take|answer)/i,             // "Can't take your call"
+    /unable\s+to\s+(answer|take|come)/i,     // "Unable to answer"
+    /voicemail/i,                            // Contains "voicemail"
+    /voice\s+mail/i,                         // "voice mail" with space
+    /mailbox/i,                              // "mailbox"
+    /please\s+record/i,                      // "Please record your message"
+    /record\s+(a|your)\s+message/i,          // "Record your message"
+    /press\s+(pound|#|star|\*)\s+when/i,     // "Press pound when finished"
+    /no\s+one\s+is\s+available/i,            // "No one is available"
+    /reached\s+the\s+(voicemail|mailbox)/i,  // "You've reached the voicemail"
+    /sorry\s+(i|we)\s+(missed|can't)/i,      // "Sorry I missed your call"
+    /call\s+you\s+(back|later)/i,            // "I'll call you back"
+    /beep/i,                                  // Just "beep" - voicemail indicator
+  ];
+
+  for (const pattern of voicemailPatterns) {
+    if (pattern.test(normalizedText)) {
+      console.log(`${LOG_PREFIX} ${LOG_TAG} VOICEMAIL PATTERN MATCHED: "${normalizedText.substring(0, 60)}..."`);
+      // Return as IVR type so the voicemail check in transcript processing will catch it
+      return { type: 'ivr', confidence: 0.98 };
+    }
+  }
+
+  // IVR Detection Patterns (non-voicemail automated systems)
+  const ivrPatterns = [
+    // Menu options
+    /press\s+\d+/i,                          // "Press 1", "Press 2 for sales"
+    /option\s+\d+/i,                         // "Option 1", "Option 2"
+    /dial\s+\d+/i,                           // "Dial 1"
+    /enter\s+(your|the)\s+\w+/i,            // "Enter your account number"
+    /please\s+(press|select|choose|say)/i,   // "Please press", "Please select"
+    /for\s+\w+\s+press/i,                    // "For sales press 1"
+    /to\s+(speak|reach|return)\s+to/i,       // "To speak to an operator"
+    /main\s+menu/i,                          // "Return to main menu"
+    /your\s+call\s+is\s+important/i,         // "Your call is important to us"
+    /currently\s+(unavailable|closed)/i,     // "Currently unavailable"
+    /business\s+hours/i,                     // "Business hours are"
+    /recorded\s+for\s+quality/i,             // "This call may be recorded"
+    /thank\s+you\s+for\s+(calling|holding)/i, // "Thank you for calling"
+    /please\s+hold/i,                        // "Please hold"
+    /transferring\s+your\s+call/i,           // "Transferring your call"
+    /all\s+(agents|representatives)\s+are/i, // "All agents are busy"
+  ];
+
+  for (const pattern of ivrPatterns) {
+    if (pattern.test(normalizedText)) {
+      console.log(`${LOG_PREFIX} ${LOG_TAG} IVR DETECTED: "${normalizedText.substring(0, 50)}..."`);
+      return { type: 'ivr', confidence: 0.95 };
+    }
+  }
+
+  // Music/Hold Detection - Repetitive or nonsensical patterns
+  const musicPatterns = [
+    // Repeated sounds that transcription picks up
+    /^(\w{1,3}\s?){10,}$/,                   // Very short repeated syllables
+    /^(la|na|da|ba|ma|hmm|uh|ah){5,}/i,      // Repeated musical syllables
+    /[♪♫]/,                                  // Music notes (if transcribed)
+    // Gibberish that's not words
+    /^[^aeiou\s]{20,}$/i,                    // Long strings without vowels (garbled)
+  ];
+
+  for (const pattern of musicPatterns) {
+    if (pattern.test(normalizedText)) {
+      console.log(`${LOG_PREFIX} 🎵 MUSIC/HOLD DETECTED: "${normalizedText.substring(0, 50)}..."`);
+      return { type: 'music', confidence: 0.85 };
+    }
+  }
+
+  // Human Speech Detection - Natural conversational patterns
+  const humanPatterns = [
+    // Greetings
+    /^(hi|hello|hey|good\s+(morning|afternoon|evening))/i,
+    // Questions
+    /\?$/,
+    /^(who|what|where|when|why|how|can|could|would|is|are)/i,
+    // Common responses
+    /^(yes|no|yeah|nope|sure|okay|alright|maybe)/i,
+    // Emotional expressions
+    /(thanks|thank you|sorry|excuse me|pardon)/i,
+    // Natural speech indicators
+    /\b(i|you|we|they|my|your|our)\b/i,
+    // Speaking of self
+    /\b(i'm|i am|my name|this is)\b/i,
+  ];
+
+  let humanConfidence = 0;
+  let matchedPatterns = 0;
+
+  for (const pattern of humanPatterns) {
+    if (pattern.test(normalizedText)) {
+      matchedPatterns++;
+      humanConfidence += 0.3;
+    }
+  }
+
+  // If transcript has normal sentence structure (words with spaces, reasonable length)
+  const words = normalizedText.split(/\s+/);
+  if (words.length >= 2 && words.length <= 50) {
+    humanConfidence += 0.3;
+  }
+
+  // If it has proper punctuation
+  if (/[.!?,]/.test(normalizedText)) {
+    humanConfidence += 0.2;
+  }
+
+  if (humanConfidence >= 0.6) {
+    console.log(`${LOG_PREFIX} [AudioDetect] HUMAN SPEECH: "${normalizedText.substring(0, 50)}..." (confidence: ${humanConfidence.toFixed(2)})`);
+    return { type: 'human', confidence: Math.min(humanConfidence, 0.95) };
+  }
+
+  // Couldn't determine with high confidence - treat as potential human to be safe
+  console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN (treating as human): "${normalizedText.substring(0, 50)}..."`);
+  return { type: 'human', confidence: 0.5 }; // Changed from 'unknown' to 'human' - be safe and respond
+}
+
+/**
+ * Check if we should send the AI's greeting based on audio detection
+ * Returns true if human speech detected, false if IVR/music/hold
+ */
+function shouldSendGreeting(session: OpenAIRealtimeSession): boolean {
+  // If we already sent greeting, don't send again
+  if (session.audioDetection.hasGreetingSent) {
+    return false;
+  }
+
+  // If human already detected, allow greeting
+  if (session.audioDetection.humanDetected) {
+    return true;
+  }
+
+  // Check recent audio patterns
+  const recentPatterns = session.audioDetection.audioPatterns.slice(-5); // Last 5 patterns
+
+  if (recentPatterns.length === 0) {
+    // No data yet, wait for first transcript
+    return false;
+  }
+
+  // Count human vs non-human patterns
+  const humanCount = recentPatterns.filter(p => p.type === 'human').length;
+  const ivrMusicCount = recentPatterns.filter(p => p.type === 'ivr' || p.type === 'music').length;
+
+  // If we detect IVR or music, don't greet yet
+  if (ivrMusicCount > 0) {
+    console.log(`${LOG_PREFIX} 🚫 Not greeting - IVR/music detected (${ivrMusicCount} patterns)`);
+    return false;
+  }
+
+  // If we have at least 2 human speech patterns, it's safe to greet
+  if (humanCount >= 2) {
+    console.log(`${LOG_PREFIX} ✅ Ready to greet - ${humanCount} human speech patterns detected`);
+    session.audioDetection.humanDetected = true;
+    session.audioDetection.humanDetectedAt = new Date();
+    return true;
+  }
+
+  // Need more data
+  console.log(`${LOG_PREFIX} ⏳ Waiting for more audio data (${humanCount} human, ${ivrMusicCount} ivr/music, ${recentPatterns.length} total)`);
+  return false;
+}
+
+/**
  * Inject a system-level reminder into the conversation to prevent identity re-verification.
  * Uses conversation.item.create to add a system message that reinforces the identity lock.
  */
@@ -2657,9 +3010,13 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             session.openaiWs.send(JSON.stringify({ type: "response.create" }));
           }
           
-          // Auto-hangup after any disposition is submitted (5 second delay for goodbye)
-          // The AI should say goodbye before the call ends
-          const hangupDelay = disposition === 'do_not_call' ? 2000 : 5000;
+          // Auto-hangup after any disposition is submitted
+          // VOICEMAIL: Hang up IMMEDIATELY (no delay) - don't waste time on voicemail
+          // DO_NOT_CALL: Hang up quickly (2 seconds) to respect their request
+          // OTHER: Normal 5 second delay for AI to say goodbye
+          const hangupDelay = disposition === 'voicemail' ? 0 : (disposition === 'do_not_call' ? 2000 : 5000);
+          console.log(`${LOG_PREFIX} Scheduling auto-hangup in ${hangupDelay}ms for disposition: ${disposition}`);
+
           setTimeout(() => {
             if (session.isActive && !session.isEnding) {
               console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${disposition}`);
@@ -3162,50 +3519,174 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         console.log(`${LOG_PREFIX} Test call transcripts: ${session.transcripts.length} turns`);
       } else {
         // Handle real call post-call processing
-        // First verify the call attempt record exists before updating
-        const [existingAttempt] = await db
-          .select({ id: dialerCallAttempts.id })
-          .from(dialerCallAttempts)
-          .where(eq(dialerCallAttempts.id, session.callAttemptId))
-          .limit(1);
+        // Check if call attempt record exists - but DON'T skip processing if missing
+        // This handles fallback sessions where callAttemptId might be a timestamp-based ID
+        let existingAttempt: { id: string } | undefined;
+        const isFallbackAttemptId = !session.callAttemptId ||
+          session.callAttemptId.startsWith('attempt-') ||
+          session.callAttemptId === '';
 
-        if (!existingAttempt) {
-          console.warn(`${LOG_PREFIX} Call attempt ${session.callAttemptId} not found in database - skipping post-call processing`);
-          // Still release the lock if we have a queue item
-          if (session.queueItemId) {
-            await releaseQueueLock(session.queueItemId);
-          }
-          return;
+        if (!isFallbackAttemptId) {
+          const [attempt] = await db
+            .select({ id: dialerCallAttempts.id })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, session.callAttemptId))
+            .limit(1);
+          existingAttempt = attempt;
         }
 
-        await db.update(dialerCallAttempts).set({
-          callEndedAt: new Date(),
-          callDurationSeconds: callDuration,
-          disposition: disposition,
-          notes,
-          updatedAt: new Date()
-        }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+        if (!existingAttempt && !isFallbackAttemptId) {
+          console.warn(`${LOG_PREFIX} Call attempt ${session.callAttemptId} not found in database - will still record disposition via call_sessions`);
+        }
 
-        // Process disposition through the engine (this handles lock release)
-        dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
-        dispositionProcessed = true;
+        if (isFallbackAttemptId) {
+          console.log(`${LOG_PREFIX} Fallback session (attempt_id=${session.callAttemptId || 'none'}) - will record disposition via call_sessions only`);
+        }
+
+        // Build full transcript for conversation intelligence
+        const fullTranscript = session.transcripts.length > 0
+          ? session.transcripts
+              .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+              .join('\n')
+          : '';
+
+        // Build transcript turns for structured analysis
+        const transcriptTurns = session.transcripts.map(t => ({
+          role: t.role === 'assistant' ? 'agent' : 'contact',
+          text: t.text,
+          timestamp: t.timestamp.toISOString(),
+        }));
+
+        // Build AI analysis from call summary and conversation state
+        const aiAnalysis = session.callSummary ? {
+          summary: session.callSummary.summary,
+          sentiment: session.callSummary.sentiment,
+          outcome: session.callSummary.outcome,
+          keyTopics: session.callSummary.keyTopics || [],
+          nextSteps: session.callSummary.nextSteps || [],
+          conversationState: {
+            identityConfirmed: session.identityConfirmed,
+            currentState: session.currentState,
+            stateHistory: session.stateHistory || []
+          }
+        } : null;
+
+        // Create call session record for comprehensive conversation intelligence
+        let callSessionId: string | null = null;
+        if (!noPiiLogging) {
+          try {
+            if (!session.calledNumber) {
+              console.warn(`${LOG_PREFIX} Missing called_number for call ${session.callId} - skipping call_sessions insert`);
+            } else {
+              const [callSession] = await db.insert(callSessions).values({
+                telnyxCallId: session.telnyxCallControlId || undefined,
+                fromNumber: session.fromNumber,
+                toNumberE164: session.calledNumber,
+                startedAt: session.callStartedAt || new Date(),
+                endedAt: new Date(),
+                durationSec: callDuration,
+                status: 'completed' as const,
+                agentType: 'ai' as const,
+                aiAgentId: session.virtualAgentId || 'openai-realtime',
+                aiConversationId: session.openaiSessionId || undefined,
+                aiTranscript: fullTranscript || undefined,
+                aiAnalysis: aiAnalysis as any,
+                aiDisposition: disposition,
+                campaignId: session.campaignId,
+                contactId: session.contactId,
+                queueItemId: session.queueItemId,
+              }).returning();
+
+              callSessionId = callSession.id;
+              console.log(`${LOG_PREFIX} ✅ Created call session ${callSessionId} with full conversation intelligence`);
+            }
+          } catch (sessionError) {
+            console.error(`${LOG_PREFIX} Failed to create call session:`, sessionError);
+          }
+        }
+
+        // Update call attempt with comprehensive data (only if record exists)
+        if (existingAttempt) {
+          await db.update(dialerCallAttempts).set({
+            callEndedAt: new Date(),
+            callDurationSeconds: callDuration,
+            disposition: disposition,
+            notes: notes || (session.callSummary?.summary ? `Summary: ${session.callSummary.summary}` : undefined),
+            callSessionId: callSessionId || undefined,
+            updatedAt: new Date()
+          }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+
+          // Process disposition through the engine (this handles lock release)
+          dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
+          dispositionProcessed = true;
+        } else {
+          // For fallback sessions without a call attempt record:
+          // Release the queue lock directly since processDisposition won't be called
+          if (session.queueItemId) {
+            console.log(`${LOG_PREFIX} Releasing queue lock for fallback session: ${session.queueItemId}`);
+            await releaseQueueLock(session.queueItemId);
+          }
+          // Mark disposition as processed (via call_sessions record)
+          dispositionProcessed = true;
+          console.log(`${LOG_PREFIX} ✅ Fallback session disposition recorded via call_sessions: ${disposition}`);
+        }
+
+        // CRITICAL FOR SYSTEMATIC RELEASE: Trigger immediate replenishment
+        // This ensures the orchestrator fills the newly freed concurrency slot within 1s
+        if (session.campaignId) {
+          triggerCampaignReplenish(session.campaignId).catch(err => {
+            console.warn(`${LOG_PREFIX} Failed to trigger replenishment for campaign ${session.campaignId}:`, err);
+          });
+        }
 
         console.log(`${LOG_PREFIX} Call ${callId} completed with disposition: ${disposition}`);
 
-        // CRITICAL: Save OpenAI real-time transcripts directly to the lead record
+        // Create call producer tracking record for quality analysis and learning
+        if (callSessionId && !noPiiLogging) {
+          try {
+            // Calculate quality score based on conversation metrics
+            let qualityScore: number | null = null;
+            if (session.transcripts.length > 0) {
+              // Basic quality scoring: weighted by call duration, transcript length, and conversation flow
+              const transcriptQuality = Math.min(100, (session.transcripts.length / 10) * 50); // Up to 50 points for transcript depth
+              const durationQuality = Math.min(50, (callDuration / 60) * 50); // Up to 50 points for duration (normalized to 1 min)
+              qualityScore = Math.round(transcriptQuality + durationQuality);
+            }
+
+            // Extract detected intents from conversation state
+            const intentsDetected = session.stateHistory?.map(state => ({
+              state: state,
+              timestamp: new Date().toISOString(),
+            })) || [];
+
+            await db.insert(callProducerTracking).values({
+              callSessionId: callSessionId,
+              campaignId: session.campaignId!,
+              contactId: session.contactId || undefined,
+              producerType: 'ai' as const,
+              virtualAgentId: session.virtualAgentId || undefined,
+              handoffStage: 'ai_initial' as const,
+              intentsDetected: intentsDetected.length > 0 ? intentsDetected as any : undefined,
+              transcriptAnalysis: aiAnalysis as any,
+              qualityScore: qualityScore?.toString() || undefined,
+            });
+
+            console.log(`${LOG_PREFIX} ✅ Created call producer tracking record with quality score: ${qualityScore || 'N/A'}`);
+          } catch (trackingError) {
+            console.error(`${LOG_PREFIX} Failed to create call producer tracking:`, trackingError);
+          }
+        }
+
+        // Save OpenAI real-time transcripts directly to the lead record (if lead was created)
         // This ensures AI QA analysis can run immediately without waiting for Telnyx recording sync
         if (dispositionResult?.leadId && session.transcripts.length > 0 && !noPiiLogging) {
           try {
-            const fullTranscript = session.transcripts
-              .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
-              .join('\n');
-            
             await db.update(leads).set({
               transcript: fullTranscript,
               transcriptionStatus: 'completed',
               updatedAt: new Date(),
             }).where(eq(leads.id, dispositionResult.leadId));
-            
+
             console.log(`${LOG_PREFIX} ✅ Saved ${session.transcripts.length} transcript turns to lead ${dispositionResult.leadId}`);
           } catch (transcriptError) {
             console.error(`${LOG_PREFIX} Failed to save transcripts to lead:`, transcriptError);
@@ -3329,18 +3810,8 @@ async function scheduleEngagedCallTranscription(options: {
       return;
     }
 
-    await scheduleAutoRecordingSync({
-      leadId: options.leadId || undefined,
-      callAttemptId: options.callAttemptId,
-      contactFirstName: attempt.contactFirstName || null,
-      agentId: attempt.agentId || null,
-      telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
-      dialedNumber: attempt.phoneDialed,
-      campaignId: attempt.campaignId || null,
-    });
-
     // Helper to get telnyxCallId from session/bridge
-    function getTelnyxCallId(callAttemptId: string): string | null {
+    const getTelnyxCallId = (callAttemptId: string): string | null => {
       try {
         const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
         const bridge = getTelnyxAiBridge();
@@ -3352,7 +3823,17 @@ async function scheduleEngagedCallTranscription(options: {
         // Ignore errors, fallback to null
       }
       return null;
-    }
+    };
+
+    await scheduleAutoRecordingSync({
+      leadId: options.leadId || undefined,
+      callAttemptId: options.callAttemptId,
+      contactFirstName: attempt.contactFirstName || null,
+      agentId: attempt.agentId || null,
+      telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
+      dialedNumber: attempt.phoneDialed,
+      campaignId: attempt.campaignId || null,
+    });
   } catch (error) {
     console.error(`${LOG_PREFIX} Error scheduling call transcription:`, error);
   }
@@ -3773,11 +4254,54 @@ async function buildSystemPrompt(
   const accountId = contactInfo?.accountId;
   let accountContextSection: string | null = null;
   let callPlanContextSection: string | null = null;
-  
-  // Skip intelligence if either ID is missing
-  if (!accountId || !contactId) {
+
+  // Check if campaign requires account intelligence (default: false for backward compatibility)
+  const requireIntelligence = campaignConfig?.requireAccountIntelligence ?? false;
+
+  // Skip intelligence if:
+  // 1. Campaign doesn't require it (requireAccountIntelligence = false), OR
+  // 2. Either ID is missing
+  if (!requireIntelligence) {
+    console.log(`${LOG_PREFIX} Campaign does not require account intelligence - using basic company context.`);
+
+    // Even without full intelligence, use basic company info (industry, description) for lightweight personalization
+    if (accountId) {
+      try {
+        const accountProfile = await getAccountProfileData(accountId);
+        if (accountProfile) {
+          // Build minimal account context from company profile (industry, description)
+          const basicContext: string[] = [];
+
+          if (accountProfile.industry) {
+            basicContext.push(`Industry: ${accountProfile.industry}`);
+          }
+
+          if (accountProfile.description) {
+            basicContext.push(`About the company: ${accountProfile.description}`);
+          }
+
+          if (accountProfile.employeeCount) {
+            basicContext.push(`Company size: ${accountProfile.employeeCount} employees`);
+          }
+
+          if (accountProfile.revenue) {
+            basicContext.push(`Revenue: $${accountProfile.revenue}`);
+          }
+
+          if (basicContext.length > 0) {
+            accountContextSection = `\n## Account Background\n\n${basicContext.join('\n')}\n`;
+            console.log(`${LOG_PREFIX} Using basic company context (industry, description) for lightweight personalization.`);
+          }
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Failed to load basic company context:`, error);
+        // Continue without basic context - not critical
+      }
+    }
+  } else if (!accountId || !contactId) {
     console.warn(`${LOG_PREFIX} Missing accountId or contactId - skipping account intelligence and call planning.`);
   } else {
+    console.log(`${LOG_PREFIX} Campaign requires account intelligence - loading/generating...`);
     const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
     const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
       accountId,
@@ -4412,12 +4936,13 @@ export function getRealtimeStatus(): {
 function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
   const logHealth = () => {
     if (!session.isActive) {
+      console.log(`${LOG_PREFIX} Health monitor skipped - session ${session.callId} is not active`);
       return;
     }
 
     const now = new Date();
     const elapsedSeconds = Math.round((now.getTime() - session.startTime.getTime()) / 1000);
-    const timeSinceLastAudio = session.lastAudioFrameTime 
+    const timeSinceLastAudio = session.lastAudioFrameTime
       ? Math.round((now.getTime() - session.lastAudioFrameTime.getTime()) / 1000)
       : elapsedSeconds;
     const endAfterSilenceRaw = Number(session.agentSettings?.advanced.conversational.endConversationAfterSilenceSeconds);
@@ -4438,6 +4963,11 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       effectiveMaxDuration = agentMaxDurationSeconds;
     }
 
+    // Enhanced logging for max duration debugging
+    if (effectiveMaxDuration >= 0) {
+      console.log(`${LOG_PREFIX} Max Duration Check [${session.callId}]: elapsed=${elapsedSeconds}s, limit=${effectiveMaxDuration}s, isActive=${session.isActive}, disposition=${session.detectedDisposition || 'none'}`);
+    }
+
     const timeSinceUserSpeech = session.lastUserSpeechTime
       ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)
       : null;
@@ -4450,8 +4980,31 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
 
     if (effectiveMaxDuration >= 0 && elapsedSeconds > effectiveMaxDuration) {
       const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds <= agentMaxDurationSeconds ? 'campaign' : 'agent';
-      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after max duration ${effectiveMaxDuration}s (${source} limit)`);
+      console.warn(`${LOG_PREFIX} MAX DURATION EXCEEDED - Ending call ${session.callId} after ${elapsedSeconds}s (limit: ${effectiveMaxDuration}s, ${source} limit)`);
       endCall(session.callId, 'completed');
+      return;
+    }
+
+    // CRITICAL FIX: End call if no human detected after 60 seconds
+    // This prevents AI from talking to voicemail/IVR for extended periods
+    const MAX_DURATION_WITHOUT_HUMAN_SECONDS = 60;
+    if (elapsedSeconds > MAX_DURATION_WITHOUT_HUMAN_SECONDS && !session.audioDetection.humanDetected) {
+      console.warn(`${LOG_PREFIX} NO HUMAN DETECTED - Ending call ${session.callId} after ${elapsedSeconds}s without human response`);
+      console.log(`${LOG_PREFIX} Audio patterns detected: ${session.audioDetection.audioPatterns.map(p => p.type).join(', ')}`);
+
+      // Determine disposition based on what we detected
+      if (!session.detectedDisposition) {
+        const hasIvr = session.audioDetection.audioPatterns.some(p => p.type === 'ivr');
+        if (hasIvr) {
+          session.detectedDisposition = 'voicemail'; // IVR without human = likely voicemail
+          console.log(`${LOG_PREFIX} Setting disposition to voicemail (IVR detected without human)`);
+        } else {
+          session.detectedDisposition = 'no_answer'; // No response at all
+          console.log(`${LOG_PREFIX} Setting disposition to no_answer (no audio patterns detected)`);
+        }
+      }
+
+      endCall(session.callId, session.detectedDisposition === 'voicemail' ? 'voicemail' : 'no_answer');
       return;
     }
 
@@ -4478,11 +5031,13 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       console.warn(`${LOG_PREFIX} âš ï¸  No audio received for ${timeSinceLastAudio}s on call ${session.callId}`);
     }
 
-    // Alert if audio production seems slow
+    // Alert if audio production seems slow - DISABLED (False positive during listening/silence periods)
+    /* 
     const framesPerSecond = session.audioFrameCount / (elapsedSeconds + 1);
     if (session.audioFrameCount > 10 && framesPerSecond < 10) {
       console.warn(`${LOG_PREFIX} âš ï¸  Low audio frame rate: ${framesPerSecond.toFixed(1)} fps on call ${session.callId}`);
-    }
+    } 
+    */
     
     // Alert if buffered frames are accumulating (indicates Telnyx connection issues)
     if (session.audioFrameBuffer.length > 50) {

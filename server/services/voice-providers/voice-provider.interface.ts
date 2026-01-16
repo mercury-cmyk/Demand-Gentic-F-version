@@ -273,10 +273,10 @@ export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
   'fable': 'Fenrir',
   'nova': 'Kore',
   'shimmer': 'Puck',
-  'onyx': 'Charon',
+  'onyx': 'Orion',
   // New OpenAI voices with most natural speech (gpt-realtime exclusive)
-  'cedar': 'Aoede',   // Cedar: warm, confident - maps to Aoede (bright and warm)
-  'marin': 'Kore',    // Marin: calm, professional - maps to Kore (soft and friendly)
+  'cedar': 'Vega',   // Cedar: warm, confident - maps to Vega
+  'marin': 'Pegasus',    // Marin: calm, professional - maps to Pegasus
 };
 
 export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
@@ -285,6 +285,16 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
   'Fenrir': 'fable',
   'Kore': 'nova',
   'Puck': 'shimmer',
+  'Orion': 'onyx',
+  'Vega': 'cedar',
+  'Pegasus': 'marin',
+  'Ursa': 'alloy',
+  'Nova': 'nova',
+  'Dipper': 'echo',
+  'Capella': 'fable',
+  'Orbit': 'shimmer',
+  'Lyra': 'onyx',
+  'Eclipse': 'cedar',
 };
 
 export function mapVoiceToProvider(voice: string, targetProvider: VoiceProviderType): string {
