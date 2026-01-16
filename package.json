@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "tsx scripts/dev-with-ngrok.ts",
+    "dev:ngrok": "tsx scripts/dev-with-ngrok.ts",
     "dev:local": "cross-env NODE_ENV=development tsx server/index.ts",
     "dev:tunnel": "tsx scripts/dev-with-ngrok.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",

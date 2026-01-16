@@ -10,6 +10,8 @@ REGION=${REGION:-us-central1}
 SERVICE=${SERVICE:-demandgentic-api}
 REPOSITORY=${REPOSITORY:-pivotal-artifacts}
 IMAGE_TAG=${IMAGE_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo 'latest')}
+VPC_CONNECTOR=${VPC_CONNECTOR:-}
+VPC_EGRESS=${VPC_EGRESS:-private-ranges-only}
 
 echo "🚀 Cloud Run Deployment Script"
 echo "=============================="
@@ -18,6 +20,8 @@ echo "Region: $REGION"
 echo "Service: $SERVICE"
 echo "Repository: $REPOSITORY"
 echo "Image Tag: $IMAGE_TAG"
+echo "VPC Connector: ${VPC_CONNECTOR:-<not set>}"
+echo "VPC Egress: $VPC_EGRESS"
 echo ""
 
 # Color codes
@@ -121,6 +125,10 @@ deploy_to_cloud_run() {
   echo "🚀 Deploying to Cloud Run..."
   
   IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${IMAGE_TAG}"
+  VPC_ARGS=()
+  if [[ -n "$VPC_CONNECTOR" ]]; then
+    VPC_ARGS+=(--vpc-connector="$VPC_CONNECTOR" --vpc-egress="$VPC_EGRESS")
+  fi
   
   gcloud run deploy "$SERVICE" \
     --image="${IMAGE_NAME}" \
@@ -131,7 +139,8 @@ deploy_to_cloud_run() {
     --env-vars-file=env.yaml \
     --max-instances=100 \
     --memory=512Mi \
-    --cpu=1
+    --cpu=1 \
+    "${VPC_ARGS[@]}"
   
   echo -e "${GREEN}✓${NC} Deployed to Cloud Run"
 }

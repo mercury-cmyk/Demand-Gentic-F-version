@@ -24,9 +24,14 @@ function parseEnv(filePath: string) {
 // Load envs to sync with server
 const envLocal = parseEnv(path.join(process.cwd(), '.env.local'));
 const envDefault = parseEnv(path.join(process.cwd(), '.env'));
+const mergedEnv = { ...envDefault, ...envLocal };
+
+function resolveEnv(key: string): string | undefined {
+    return process.env[key] || envLocal[key] || envDefault[key];
+}
 
 // Determine PORT: process.env > .env.local > .env > 5000
-const PORT_STR = process.env.PORT || envLocal.PORT || envDefault.PORT || '5000';
+const PORT_STR = resolveEnv('PORT') || '5000';
 const PORT = parseInt(PORT_STR, 10);
 console.log(`ℹ️  Resolved PORT to ${PORT}`);
 
@@ -148,16 +153,21 @@ const pollInterval = setInterval(async () => {
 function startDevServer() {
   if (!tunnelUrl) return;
 
-  const publicWsUrl = `${tunnelUrl}/openai-realtime-dialer`;
+  const envPublicWsUrl = resolveEnv('PUBLIC_WEBSOCKET_URL');
+  const publicWsUrl = envPublicWsUrl || `${tunnelUrl}/openai-realtime-dialer`;
   console.log(`✅ Tunnel established: ${tunnelUrl}`);
+  if (envPublicWsUrl) {
+      console.log(`ℹ️  Using PUBLIC_WEBSOCKET_URL from .env.local/.env`);
+  }
   console.log(`🔗 PUBLIC_WEBSOCKET_URL=${publicWsUrl}`);
   console.log('---------------------------------------------------');
   
   // Start the dev server
   console.log('🚀 Starting Express + Vite dev server...');
   
-  const env = { 
-      ...process.env, 
+  const env = {
+      ...process.env,
+      ...mergedEnv,
       PUBLIC_WEBSOCKET_URL: publicWsUrl,
       NODE_ENV: 'development',
       PORT: PORT.toString()

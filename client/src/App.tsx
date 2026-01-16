@@ -1,4 +1,5 @@
 import { Switch, Route, Redirect } from "wouter";
+import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -48,6 +49,9 @@ import OrdersPage from "@/pages/orders";
 import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
+
+// Lazy-loaded components
+const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
@@ -390,7 +394,11 @@ function AuthenticatedApp() {
               </Route>
 
               {/* Cloud Logs Monitoring */}
-              <Route path="/cloud-logs" component={lazy(() => import("./pages/cloud-logs-monitor"))} />
+              <Route path="/cloud-logs">
+                <Suspense fallback={<div className="p-4">Loading...</div>}>
+                  <CloudLogsMonitor />
+                </Suspense>
+              </Route>
 
               {/* 404 */}
               <Route component={NotFound} />

@@ -149,11 +149,11 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         name: (aiSettings as any).agentName || campaign.name || "Assistant",
       },
       org: {
-        name: campaign.accountId ? (await storage.getAccount(campaign.accountId))?.name || "Unknown Org" : "Unknown Org",
+        name: account?.name || campaign.name || "Unknown Org",
       },
       contact: {
-        full_name: contact.full_name || contact.firstName || "Unknown",
-        first_name: contact.firstName || contact.full_name?.split(" ")[0] || "Unknown",
+        full_name: contact.fullName || contact.firstName || "Unknown",
+        first_name: contact.firstName || contact.fullName?.split(" ")[0] || "Unknown",
         job_title: (contact as any).jobTitle || (contact as any).title || "Unknown",
         email: contact.email,
       },
@@ -213,18 +213,17 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       return res.status(400).json({ message: "Contact has no phone number" });
     }
 
-    const context: CallContext = {
-      contactFirstName: contact.firstName || "there",
-      contactLastName: contact.lastName || "",
-      contactTitle: (contact as any).title || (contact as any).jobTitle || "Decision Maker",
-      contactEmail: contact.email || "",
-      companyName: account?.name || (contact as any).companyNameOverride || "your company",
-      phoneNumber,
-      campaignId,
-      queueItemId,
-      agentFullName: aiSettings.persona?.name || "your representative",
-      virtualAgentId: aiSettings.id || undefined,
-    };
+      const context: CallContext = {
+        contactFirstName: contact.firstName || "there",
+        contactLastName: contact.lastName || "",
+        contactTitle: (contact as any).title || (contact as any).jobTitle || "Decision Maker",
+        contactEmail: contact.email || "",
+        companyName: account?.name || (contact as any).companyNameOverride || "your company",
+        phoneNumber,
+        campaignId,
+        queueItemId,
+        agentFullName: aiSettings.persona?.name || "your representative",
+      };
 
     const bridge = getTelnyxAiBridge();
     
@@ -329,7 +328,16 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
     console.log(`[AI Batch] Starting batch calls for campaign ${campaignId}, limit: ${limit}`);
     console.log(`[AI Batch] Current queue status: ${JSON.stringify(queueStatus)}`);
 
-    const results: Array<{ contactId: string; queueItemId: string; status: string; callId?: string; error?: string; skipReason?: string }> = [];
+    const results: Array<{
+      contactId: string;
+      queueItemId: string;
+      status: string;
+      callId?: string;
+      error?: string;
+      skipReason?: string;
+      missingKeys?: string[];
+      invalidKeys?: string[];
+    }> = [];
     let callsInitiated = 0;
     let skippedDnc = 0;
     let skippedSuppression = 0;
@@ -519,18 +527,18 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
         const contact = contactId ? await storage.getContact(contactId) : null;
         const account = contact?.accountId ? await storage.getAccount(contact.accountId) : null;
 
-        const context: CallContext = {
-          contactFirstName: item.firstName || contact?.firstName || "there",
-          contactLastName: item.lastName || contact?.lastName || "",
-          contactTitle: item.title || (contact as any)?.title || (contact as any)?.jobTitle || "Decision Maker",
-          contactEmail: item.email || contact?.email || "",
-          companyName: item.companyName || account?.name || "your company",
-          phoneNumber,
-          campaignId,
-          queueItemId: item.id,
-          agentFullName: aiSettings.persona?.name || "your representative",
-          virtualAgentId: aiSettings.id || undefined, // Important for lock validation
-        };
+          const context: CallContext = {
+            contactFirstName: item.firstName || contact?.firstName || "there",
+            contactLastName: item.lastName || contact?.lastName || "",
+            contactTitle: item.title || (contact as any)?.title || (contact as any)?.jobTitle || "Decision Maker",
+            contactEmail: item.email || contact?.email || "",
+            companyName: item.companyName || account?.name || "your company",
+            phoneNumber,
+            campaignId,
+            queueItemId: item.id,
+            agentFullName: aiSettings.persona?.name || "your representative",
+            virtualAgentId: (item as any).virtualAgentId || undefined, // Important for lock validation
+          };
 
         // PRE-LOCK: Lock the queue item before initiating the call to prevent race conditions
         // where the call is answered and tries to connect to WebSocket before we update status.
@@ -647,8 +655,8 @@ router.post("/webhook", async (req, res) => {
     console.log(`[AI Webhook] COMPLETE PAYLOAD:`, JSON.stringify(req.body, null, 2).substring(0, 500));
     
     // Extract event data - handle different Telnyx payload formats
-    const eventData = event.data || event;
-    const eventType = eventData.event_type || (event as any).event_type;
+    const eventData: any = event.data || event;
+    const eventType = eventData.event_type || event.event_type;
     const payload = eventData.payload || eventData;
     
     console.log(`[AI Webhook] Received event: ${eventType}`, JSON.stringify({
@@ -889,6 +897,32 @@ router.post("/test-voice", requireAuth, requireRole("admin"), async (req, res) =
 });
 
 /**
+ * Helper to generate a public WebSocket URL for Telnyx media streaming.
+ * This fixes the issue where Telnyx cannot reach 'localhost'.
+ */
+function getPublicWsUrl(req: any, path: string): string {
+  let host = req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+  
+  if (process.env.PUBLIC_WEBSOCKET_URL) {
+    try {
+      const url = new URL(process.env.PUBLIC_WEBSOCKET_URL);
+      host = url.host;
+    } catch {
+      // Fallback if the env var is just a hostname/domain
+      host = process.env.PUBLIC_WEBSOCKET_URL.replace(/^wss?:\/\//, '').split('/')[0];
+    }
+  }
+
+  const protocol = host.includes('localhost') ? 'ws' : 'wss';
+  
+  if (host.includes('localhost')) {
+    console.warn(`[AI Calls] ⚠️  CRITICAL: Using localhost for ${path}. Telnyx cannot reach this! Use ngrok and set PUBLIC_WEBSOCKET_URL.`);
+  }
+  
+  return `${protocol}://${host}${path}`;
+}
+
+/**
  * Test endpoint for OpenAI Realtime Voice API calls
  * POST /api/ai/test-openai-realtime
  * 
@@ -1108,6 +1142,134 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     }
     res.status(500).json({ message: "Failed to initiate test call", error: String(error) });
   }
+});
+
+/**
+ * Test endpoint for Google Gemini Multimodal Live API calls
+ * POST /api/ai/test-gemini-live
+ * 
+ * This initiates a test call using the Gemini Multimodal Live API.
+ * Voices are handled dynamically to ensure automatic synchronization with Google's updates.
+ */
+const testGeminiLiveSchema = z.object({
+  phoneNumber: z.string().min(10, "Phone number required"),
+  virtualAgentId: z.string().optional(),
+  campaignId: z.string().optional(),
+  systemPrompt: z.string().optional(),
+  voice: z.string().optional(),
+  settings: z.record(z.unknown()).optional(),
+});
+
+router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
+  try {
+    const {
+      phoneNumber,
+      virtualAgentId,
+      campaignId,
+      systemPrompt: systemPromptOverride,
+      voice: voiceOverride,
+      settings: settingsOverride,
+    } = testGeminiLiveSchema.parse(req.body);
+
+    const sipConfig = await storage.getDefaultSipTrunkConfig();
+    const sipProvider = (sipConfig?.provider || process.env.SIP_TRUNK_PROVIDER || "telnyx").toLowerCase();
+
+    if (sipProvider !== "telnyx") {
+      return res.status(400).json({
+        message: "Gemini Live Test currently supports Telnyx call control only.",
+      });
+    }
+
+    const telnyxApiKey = process.env.TELNYX_API_KEY;
+    const fromNumber = sipConfig?.callerIdNumber || process.env.TELNYX_FROM_NUMBER;
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    const connectionId = process.env.TELNYX_TEXML_APP_ID || sipConfig?.connectionId;
+
+    if (!telnyxApiKey || !fromNumber || !geminiApiKey || !connectionId) {
+      return res.status(500).json({ message: "Missing required configuration (Telnyx, Gemini, or Connection ID)" });
+    }
+
+    let systemPrompt = "You are a professional AI assistant.";
+    let voice = "Pumice"; // Default Gemini Live voice
+    
+    if (virtualAgentId) {
+      const [agent] = await db.select().from(virtualAgents).where(eq(virtualAgents.id, virtualAgentId)).limit(1);
+      if (agent) {
+        systemPrompt = agent.systemPrompt || systemPrompt;
+        voice = agent.voice || voice;
+      }
+    }
+
+    if (systemPromptOverride?.trim()) systemPrompt = systemPromptOverride.trim();
+    if (voiceOverride?.trim()) voice = voiceOverride.trim();
+
+    let normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
+    if (!normalizedPhone.startsWith('+')) normalizedPhone = '+' + normalizedPhone.replace(/^0+/, '');
+
+    const wsUrl = getPublicWsUrl(req, '/gemini-live-dialer');
+    const callId = `gemini-test-${Date.now()}`;
+    
+    const customParams = {
+      call_id: callId,
+      campaign_id: campaignId || 'test-campaign',
+      virtual_agent_id: virtualAgentId || 'test-agent',
+      system_prompt: systemPrompt,
+      voice, // Dynamic voice selection for automatic synchronization
+      agent_settings: settingsOverride,
+      provider: 'gemini_live',
+    };
+
+    const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
+
+    const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${telnyxApiKey}`,
+      },
+      body: JSON.stringify({
+        texml_application_id: connectionId,
+        to: normalizedPhone,
+        from: fromNumber,
+        url: texmlUrl,
+        client_state: clientStateB64,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(500).json({ message: "Failed to initiate Telnyx call", error: errorText });
+    }
+
+    const result = await response.json();
+    res.json({ success: true, callId, callControlId: result.data?.call_control_id, voice, wsUrl });
+  } catch (error) {
+    console.error("[AI Calls] Error initiating Gemini Live test call:", error);
+    res.status(500).json({ message: "Failed to initiate test call", error: String(error) });
+  }
+});
+
+/**
+ * GET /api/ai-calls/gemini-voices
+ * Returns the list of available Google Gemini Live voices.
+ * This ensures the UI is synchronized with the latest available options.
+ */
+router.get("/gemini-voices", requireAuth, (req, res) => {
+  // These are the current Gemini Live voices as of the latest documentation.
+  // The backend uses a pass-through string in the dialer, so any voice name
+  // provided by the UI will be sent to the API.
+  res.json([
+    { id: "Pumice", name: "Pumice", description: "Soft and breathy" },
+    { id: "Juniper", name: "Juniper", description: "Energetic and bright" },
+    { id: "Bamboo", name: "Bamboo", description: "Calm and grounded" },
+    { id: "Ember", name: "Ember", description: "Warm and rich" },
+    { id: "Lyra", name: "Lyra", description: "Clear and professional" },
+    { id: "Orion", name: "Orion", description: "Deep and authoritative" },
+    { id: "Jade", name: "Jade", description: "New experimental voice" }
+  ]);
 });
 
 export default router;

@@ -56,6 +56,7 @@ import openaiSipRouter from './routes/openai-sip';
 import openaiWebrtcRouter from './routes/openai-webrtc';
 import telnyxWebrtcRouter from './routes/telnyx-webrtc';
 import virtualAgentsRouter from './routes/virtual-agents';
+import voiceProviderRouter from './routes/voice-provider-routes';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
@@ -13286,6 +13287,10 @@ Provide JSON response with:
   // ==================== VIRTUAL AGENTS (AI Personas) ====================
 
   app.use("/api/virtual-agents", virtualAgentsRouter);
+
+  // ==================== VOICE PROVIDERS (Dynamic Voice Discovery + Preview) ====================
+
+  app.use("/api/voice-providers", voiceProviderRouter);
 
   // ==================== HYBRID CAMPAIGN AGENTS ====================
 

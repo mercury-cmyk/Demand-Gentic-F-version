@@ -23,13 +23,14 @@ import { log } from "./log";
 import { initializeDatabase } from "./db-init";
 import { autoDialerService } from "./services/auto-dialer";
 import { LogStreamingService } from "./services/log-streaming-service";
-import { 
-  apiLimiter, 
-  securityHeaders, 
+import {
+  apiLimiter,
+  securityHeaders,
   captureClientIP,
   sanitizeBody,
-  PAYLOAD_LIMITS 
+  PAYLOAD_LIMITS
 } from "./middleware/security";
+import type { WebSocket as WsWebSocket } from 'ws';
 
 const app = express();
 
@@ -130,6 +131,9 @@ app.use((req, res, next) => {
     console.error('[WebSocket Upgrade] Realtime WSS error:', err);
   });
 
+  // Initialize Gemini Live Dialer
+  const { handleGeminiLiveConnection } = await import("./services/gemini-live-dialer");
+
   // Initialize Campaign Runner WebSocket for browser-based WebRTC calling
   const { initializeCampaignRunnerWS } = await import("./services/campaign-runner-ws");
   const campaignRunnerWss = initializeCampaignRunnerWS(server);
@@ -139,11 +143,15 @@ app.use((req, res, next) => {
 
   // Initialize Log Streaming Service (optional - requires GCP Pub/Sub permissions)
   // Disabled by default since cloud-logs API endpoints work without it
-  // Uncomment if you want real-time log streaming to the dashboard
-  const logStreamingService = new LogStreamingService(server);
-  logStreamingService.initialize().catch((err) => {
-    console.warn('[LogStreaming] Service initialization failed (non-blocking):', err.message);
-  });
+  const enableLogStreaming = process.env.ENABLE_LOG_STREAMING === 'true';
+  if (enableLogStreaming) {
+    const logStreamingService = new LogStreamingService(server);
+    logStreamingService.initialize().catch((err) => {
+      console.warn('[LogStreaming] Service initialization failed (non-blocking):', err.message);
+    });
+  } else {
+    console.log('[LogStreaming] Disabled (set ENABLE_LOG_STREAMING=true to enable)');
+  }
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
@@ -154,13 +162,13 @@ app.use((req, res, next) => {
     const pathname = new URL(req.url || '', `ws://${req.headers.host}`).pathname;
     console.log(`[WebSocket Upgrade] URL: ${req.url}`);
     console.log(`[WebSocket Upgrade] Headers:`, JSON.stringify(req.headers, null, 2));
-    console.log(`[WebSocket Upgrade] Socket state: { readable: ${socket.readable}, writable: ${socket.writable}, destroyed: ${socket.destroyed}, readyState: ${socket.readyState} }`);
+    console.log(`[WebSocket Upgrade] Socket state: { readable: ${socket.readable}, writable: ${socket.writable}, destroyed: ${socket.destroyed} }`);
     
     socket.on('error', (err) => {
       console.error('[WebSocket Upgrade] Socket error:', err);
     });
 
-    socket.on('close', (hadError) => {
+    socket.on('close', (hadError: boolean) => {
       console.log(`[WebSocket Upgrade] Socket closed. Had error: ${hadError}`);
     });
 
@@ -175,6 +183,15 @@ app.use((req, res, next) => {
       } catch (error) {
         console.error('[WebSocket Upgrade] Exception in handleUpgrade:', error);
       }
+    } else if (pathname === '/gemini-live-dialer') {
+      console.log('[WebSocket Upgrade] Handling Gemini Live Dialer connection');
+      
+      const { WebSocketServer } = require('ws');
+      const geminiWss = new WebSocketServer({ noServer: true });
+      geminiWss.handleUpgrade(req, socket as any, head, (ws: WsWebSocket) => {
+        console.log('[WebSocket Upgrade] ✅ Gemini Live Dialer connection established');
+        handleGeminiLiveConnection(ws, req);
+      });
     } else if (pathname === '/ai-media-stream') {
       console.log('[WebSocket Upgrade] Handling AI Media Stream connection');
       
@@ -433,4 +450,3 @@ app.use((req, res, next) => {
     log(`serving on http://${host}:${port}`);
   });
 })();
-

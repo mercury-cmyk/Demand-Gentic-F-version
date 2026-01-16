@@ -56,21 +56,37 @@ import {
   buildSessionMemoryFromTranscripts,
 } from "@/lib/call-analysis";
 
-// OpenAI Realtime voices (not TTS voices)
-const OPENAI_VOICES = [
-  { value: 'marin', label: 'Marin - Natural & conversational (Recommended)' },
-  { value: 'alloy', label: 'Alloy - Balanced & neutral' },
-  { value: 'ash', label: 'Ash - Clear & professional' },
-  { value: 'coral', label: 'Coral - Warm & friendly' },
-  { value: 'verse', label: 'Verse - Expressive & dynamic' },
+// Voice types for API response
+interface VoiceInfo {
+  id: string;
+  name: string;
+  displayName: string;
+  gender: 'male' | 'female' | 'neutral';
+  language: string;
+  provider: 'openai' | 'gemini';
+  description?: string;
+}
+
+interface VoicesByProvider {
+  openai: VoiceInfo[];
+  gemini: VoiceInfo[];
+}
+
+// Fallback voices (used if API fails)
+const FALLBACK_OPENAI_VOICES: VoiceInfo[] = [
+  { id: 'marin', name: 'marin', displayName: 'Marin', gender: 'female', language: 'en', provider: 'openai', description: 'Natural & conversational (Recommended)' },
+  { id: 'alloy', name: 'alloy', displayName: 'Alloy', gender: 'neutral', language: 'en', provider: 'openai', description: 'Balanced & neutral' },
+  { id: 'ash', name: 'ash', displayName: 'Ash', gender: 'male', language: 'en', provider: 'openai', description: 'Clear & professional' },
+  { id: 'coral', name: 'coral', displayName: 'Coral', gender: 'female', language: 'en', provider: 'openai', description: 'Warm & friendly' },
+  { id: 'verse', name: 'verse', displayName: 'Verse', gender: 'male', language: 'en', provider: 'openai', description: 'Expressive & dynamic' },
 ];
 
-const GOOGLE_VOICES = [
-  { value: 'Puck', label: 'Puck - Natural & Soft (Recommended)' },
-  { value: 'Charon', label: 'Charon - Deep & Resonant' },
-  { value: 'Kore', label: 'Kore - Balanced & Clear' },
-  { value: 'Fenrir', label: 'Fenrir - Authoritative & Deep' },
-  { value: 'Aoede', label: 'Aoede - Bright & Expressive' },
+const FALLBACK_GEMINI_VOICES: VoiceInfo[] = [
+  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', language: 'en', provider: 'gemini', description: 'Natural & Soft (Recommended)' },
+  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', language: 'en', provider: 'gemini', description: 'Deep & Resonant' },
+  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', language: 'en', provider: 'gemini', description: 'Balanced & Clear' },
+  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', language: 'en', provider: 'gemini', description: 'Authoritative & Deep' },
+  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', language: 'en', provider: 'gemini', description: 'Bright & Expressive' },
 ];
 
 // Turn detection options for OpenAI Realtime
@@ -153,18 +169,32 @@ export function LiveSimulationPanel({
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const playPreviewRef = useRef<HTMLAudioElement | null>(null);
 
+  // Fetch available voices from API
+  const { data: voicesData } = useQuery<VoicesByProvider>({
+    queryKey: ['/api/voice-providers/voices'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/voice-providers/voices');
+      return res.json();
+    },
+    staleTime: 15 * 60 * 1000, // 15 minutes
+  });
+
+  // Get voices for current provider with fallback
+  const getVoicesForProvider = useCallback((provider: 'openai' | 'google'): VoiceInfo[] => {
+    if (provider === 'openai') {
+      return voicesData?.openai || FALLBACK_OPENAI_VOICES;
+    } else {
+      return voicesData?.gemini || FALLBACK_GEMINI_VOICES;
+    }
+  }, [voicesData]);
+
   // Update default voice when provider changes
   useEffect(() => {
-    if (voiceProvider === 'openai') {
-      if (!OPENAI_VOICES.find(v => v.value === selectedVoice)) {
-        setSelectedVoice(OPENAI_VOICES[0].value);
-      }
-    } else {
-      if (!GOOGLE_VOICES.find(v => v.value === selectedVoice)) {
-        setSelectedVoice(GOOGLE_VOICES[0].value);
-      }
+    const voices = getVoicesForProvider(voiceProvider);
+    if (voices.length > 0 && !voices.find(v => v.id === selectedVoice)) {
+      setSelectedVoice(voices[0].id);
     }
-  }, [voiceProvider, selectedVoice]);
+  }, [voiceProvider, selectedVoice, getVoicesForProvider]);
 
   // Auto-load prompt when campaign and account are selected (or change)
   useEffect(() => {
@@ -204,7 +234,7 @@ export function LiveSimulationPanel({
     autoLoadPrompt();
   }, [campaignId, accountId, contactId]);
 
-  // Handle voice preview
+  // Handle voice preview using the new voice-providers API
   const handlePreviewVoice = async () => {
     try {
       if (playPreviewRef.current) {
@@ -212,14 +242,27 @@ export function LiveSimulationPanel({
         playPreviewRef.current = null;
       }
 
-      const message = "Hello, this is a voice preview for testing AI agents.";
+      // Map provider name to API format (google -> gemini)
+      const providerForApi = voiceProvider === 'google' ? 'gemini' : 'openai';
+
       const response = await apiRequest(
-        "GET",
-        `/api/virtual-agents/preview-voice?voice=${encodeURIComponent(selectedVoice)}&provider=${voiceProvider}&text=${encodeURIComponent(message)}`
+        "POST",
+        '/api/voice-providers/preview',
+        { voiceId: selectedVoice, provider: providerForApi }
       );
+
+      if (!response.ok) {
+        throw new Error('Failed to generate preview');
+      }
+
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+
       playPreviewRef.current = audio;
       await audio.play();
     } catch (error) {
@@ -531,10 +574,15 @@ export function LiveSimulationPanel({
                     <SelectTrigger className="h-12 flex-1 shadow-sm">
                       <SelectValue placeholder="Voice" />
                     </SelectTrigger>
-                    <SelectContent>
-                      {(voiceProvider === 'openai' ? OPENAI_VOICES : GOOGLE_VOICES).map(voice => (
-                        <SelectItem key={voice.value} value={voice.value}>
-                          {voice.label}
+                    <SelectContent className="max-h-80">
+                      {getVoicesForProvider(voiceProvider).map(voice => (
+                        <SelectItem key={voice.id} value={voice.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{voice.displayName || voice.name}</span>
+                            {voice.description && (
+                              <span className="text-xs text-muted-foreground">- {voice.description}</span>
+                            )}
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>

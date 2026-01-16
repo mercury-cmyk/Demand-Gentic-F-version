@@ -2,10 +2,13 @@
  * Voice Provider Configuration Panel
  *
  * Configures primary and fallback voice providers for virtual agents.
- * Shows provider status and allows selection of voice options.
+ * Features:
+ * - Dynamic voice list fetched from API (auto-synced)
+ * - Voice preview (play sample) button
+ * - Provider health status monitoring
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,22 +30,43 @@ import {
   Volume2,
   Zap,
   RefreshCw,
+  Play,
+  Square,
+  Loader2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiRequest } from '@/lib/queryClient';
+import { useToast } from '@/hooks/use-toast';
 
-interface ProviderHealth {
-  provider: string;
-  status: 'online' | 'degraded' | 'offline';
-  latency?: number;
-  lastChecked: string;
-}
+// ==================== TYPES ====================
 
-interface VoiceOption {
+interface VoiceInfo {
   id: string;
   name: string;
-  gender: string;
+  displayName: string;
+  gender: 'male' | 'female' | 'neutral';
   language: string;
+  provider: 'openai' | 'gemini';
+  description?: string;
+}
+
+interface VoicesByProvider {
+  openai: VoiceInfo[];
+  gemini: VoiceInfo[];
+}
+
+interface ProviderHealthResponse {
+  status: 'healthy' | 'degraded' | 'error';
+  providers: {
+    openai: { status: 'online' | 'offline' };
+    gemini: { status: 'online' | 'offline' };
+  };
+  cache: {
+    voiceCount: number;
+    isCached: boolean;
+  };
+  timestamp: string;
 }
 
 export interface ProviderConfig {
@@ -59,83 +83,149 @@ export interface ProviderConfigPanelProps {
   disabled?: boolean;
 }
 
+// ==================== CONSTANTS ====================
+
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI Realtime', description: 'GPT-4 based voice' },
   { id: 'gemini', name: 'Google Gemini', description: 'Gemini Live voice' },
-  { id: 'elevenlabs', name: 'ElevenLabs', description: 'High-quality TTS' },
 ];
 
-const OPENAI_VOICES: VoiceOption[] = [
-  { id: 'alloy', name: 'Alloy', gender: 'neutral', language: 'en' },
-  { id: 'echo', name: 'Echo', gender: 'male', language: 'en' },
-  { id: 'fable', name: 'Fable', gender: 'male', language: 'en' },
-  { id: 'onyx', name: 'Onyx', gender: 'male', language: 'en' },
-  { id: 'nova', name: 'Nova', gender: 'female', language: 'en' },
-  { id: 'shimmer', name: 'Shimmer', gender: 'female', language: 'en' },
-];
-
-const GEMINI_VOICES: VoiceOption[] = [
-  // Original voices
-  { id: 'Aoede', name: 'Aoede', gender: 'female', language: 'en' },
-  { id: 'Charon', name: 'Charon', gender: 'male', language: 'en' },
-  { id: 'Fenrir', name: 'Fenrir', gender: 'male', language: 'en' },
-  { id: 'Kore', name: 'Kore', gender: 'female', language: 'en' },
-  { id: 'Puck', name: 'Puck', gender: 'male', language: 'en' },
-
-  // Newer voices (from Gemini App)
-  { id: 'Orion', name: 'Orion', gender: 'neutral', language: 'en' },
-  { id: 'Vega', name: 'Vega', gender: 'neutral', language: 'en' },
-  { id: 'Pegasus', name: 'Pegasus', gender: 'neutral', language: 'en' },
-  { id: 'Ursa', name: 'Ursa', gender: 'neutral', language: 'en' },
-  { id: 'Nova', name: 'Nova', gender: 'neutral', language: 'en' },
-  { id: 'Dipper', name: 'Dipper', gender: 'neutral', language: 'en' },
-  { id: 'Capella', name: 'Capella', gender: 'neutral', language: 'en' },
-  { id: 'Orbit', name: 'Orbit', gender: 'neutral', language: 'en' },
-  { id: 'Lyra', name: 'Lyra', gender: 'neutral', language: 'en' },
-  { id: 'Eclipse', name: 'Eclipse', gender: 'neutral', language: 'en' },
-];
+// ==================== COMPONENT ====================
 
 export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConfigPanelProps) {
   const { token } = useAuth();
+  const { toast } = useToast();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Fetch provider health status
-  const { data: providerHealth = [], refetch: refetchHealth } = useQuery<ProviderHealth[]>({
-    queryKey: ['/api/voice-providers/health'],
+  // Fetch available voices from API
+  const {
+    data: voices,
+    isLoading: voicesLoading,
+    refetch: refetchVoices,
+  } = useQuery<VoicesByProvider>({
+    queryKey: ['/api/voice-providers/voices'],
     queryFn: async () => {
-      // Mock health check - in real implementation, this would call the API
-      return [
-        { provider: 'openai', status: 'online', latency: 45, lastChecked: new Date().toISOString() },
-        { provider: 'gemini', status: 'online', latency: 62, lastChecked: new Date().toISOString() },
-        { provider: 'elevenlabs', status: 'online', latency: 78, lastChecked: new Date().toISOString() },
-      ];
+      const res = await apiRequest('GET', '/api/voice-providers/voices');
+      return res.json();
     },
     enabled: !!token,
-    refetchInterval: 30000,
+    staleTime: 15 * 60 * 1000, // 15 minutes
   });
 
-  const getVoicesForProvider = (providerId: string): VoiceOption[] => {
+  // Fetch provider health status
+  const {
+    data: healthData,
+    refetch: refetchHealth,
+  } = useQuery<ProviderHealthResponse>({
+    queryKey: ['/api/voice-providers/health'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/voice-providers/health');
+      return res.json();
+    },
+    enabled: !!token,
+    refetchInterval: 30000, // Poll every 30 seconds
+  });
+
+  // Get voices for a specific provider
+  const getVoicesForProvider = (providerId: string): VoiceInfo[] => {
+    if (!voices) return [];
     switch (providerId) {
       case 'openai':
-        return OPENAI_VOICES;
+        return voices.openai || [];
       case 'gemini':
-        return GEMINI_VOICES;
+        return voices.gemini || [];
       default:
         return [];
     }
   };
 
-  const getProviderStatus = (providerId: string): ProviderHealth | undefined => {
-    return providerHealth.find(h => h.provider === providerId);
+  // Get provider health status
+  const getProviderStatus = (providerId: string): 'online' | 'offline' | undefined => {
+    if (!healthData?.providers) return undefined;
+    const provider = healthData.providers[providerId as keyof typeof healthData.providers];
+    return provider?.status;
   };
 
+  // Handle refresh button click
   const handleRefreshHealth = async () => {
     setIsRefreshing(true);
-    await refetchHealth();
+    try {
+      await Promise.all([refetchHealth(), refetchVoices()]);
+      toast({
+        title: 'Refreshed',
+        description: 'Voice providers and status updated',
+      });
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to refresh voice providers',
+      });
+    }
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
-  const StatusBadge = ({ status }: { status?: 'online' | 'degraded' | 'offline' }) => {
+  // Play voice preview
+  const playVoicePreview = async (voiceId: string, provider: string) => {
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    // If clicking the same voice that's playing, just stop
+    if (playingVoice === voiceId) {
+      setPlayingVoice(null);
+      return;
+    }
+
+    setPlayingVoice(voiceId);
+
+    try {
+      const res = await apiRequest('POST', '/api/voice-providers/preview', {
+        voiceId,
+        provider,
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to generate preview');
+      }
+
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        setPlayingVoice(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = () => {
+        setPlayingVoice(null);
+        URL.revokeObjectURL(audioUrl);
+        toast({
+          variant: 'destructive',
+          title: 'Error',
+          description: 'Failed to play voice preview',
+        });
+      };
+
+      audioRef.current = audio;
+      await audio.play();
+    } catch (error) {
+      setPlayingVoice(null);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to generate voice preview',
+      });
+    }
+  };
+
+  // Status badge component
+  const StatusBadge = ({ status }: { status?: 'online' | 'offline' }) => {
     if (!status) return <Badge variant="outline">Unknown</Badge>;
 
     const config = {
@@ -143,11 +233,6 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
         variant: 'default' as const,
         className: 'bg-green-500',
         icon: CheckCircle2,
-      },
-      degraded: {
-        variant: 'outline' as const,
-        className: 'border-amber-300 text-amber-700',
-        icon: AlertCircle,
       },
       offline: {
         variant: 'destructive' as const,
@@ -165,6 +250,46 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
     );
   };
 
+  // Voice select item with preview button
+  const VoiceSelectItem = ({
+    voice,
+    provider,
+  }: {
+    voice: VoiceInfo;
+    provider: string;
+  }) => {
+    const isPlaying = playingVoice === voice.id;
+
+    return (
+      <div className="flex items-center justify-between w-full gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Volume2 className="h-3 w-3 flex-shrink-0" />
+          <span className="truncate">{voice.displayName || voice.name}</span>
+          <Badge variant="outline" className="text-xs flex-shrink-0">
+            {voice.gender}
+          </Badge>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 flex-shrink-0"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            playVoicePreview(voice.id, provider);
+          }}
+        >
+          {isPlaying ? (
+            <Square className="h-3 w-3" />
+          ) : (
+            <Play className="h-3 w-3" />
+          )}
+        </Button>
+      </div>
+    );
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -174,7 +299,14 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
               <Settings2 className="h-5 w-5" />
               Voice Provider Configuration
             </CardTitle>
-            <CardDescription>Configure primary and fallback voice providers</CardDescription>
+            <CardDescription>
+              Configure primary and fallback voice providers
+              {voices && (
+                <span className="ml-2 text-xs">
+                  ({voices.openai?.length || 0} OpenAI, {voices.gemini?.length || 0} Gemini voices)
+                </span>
+              )}
+            </CardDescription>
           </div>
           <Button
             variant="outline"
@@ -183,15 +315,15 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
             disabled={isRefreshing}
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh Status
+            Refresh
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Provider Health Overview */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {PROVIDERS.map(provider => {
-            const health = getProviderStatus(provider.id);
+            const status = getProviderStatus(provider.id);
             return (
               <div
                 key={provider.id}
@@ -199,165 +331,177 @@ export function ProviderConfigPanel({ config, onChange, disabled }: ProviderConf
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-medium text-sm">{provider.name}</span>
-                  <StatusBadge status={health?.status} />
+                  <StatusBadge status={status} />
                 </div>
-                {health?.latency && (
-                  <p className="text-xs text-muted-foreground">{health.latency}ms latency</p>
-                )}
+                <p className="text-xs text-muted-foreground">{provider.description}</p>
               </div>
             );
           })}
         </div>
 
+        {/* Loading state */}
+        {voicesLoading && (
+          <div className="space-y-4">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full" />
+          </div>
+        )}
+
         {/* Primary Provider */}
-        <div className="space-y-4 p-4 rounded-lg border bg-primary/5">
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-primary" />
-            <Label className="text-base font-semibold">Primary Provider</Label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <Select
-                value={config.primaryProvider}
-                onValueChange={value =>
-                  onChange({
-                    ...config,
-                    primaryProvider: value,
-                    primaryVoice: getVoicesForProvider(value)[0]?.id || '',
-                  })
-                }
-                disabled={disabled}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDERS.map(provider => (
-                    <SelectItem key={provider.id} value={provider.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{provider.name}</span>
-                        <StatusBadge status={getProviderStatus(provider.id)?.status} />
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        {!voicesLoading && (
+          <div className="space-y-4 p-4 rounded-lg border bg-primary/5">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-primary" />
+              <Label className="text-base font-semibold">Primary Provider</Label>
             </div>
 
-            <div className="space-y-2">
-              <Label>Voice</Label>
-              <Select
-                value={config.primaryVoice}
-                onValueChange={value => onChange({ ...config, primaryVoice: value })}
-                disabled={disabled || !config.primaryProvider}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select voice" />
-                </SelectTrigger>
-                <SelectContent>
-                  {getVoicesForProvider(config.primaryProvider).map(voice => (
-                    <SelectItem key={voice.id} value={voice.id}>
-                      <div className="flex items-center gap-2">
-                        <Volume2 className="h-3 w-3" />
-                        <span>{voice.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {voice.gender}
-                        </Badge>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select
+                  value={config.primaryProvider}
+                  onValueChange={value =>
+                    onChange({
+                      ...config,
+                      primaryProvider: value,
+                      primaryVoice: getVoicesForProvider(value)[0]?.id || '',
+                    })
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROVIDERS.map(provider => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{provider.name}</span>
+                          <StatusBadge status={getProviderStatus(provider.id)} />
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Voice (click play to preview)</Label>
+                <Select
+                  value={config.primaryVoice}
+                  onValueChange={value => onChange({ ...config, primaryVoice: value })}
+                  disabled={disabled || !config.primaryProvider}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select voice" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-80">
+                    {getVoicesForProvider(config.primaryProvider).map(voice => (
+                      <SelectItem key={voice.id} value={voice.id}>
+                        <VoiceSelectItem voice={voice} provider={config.primaryProvider} />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {/* Show selected voice description */}
+            {config.primaryVoice && (
+              <p className="text-xs text-muted-foreground">
+                {getVoicesForProvider(config.primaryProvider).find(v => v.id === config.primaryVoice)?.description}
+              </p>
+            )}
           </div>
-        </div>
+        )}
 
         {/* Fallback Provider */}
-        <div className="space-y-4 p-4 rounded-lg border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-muted-foreground" />
-              <Label className="text-base font-semibold">Fallback Provider</Label>
+        {!voicesLoading && (
+          <div className="space-y-4 p-4 rounded-lg border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-base font-semibold">Fallback Provider</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="auto-fallback" className="text-sm text-muted-foreground">
+                  Auto-fallback
+                </Label>
+                <Switch
+                  id="auto-fallback"
+                  checked={config.autoFallback}
+                  onCheckedChange={checked => onChange({ ...config, autoFallback: checked })}
+                  disabled={disabled}
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="auto-fallback" className="text-sm text-muted-foreground">
-                Auto-fallback
-              </Label>
-              <Switch
-                id="auto-fallback"
-                checked={config.autoFallback}
-                onCheckedChange={checked => onChange({ ...config, autoFallback: checked })}
-                disabled={disabled}
-              />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select
+                  value={config.fallbackProvider}
+                  onValueChange={value =>
+                    onChange({
+                      ...config,
+                      fallbackProvider: value,
+                      fallbackVoice: getVoicesForProvider(value)[0]?.id || '',
+                    })
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select fallback provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROVIDERS.filter(p => p.id !== config.primaryProvider).map(provider => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{provider.name}</span>
+                          <StatusBadge status={getProviderStatus(provider.id)} />
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Voice (click play to preview)</Label>
+                <Select
+                  value={config.fallbackVoice}
+                  onValueChange={value => onChange({ ...config, fallbackVoice: value })}
+                  disabled={disabled || !config.fallbackProvider}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select voice" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-80">
+                    {getVoicesForProvider(config.fallbackProvider).map(voice => (
+                      <SelectItem key={voice.id} value={voice.id}>
+                        <VoiceSelectItem voice={voice} provider={config.fallbackProvider} />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {/* Show selected voice description */}
+            {config.fallbackVoice && (
+              <p className="text-xs text-muted-foreground">
+                {getVoicesForProvider(config.fallbackProvider).find(v => v.id === config.fallbackVoice)?.description}
+              </p>
+            )}
+
+            {config.autoFallback && (
+              <p className="text-xs text-muted-foreground mt-2">
+                When enabled, the system will automatically switch to the fallback provider if the
+                primary provider fails or experiences high latency.
+              </p>
+            )}
           </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <Select
-                value={config.fallbackProvider}
-                onValueChange={value =>
-                  onChange({
-                    ...config,
-                    fallbackProvider: value,
-                    fallbackVoice: getVoicesForProvider(value)[0]?.id || '',
-                  })
-                }
-                disabled={disabled}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select fallback provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDERS.filter(p => p.id !== config.primaryProvider).map(provider => (
-                    <SelectItem key={provider.id} value={provider.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{provider.name}</span>
-                        <StatusBadge status={getProviderStatus(provider.id)?.status} />
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Voice</Label>
-              <Select
-                value={config.fallbackVoice}
-                onValueChange={value => onChange({ ...config, fallbackVoice: value })}
-                disabled={disabled || !config.fallbackProvider}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select voice" />
-                </SelectTrigger>
-                <SelectContent>
-                  {getVoicesForProvider(config.fallbackProvider).map(voice => (
-                    <SelectItem key={voice.id} value={voice.id}>
-                      <div className="flex items-center gap-2">
-                        <Volume2 className="h-3 w-3" />
-                        <span>{voice.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {voice.gender}
-                        </Badge>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {config.autoFallback && (
-            <p className="text-xs text-muted-foreground">
-              When enabled, the system will automatically switch to the fallback provider if the
-              primary provider fails or experiences high latency.
-            </p>
-          )}
-        </div>
+        )}
       </CardContent>
     </Card>
   );

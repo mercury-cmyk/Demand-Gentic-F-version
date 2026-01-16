@@ -446,6 +446,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [USER_ROLES.ADMIN],
             description: 'Super organization management',
           },
+          {
+            id: 'settings-cloud-logs',
+            title: 'Cloud Logs',
+            url: '/cloud-logs',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Monitor cloud logs and system health',
+          },
         ],
       },
     ],
