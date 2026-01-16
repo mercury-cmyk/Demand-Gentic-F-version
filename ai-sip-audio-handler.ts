@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { config } from 'dotenv';
 import OpenAI from 'openai';
 import { PassThrough } from 'stream';
+import { submitTranscription } from './server/services/assemblyai-transcription';
 
 // Load environment variables from .env file
 config();
@@ -18,8 +19,8 @@ console.log('WebSocket server started on port 8080');
 wss.on('connection', (ws) => {
   console.log('[AI Agent] Client connected');
 
-  // This stream will be used to pipe audio data from the WebSocket to OpenAI's Whisper API
-  const whisperStream = new PassThrough();
+  // This stream will be used to collect audio data for Google Cloud Speech-to-Text
+  const audioChunks: Buffer[] = [];
 
   // Enhanced: Log when agent is initialized
   console.log('[AI Agent] Initializing agent and audio stream');
@@ -27,16 +28,44 @@ wss.on('connection', (ws) => {
   // A function to start the transcription process
   const startTranscription = async () => {
     try {
-      console.log('[AI Agent] Starting OpenAI transcription...');
-      const transcription = await openai.audio.transcriptions.create({
-        model: 'whisper-1',
-        file: whisperStream as any, // We pipe the audio stream directly
-      });
+      console.log('[AI Agent] Starting Google Cloud Speech-to-Text transcription...');
+      
+      // Combine audio chunks into a single buffer
+      const audioBuffer = Buffer.concat(audioChunks);
+      
+      // Create a data URL for the audio
+      const audioDataUrl = `data:audio/wav;base64,${audioBuffer.toString('base64')}`;
+      
+      // For now, we need to save to a temp file or upload to a URL that submitTranscription can access
+      // Since submitTranscription expects a URL, we'll need to modify this approach
+      // For production, upload the audio buffer to GCS or similar first
+      console.log('[AI Agent] Audio collected, preparing for transcription...');
+      
+      // Convert buffer to base64 and send to Google Cloud Speech API directly
+      const { SpeechClient } = await import('@google-cloud/speech');
+      const speechClient = new SpeechClient();
+      
+      const request = {
+        audio: {
+          content: audioBuffer.toString('base64'),
+        },
+        config: {
+          encoding: 1, // LINEAR16
+          sampleRateHertz: 16000,
+          languageCode: 'en-US',
+          model: 'default',
+        },
+      };
+      
+      const [response] = await speechClient.recognize(request);
+      const transcription = response.results?.map(result =>
+        result.alternatives?.[0]?.transcript || ''
+      ).join(' ') || '';
 
-      console.log(`[AI Agent] Transcription received: ${transcription.text}`);
+      console.log(`[AI Agent] Transcription received: ${transcription}`);
 
       // Once we have the transcription, get a response from GPT
-      getGptResponse(transcription.text);
+      getGptResponse(transcription);
 
     } catch (error) {
       console.error('[AI Agent] Error during transcription:', error);

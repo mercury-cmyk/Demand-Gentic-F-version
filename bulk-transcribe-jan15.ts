@@ -93,31 +93,24 @@ function pickBestRecording(recordings: TelnyxRecording[], targetSeconds: number)
 }
 
 async function transcribeWithWhisper(recordingUrl: string, model: string): Promise<string | null> {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY not configured");
+  try {
+    console.log(`[Google STT] Transcribing with Google Cloud Speech-to-Text...`);
+    
+    // Dynamic import to get transcription service
+    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const transcript = await submitTranscription(recordingUrl);
+    
+    if (!transcript) {
+      console.error(`[Google STT] Transcription failed`);
+      return null;
+    }
+    
+    return transcript;
+  } catch (error) {
+    console.error('[Google STT] Error:', error);
+    return null;
   }
-
-  const audioResponse = await fetch(recordingUrl);
-  if (!audioResponse.ok) {
-    throw new Error(`Failed to download recording: ${audioResponse.statusText}`);
-  }
-
-  const audioBlob = await audioResponse.blob();
-  const formData = new FormData();
-  formData.append("file", audioBlob, "audio.mp3");
-  formData.append("model", model);
-  formData.append("response_format", "json");
-
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Transcription failed: ${errorText}`);
-  }
+}
 
   const data = await response.json();
   return data.text || null;
@@ -128,6 +121,8 @@ async function run() {
   const concurrency = Number(getArg("--concurrency") || "3");
   const windowMins = Number(getArg("--window-mins") || "360");
   const model = getArg("--model") || "whisper-1";
+  const minSec = Number(getArg("--min-sec") || "60");
+  const maxSec = Number(getArg("--max-sec") || "1000000");
 
   if (!TELNYX_API_KEY) throw new Error("TELNYX_API_KEY not configured");
   if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
@@ -137,6 +132,7 @@ async function run() {
   console.log("========================================\n");
   console.log(`Concurrency: ${concurrency}`);
   console.log(`Window minutes: ${windowMins}`);
+  console.log(`Duration range: ${minSec}s - ${maxSec}s`);
   console.log(`Model: ${model}\n`);
 
   const attempts = await db.execute(sql`
@@ -149,8 +145,8 @@ async function run() {
       recording_url
     FROM dialer_call_attempts
     WHERE created_at::date = '2026-01-15'
-      AND call_duration_seconds >= 60
-      AND recording_url IS NOT NULL
+      AND call_duration_seconds >= ${minSec}
+      AND call_duration_seconds <= ${maxSec}
       AND (notes IS NULL OR notes NOT LIKE '%[Call Transcript]%')
     ORDER BY call_duration_seconds DESC
   `);

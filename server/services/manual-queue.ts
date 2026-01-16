@@ -247,14 +247,17 @@ export class ManualQueueService {
         // 1. Only one agent can lock a row at a time
         // 2. Other agents skip locked rows and get the next available one
         // 3. No race conditions or deadlocks
+        // Also filters out contacts that are suppressed (next_call_eligible_at > NOW())
         const selectResult = await tx.execute(sql`
-          SELECT id, lock_version
-          FROM agent_queue
-          WHERE agent_id = ${agentId}
-            AND campaign_id = ${campaignId}
-            AND queue_state = 'queued'
-            AND (scheduled_for IS NULL OR scheduled_for <= NOW())
-          ORDER BY priority DESC, created_at ASC
+          SELECT aq.id, aq.lock_version
+          FROM agent_queue aq
+          INNER JOIN contacts c ON aq.contact_id = c.id
+          WHERE aq.agent_id = ${agentId}
+            AND aq.campaign_id = ${campaignId}
+            AND aq.queue_state = 'queued'
+            AND (aq.scheduled_for IS NULL OR aq.scheduled_for <= NOW())
+            AND (c.next_call_eligible_at IS NULL OR c.next_call_eligible_at <= NOW())
+          ORDER BY aq.priority DESC, aq.created_at ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         `);

@@ -267,9 +267,12 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
             WHERE id = ${queueItemId}
           `);
         } else {
+          // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
           await db.execute(sql`
-            UPDATE campaign_queue 
-            SET status = 'queued', updated_at = NOW()
+            UPDATE campaign_queue
+            SET status = 'queued',
+                next_attempt_at = NOW() + INTERVAL '5 minutes',
+                updated_at = NOW()
             WHERE id = ${queueItemId}
           `);
         }
@@ -566,9 +569,11 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
             results.push({ contactId: contactId || item.id, queueItemId: item.id, status: "failed_whitelist", error: initiateError.message });
           } else {
             // Revert to queued for transient errors
+            // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
             await db.execute(sql`
-              UPDATE campaign_queue 
-              SET status = 'queued', 
+              UPDATE campaign_queue
+              SET status = 'queued',
+                  next_attempt_at = NOW() + INTERVAL '5 minutes',
                   updated_at = NOW()
               WHERE id = ${item.id}
             `);

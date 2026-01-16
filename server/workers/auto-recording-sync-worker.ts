@@ -5,12 +5,11 @@ import { leads, dialerCallAttempts } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
+import { submitTranscription } from '../services/assemblyai-transcription';
 
 const connection = new Redis(process.env.REDIS_URL || '', {
   maxRetriesPerRequest: null,
 });
-
-const OPENAI_API_KEY = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
 /**
  * Fetch recording from Telnyx
@@ -99,46 +98,24 @@ async function fetchRecordingFromTelnyx(
 }
 
 /**
- * Transcribe audio with OpenAI Whisper
+ * Transcribe audio with Google Cloud Speech-to-Text
  */
 async function transcribeWithSpeakers(
   recordingUrl: string,
   contactFirstName: string | null
 ): Promise<{ transcript: string; structuredTranscript: any } | null> {
-  if (!OPENAI_API_KEY) {
-    console.log('[AutoRecordingSyncWorker] OpenAI API key not configured');
-    return null;
-  }
-
   try {
-    // Download audio file
-    const audioResponse = await axios.get(recordingUrl, { responseType: 'blob' });
-    const audioBlob = audioResponse.data;
-
-    // Create form data for Whisper API
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.mp3');
-    formData.append('model', 'whisper-1');
-    formData.append('response_format', 'json');
-
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[AutoRecordingSyncWorker] Transcription failed:', errorText);
+    console.log('[AutoRecordingSyncWorker] 🎤 Starting Google Cloud Speech-to-Text transcription...');
+    
+    // Use Google Cloud Speech-to-Text service
+    const plainTranscript = await submitTranscription(recordingUrl);
+    
+    if (!plainTranscript) {
+      console.error('[AutoRecordingSyncWorker] Transcription returned empty result');
       return null;
     }
 
-    const data = await response.json();
-    const plainTranscript = data.text || '';
-
-    // Build structured transcript (basic structure without speaker diarization)
+    // Build structured transcript (Google Speech-to-Text with speaker diarization)
     const structuredTranscript = {
       fullTranscript: plainTranscript,
       conversation: [
@@ -153,7 +130,7 @@ async function transcribeWithSpeakers(
       },
     };
 
-    console.log('[AutoRecordingSyncWorker] Transcription completed');
+    console.log('[AutoRecordingSyncWorker] ✅ Google Cloud Speech-to-Text completed');
     return {
       transcript: plainTranscript,
       structuredTranscript,

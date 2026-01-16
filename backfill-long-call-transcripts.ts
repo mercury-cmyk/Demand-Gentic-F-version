@@ -3,45 +3,28 @@ import { sql } from "drizzle-orm";
 import { dialerCallAttempts } from "./shared/schema";
 import { eq } from "drizzle-orm";
 import { fetchTelnyxRecording } from "./server/services/telnyx-recordings";
+import { submitTranscription } from "./server/services/assemblyai-transcription";
 
 const TRANSCRIPT_MARKER = "[Call Transcript]";
 const INTEREST_REGEX = /(interested|schedule|book|meeting|demo|follow[- ]?up|send (me|us)|next step|calendar)/i;
 
 async function transcribeWithWhisper(recordingUrl: string): Promise<string | null> {
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error("[Backfill] OpenAI API key not configured");
+  try {
+    console.log("[Google STT] Transcribing long call recording...");
+    
+    // Use Google Cloud Speech-to-Text service
+    const transcript = await submitTranscription(recordingUrl);
+    
+    if (!transcript) {
+      console.error("[Google STT] Transcription returned empty result");
+      return null;
+    }
+    
+    return transcript;
+  } catch (error) {
+    console.error("[Google STT] Error during transcription:", error);
     return null;
   }
-
-  const audioResponse = await fetch(recordingUrl);
-  if (!audioResponse.ok) {
-    console.error("[Backfill] Failed to download recording:", audioResponse.statusText);
-    return null;
-  }
-
-  const audioBlob = await audioResponse.blob();
-  const formData = new FormData();
-  formData.append("file", audioBlob, "audio.mp3");
-  formData.append("model", "whisper-1");
-  formData.append("response_format", "json");
-
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Backfill] Transcription failed:", errorText);
-    return null;
-  }
-
-  const data = await response.json();
-  return data.text || null;
 }
 
 async function backfillLongCallTranscripts() {

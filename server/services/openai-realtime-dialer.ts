@@ -3,7 +3,7 @@ import { Server as HttpServer } from "http";
 import { db } from "../db";
 import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { processDisposition } from "./disposition-engine";
+import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import {
@@ -2258,6 +2258,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
         if (audioType.type === 'ivr') {
           const lowerTranscript = message.transcript.toLowerCase();
           const voicemailIndicators = [
+            // Standard voicemail greetings
             'leave a message',
             'leave your message',
             'after the beep',
@@ -2274,7 +2275,34 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             'no one is available',
             'at the tone please record',
             'press pound when finished',
-            'beep'
+            'beep',
+            // CRITICAL: Voicemail system error messages (these were causing false positives)
+            'we didn\'t get your message',
+            'we did not get your message',
+            'you were not speaking',
+            'because of a bad connection',
+            'to disconnect press',
+            'to disconnect, press',
+            'to record your message press',
+            'to record your message, press',
+            'system cannot process',
+            'please try again later',
+            'are you still there',
+            'sorry you were having trouble',
+            'sorry you are having trouble',
+            'maximum time permitted',
+            // Automated phone number readout
+            'is not available',
+            'your call has been forwarded',
+            'automatic voice message system',
+            // Common voicemail phrases
+            'i\'ll get back to you',
+            'i will get back to you',
+            'call you back',
+            'return your call',
+            'come to the phone',
+            'away from my phone',
+            'away from the phone',
           ];
 
           const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
@@ -2283,6 +2311,23 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             console.log(`${LOG_PREFIX} Immediately ending call ${session.callId} - NO voicemail will be left`);
             session.detectedDisposition = 'voicemail';
             session.callOutcome = 'voicemail';
+
+            // Update voicemailDetected flag in database immediately (non-blocking)
+            if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+              setImmediate(async () => {
+                try {
+                  await db.update(dialerCallAttempts).set({
+                    voicemailDetected: true,
+                    connected: false,
+                    updatedAt: new Date()
+                  }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+                  console.log(`${LOG_PREFIX} ✅ Updated voicemailDetected=true for call attempt ${session.callAttemptId}`);
+                } catch (err) {
+                  console.error(`${LOG_PREFIX} Failed to update voicemailDetected flag:`, err);
+                }
+              });
+            }
+
             await endCall(session.callId, 'voicemail');
             break;
           }
@@ -2303,6 +2348,23 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
                 console.log(`${LOG_PREFIX} Immediately ending call ${session.callId}`);
                 session.detectedDisposition = 'voicemail';
                 session.callOutcome = 'voicemail';
+
+                // Update voicemailDetected flag in database immediately (non-blocking)
+                if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+                  setImmediate(async () => {
+                    try {
+                      await db.update(dialerCallAttempts).set({
+                        voicemailDetected: true,
+                        connected: false,
+                        updatedAt: new Date()
+                      }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+                      console.log(`${LOG_PREFIX} ✅ Updated voicemailDetected=true (IVR repeat) for call attempt ${session.callAttemptId}`);
+                    } catch (err) {
+                      console.error(`${LOG_PREFIX} Failed to update voicemailDetected flag:`, err);
+                    }
+                  });
+                }
+
                 await endCall(session.callId, 'voicemail');
                 break;
               }
@@ -2326,6 +2388,22 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.audioDetection.humanDetected = true;
             session.audioDetection.humanDetectedAt = new Date();
             console.log(`${LOG_PREFIX} ✅ HUMAN DETECTED for call ${session.callId} at ${session.audioDetection.humanDetectedAt.toISOString()}`);
+
+            // Update connected flag in database immediately (non-blocking)
+            // This ensures real-time stats are accurate
+            if (session.callAttemptId && !session.callAttemptId.startsWith('test-attempt-')) {
+              setImmediate(async () => {
+                try {
+                  await db.update(dialerCallAttempts).set({
+                    connected: true,
+                    updatedAt: new Date()
+                  }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+                  console.log(`${LOG_PREFIX} ✅ Updated connected=true for call attempt ${session.callAttemptId}`);
+                } catch (err) {
+                  console.error(`${LOG_PREFIX} Failed to update connected flag:`, err);
+                }
+              });
+            }
           }
         } else if (audioType.type === 'ivr' || audioType.type === 'music') {
           console.log(`${LOG_PREFIX} Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
@@ -2665,6 +2743,7 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   // VOICEMAIL Detection - CHECK FIRST (highest priority)
   // These patterns indicate the call went to voicemail - we must hang up immediately
   const voicemailPatterns = [
+    // Standard voicemail greetings
     /leave\s+(a\s+)?message/i,               // "Please leave a message"
     /leave\s+your\s+message/i,               // "Leave your message"
     /after\s+the\s+(beep|tone)/i,            // "After the beep"
@@ -2683,6 +2762,26 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
     /sorry\s+(i|we)\s+(missed|can't)/i,      // "Sorry I missed your call"
     /call\s+you\s+(back|later)/i,            // "I'll call you back"
     /beep/i,                                  // Just "beep" - voicemail indicator
+    // CRITICAL: Voicemail system error messages (these were missing and caused false positives)
+    /we\s+(didn't|did\s+not)\s+get\s+your\s+message/i,  // "We didn't get your message"
+    /you\s+were\s+not\s+speaking/i,          // "because you were not speaking"
+    /because\s+of\s+a\s+bad\s+connection/i,  // "because of a bad connection"
+    /to\s+disconnect,?\s+press/i,            // "To disconnect, press 1"
+    /to\s+record\s+your\s+message,?\s+press/i, // "To record your message, press 2"
+    /system\s+cannot\s+process/i,            // "system cannot process your entries"
+    /please\s+try\s+again\s+later/i,         // "please try again later"
+    /are\s+you\s+still\s+there/i,            // "Are you still there?"
+    /sorry\s+you\s+(were|are)\s+having\s+trouble/i, // "Sorry you were having trouble"
+    /maximum\s+time\s+permitted/i,           // "maximum time permitted for recording"
+    // Phone number readout patterns (automated systems)
+    /^\d[\d\s,\-\.]+is\s+not\s+available/i,  // "408-555-1234 is not available"
+    /your\s+call\s+has\s+been\s+forwarded/i, // "Your call has been forwarded"
+    /automatic\s+voice\s+message\s+system/i, // "automatic voice message system"
+    // Common voicemail personal greetings
+    /i('ll|\s+will)\s+get\s+back\s+to\s+you/i, // "I'll get back to you"
+    /i('ll|\s+will)\s+(return|call)\s+you/i,   // "I'll return your call"
+    /come\s+to\s+the\s+phone/i,              // "can't come to the phone"
+    /away\s+from\s+(my|the)\s+(phone|desk)/i, // "away from my phone"
   ];
 
   for (const pattern of voicemailPatterns) {
@@ -3451,7 +3550,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     session.telnyxWs.close();
   }
 
-  const disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
+  const fullTranscript = session.transcripts.length > 0
+    ? session.transcripts
+        .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+        .join('\n')
+    : '';
+
+  let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
+  if (disposition === 'no_answer' && fullTranscript && isVoicemailTranscript(fullTranscript)) {
+    console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript, overriding disposition to voicemail`);
+    disposition = 'voicemail';
+  }
   let dispositionProcessed = false;
   let dispositionResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
@@ -3543,19 +3652,12 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           console.log(`${LOG_PREFIX} Fallback session (attempt_id=${session.callAttemptId || 'none'}) - will record disposition via call_sessions only`);
         }
 
-        // Build full transcript for conversation intelligence
-        const fullTranscript = session.transcripts.length > 0
-          ? session.transcripts
-              .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
-              .join('\n')
-          : '';
-
-        // Build transcript turns for structured analysis
-        const transcriptTurns = session.transcripts.map(t => ({
-          role: t.role === 'assistant' ? 'agent' : 'contact',
-          text: t.text,
-          timestamp: t.timestamp.toISOString(),
-        }));
+          // Build transcript turns for structured analysis
+          const transcriptTurns = session.transcripts.map(t => ({
+            role: t.role === 'assistant' ? 'agent' : 'contact',
+            text: t.text,
+            timestamp: t.timestamp.toISOString(),
+          }));
 
         // Build AI analysis from call summary and conversation state
         const aiAnalysis = session.callSummary ? {
@@ -3607,14 +3709,24 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
         // Update call attempt with comprehensive data (only if record exists)
         if (existingAttempt) {
+          // CRITICAL: Set connected and voicemailDetected flags based on actual detection
+          const wasHumanDetected = session.audioDetection?.humanDetected === true;
+          const wasVoicemail = disposition === 'voicemail' || outcome === 'voicemail';
+
           await db.update(dialerCallAttempts).set({
             callEndedAt: new Date(),
             callDurationSeconds: callDuration,
             disposition: disposition,
+            // Set connected=true ONLY if human was actually detected (not voicemail)
+            connected: wasHumanDetected && !wasVoicemail,
+            // Set voicemailDetected=true if voicemail was detected
+            voicemailDetected: wasVoicemail,
             notes: notes || (session.callSummary?.summary ? `Summary: ${session.callSummary.summary}` : undefined),
             callSessionId: callSessionId || undefined,
             updatedAt: new Date()
           }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+
+          console.log(`${LOG_PREFIX} Call flags: connected=${wasHumanDetected && !wasVoicemail}, voicemailDetected=${wasVoicemail}`);
 
           // Process disposition through the engine (this handles lock release)
           dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
@@ -3626,6 +3738,17 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             console.log(`${LOG_PREFIX} Releasing queue lock for fallback session: ${session.queueItemId}`);
             await releaseQueueLock(session.queueItemId);
           }
+
+          // Update contact-level suppression even for fallback sessions
+          if (session.contactId && disposition) {
+            try {
+              await updateContactSuppression(session.contactId, disposition);
+              console.log(`${LOG_PREFIX} ✅ Updated contact suppression for fallback session: ${disposition}`);
+            } catch (suppErr) {
+              console.error(`${LOG_PREFIX} Failed to update contact suppression:`, suppErr);
+            }
+          }
+
           // Mark disposition as processed (via call_sessions record)
           dispositionProcessed = true;
           console.log(`${LOG_PREFIX} ✅ Fallback session disposition recorded via call_sessions: ${disposition}`);
@@ -3735,18 +3858,75 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   activeSessions.delete(callId);
 }
 
-function mapOutcomeToDisposition(outcome: string): DispositionCode {
-  switch (outcome) {
-    case 'voicemail':
-      return 'voicemail';
-    case 'no_answer':
-      return 'no_answer';
-    case 'error':
-      return 'invalid_data';
-    default:
-      return 'no_answer';
+  function mapOutcomeToDisposition(outcome: string): DispositionCode {
+    switch (outcome) {
+      case 'voicemail':
+        return 'voicemail';
+      case 'no_answer':
+        return 'no_answer';
+      case 'error':
+        return 'invalid_data';
+      default:
+        return 'no_answer';
+    }
   }
-}
+
+  function isVoicemailTranscript(transcript: string): boolean {
+    if (!transcript) return false;
+    const lower = transcript.toLowerCase();
+
+    // Comprehensive voicemail detection phrases
+    const voicemailPhrases = [
+      // Standard voicemail greetings
+      'leave a message',
+      'leave your message',
+      'after the beep',
+      'after the tone',
+      'not available',
+      'cannot take your call',
+      'can\'t take your call',
+      'please leave',
+      'record your message',
+      'voicemail',
+      'voice mail',
+      'mailbox',
+      'answering machine',
+      'reached the voicemail',
+      'no one is available',
+      'press pound when finished',
+      // CRITICAL: Voicemail system error messages
+      'we didn\'t get your message',
+      'we did not get your message',
+      'you were not speaking',
+      'because of a bad connection',
+      'to disconnect press',
+      'to disconnect, press',
+      'to record your message press',
+      'to record your message, press',
+      'system cannot process',
+      'please try again later',
+      'are you still there',
+      'sorry you were having trouble',
+      'sorry you are having trouble',
+      'maximum time permitted',
+      // Automated phone system messages
+      'is not available',
+      'your call has been forwarded',
+      'automatic voice message system',
+      // Common voicemail personal greetings
+      'i\'ll get back to you',
+      'i will get back to you',
+      'call you back',
+      'return your call',
+      'come to the phone',
+      'away from my phone',
+      'away from the phone',
+      'i\'m unable to',
+      'unable to take your call',
+    ];
+
+    return voicemailPhrases.some(phrase => lower.includes(phrase));
+  }
 
 function shouldAutoTranscribeDisposition(disposition: DispositionCode): boolean {
   return ENGAGED_DISPOSITIONS.has(disposition);

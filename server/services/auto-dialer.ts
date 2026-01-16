@@ -6,6 +6,7 @@ import { getBestPhoneForContact, normalizePhoneWithCountryCode } from "../lib/ph
 import { db } from "../db";
 import { contacts } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { isContactEligibleForCall } from "../lib/contact-suppression";
 
 interface DialerConfig {
   pollingIntervalMs: number;
@@ -365,6 +366,13 @@ export class PowerDialerEngine {
         if (!fullContact) {
           console.log(`[AutoDialer] Contact ${contact.contactId} not found, skipping`);
           await storage.updateQueueStatus(contact.id, 'removed', 'Contact not found');
+          continue;
+        }
+
+        // CONTACT-LEVEL RETRY SUPPRESSION CHECK
+        if (!isContactEligibleForCall(fullContact.nextCallEligibleAt)) {
+          console.log(`[AutoDialer] Contact ${contact.contactId} suppressed until ${fullContact.nextCallEligibleAt}, skipping`);
+          // Don't mark as removed - will be retried when eligible
           continue;
         }
 

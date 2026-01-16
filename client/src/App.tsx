@@ -389,6 +389,9 @@ function AuthenticatedApp() {
                 <Redirect to="/verification/campaigns" />
               </Route>
 
+              {/* Cloud Logs Monitoring */}
+              <Route path="/cloud-logs" component={lazy(() => import("./pages/cloud-logs-monitor"))} />
+
               {/* 404 */}
               <Route component={NotFound} />
             </Switch>

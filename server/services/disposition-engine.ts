@@ -11,21 +11,27 @@
  */
 
 import { db } from "../db";
-import { 
-  dialerCallAttempts, 
-  dialerRuns, 
-  campaignQueue, 
-  leads, 
-  globalDnc, 
+import {
+  dialerCallAttempts,
+  dialerRuns,
+  campaignQueue,
+  leads,
+  globalDnc,
   contacts,
   campaigns,
   governanceActionsLog,
   qcWorkQueue,
   recycleJobs,
+  activityLog,
   type CanonicalDisposition,
-  type CampaignContactState 
+  type CampaignContactState
 } from "@shared/schema";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import {
+  shouldTriggerSuppression,
+  calculateNextEligibleDate,
+  getSuppressionReason
+} from "../lib/contact-suppression";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -142,6 +148,10 @@ export async function processDisposition(
         updatedAt: new Date()
       })
       .where(eq(dialerCallAttempts.id, callAttemptId));
+
+    // Update contact-level retry suppression
+    await updateContactSuppression(callAttempt.contactId, disposition);
+    result.actions.push(`Contact suppression updated for outcome: ${disposition}`);
 
     // Update dialer run statistics
     await updateDialerRunStats(callAttempt.dialerRunId, disposition);
@@ -264,6 +274,33 @@ async function processQualifiedLead(
   if (newLead) {
     result.leadId = newLead.id;
     result.actions.push(`Created lead ${newLead.id}${isShortDurationCall ? ' (flagged: short duration)' : ''}`);
+
+    // Log lead creation for monitoring
+    console.log(`[DispositionEngine] ✅ LEAD CREATED: ${newLead.id} | Contact: ${contactName} | Duration: ${callDuration}s | QA Status: ${qaStatus}${isShortDurationCall ? ' | ⚠️ SHORT DURATION' : ''}`);
+
+    // Insert activity log entry for lead creation
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'lead',
+        entityId: newLead.id,
+        eventType: 'lead_created',
+        payload: {
+          callAttemptId: callAttempt.id,
+          contactId: callAttempt.contactId,
+          campaignId: callAttempt.campaignId,
+          contactName: contactName,
+          companyName: contact?.companyName || null,
+          callDuration: callDuration,
+          qaStatus: qaStatus,
+          isShortDuration: isShortDurationCall,
+          recordingUrl: callAttempt.recordingUrl,
+          phoneDialed: callAttempt.phoneDialed,
+        },
+        createdBy: callAttempt.humanAgentId || null,
+      });
+    } catch (logErr) {
+      console.error('[DispositionEngine] Failed to log lead_created activity:', logErr);
+    }
   }
 
   // Add to QC work queue with higher priority for short duration calls
@@ -295,7 +332,7 @@ async function processNotInterested(
   if (callAttempt.queueItemId) {
     await db
       .update(campaignQueue)
-      .set({ 
+      .set({
         status: 'removed',
         removedReason: 'not_interested',
         agentId: null,
@@ -305,6 +342,28 @@ async function processNotInterested(
       })
       .where(eq(campaignQueue.id, callAttempt.queueItemId));
     result.actions.push('Removed from campaign queue (not interested)');
+  }
+
+  // Log disposition for monitoring
+  console.log(`[DispositionEngine] 📵 NOT INTERESTED: Contact ${callAttempt.contactId} | Campaign: ${callAttempt.campaignId} | Removed from queue`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_not_interested',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        callDuration: callAttempt.callDurationSeconds,
+        agentType: callAttempt.agentType,
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_not_interested activity:', logErr);
   }
 
   result.queueState = 'removed';
@@ -446,6 +505,32 @@ async function processVoicemailOrNoAnswer(
   });
   result.actions.push('Created recycle job');
 
+  // Log voicemail/no_answer for monitoring
+  const eventType = type === 'voicemail' ? 'disposition_voicemail' : 'disposition_no_answer';
+  console.log(`[DispositionEngine] 📞 ${type.toUpperCase()}: Contact ${callAttempt.contactId} | Attempt ${currentAttempts}/${rules.maxAttemptsPerContact} | Retry scheduled: ${nextAttemptAt.toISOString()}`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: eventType as any,
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        attemptNumber: currentAttempts,
+        maxAttempts: rules.maxAttemptsPerContact,
+        nextAttemptAt: nextAttemptAt.toISOString(),
+        retryDays: retryDays,
+        agentType: callAttempt.agentType,
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error(`[DispositionEngine] Failed to log ${eventType} activity:`, logErr);
+  }
+
   result.nextAttemptAt = nextAttemptAt;
   result.queueState = 'waiting_retry';
 }
@@ -465,7 +550,7 @@ async function processInvalidData(
   if (callAttempt.queueItemId) {
     await db
       .update(campaignQueue)
-      .set({ 
+      .set({
         status: 'removed',
         removedReason: 'invalid_data',
         agentId: null,
@@ -481,6 +566,29 @@ async function processInvalidData(
   // Note: This would need to update the specific phone field
   // For now, we log the action
   result.actions.push(`Flagged phone ${callAttempt.phoneDialed} as invalid`);
+
+  // Log disposition for monitoring
+  console.log(`[DispositionEngine] ❌ INVALID DATA: Phone ${callAttempt.phoneDialed} | Contact: ${callAttempt.contactId} | Campaign: ${callAttempt.campaignId}`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_invalid_data',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        callDuration: callAttempt.callDurationSeconds,
+        agentType: callAttempt.agentType,
+        reason: 'Phone number invalid or disconnected',
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_invalid_data activity:', logErr);
+  }
 
   result.queueState = 'removed';
 }
@@ -576,4 +684,43 @@ export function getDispositionDescription(disposition: CanonicalDisposition): st
     'invalid_data': 'Invalid data - marks phone as invalid'
   };
   return descriptions[disposition];
+}
+
+/**
+ * Update contact-level retry suppression after a call attempt
+ *
+ * This implements the Contact-Level Retry Suppression policy:
+ * - Same-day block: Don't call the same contact again on the same day
+ * - 7-day gap: After trigger outcomes (voicemail, no_answer, busy, rejected, etc.),
+ *   the contact is not eligible for another call until 7 days have passed
+ *
+ * @param contactId - The contact's ID
+ * @param outcome - The call outcome (disposition or hangup cause)
+ */
+export async function updateContactSuppression(
+  contactId: string,
+  outcome: string
+): Promise<void> {
+  const now = new Date();
+  const nextEligibleAt = calculateNextEligibleDate(outcome);
+  const suppressionReason = shouldTriggerSuppression(outcome)
+    ? getSuppressionReason(outcome)
+    : null;
+
+  await db
+    .update(contacts)
+    .set({
+      lastCallAttemptAt: now,
+      lastCallOutcome: outcome,
+      nextCallEligibleAt: nextEligibleAt,
+      suppressionReason: suppressionReason,
+      updatedAt: now,
+    })
+    .where(eq(contacts.id, contactId));
+
+  console.log(
+    `[DispositionEngine] Contact ${contactId} suppression updated: ` +
+    `outcome=${outcome}, nextEligible=${nextEligibleAt.toISOString()}` +
+    (suppressionReason ? `, reason=${suppressionReason}` : '')
+  );
 }

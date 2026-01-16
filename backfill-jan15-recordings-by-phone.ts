@@ -67,34 +67,23 @@ async function searchRecordingsByPhone(phone: string, start: Date, end: Date): P
 }
 
 async function transcribeWithWhisper(recordingUrl: string): Promise<string | null> {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY not configured");
+  try {
+    console.log(`[Google STT] Transcribing: ${recordingUrl.substring(0, 80)}...`);
+    
+    // Dynamic import to get transcription service
+    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const transcript = await submitTranscription(recordingUrl);
+    
+    if (!transcript) {
+      console.error('[Google STT] Transcription failed or returned empty');
+      return null;
+    }
+    
+    return transcript;
+  } catch (error) {
+    console.error('[Google STT] Error during transcription:', error);
+    return null;
   }
-
-  const audioResponse = await fetch(recordingUrl);
-  if (!audioResponse.ok) {
-    throw new Error(`Failed to download recording: ${audioResponse.statusText}`);
-  }
-
-  const audioBlob = await audioResponse.blob();
-  const formData = new FormData();
-  formData.append("file", audioBlob, "audio.mp3");
-  formData.append("model", "whisper-1");
-  formData.append("response_format", "json");
-
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Transcription failed: ${errorText}`);
-  }
-
-  const data = await response.json();
-  return data.text || null;
 }
 
 function pickBestRecording(recordings: TelnyxRecording[], targetSeconds: number): TelnyxRecording | null {

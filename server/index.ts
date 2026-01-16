@@ -22,6 +22,7 @@ import { serveStatic } from "./static";
 import { log } from "./log";
 import { initializeDatabase } from "./db-init";
 import { autoDialerService } from "./services/auto-dialer";
+import { LogStreamingService } from "./services/log-streaming-service";
 import { 
   apiLimiter, 
   securityHeaders, 
@@ -135,6 +136,14 @@ app.use((req, res, next) => {
   campaignRunnerWss.on('error', (err) => {
     console.error('[WebSocket Upgrade] Campaign Runner WSS error:', err);
   });
+
+  // Initialize Log Streaming Service (optional - requires GCP Pub/Sub permissions)
+  // Disabled by default since cloud-logs API endpoints work without it
+  // Uncomment if you want real-time log streaming to the dashboard
+  const logStreamingService = new LogStreamingService(server);
+  logStreamingService.initialize().catch((err) => {
+    console.warn('[LogStreaming] Service initialization failed (non-blocking):', err.message);
+  });
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
@@ -180,6 +189,10 @@ app.use((req, res, next) => {
         console.log('[WebSocket Upgrade] ✅ Campaign Runner connection established');
         campaignRunnerWss.emit('connection', ws, req);
       });
+    } else if (pathname === '/log-stream') {
+      console.log('[WebSocket Upgrade] Handling Log Stream connection');
+      
+      logStreamingService.handleUpgrade(req, socket, head);
     } else {
       // Let Vite HMR handle its own WebSocket connections (protocol: vite-hmr)
       // Don't destroy unknown paths - they may be handled by other middleware

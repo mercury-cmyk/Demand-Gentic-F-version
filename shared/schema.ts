@@ -576,7 +576,26 @@ export const activityEventTypeEnum = pgEnum('activity_event_type', [
   'note_added',
   'quick_linkedin_lookup',
   'lead_verification_linkedin',
-  'lead_verification_oncall'
+  'lead_verification_oncall',
+  // Business-critical monitoring events
+  'lead_created',
+  'lead_qualified',
+  'lead_rejected',
+  'transcription_started',
+  'transcription_completed',
+  'transcription_failed',
+  'voicemail_detected',
+  'amd_human_detected',
+  'amd_machine_detected',
+  'qa_analysis_started',
+  'qa_analysis_completed',
+  'qa_auto_approved',
+  'qa_auto_rejected',
+  'qa_needs_review',
+  'disposition_not_interested',
+  'disposition_invalid_data',
+  'disposition_voicemail',
+  'disposition_no_answer'
 ]);
 
 export const activityEntityTypeEnum = pgEnum('activity_entity_type', [
@@ -840,6 +859,12 @@ export const contacts = pgTable("contacts", {
   cavId: text("cav_id"),
   cavUserId: text("cav_user_id"),
 
+  // Contact-Level Retry Suppression fields
+  lastCallAttemptAt: timestamp("last_call_attempt_at"),
+  lastCallOutcome: text("last_call_outcome"), // voicemail, no_answer, busy, rejected, unavailable, completed, qualified_lead, etc.
+  nextCallEligibleAt: timestamp("next_call_eligible_at"),
+  suppressionReason: text("suppression_reason"), // Human-readable reason for current suppression
+
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -854,6 +879,7 @@ export const contacts = pgTable("contacts", {
   cavIdIdx: index("contacts_cav_id_idx").on(table.cavId),
   cavUserIdIdx: index("contacts_cav_user_id_idx").on(table.cavUserId),
   nameCompanyHashIdx: index("contacts_name_company_hash_idx").on(table.nameCompanyHash),
+  nextCallEligibleIdx: index("contacts_next_call_eligible_idx").on(table.nextCallEligibleAt),
 }));
 
 

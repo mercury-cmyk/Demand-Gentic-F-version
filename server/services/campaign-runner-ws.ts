@@ -16,7 +16,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
 import { campaignQueue, contacts, accounts, campaigns, virtualAgents } from "@shared/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, or, isNull, lte } from "drizzle-orm";
 import { getBestPhoneForContact } from "../lib/phone-utils";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
@@ -362,6 +362,7 @@ class CampaignRunnerService {
         : [];
 
       // Get queued queue items with contact and account info
+      // Filter out contacts that are suppressed (next_call_eligible_at > NOW())
       const queueItems = await db.select({
         queueItem: campaignQueue,
         contact: contacts,
@@ -372,7 +373,12 @@ class CampaignRunnerService {
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .where(and(
         eq(campaignQueue.campaignId, campaignId),
-        eq(campaignQueue.status, 'queued')
+        eq(campaignQueue.status, 'queued'),
+        // Contact-level suppression check: only include contacts that are eligible
+        or(
+          isNull(contacts.nextCallEligibleAt),
+          lte(contacts.nextCallEligibleAt, sql`NOW()`)
+        )
       ))
       .orderBy(campaignQueue.priority, campaignQueue.createdAt)
       .limit(50); // Load in batches
@@ -500,8 +506,13 @@ class CampaignRunnerService {
     this.taskQueue.set(task.campaignId, tasks);
 
     // Reset status in database
+    // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
     db.update(campaignQueue)
-      .set({ status: 'queued', updatedAt: new Date() })
+      .set({
+        status: 'queued',
+        nextAttemptAt: new Date(Date.now() + 2 * 60 * 1000), // 2 minute cooldown
+        updatedAt: new Date()
+      })
       .where(eq(campaignQueue.id, task.queueItemId))
       .catch(err => console.error(`${LOG_PREFIX} Failed to requeue task:`, err));
   }

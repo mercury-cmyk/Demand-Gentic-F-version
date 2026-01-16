@@ -6,7 +6,7 @@
 
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { isAuthenticated } from "../middleware/auth";
+import { requireAuth as isAuthenticated } from "../auth";
 import {
   createPromptVariant,
   getCampaignVariants,
@@ -150,7 +150,7 @@ router.post(
               perspective: v.perspective as any,
               systemPrompt: v.systemPrompt,
               firstMessage: v.firstMessage,
-              context: v.context,
+              context: context,
               accountId,
             },
             userId
@@ -422,7 +422,7 @@ router.post(
               perspective: v.perspective as any,
               systemPrompt: v.systemPrompt,
               firstMessage: v.firstMessage,
-              context: v.context,
+              context: context,
               campaignId,
             },
             userId
@@ -510,7 +510,7 @@ router.post(
               perspective: v.perspective as any,
               systemPrompt: v.systemPrompt,
               firstMessage: v.firstMessage,
-              context: v.context,
+              context: context,
               agentId,
             },
             userId

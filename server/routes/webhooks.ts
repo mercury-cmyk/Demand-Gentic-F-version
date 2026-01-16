@@ -1,10 +1,12 @@
 import { Router, Request, Response } from "express";
 import { verifyApiKey, verifyHmac } from "../lib/webhookVerify";
 import { db } from "../db";
-import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions } from "@shared/schema";
+import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog } from "@shared/schema";
 import { z } from "zod";
 import crypto from "crypto";
 import { eq, or, and, sql } from "drizzle-orm";
+import { mapTelnyxHangupCause, shouldTriggerSuppression } from "../lib/contact-suppression";
+import { updateContactSuppression } from "../services/disposition-engine";
 
 const router = Router();
 
@@ -270,10 +272,44 @@ router.post("/telnyx", async (req, res) => {
         await bridge.handleSimpleWebhookEvent('gather_ended', payload);
         return res.json({ status: "ok", event_type: eventType });
 
-      case 'call.hangup':
+      case 'call.hangup': {
         console.log(`[Telnyx Webhook] Call hangup: ${payload.call_control_id}`);
+
+        // Handle pre-connect hangups (busy, rejected, etc.) for contact suppression
+        // These happen before the AI can process disposition, so we handle them here
+        const hangupCause = payload.hangup_cause || payload.sip_hangup_cause || 'normal_clearing';
+        const mappedOutcome = mapTelnyxHangupCause(hangupCause);
+
+        // Only apply suppression for pre-connect failures (busy, rejected, no_answer, etc.)
+        if (shouldTriggerSuppression(mappedOutcome)) {
+          // Try to get contact_id from client_state
+          let clientStateData: any = null;
+          if (payload?.client_state) {
+            try {
+              clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+            } catch (e) {
+              // Not base64 encoded or invalid JSON, ignore
+            }
+          }
+
+          // Fallback: get from bridge's state map
+          if (!clientStateData) {
+            clientStateData = bridge.getClientStateByControlId?.(payload.call_control_id);
+          }
+
+          if (clientStateData?.contact_id) {
+            try {
+              await updateContactSuppression(clientStateData.contact_id, mappedOutcome);
+              console.log(`[Telnyx Webhook] Pre-connect hangup: ${hangupCause} -> ${mappedOutcome}, suppression applied for contact ${clientStateData.contact_id}`);
+            } catch (err) {
+              console.error(`[Telnyx Webhook] Failed to update contact suppression:`, err);
+            }
+          }
+        }
+
         await bridge.handleSimpleWebhookEvent('hangup', payload);
         return res.json({ status: "ok", event_type: eventType });
+      }
 
       case 'call.machine.detection.ended': {
         // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
@@ -336,7 +372,30 @@ router.post("/telnyx", async (req, res) => {
                   updatedAt: new Date()
                 })
                 .where(eq(campaignQueue.id, clientStateData.queue_item_id));
-              console.log(`[Telnyx Webhook] Voicemail detected - queue item ${clientStateData.queue_item_id} scheduled for retry on ${nextAttemptAt.toISOString()}`);
+              console.log(`[Telnyx Webhook] 📠 VOICEMAIL DETECTED: Queue ${clientStateData.queue_item_id} | Contact: ${clientStateData.contact_id || 'unknown'} | Retry: ${nextAttemptAt.toISOString()} | Confidence: ${amdConfidence}`);
+
+              // Insert activity log for voicemail detection
+              try {
+                if (clientStateData.contact_id) {
+                  await db.insert(activityLog).values({
+                    entityType: 'contact',
+                    entityId: clientStateData.contact_id,
+                    eventType: 'voicemail_detected',
+                    payload: {
+                      callControlId: payload.call_control_id,
+                      queueItemId: clientStateData.queue_item_id,
+                      campaignId: clientStateData.campaign_id || null,
+                      amdResult: amdResult,
+                      amdConfidence: amdConfidence,
+                      nextAttemptAt: nextAttemptAt.toISOString(),
+                      retryDays: retryDays,
+                    },
+                    createdBy: null,
+                  });
+                }
+              } catch (logErr) {
+                console.error('[Telnyx Webhook] Failed to log voicemail_detected activity:', logErr);
+              }
             } else {
               console.log(`[Telnyx Webhook] AMD detected machine but no queue_item_id available for disposition`);
             }
@@ -344,7 +403,37 @@ router.post("/telnyx", async (req, res) => {
             console.error(`[Telnyx Webhook] Failed to process machine-detected call:`, hangupErr);
           }
         } else if (amdResult === 'human' || amdResult === 'human_residence' || amdResult === 'human_business') {
-          console.log(`[Telnyx Webhook] Human detected for call ${payload.call_control_id} - continuing with AI conversation`);
+          console.log(`[Telnyx Webhook] 👤 HUMAN DETECTED: Call ${payload.call_control_id} | Type: ${amdResult} | Confidence: ${amdConfidence} - continuing with AI conversation`);
+
+          // Try to get client_state for activity logging
+          let clientStateData: any = null;
+          if (payload?.client_state) {
+            try {
+              clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+
+          // Insert activity log for human detection
+          try {
+            if (clientStateData?.contact_id) {
+              await db.insert(activityLog).values({
+                entityType: 'contact',
+                entityId: clientStateData.contact_id,
+                eventType: 'amd_human_detected',
+                payload: {
+                  callControlId: payload.call_control_id,
+                  campaignId: clientStateData.campaign_id || null,
+                  amdResult: amdResult,
+                  amdConfidence: amdConfidence,
+                },
+                createdBy: null,
+              });
+            }
+          } catch (logErr) {
+            console.error('[Telnyx Webhook] Failed to log amd_human_detected activity:', logErr);
+          }
           // Human detected - the AI conversation will continue normally via the WebSocket stream
         }
         return res.json({ status: "ok", event_type: eventType, amd_result: amdResult });

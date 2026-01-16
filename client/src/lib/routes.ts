@@ -110,6 +110,7 @@ export const ROUTES = {
   // Data Routes
   // ==========================================
   DATA_INTEGRITY: '/data-integrity',
+  CLOUD_LOGS: '/cloud-logs',
 
   // ==========================================
   // Operations Routes

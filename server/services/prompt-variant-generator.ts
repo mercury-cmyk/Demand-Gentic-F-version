@@ -6,6 +6,15 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 
+type Perspective =
+  | "consultative"
+  | "direct_value"
+  | "pain_point"
+  | "social_proof"
+  | "educational"
+  | "urgent"
+  | "relationship";
+
 interface GenerationInput {
   agentName: string;
   baseGoal: string;
@@ -19,7 +28,7 @@ interface GenerationInput {
 }
 
 interface GeneratedVariant {
-  perspective: "consultative" | "direct_value" | "pain_point" | "social_proof" | "educational" | "urgent" | "relationship";
+  perspective: Perspective;
   variantName: string;
   systemPrompt: string;
   firstMessage: string;
@@ -30,11 +39,14 @@ interface GeneratedVariant {
  * Creates 7 different perspectives to test different approaches
  */
 export async function generateMultiplePromptVariants(
-  input: GenerationInput
+  input: GenerationInput,
+  onlyPerspectives?: string[]
 ): Promise<GeneratedVariant[]> {
   const client = new Anthropic();
 
   const contextDescription = buildContextDescription(input);
+  const requestedPerspectives = onlyPerspectives?.map((perspective) => perspective.toLowerCase()) ?? null;
+  const requestedSet = requestedPerspectives ? new Set(requestedPerspectives) : null;
 
   const systemPrompt = `You are an expert AI prompt engineer specializing in outbound calling agents.
 Your task is to generate different prompt variations from the same context, each emphasizing a different approach/perspective.
@@ -96,21 +108,33 @@ Each object must have: { perspective, variantName, systemPrompt, firstMessage }`
 
   // Ensure all perspectives are present
   const perspectiveMap = {
-    "CONSULTATIVE": "consultative",
-    "DIRECT_VALUE": "direct_value",
-    "PAIN_POINT": "pain_point",
-    "SOCIAL_PROOF": "social_proof",
-    "EDUCATIONAL": "educational",
-    "URGENT": "urgent",
-    "RELATIONSHIP": "relationship",
+    CONSULTATIVE: "consultative",
+    DIRECT_VALUE: "direct_value",
+    PAIN_POINT: "pain_point",
+    SOCIAL_PROOF: "social_proof",
+    EDUCATIONAL: "educational",
+    URGENT: "urgent",
+    RELATIONSHIP: "relationship",
   } as const;
 
-  return variants.map((v: any) => ({
-    perspective: perspectiveMap[v.perspective as keyof typeof perspectiveMap] || v.perspective.toLowerCase(),
-    variantName: v.variantName,
-    systemPrompt: v.systemPrompt,
-    firstMessage: v.firstMessage,
-  }));
+  const normalizedVariants: GeneratedVariant[] = variants.map((variant: any) => {
+    const mapped =
+      perspectiveMap[variant.perspective as keyof typeof perspectiveMap] ||
+      (typeof variant.perspective === "string" ? variant.perspective.toLowerCase() : "");
+
+    return {
+      perspective: mapped as Perspective,
+      variantName: variant.variantName,
+      systemPrompt: variant.systemPrompt,
+      firstMessage: variant.firstMessage,
+    };
+  });
+
+  if (!requestedSet) {
+    return normalizedVariants;
+  }
+
+  return normalizedVariants.filter((variant) => requestedSet.has(variant.perspective));
 }
 
 /**
@@ -118,7 +142,7 @@ Each object must have: { perspective, variantName, systemPrompt, firstMessage }`
  * Useful when you want to create a single variant with custom context
  */
 export async function generateSingleVariant(
-  perspective: "consultative" | "direct_value" | "pain_point" | "social_proof" | "educational" | "urgent" | "relationship",
+  perspective: Perspective,
   input: GenerationInput
 ): Promise<GeneratedVariant> {
   const client = new Anthropic();

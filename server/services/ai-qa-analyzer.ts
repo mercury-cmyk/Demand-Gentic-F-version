@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { workerDb as db, withRetry } from "../db";
-import { leads, campaigns, contacts, accounts } from "@shared/schema";
+import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -346,6 +346,46 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       .where(eq(leads.id, leadId));
 
     console.log('[AI-QA] Analysis completed for lead:', leadId, 'Score:', normalizedAnalysis.score, 'Status:', normalizedAnalysis.qualification_status, 'QA Status:', qaStatus);
+
+    // Determine the specific QA event type for activity logging
+    let qaEventType: 'qa_auto_approved' | 'qa_auto_rejected' | 'qa_needs_review' | 'qa_analysis_completed';
+    if (qaStatus === 'approved') {
+      qaEventType = 'qa_auto_approved';
+    } else if (qaStatus === 'rejected') {
+      qaEventType = 'qa_auto_rejected';
+    } else {
+      qaEventType = 'qa_needs_review';
+    }
+
+    // Insert activity log for QA decision
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'lead',
+        entityId: leadId,
+        eventType: qaEventType as any,
+        payload: {
+          score: normalizedAnalysis.score,
+          qualificationStatus: normalizedAnalysis.qualification_status,
+          qaStatus: qaStatus,
+          qaDecision: qaDecisionComment,
+          callDuration: callDuration,
+          isShortDuration: isShortDurationCall,
+          hasPositiveEngagement: hasPositiveEngagement,
+          campaignId: lead.campaignId,
+          contactId: lead.contactId,
+          analysisHighlights: {
+            contentInterest: normalizedAnalysis.analysis?.content_interest?.score,
+            permissionGiven: normalizedAnalysis.analysis?.permission_given?.score,
+            complianceConsent: normalizedAnalysis.analysis?.compliance_consent?.score,
+          },
+          missingInfo: normalizedAnalysis.missing_info,
+        },
+        createdBy: null,
+      });
+    } catch (logErr) {
+      console.error('[AI-QA] Failed to log QA decision activity:', logErr);
+    }
+
     return normalizedAnalysis;
 
   } catch (error) {

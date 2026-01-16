@@ -57,9 +57,11 @@ async function sweepExpiredLocks() {
 
     // 2. Release stuck entries in campaign_queue (power dial)
     // If a contact is in 'in_progress' state for > 10 minutes, something went wrong
+    // CRITICAL FIX: Add cooldown to prevent immediate retry (back-to-back calls)
     const releasedPowerEntries = await db.update(campaignQueue)
       .set({
         status: 'queued',
+        nextAttemptAt: sql`NOW() + INTERVAL '2 minutes'`,
         updatedAt: new Date()
       })
       .where(and(

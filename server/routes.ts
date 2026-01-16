@@ -72,6 +72,7 @@ import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import agentPromptVisibilityRouter from './routes/agent-prompt-visibility-routes';
 import superOrganizationRouter from './routes/super-organization-routes';
 import promptVariantsRouter from './routes/prompt-variants';
+import cloudLogsRouter from './routes/cloud-logs-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -638,6 +639,9 @@ export function registerRoutes(app: Express) {
 
   // Vertex AI Agentic CRM Operator
   app.use('/api/vertex-ai', vertexAiRouter);
+
+  // Cloud Logging Dashboard
+  app.use('/api/cloud-logs', requireAuth, cloudLogsRouter);
 
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes
@@ -6386,14 +6390,10 @@ export function registerRoutes(app: Express) {
         return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
       }
 
-      const sipConfig = await storage.getDefaultSipTrunkConfig();
       const connectionId =
-        sipConfig?.connectionId ||
         process.env.TELNYX_CALL_CONTROL_APP_ID ||
         process.env.TELNYX_CONNECTION_ID;
-      const fromNumber =
-        sipConfig?.callerIdNumber ||
-        process.env.TELNYX_FROM_NUMBER;
+      const fromNumber = process.env.TELNYX_FROM_NUMBER;
 
       if (!connectionId) {
         return res.status(500).json({ message: "TELNYX connection ID not configured" });
