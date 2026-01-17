@@ -74,19 +74,21 @@ export interface ResolverParams {
 // ==================== CONFIGURATION ====================
 
 /**
- * System default provider (Google is priority)
+ * System default provider (Google Gemini Live is primary - more cost-effective)
  */
 const SYSTEM_DEFAULT_PROVIDER: VoiceProviderType = 'google';
 
 /**
- * Default fallback provider
+ * Default fallback provider (OpenAI as backup if Gemini fails)
+ * Note: Fallback is DISABLED by default - Gemini Live is the only provider
  */
 const DEFAULT_FALLBACK_PROVIDER: VoiceProviderType = 'openai';
 
 /**
  * Whether fallback is enabled by default
+ * DISABLED - Using Gemini Live exclusively for cost savings
  */
-const DEFAULT_FALLBACK_ENABLED = true;
+const DEFAULT_FALLBACK_ENABLED = false;
 
 // ==================== RESOLVER ====================
 

@@ -185,21 +185,32 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 `;
 
     // Custom parameters for the WebSocket connection
-    const supportedVoices = new Set([
-      'alloy',
-      'ash',
-      'coral',
-      'marin',
-      'verse',
-    ]);
+    // Support both OpenAI and Gemini voices
+    const openaiVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar', 'echo', 'fable', 'nova', 'shimmer', 'onyx']);
+    const geminiVoices = new Set(['aoede', 'charon', 'fenrir', 'kore', 'puck', 'orion', 'vega', 'pegasus', 'ursa', 'nova', 'dipper', 'capella', 'orbit', 'lyra', 'eclipse']);
+
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
-    const voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
+
+    // Determine provider - default to Google Gemini Live
+    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
+    const isGoogleDefault = !defaultProvider.includes('openai');
+    const effectiveProvider = validatedData.voiceProvider || (isGoogleDefault ? 'google' : 'openai');
+
+    // Select appropriate voice based on provider
+    let voice: string;
+    if (effectiveProvider === 'google') {
+      // Use Gemini voice if specified, otherwise default to 'Kore' (natural, friendly)
+      voice = geminiVoices.has(rawVoice) ? rawVoice : (openaiVoices.has(rawVoice) ? rawVoice : 'kore');
+    } else {
+      // Use OpenAI voice
+      voice = openaiVoices.has(rawVoice) ? rawVoice : 'marin';
+    }
 
     // Map provider selection to internal format
     // client_state uses openai_realtime for legacy compatibility, session store uses openai
-    const providerForClientState = validatedData.voiceProvider === 'google' ? 'google' : 'openai_realtime';
-    const providerForSession = validatedData.voiceProvider === 'google' ? 'google' : 'openai';
-    console.log(`[Campaign Test Call] Using voice provider: ${validatedData.voiceProvider}`);
+    const providerForClientState = effectiveProvider === 'google' ? 'google' : 'openai_realtime';
+    const providerForSession = effectiveProvider === 'google' ? 'google' : 'openai';
+    console.log(`[Campaign Test Call] Using voice provider: ${effectiveProvider} (voice: ${voice})`);
 
     const customParams = {
       call_id: testCallId,

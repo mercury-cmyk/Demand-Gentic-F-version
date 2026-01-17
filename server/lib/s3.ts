@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 
 // Environment configuration
 const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demangent-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-storage';
 const GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
 
 // Initialize Google Cloud Storage client
@@ -40,16 +40,27 @@ export async function getPresignedUploadUrl(
   contentType: string,
   expiresIn: number = 900
 ): Promise<string> {
-  const file = bucket.file(key);
+  try {
+    const file = bucket.file(key);
 
-  const [url] = await file.getSignedUrl({
-    version: 'v4',
-    action: 'write',
-    expires: Date.now() + expiresIn * 1000,
-    contentType,
-  });
+    const [url] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + expiresIn * 1000,
+      contentType,
+    });
 
-  return url;
+    return url;
+  } catch (error: any) {
+    // In local development without service account, fallback to public URL
+    if (error?.name === 'SigningError' || error?.message?.includes('client_email')) {
+      console.warn(`[GCS] Cannot generate signed URL (no service account): ${error.message}`);
+      console.warn('[GCS] Falling back to public URL (not recommended for production)');
+      // Return direct GCS URL (works if bucket is public or if using ADC with proper permissions)
+      return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -64,15 +75,26 @@ export async function getPresignedDownloadUrl(
   key: string,
   expiresIn: number = 900
 ): Promise<string> {
-  const file = bucket.file(key);
+  try {
+    const file = bucket.file(key);
 
-  const [url] = await file.getSignedUrl({
-    version: 'v4',
-    action: 'read',
-    expires: Date.now() + expiresIn * 1000,
-  });
+    const [url] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'read',
+      expires: Date.now() + expiresIn * 1000,
+    });
 
-  return url;
+    return url;
+  } catch (error: any) {
+    // In local development without service account, fallback to public URL
+    if (error?.name === 'SigningError' || error?.message?.includes('client_email')) {
+      console.warn(`[GCS] Cannot generate signed URL (no service account): ${error.message}`);
+      console.warn('[GCS] Falling back to public URL (not recommended for production)');
+      // Return direct GCS URL (works if bucket is public or if using ADC with proper permissions)
+      return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
+    }
+    throw error;
+  }
 }
 
 /**

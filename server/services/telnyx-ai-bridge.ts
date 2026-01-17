@@ -121,6 +121,7 @@ export interface ActiveAiCall {
   startTime: Date;
   disposition?: string;
   isAnswered?: boolean;
+  hasEnded?: boolean; // Prevent duplicate hangup processing
 }
 
 export interface QueuedCall {
@@ -644,6 +645,12 @@ export class TelnyxAiBridge extends EventEmitter {
       attempts++;
       if (attempts > maxAttempts) {
         console.log(`[TelnyxAiBridge] Call ${callId} polling timeout - cleaning up`);
+        // Set disposition to no_answer for timeout (call never connected)
+        const timedOutCall = this.activeCalls.get(callId);
+        if (timedOutCall && !timedOutCall.isAnswered) {
+          timedOutCall.disposition = "no-answer";
+          await this.handleCallHangup(callId, timedOutCall);
+        }
         this.activeCalls.delete(callId);
         return;
       }
@@ -658,6 +665,15 @@ export class TelnyxAiBridge extends EventEmitter {
         if (!response.ok) {
           if (response.status === 404) {
             console.log(`[TelnyxAiBridge] Call ${callId} no longer exists (ended)`);
+            // Call ended before we got the webhook - record disposition
+            const endedCall = this.activeCalls.get(callId);
+            if (endedCall) {
+              // If never answered, treat as no_answer; otherwise disposition was set during call
+              if (!endedCall.isAnswered && !endedCall.disposition) {
+                endedCall.disposition = "no-answer";
+              }
+              await this.handleCallHangup(callId, endedCall);
+            }
             this.activeCalls.delete(callId);
             return;
           }
@@ -669,21 +685,40 @@ export class TelnyxAiBridge extends EventEmitter {
         const data = await response.json();
         const callData = data.data || data;
         const isAlive = callData.is_alive;
-        
-        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${isAlive}, attempt: ${attempts}`);
+        const callState = callData.state; // 'ringing', 'answered', 'bridged', etc.
+
+        // Also check if webhook marked this call as answered
+        const activeCall = this.activeCalls.get(callId);
+        const isAnsweredViaWebhook = activeCall?.isAnswered === true;
+
+        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${isAlive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, attempt: ${attempts}`);
 
         if (!isAlive) {
           console.log(`[TelnyxAiBridge] Call ${callId} ended (is_alive=false)`);
+          // Call handleCallHangup to record disposition (if webhook didn't arrive)
+          const endedCall = this.activeCalls.get(callId);
+          if (endedCall) {
+            await this.handleCallHangup(callId, endedCall);
+          }
           this.activeCalls.delete(callId);
           return;
         }
 
-        // Wait 10 seconds (attempts >= 10) then assume answered and start conversation
-        // This gives time for the call to connect and for AMD to complete
-        if (isAlive && attempts >= 10 && !hasSpoken) {
+        // Check if call is answered via API state OR via webhook notification
+        const isAnsweredViaApi = callState === 'answered' || callState === 'bridged' || callState === 'active';
+        const isAnswered = isAnsweredViaApi || isAnsweredViaWebhook;
+
+        // Start conversation when call is answered, or after max wait time as fallback
+        if (isAlive && !hasSpoken && (isAnswered || attempts >= 20)) {
           hasSpoken = true;
-          console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s`);
-          
+          if (isAnsweredViaWebhook) {
+            console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
+          } else if (isAnsweredViaApi) {
+            console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
+          } else {
+            console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState})`);
+          }
+
           console.log(`[TelnyxAiBridge] Starting OpenAI realtime path for ${callId}`);
           const openingMessage = agent.getOpeningMessage();
           const voiceSetting = agent.getVoiceSetting();
@@ -842,6 +877,12 @@ export class TelnyxAiBridge extends EventEmitter {
   }
 
   private async handleCallHangup(callId: string, call: ActiveAiCall): Promise<void> {
+    // Prevent duplicate hangup processing
+    if (call.hasEnded) {
+      console.log(`[TelnyxAiBridge] Call hangup already processed for ${callId}, skipping`);
+      return;
+    }
+    call.hasEnded = true;
     console.log(`[TelnyxAiBridge] Call hangup: ${callId}`);
 
     const { summary, transcript } = await call.agent.endConversation(call.disposition || "completed");
@@ -898,6 +939,24 @@ export class TelnyxAiBridge extends EventEmitter {
 
         await storage.updateQueueStatus(call.queueItemId, "done");
       }
+
+      // Update dialer_call_attempts with disposition if we have a callAttemptId
+      if (call.callAttemptId) {
+        const canonicalDisposition = this.mapToCanonicalDisposition(disposition);
+        await db
+          .update(dialerCallAttempts)
+          .set({
+            disposition: canonicalDisposition,
+            dispositionSubmittedAt: new Date(),
+            callEndedAt: new Date(),
+            callDurationSeconds: Math.round(duration / 1000),
+            connected: phase !== "opening" && phase !== "gatekeeper",
+            voicemailDetected: disposition === "voicemail",
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, call.callAttemptId));
+        console.log(`[TelnyxAiBridge] Updated call attempt ${call.callAttemptId} with disposition: ${canonicalDisposition}`);
+      }
     } catch (error) {
       console.error(`[TelnyxAiBridge] Failed to create lead for AI call:`, error);
     }
@@ -926,6 +985,32 @@ export class TelnyxAiBridge extends EventEmitter {
     if (phase === "gatekeeper") return "no-answer";
     if (phase === "objection_handling") return "not_interested";
     return "connected";
+  }
+
+  // Map internal disposition to canonical disposition enum values
+  // Canonical values: 'qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data'
+  private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' {
+    const d = disposition.toLowerCase();
+    if (d === "qualified" || d === "handoff" || d === "meeting_booked" || d === "callback_requested") {
+      return "qualified_lead";
+    }
+    if (d === "voicemail" || d === "machine") {
+      return "voicemail";
+    }
+    if (d === "no-answer" || d === "no_answer" || d === "busy" || d === "failed") {
+      return "no_answer";
+    }
+    if (d === "not_interested" || d === "not interested" || d === "hung_up") {
+      return "not_interested";
+    }
+    if (d === "dnc" || d === "dnc_request" || d === "do_not_call") {
+      return "do_not_call";
+    }
+    if (d === "wrong_number" || d === "invalid" || d === "invalid_data") {
+      return "invalid_data";
+    }
+    // Default: If connected but no clear outcome, treat as not_interested (most common AI call outcome)
+    return "not_interested";
   }
 
   private async handleHandoff(callId: string, reason: string, transferNumber: string): Promise<void> {
@@ -992,6 +1077,19 @@ export class TelnyxAiBridge extends EventEmitter {
     return this.activeCalls.get(callId);
   }
 
+  // Mark a call as answered (called from webhook when call.answered event is received)
+  markCallAnswered(callControlId: string): boolean {
+    for (const [callId, call] of this.activeCalls.entries()) {
+      if (call.callControlId === callControlId) {
+        call.isAnswered = true;
+        console.log(`[TelnyxAiBridge] Call ${callId} marked as answered via webhook`);
+        return true;
+      }
+    }
+    console.log(`[TelnyxAiBridge] Could not find call to mark as answered: ${callControlId}`);
+    return false;
+  }
+
   async processTranscribedSpeech(callId: string, text: string): Promise<string | null> {
     const call = this.activeCalls.get(callId);
     if (!call) return null;
@@ -1016,6 +1114,7 @@ export class TelnyxAiBridge extends EventEmitter {
     switch (eventType) {
       case 'answered':
         if (call && callId) {
+          call.isAnswered = true; // Mark as answered so polling loop knows
           console.log(`[TelnyxAiBridge] Call answered via webhook: ${callId}`);
           // Speak opening message
           const openingMessage = call.agent.getOpeningMessage();

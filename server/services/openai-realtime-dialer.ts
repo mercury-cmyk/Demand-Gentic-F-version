@@ -108,6 +108,13 @@ interface OpenAIRealtimeSession {
   callAttemptId: string;
   contactId: string;
   calledNumber?: string | null;
+  telnyxCallControlId?: string | null;
+  fromNumber?: string | null;
+  callStartedAt?: Date | null;
+  openaiSessionId?: string | null;
+  identityConfirmed?: boolean;
+  currentState?: string;
+  stateHistory?: string[];
   provider: 'openai' | 'google';
   virtualAgentId: string;
   isTestSession: boolean;
@@ -210,6 +217,9 @@ type CallSummary = {
   primary_challenge?: string;
   follow_up_consent: "yes" | "no" | "unknown";
   next_step?: string;
+  nextSteps?: string[];
+  outcome?: string;
+  keyTopics?: string[];
 };
 
 type ClientStateFormat = "raw_json" | "base64";
@@ -338,7 +348,15 @@ function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; 
   return { format: 'g711_ulaw', source: 'default' };
 }
 
-const DISPOSITION_FUNCTION_TOOLS = [
+type RealtimeToolDefinition = {
+  type: "function";
+  name: string;
+  description: string;
+  parameters: { type: "object"; properties: Record<string, any>; required?: string[] };
+  strict?: boolean;
+};
+
+const DISPOSITION_FUNCTION_TOOLS: RealtimeToolDefinition[] = ([
     {
       type: "function",
       name: "send_dtmf",
@@ -372,8 +390,6 @@ const DISPOSITION_FUNCTION_TOOLS = [
         }
       }
     },
-    // <-- MISSING COMMA ADDED ABOVE
-  ,
   {
     type: "function",
     name: "submit_disposition",
@@ -514,7 +530,7 @@ const DISPOSITION_FUNCTION_TOOLS = [
       required: ["rationale_for_transfer", "conversation_summary", "prospect_sentiment", "urgency"]
     }
   }
-];
+]).filter(Boolean) as RealtimeToolDefinition[];
 
 export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketServer {
   // We do NOT pass the server instance here because we are handling upgrades manually in index.ts
@@ -523,6 +539,21 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
     noServer: true
   });
 
+  // Determine active voice provider
+  const voiceProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
+  const isGeminiActive = !voiceProvider.includes('openai');
+  const fallbackEnabled = process.env.VOICE_PROVIDER_FALLBACK === 'true';
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+
+  console.log(`${LOG_PREFIX} ========================================`);
+  console.log(`${LOG_PREFIX} 🎙️  VOICE PROVIDER CONFIGURATION`);
+  console.log(`${LOG_PREFIX} ========================================`);
+  console.log(`${LOG_PREFIX} Primary Provider: ${isGeminiActive ? '🟢 Google Gemini Live' : '🔵 OpenAI Realtime'}`);
+  console.log(`${LOG_PREFIX} Model: ${isGeminiActive ? geminiModel : 'gpt-4o-realtime-preview'}`);
+  const fallbackTarget = process.env.VOICE_PROVIDER_FALLBACK_TARGET || 'openai';
+  console.log(`${LOG_PREFIX} Fallback: ${fallbackEnabled ? `✅ ${fallbackTarget === 'openai' ? 'OpenAI Realtime' : 'Gemini Live'}` : '❌ Disabled (Gemini-only mode)'}`);
+  console.log(`${LOG_PREFIX} Cost Savings: ${isGeminiActive ? '~50-70% vs OpenAI Realtime' : 'N/A'}`);
+  console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} WebSocket server initialized on /openai-realtime-dialer`);
 
   wss.on("error", (err) => {
@@ -533,9 +564,11 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
     console.log(`${LOG_PREFIX} âœ… CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
     
     // Send a welcome message immediately to confirm connection
+    const activeProvider = (process.env.VOICE_PROVIDER?.toLowerCase() || 'google').includes('openai') ? 'OpenAI Realtime' : 'Gemini Live';
     ws.send(JSON.stringify({
       type: "connection_established",
-      message: "Connected to OpenAI Realtime Dialer Service",
+      message: `Connected to ${activeProvider} Voice Dialer Service`,
+      provider: activeProvider.toLowerCase().replace(' ', '_'),
       timestamp: new Date().toISOString()
     }));
 
@@ -548,6 +581,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
       queue_item_id: url.searchParams.get('queue_item_id'),
       call_attempt_id: url.searchParams.get('call_attempt_id'),
       contact_id: url.searchParams.get('contact_id'),
+      called_number: url.searchParams.get('called_number'),
       virtual_agent_id: url.searchParams.get('virtual_agent_id'),
     };
     console.log(`${LOG_PREFIX} URL params:`, urlParams);
@@ -653,9 +687,9 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
 
-          // Determine provider - test sessions default to OpenAI (more reliable)
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
-          // Check if openai is requested (handles 'openai', 'openai_realtime', etc.)
+          // Determine provider - default to Google Gemini Live (more cost-effective)
+          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'google').toString().toLowerCase();
+          // Check if openai is explicitly requested (handles 'openai', 'openai_realtime', etc.)
           const isOpenAIRequested = requestedProvider.includes('openai');
           const provider: 'openai' | 'google' = isOpenAIRequested ? 'openai' : 'google';
 
@@ -736,9 +770,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
               queueItemId: queueItemId || '',
               callAttemptId: callAttemptId || '',
               contactId: contactId || '',
-              calledNumber: customParams.called_number || urlParams.called_number || null,
-              calledNumber: customParams.called_number || urlParams.called_number || null,
-              calledNumber: customParams.called_number || urlParams.called_number || null,
+              calledNumber: (customParams as any).called_number || (urlParams as any).called_number || null,
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || validationResult.virtualAgentId || '',
               isTestSession,
@@ -906,7 +938,6 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
             queueItemId: queueItemId || '',
             callAttemptId: callAttemptId || '',
             contactId: contactId || '',
-            calledNumber: customParams.called_number || urlParams.called_number || null,
             virtualAgentId: session!.virtualAgentId,
             status: 'active',
             provider: provider,
@@ -1072,7 +1103,7 @@ function buildTurnDetection(
   };
 }
 
-function getAvailableTools(systemTools: SystemToolsSettings) {
+function getAvailableTools(systemTools: SystemToolsSettings): RealtimeToolDefinition[] {
   return DISPOSITION_FUNCTION_TOOLS.filter((tool) => {
     if (tool.name === "transfer_to_human") {
       return systemTools.transferToAgent;
@@ -1801,10 +1832,10 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     const geminiVoice = mapVoiceToProvider(voice, 'google');
 
     // Map tools to ProviderTool format
-    const providerTools = getAvailableTools(agentSettings.systemTools).map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters as { type: 'object'; properties: Record<string, any>; required?: string[] },
+    const providerTools = getAvailableTools(agentSettings.systemTools).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters as { type: 'object'; properties: Record<string, any>; required?: string[] },
     }));
 
     await provider.configure({
@@ -3663,13 +3694,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         const aiAnalysis = session.callSummary ? {
           summary: session.callSummary.summary,
           sentiment: session.callSummary.sentiment,
-          outcome: session.callSummary.outcome,
-          keyTopics: session.callSummary.keyTopics || [],
-          nextSteps: session.callSummary.nextSteps || [],
+          outcome: (session.callSummary as any).outcome || session.detectedDisposition,
+          keyTopics: (session.callSummary as any).keyTopics || [],
+          nextSteps: session.callSummary.next_step ? [session.callSummary.next_step] : [],
           conversationState: {
-            identityConfirmed: session.identityConfirmed,
-            currentState: session.currentState,
-            stateHistory: session.stateHistory || []
+            identityConfirmed: (session as any).identityConfirmed || false,
+            currentState: (session as any).currentState || 'unknown',
+            stateHistory: (session as any).stateHistory || []
           }
         } : null;
 
@@ -3681,16 +3712,16 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               console.warn(`${LOG_PREFIX} Missing called_number for call ${session.callId} - skipping call_sessions insert`);
             } else {
               const [callSession] = await db.insert(callSessions).values({
-                telnyxCallId: session.telnyxCallControlId || undefined,
-                fromNumber: session.fromNumber,
+                telnyxCallId: (session as any).telnyxCallControlId || undefined,
+                fromNumber: (session as any).fromNumber || undefined,
                 toNumberE164: session.calledNumber,
-                startedAt: session.callStartedAt || new Date(),
+                startedAt: (session as any).callStartedAt || session.startTime,
                 endedAt: new Date(),
                 durationSec: callDuration,
                 status: 'completed' as const,
                 agentType: 'ai' as const,
                 aiAgentId: session.virtualAgentId || 'openai-realtime',
-                aiConversationId: session.openaiSessionId || undefined,
+                aiConversationId: (session as any).openaiSessionId || undefined,
                 aiTranscript: fullTranscript || undefined,
                 aiAnalysis: aiAnalysis as any,
                 aiDisposition: disposition,
@@ -3777,7 +3808,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             }
 
             // Extract detected intents from conversation state
-            const intentsDetected = session.stateHistory?.map(state => ({
+            const intentsDetected = ((session as any).stateHistory as any[] | undefined)?.map((state: any) => ({
               state: state,
               timestamp: new Date().toISOString(),
             })) || [];
@@ -3936,6 +3967,21 @@ async function scheduleEngagedCallTranscription(options: {
   callAttemptId: string;
   leadId: string | null;
 }): Promise<void> {
+  // Helper to get telnyxCallId from session/bridge
+  const getTelnyxCallId = (callAttemptId: string): string | null => {
+    try {
+      const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
+      const bridge = getTelnyxAiBridge();
+      const callState = bridge.getClientStateByControlId(callAttemptId) || (bridge.activeCalls?.get(callAttemptId));
+      if (callState?.callControlId) {
+        return callState.callControlId;
+      }
+    } catch (err) {
+      console.warn(`${LOG_PREFIX} Unable to get Telnyx call ID for ${callAttemptId}:`, err);
+    }
+    return null;
+  };
+
   try {
     // Handle Test Calls
     if (options.callAttemptId && options.callAttemptId.startsWith('test-attempt-')) {
@@ -3989,21 +4035,6 @@ async function scheduleEngagedCallTranscription(options: {
       console.warn(`${LOG_PREFIX} Unable to schedule transcription: missing dialed number for call attempt ${options.callAttemptId}`);
       return;
     }
-
-    // Helper to get telnyxCallId from session/bridge
-    const getTelnyxCallId = (callAttemptId: string): string | null => {
-      try {
-        const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
-        const bridge = getTelnyxAiBridge();
-        const callState = bridge.getClientStateByControlId(callAttemptId) || (bridge.activeCalls?.get(callAttemptId));
-        if (callState?.callControlId) {
-          return callState.callControlId;
-        }
-      } catch (err) {
-        // Ignore errors, fallback to null
-      }
-      return null;
-    };
 
     await scheduleAutoRecordingSync({
       leadId: options.leadId || undefined,
@@ -4410,7 +4441,7 @@ async function buildSystemPrompt(
   callAttemptId?: string | null,
   attemptNumber?: number,
   isTestSession: boolean = false,
-  provider: 'openai' | 'google' = 'openai'  // Voice provider for prompt optimization
+  provider: 'openai' | 'google' = 'google'  // Voice provider for prompt optimization (default: Gemini Live)
 ): Promise<string> {
   // Try to get provider-specific knowledge blocks first
   const providerKnowledge = await getProviderVoiceControlLayer(
@@ -5104,11 +5135,16 @@ export function getRealtimeStatus(): {
     };
   });
 
+  // Get the default provider from env or use 'google' as default
+  const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
+  const isGoogleDefault = !defaultProvider.includes('openai');
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+
   return {
     activeSessions: sessionStates.length,
     websocketPath: '/openai-realtime-dialer',
-    provider: 'openai',
-    model: 'gpt-4o-realtime-preview-2024-12-17',
+    provider: isGoogleDefault ? 'google' : 'openai',
+    model: isGoogleDefault ? geminiModel : 'gpt-4o-realtime-preview-2024-12-17',
     sessions: sessionStates,
   };
 }

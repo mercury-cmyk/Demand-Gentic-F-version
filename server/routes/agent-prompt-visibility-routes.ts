@@ -312,8 +312,8 @@ router.get("/providers", requireAuth, async (_req, res) => {
           {
             id: 'gemini',
             name: 'Google Gemini Live',
-            model: 'gemini-2.5-flash-preview-native-audio-dialog',
-            description: 'Real-time voice conversations with Gemini Native Audio (30 HD voices)',
+            model: 'gemini-3-flash',
+            description: 'Real-time voice conversations with Gemini 3 Flash Native Audio (30 HD voices)',
             capabilities: ['voice_call', 'realtime', 'multimodal', 'affective_dialog'],
           },
         ],

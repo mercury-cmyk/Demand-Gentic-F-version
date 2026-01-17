@@ -153,26 +153,49 @@ const pollInterval = setInterval(async () => {
 
 function startDevServer() {
   const envPublicWsUrl = resolveEnv('PUBLIC_WEBSOCKET_URL');
-  const publicWsUrl = tunnelUrl 
-    ? (envPublicWsUrl || `${tunnelUrl}/openai-realtime-dialer`)
-    : (envPublicWsUrl || `http://localhost:${PORT}`);
-  
+
+  // ALWAYS use ngrok URL when tunnel is available - ignore placeholder env values
+  // This ensures Telnyx can reach our WebSocket endpoint
+  const isPlaceholderUrl = envPublicWsUrl && (
+    envPublicWsUrl.includes('<your-ngrok-host>') ||
+    envPublicWsUrl.includes('placeholder') ||
+    envPublicWsUrl.includes('localhost')
+  );
+
+  const publicWsUrl = tunnelUrl
+    ? `${tunnelUrl}/openai-realtime-dialer`  // Always use ngrok URL when available
+    : (isPlaceholderUrl ? `http://localhost:${PORT}` : (envPublicWsUrl || `http://localhost:${PORT}`));
+
+  // Extract the hostname from the ngrok tunnel URL for webhooks
+  // tunnelUrl is in format: wss://xxxx.ngrok.io -> need https://xxxx.ngrok.io for webhooks
+  let publicWebhookHost = `localhost:${PORT}`;
+  let telnyxWebhookUrl = `http://localhost:${PORT}/`;
+
   if (tunnelUrl) {
+    // tunnelUrl is like "wss://xxxx.ngrok-free.app" - convert to https host
+    publicWebhookHost = tunnelUrl.replace('wss://', '').replace('ws://', '');
+    telnyxWebhookUrl = `https://${publicWebhookHost}/`;
     console.log(`✅ Tunnel established: ${tunnelUrl}`);
+    console.log(`🔗 PUBLIC_WEBHOOK_HOST=${publicWebhookHost}`);
+    console.log(`🔗 TELNYX_WEBHOOK_URL=${telnyxWebhookUrl}`);
   }
-  if (envPublicWsUrl) {
+  if (tunnelUrl) {
+      console.log(`✅ Using ngrok tunnel for PUBLIC_WEBSOCKET_URL (ignoring env placeholder)`);
+  } else if (envPublicWsUrl && !isPlaceholderUrl) {
       console.log(`ℹ️  Using PUBLIC_WEBSOCKET_URL from .env.local/.env`);
+  } else {
+      console.log(`⚠️  No ngrok tunnel - using localhost`);
   }
   console.log(`🔗 PUBLIC_WEBSOCKET_URL=${publicWsUrl}`);
   console.log('---------------------------------------------------');
-  
+
   // Start the dev server
   console.log('🚀 Starting Express + Vite dev server...');
-  
+
   // Use NODE_OPTIONS to preload warning suppression script before anything else
   const preloadPath = path.resolve(process.cwd(), 'server/preload-suppress.cjs');
   const existingNodeOptions = process.env.NODE_OPTIONS || '';
-  
+
   // Escape backslashes for Windows paths in NODE_OPTIONS
   const escapedPreloadPath = preloadPath.replace(/\\/g, '\\\\');
 
@@ -180,6 +203,8 @@ function startDevServer() {
       ...process.env,
       ...mergedEnv,
       PUBLIC_WEBSOCKET_URL: publicWsUrl,
+      PUBLIC_WEBHOOK_HOST: publicWebhookHost,
+      TELNYX_WEBHOOK_URL: telnyxWebhookUrl,
       NODE_ENV: 'development',
       PORT: PORT.toString(),
       NODE_OPTIONS: `--require "${escapedPreloadPath}" ${existingNodeOptions}`.trim()

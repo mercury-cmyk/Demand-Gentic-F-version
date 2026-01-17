@@ -1,12 +1,19 @@
 /**
- * Gemini 2.0 Live API Voice Provider
+ * Gemini 3 Flash Live API Voice Provider
  *
  * Implements the IVoiceProvider interface for Google's Gemini Live API.
+ * Uses Gemini 3 Flash Native Audio for high-quality real-time voice (Dec 2025).
  * Handles WebSocket connection, audio transcoding, and function calling.
+ *
+ * Key features:
+ * - Native audio output with natural prosody
+ * - 15+ voice options (Kore, Vega, Pegasus, etc.)
+ * - Low latency, high quality speech
+ * - Function calling support
  *
  * Key differences from OpenAI:
  * - Audio format: PCM 16kHz input, PCM 24kHz output (vs G.711)
- * - Authentication: OAuth2/ADC (vs API key)
+ * - Authentication: OAuth2/ADC or API key
  * - Message format: Different protocol structure
  */
 
@@ -74,8 +81,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use the latest Gemini 2.5 Flash Native Audio model for most natural, human-like speech
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-preview-native-audio-dialog';
+    // Use Gemini 3 Flash Native Audio for the Live API (Dec 2025)
+    // Note: Model name format differs between Google AI and Vertex AI
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
 
     // Check for API key (Google AI Studio) or use ADC (Vertex AI)
     // Accept multiple env var names for flexibility
@@ -230,8 +238,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use the latest Gemini 2.5 Flash Native Audio model for most natural, human-like speech
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-preview-native-audio-dialog';
+    // Use Gemini 3 Flash Native Audio for the Live API (Dec 2025)
+    // Note: Model name format differs between Google AI and Vertex AI
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
     const useVertexAI = !!projectId && !apiKey;
 

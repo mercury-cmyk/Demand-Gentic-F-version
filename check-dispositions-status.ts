@@ -13,7 +13,7 @@ async function checkDispositions() {
       ca.disposition,
       ca.duration,
       c.full_name as contact_name,
-      c.phone as contact_phone,
+      c.direct_phone as contact_phone,
       camp.name as campaign_name
     FROM call_attempts ca
     LEFT JOIN contacts c ON ca.contact_id = c.id

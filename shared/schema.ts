@@ -4639,7 +4639,485 @@ export const clientPortalOrderContactsRelations = relations(clientPortalOrderCon
   selectedByUser: one(users, { fields: [clientPortalOrderContacts.selectedBy], references: [users.id] }),
 }));
 
-// ==================== END CLIENT PORTAL SYSTEM ====================
+// ==================== ENHANCED CLIENT PORTAL SYSTEM ====================
+
+// Enums for enhanced client portal
+export const clientProjectStatusEnum = pgEnum('client_project_status', [
+  'draft',
+  'active',
+  'paused',
+  'completed',
+  'archived'
+]);
+
+export const billingModelTypeEnum = pgEnum('billing_model_type', [
+  'cpl',              // Cost Per Lead
+  'cpc',              // Cost Per Contact
+  'monthly_retainer', // Fixed monthly fee
+  'hybrid'            // Retainer + overage
+]);
+
+export const activityCostTypeEnum = pgEnum('activity_cost_type', [
+  'lead_delivered',
+  'contact_verified',
+  'ai_call_minute',
+  'email_sent',
+  'sms_sent',
+  'retainer_fee',
+  'setup_fee',
+  'adjustment',
+  'credit'
+]);
+
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'draft',
+  'pending',
+  'sent',
+  'paid',
+  'overdue',
+  'void',
+  'disputed'
+]);
+
+export const deliveryStatusEnum = pgEnum('delivery_status', [
+  'pending',
+  'processing',
+  'delivered',
+  'failed',
+  'expired'
+]);
+
+export const voiceCommandIntentEnum = pgEnum('voice_command_intent', [
+  'navigation',
+  'query',
+  'action',
+  'report',
+  'unknown'
+]);
+
+// Client Projects - Container for campaigns and billing
+export const clientProjects = pgTable("client_projects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Project Details
+  name: text("name").notNull(),
+  description: text("description"),
+  projectCode: text("project_code").unique(),
+
+  // Dates
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+
+  // Status
+  status: clientProjectStatusEnum("status").notNull().default('draft'),
+
+  // Budget
+  budgetAmount: numeric("budget_amount", { precision: 12, scale: 2 }),
+  budgetCurrency: varchar("budget_currency", { length: 3 }).default('USD'),
+
+  // Billing Settings (override account defaults)
+  billingModel: billingModelTypeEnum("billing_model"),
+  ratePerLead: numeric("rate_per_lead", { precision: 10, scale: 2 }),
+  ratePerContact: numeric("rate_per_contact", { precision: 10, scale: 2 }),
+  ratePerCallMinute: numeric("rate_per_call_minute", { precision: 10, scale: 4 }),
+  monthlyRetainer: numeric("monthly_retainer", { precision: 10, scale: 2 }),
+
+  // Metadata
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_projects_client_idx").on(table.clientAccountId),
+  statusIdx: index("client_projects_status_idx").on(table.status),
+  codeIdx: index("client_projects_code_idx").on(table.projectCode),
+}));
+
+// Link campaigns to projects
+export const clientProjectCampaigns = pgTable("client_project_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => clientProjects.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").notNull().references(() => verificationCampaigns.id, { onDelete: 'cascade' }),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  assignedBy: varchar("assigned_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  projectCampaignUniq: uniqueIndex("client_project_campaigns_unique_idx").on(table.projectId, table.campaignId),
+  projectIdx: index("client_project_campaigns_project_idx").on(table.projectId),
+  campaignIdx: index("client_project_campaigns_campaign_idx").on(table.campaignId),
+}));
+
+// Client Billing Configuration
+export const clientBillingConfig = pgTable("client_billing_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().unique().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Default Pricing Model
+  defaultBillingModel: billingModelTypeEnum("default_billing_model").notNull().default('cpl'),
+
+  // Rates (defaults)
+  defaultRatePerLead: numeric("default_rate_per_lead", { precision: 10, scale: 2 }).default('150.00'),
+  defaultRatePerContact: numeric("default_rate_per_contact", { precision: 10, scale: 2 }).default('25.00'),
+  defaultRatePerCallMinute: numeric("default_rate_per_call_minute", { precision: 10, scale: 4 }).default('0.15'),
+  defaultRatePerEmail: numeric("default_rate_per_email", { precision: 10, scale: 4 }).default('0.02'),
+
+  // Retainer Settings
+  monthlyRetainerAmount: numeric("monthly_retainer_amount", { precision: 12, scale: 2 }),
+  retainerIncludesLeads: integer("retainer_includes_leads"),
+  overageRatePerLead: numeric("overage_rate_per_lead", { precision: 10, scale: 2 }),
+
+  // Payment Terms
+  paymentTermsDays: integer("payment_terms_days").default(30),
+  currency: varchar("currency", { length: 3 }).default('USD'),
+
+  // Billing Contact
+  billingEmail: text("billing_email"),
+  billingAddress: jsonb("billing_address"),
+
+  // Tax
+  taxExempt: boolean("tax_exempt").default(false),
+  taxId: text("tax_id"),
+  taxRate: numeric("tax_rate", { precision: 5, scale: 4 }).default('0'),
+
+  // Auto Invoice Settings
+  autoInvoiceEnabled: boolean("auto_invoice_enabled").default(true),
+  invoiceDayOfMonth: integer("invoice_day_of_month").default(1),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Client Activity Costs (Real-time tracking)
+export const clientActivityCosts = pgTable("client_activity_costs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'set null' }),
+  orderId: varchar("order_id").references(() => clientPortalOrders.id, { onDelete: 'set null' }),
+
+  // Activity Details
+  activityType: activityCostTypeEnum("activity_type").notNull(),
+  activityDate: timestamp("activity_date").notNull().defaultNow(),
+
+  // Reference to source record
+  referenceType: text("reference_type"),
+  referenceId: varchar("reference_id"),
+
+  // Cost Calculation
+  quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull().default('1'),
+  unitRate: numeric("unit_rate", { precision: 10, scale: 4 }).notNull(),
+  totalCost: numeric("total_cost", { precision: 12, scale: 4 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default('USD'),
+
+  // Billing Status
+  invoiceId: varchar("invoice_id"),
+  invoicedAt: timestamp("invoiced_at"),
+
+  // Metadata
+  description: text("description"),
+  metadata: jsonb("metadata"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientDateIdx: index("client_activity_costs_client_date_idx").on(table.clientAccountId, table.activityDate),
+  invoiceIdx: index("client_activity_costs_invoice_idx").on(table.invoiceId),
+  projectIdx: index("client_activity_costs_project_idx").on(table.projectId),
+  campaignIdx: index("client_activity_costs_campaign_idx").on(table.campaignId),
+}));
+
+// Client Invoices
+export const clientInvoices = pgTable("client_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Invoice Details
+  invoiceNumber: text("invoice_number").unique().notNull(),
+
+  // Period
+  billingPeriodStart: date("billing_period_start").notNull(),
+  billingPeriodEnd: date("billing_period_end").notNull(),
+
+  // Amounts
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }).default('0'),
+  discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).default('0'),
+  totalAmount: numeric("total_amount", { precision: 12, scale: 2 }).notNull(),
+  amountPaid: numeric("amount_paid", { precision: 12, scale: 2 }).default('0'),
+  currency: varchar("currency", { length: 3 }).default('USD'),
+
+  // Status
+  status: invoiceStatusEnum("status").notNull().default('draft'),
+
+  // Dates
+  issueDate: date("issue_date"),
+  dueDate: date("due_date"),
+  paidDate: date("paid_date"),
+
+  // Payment
+  paymentMethod: text("payment_method"),
+  paymentReference: text("payment_reference"),
+
+  // Notes
+  notes: text("notes"),
+  internalNotes: text("internal_notes"),
+
+  // PDF Storage
+  pdfUrl: text("pdf_url"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  sentBy: varchar("sent_by").references(() => users.id, { onDelete: 'set null' }),
+  sentAt: timestamp("sent_at"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_invoices_client_idx").on(table.clientAccountId),
+  statusIdx: index("client_invoices_status_idx").on(table.status),
+  periodIdx: index("client_invoices_period_idx").on(table.billingPeriodStart, table.billingPeriodEnd),
+  dueDateIdx: index("client_invoices_due_date_idx").on(table.dueDate),
+}));
+
+// Invoice Line Items
+export const clientInvoiceItems = pgTable("client_invoice_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceId: varchar("invoice_id").notNull().references(() => clientInvoices.id, { onDelete: 'cascade' }),
+
+  // Item Details
+  description: text("description").notNull(),
+  itemType: text("item_type").notNull(),
+
+  // Quantity & Pricing
+  quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
+  unitPrice: numeric("unit_price", { precision: 10, scale: 4 }).notNull(),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+
+  // Project/Campaign Reference
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'set null' }),
+
+  // Period
+  periodStart: date("period_start"),
+  periodEnd: date("period_end"),
+
+  // Ordering
+  sortOrder: integer("sort_order").default(0),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  invoiceIdx: index("client_invoice_items_invoice_idx").on(table.invoiceId),
+}));
+
+// Invoice Activity Log
+export const clientInvoiceActivity = pgTable("client_invoice_activity", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceId: varchar("invoice_id").notNull().references(() => clientInvoices.id, { onDelete: 'cascade' }),
+
+  activityType: text("activity_type").notNull(),
+  description: text("description"),
+
+  performedBy: varchar("performed_by").references(() => users.id, { onDelete: 'set null' }),
+  performedByClient: varchar("performed_by_client").references(() => clientUsers.id, { onDelete: 'set null' }),
+  performedAt: timestamp("performed_at").notNull().defaultNow(),
+}, (table) => ({
+  invoiceIdx: index("client_invoice_activity_invoice_idx").on(table.invoiceId),
+}));
+
+// Delivery Links
+export const clientDeliveryLinks = pgTable("client_delivery_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  orderId: varchar("order_id").references(() => clientPortalOrders.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // Delivery Details
+  deliveryType: text("delivery_type").notNull().default('csv_export'),
+  deliveryStatus: deliveryStatusEnum("delivery_status").notNull().default('pending'),
+
+  // Link Information
+  fileUrl: text("file_url"),
+  fileName: text("file_name"),
+  linkExpiresAt: timestamp("link_expires_at"),
+  downloadCount: integer("download_count").default(0),
+  maxDownloads: integer("max_downloads"),
+
+  // Delivery Content
+  contactCount: integer("contact_count").notNull().default(0),
+  fileFormat: text("file_format").default('csv'),
+  fileSizeBytes: integer("file_size_bytes"),
+
+  // Tracking
+  deliveredAt: timestamp("delivered_at"),
+  firstAccessedAt: timestamp("first_accessed_at"),
+  lastAccessedAt: timestamp("last_accessed_at"),
+
+  // Security
+  accessToken: text("access_token").unique().default(sql`gen_random_uuid()::text`),
+  passwordProtected: boolean("password_protected").default(false),
+  passwordHash: text("password_hash"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_delivery_links_client_idx").on(table.clientAccountId),
+  orderIdx: index("client_delivery_links_order_idx").on(table.orderId),
+  tokenIdx: index("client_delivery_links_token_idx").on(table.accessToken),
+  statusIdx: index("client_delivery_links_status_idx").on(table.deliveryStatus),
+}));
+
+// Delivery Access Log
+export const clientDeliveryAccessLog = pgTable("client_delivery_access_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  deliveryLinkId: varchar("delivery_link_id").notNull().references(() => clientDeliveryLinks.id, { onDelete: 'cascade' }),
+
+  accessedAt: timestamp("accessed_at").notNull().defaultNow(),
+  accessedByUserId: varchar("accessed_by_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+}, (table) => ({
+  linkIdx: index("client_delivery_access_log_link_idx").on(table.deliveryLinkId),
+}));
+
+// Voice Commands
+export const clientVoiceCommands = pgTable("client_voice_commands", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientUserId: varchar("client_user_id").notNull().references(() => clientUsers.id, { onDelete: 'cascade' }),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Command Details
+  transcript: text("transcript").notNull(),
+  intent: voiceCommandIntentEnum("intent").default('unknown'),
+  entities: jsonb("entities"),
+
+  // Response
+  responseText: text("response_text"),
+  responseAudioUrl: text("response_audio_url"),
+
+  // Action Taken
+  actionType: text("action_type"),
+  actionResult: jsonb("action_result"),
+  actionSuccess: boolean("action_success"),
+
+  // Timing
+  processingDurationMs: integer("processing_duration_ms"),
+
+  // Audio Storage
+  audioInputUrl: text("audio_input_url"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("client_voice_commands_user_idx").on(table.clientUserId),
+  accountIdx: index("client_voice_commands_account_idx").on(table.clientAccountId),
+  createdIdx: index("client_voice_commands_created_idx").on(table.createdAt),
+}));
+
+// Voice Configuration
+export const clientVoiceConfig = pgTable("client_voice_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().unique().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Voice Settings
+  voiceEnabled: boolean("voice_enabled").default(true),
+  preferredVoice: text("preferred_voice").default('nova'),
+  responseSpeed: numeric("response_speed", { precision: 3, scale: 2 }).default('1.0'),
+
+  // Permissions
+  voiceCanCreateOrders: boolean("voice_can_create_orders").default(true),
+  voiceCanViewInvoices: boolean("voice_can_view_invoices").default(true),
+  voiceCanDownloadReports: boolean("voice_can_download_reports").default(true),
+
+  // Custom Vocabulary
+  customVocabulary: jsonb("custom_vocabulary"),
+
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Relations for enhanced client portal
+export const clientProjectsRelations = relations(clientProjects, ({ one, many }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientProjects.clientAccountId], references: [clientAccounts.id] }),
+  createdBy: one(users, { fields: [clientProjects.createdBy], references: [users.id] }),
+  campaigns: many(clientProjectCampaigns),
+  costs: many(clientActivityCosts),
+  deliveryLinks: many(clientDeliveryLinks),
+}));
+
+export const clientProjectCampaignsRelations = relations(clientProjectCampaigns, ({ one }) => ({
+  project: one(clientProjects, { fields: [clientProjectCampaigns.projectId], references: [clientProjects.id] }),
+  campaign: one(verificationCampaigns, { fields: [clientProjectCampaigns.campaignId], references: [verificationCampaigns.id] }),
+  assignedBy: one(users, { fields: [clientProjectCampaigns.assignedBy], references: [users.id] }),
+}));
+
+export const clientBillingConfigRelations = relations(clientBillingConfig, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientBillingConfig.clientAccountId], references: [clientAccounts.id] }),
+}));
+
+export const clientActivityCostsRelations = relations(clientActivityCosts, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientActivityCosts.clientAccountId], references: [clientAccounts.id] }),
+  project: one(clientProjects, { fields: [clientActivityCosts.projectId], references: [clientProjects.id] }),
+  campaign: one(verificationCampaigns, { fields: [clientActivityCosts.campaignId], references: [verificationCampaigns.id] }),
+  order: one(clientPortalOrders, { fields: [clientActivityCosts.orderId], references: [clientPortalOrders.id] }),
+  invoice: one(clientInvoices, { fields: [clientActivityCosts.invoiceId], references: [clientInvoices.id] }),
+}));
+
+export const clientInvoicesRelations = relations(clientInvoices, ({ one, many }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientInvoices.clientAccountId], references: [clientAccounts.id] }),
+  createdBy: one(users, { fields: [clientInvoices.createdBy], references: [users.id] }),
+  sentBy: one(users, { fields: [clientInvoices.sentBy], references: [users.id] }),
+  items: many(clientInvoiceItems),
+  activity: many(clientInvoiceActivity),
+  costs: many(clientActivityCosts),
+}));
+
+export const clientInvoiceItemsRelations = relations(clientInvoiceItems, ({ one }) => ({
+  invoice: one(clientInvoices, { fields: [clientInvoiceItems.invoiceId], references: [clientInvoices.id] }),
+  project: one(clientProjects, { fields: [clientInvoiceItems.projectId], references: [clientProjects.id] }),
+  campaign: one(verificationCampaigns, { fields: [clientInvoiceItems.campaignId], references: [verificationCampaigns.id] }),
+}));
+
+export const clientInvoiceActivityRelations = relations(clientInvoiceActivity, ({ one }) => ({
+  invoice: one(clientInvoices, { fields: [clientInvoiceActivity.invoiceId], references: [clientInvoices.id] }),
+  performedBy: one(users, { fields: [clientInvoiceActivity.performedBy], references: [users.id] }),
+  performedByClient: one(clientUsers, { fields: [clientInvoiceActivity.performedByClient], references: [clientUsers.id] }),
+}));
+
+export const clientDeliveryLinksRelations = relations(clientDeliveryLinks, ({ one, many }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientDeliveryLinks.clientAccountId], references: [clientAccounts.id] }),
+  order: one(clientPortalOrders, { fields: [clientDeliveryLinks.orderId], references: [clientPortalOrders.id] }),
+  campaign: one(verificationCampaigns, { fields: [clientDeliveryLinks.campaignId], references: [verificationCampaigns.id] }),
+  project: one(clientProjects, { fields: [clientDeliveryLinks.projectId], references: [clientProjects.id] }),
+  createdBy: one(users, { fields: [clientDeliveryLinks.createdBy], references: [users.id] }),
+  accessLogs: many(clientDeliveryAccessLog),
+}));
+
+export const clientDeliveryAccessLogRelations = relations(clientDeliveryAccessLog, ({ one }) => ({
+  deliveryLink: one(clientDeliveryLinks, { fields: [clientDeliveryAccessLog.deliveryLinkId], references: [clientDeliveryLinks.id] }),
+  accessedBy: one(clientUsers, { fields: [clientDeliveryAccessLog.accessedByUserId], references: [clientUsers.id] }),
+}));
+
+export const clientVoiceCommandsRelations = relations(clientVoiceCommands, ({ one }) => ({
+  clientUser: one(clientUsers, { fields: [clientVoiceCommands.clientUserId], references: [clientUsers.id] }),
+  clientAccount: one(clientAccounts, { fields: [clientVoiceCommands.clientAccountId], references: [clientAccounts.id] }),
+}));
+
+export const clientVoiceConfigRelations = relations(clientVoiceConfig, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientVoiceConfig.clientAccountId], references: [clientAccounts.id] }),
+}));
+
+// Types for enhanced client portal
+export type ClientProject = typeof clientProjects.$inferSelect;
+export type InsertClientProject = typeof clientProjects.$inferInsert;
+export type ClientProjectCampaign = typeof clientProjectCampaigns.$inferSelect;
+export type ClientBillingConfig = typeof clientBillingConfig.$inferSelect;
+export type ClientActivityCost = typeof clientActivityCosts.$inferSelect;
+export type ClientInvoice = typeof clientInvoices.$inferSelect;
+export type InsertClientInvoice = typeof clientInvoices.$inferInsert;
+export type ClientInvoiceItem = typeof clientInvoiceItems.$inferSelect;
+export type ClientDeliveryLink = typeof clientDeliveryLinks.$inferSelect;
+export type ClientVoiceCommand = typeof clientVoiceCommands.$inferSelect;
+export type ClientVoiceConfig = typeof clientVoiceConfig.$inferSelect;
+
+// ==================== END ENHANCED CLIENT PORTAL SYSTEM ====================
 
 export const verificationCampaignsRelations = relations(verificationCampaigns, ({ one, many }) => ({
   createdBy: one(users, { fields: [verificationCampaigns.createdBy], references: [users.id] }),

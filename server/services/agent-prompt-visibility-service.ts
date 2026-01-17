@@ -818,7 +818,7 @@ We are DemandGentic, a B2B demand generation platform that helps companies impro
     },
     gemini: {
       provider: 'gemini',
-      model: 'gemini-2.5-flash-preview-native-audio-dialog',
+      model: 'gemini-3-flash',
       systemPrompt: geminiSystemPrompt,
       userPromptTemplate: userPromptTemplate,
       sampleUserPrompt: sampleUserPrompt,

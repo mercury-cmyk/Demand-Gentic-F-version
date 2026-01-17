@@ -184,6 +184,9 @@ export async function getAvailableVoices(): Promise<VoicesByProvider> {
 /**
  * Generate a voice preview audio sample.
  * Returns MP3 audio buffer.
+ *
+ * For Gemini voices: Uses Google Cloud TTS if available, falls back to OpenAI TTS
+ * For OpenAI voices: Uses OpenAI TTS directly
  */
 export async function generateVoicePreview(
   voiceId: string,
@@ -194,32 +197,59 @@ export async function generateVoicePreview(
   console.log(`${LOG_PREFIX} Generating preview for ${provider}/${voiceId}`);
 
   if (provider === 'gemini') {
-    // Use Google TTS with the mapped preview voice
+    // First try Google TTS with the mapped preview voice
     const previewConfig = GEMINI_TO_TTS_PREVIEW_MAP[voiceId];
     if (!previewConfig) {
       throw new Error(`Unknown Gemini voice: ${voiceId}`);
     }
 
-    const client = getTTSClient();
-    const [response] = await client.synthesizeSpeech({
-      input: { text: sampleText },
-      voice: {
-        name: previewConfig.ttsVoice,
-        languageCode: 'en-US',
-      },
-      audioConfig: {
-        audioEncoding: protos.google.cloud.texttospeech.v1.AudioEncoding.MP3,
-        speakingRate: 1.0,
-        pitch: 0,
-      },
-    });
+    try {
+      const client = getTTSClient();
+      const [response] = await client.synthesizeSpeech({
+        input: { text: sampleText },
+        voice: {
+          name: previewConfig.ttsVoice,
+          languageCode: 'en-US',
+        },
+        audioConfig: {
+          audioEncoding: protos.google.cloud.texttospeech.v1.AudioEncoding.MP3,
+          speakingRate: 1.0,
+          pitch: 0,
+        },
+      });
 
-    if (!response.audioContent) {
-      throw new Error('No audio content returned from Google TTS');
+      if (!response.audioContent) {
+        throw new Error('No audio content returned from Google TTS');
+      }
+
+      console.log(`${LOG_PREFIX} Generated Gemini preview via Google TTS: ${(response.audioContent as Buffer).length} bytes`);
+      return Buffer.from(response.audioContent as Uint8Array);
+    } catch (googleTtsError) {
+      // Google TTS failed (likely ADC not configured), fall back to OpenAI TTS
+      console.warn(`${LOG_PREFIX} Google TTS failed, using OpenAI TTS as fallback:`, googleTtsError instanceof Error ? googleTtsError.message : 'Unknown error');
+
+      try {
+        const openai = getOpenAIClient();
+        // Map Gemini voice to similar OpenAI voice for preview
+        const fallbackVoice = mapGeminiToOpenAIVoice(voiceId);
+
+        const response = await openai.audio.speech.create({
+          model: 'tts-1',
+          voice: fallbackVoice as any,
+          input: `This is a preview of the ${voiceId} voice. ${sampleText}`,
+          response_format: 'mp3',
+        });
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        console.log(`${LOG_PREFIX} Generated Gemini preview via OpenAI fallback: ${buffer.length} bytes`);
+        return buffer;
+      } catch (openaiError) {
+        console.error(`${LOG_PREFIX} OpenAI fallback also failed:`, openaiError);
+        throw new Error('Voice preview generation failed: Neither Google TTS nor OpenAI TTS available');
+      }
     }
-
-    console.log(`${LOG_PREFIX} Generated Gemini preview: ${(response.audioContent as Buffer).length} bytes`);
-    return Buffer.from(response.audioContent as Uint8Array);
 
   } else {
     // Use OpenAI TTS
@@ -241,6 +271,35 @@ export async function generateVoicePreview(
     console.log(`${LOG_PREFIX} Generated OpenAI preview: ${buffer.length} bytes`);
     return buffer;
   }
+}
+
+/**
+ * Map Gemini voice to similar OpenAI voice for preview fallback.
+ */
+function mapGeminiToOpenAIVoice(geminiVoice: string): string {
+  const config = GEMINI_TO_TTS_PREVIEW_MAP[geminiVoice];
+  if (!config) return 'alloy'; // Default fallback
+
+  // Map based on gender/characteristics
+  const mapping: Record<string, string> = {
+    'Aoede': 'nova',     // Bright female -> Nova
+    'Charon': 'onyx',    // Deep male -> Onyx
+    'Fenrir': 'echo',    // Calm male -> Echo
+    'Kore': 'shimmer',   // Soft female -> Shimmer
+    'Puck': 'fable',     // Light expressive -> Fable
+    'Orion': 'alloy',    // Balanced -> Alloy
+    'Vega': 'nova',      // Warm confident -> Nova
+    'Pegasus': 'echo',   // Calm professional -> Echo
+    'Ursa': 'onyx',      // Strong steady -> Onyx
+    'Nova': 'nova',      // Bright energetic -> Nova
+    'Dipper': 'alloy',   // Clear articulate -> Alloy
+    'Capella': 'shimmer', // Melodic smooth -> Shimmer
+    'Orbit': 'fable',    // Modern dynamic -> Fable
+    'Lyra': 'shimmer',   // Elegant refined -> Shimmer
+    'Eclipse': 'onyx',   // Bold distinctive -> Onyx
+  };
+
+  return mapping[geminiVoice] || 'alloy';
 }
 
 /**

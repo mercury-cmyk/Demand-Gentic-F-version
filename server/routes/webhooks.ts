@@ -240,7 +240,10 @@ router.post("/telnyx", async (req, res) => {
     switch (eventType) {
       case 'call.answered':
         console.log(`[Telnyx Webhook] Call answered: ${payload.call_control_id}`);
-        
+
+        // Always mark the call as answered in the bridge for polling to detect
+        bridge.markCallAnswered(payload.call_control_id);
+
         // Check if this is an OpenAI Realtime call by looking at client_state
         let clientState: any = null;
         if (payload.client_state) {
@@ -250,7 +253,7 @@ router.post("/telnyx", async (req, res) => {
             // Not base64 encoded or invalid JSON
           }
         }
-        
+
         // TeXML calls handle streaming automatically via <Stream bidirectionalMode="rtp" />
         // The TeXML endpoint returns XML with <Stream> directive that auto-connects to WebSocket
         if (clientState?.provider === 'openai_realtime') {

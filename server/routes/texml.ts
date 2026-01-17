@@ -41,14 +41,15 @@ router.post("/ai-call", (req, res) => {
   const escapedWsUrl = finalWsUrl.replace(/&/g, '&amp;');
 
   res.set("Content-Type", "application/xml");
-  // Enable AMD (Answering Machine Detection) before connecting to AI
-  // AMD will fire call.machine.detection.ended webhook with result
-  // If machine detected, webhook handler will hang up immediately
+  // CRITICAL FIX for early disconnects:
+  // 1. Remove AMD blocking - it was preventing stream setup
+  // 2. Connect directly to WebSocket stream - let AI handle voicemail detection
+  // 3. For test calls, avoid AMD timeouts that can kill calls before they ring
+  
+  // Note: Machine detection can still be done via WebSocket stream data if needed,
+  // but doesn't block the <Stream> connection from establishing
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <AnswerMachine>
-        <Config machineDetection="DetectMessageEnd" machineDetectionTimeout="30" machineDetectionSpeechThreshold="3500" machineDetectionSpeechEndThreshold="1200" machineDetectionSilenceTimeout="5000" />
-    </AnswerMachine>
     <Connect>
         <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" />
     </Connect>
@@ -62,11 +63,10 @@ router.post("/incoming", (req, res) => {
   console.log("[TeXML] Received incoming call:", req.body);
   
   res.set("Content-Type", "application/xml");
+  // CRITICAL FIX: Remove AMD blocking from incoming calls too
+  // Connect directly to stream without AMD delays
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <AnswerMachine>
-        <Config machineDetection="DetectMessageEnd" machineDetectionTimeout="30" />
-    </AnswerMachine>
     <Say>Connecting you to the DemandGentic AI assistant.</Say>
     <Connect>
         <Stream url="wss://${req.get('host')}/openai-realtime-dialer" bidirectionalMode="rtp" />

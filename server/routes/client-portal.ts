@@ -19,6 +19,13 @@ import {
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
 
+// Import enhanced client portal route modules
+import clientPortalProjectsRouter from './client-portal-projects';
+import clientPortalBillingRouter from './client-portal-billing';
+import clientPortalVoiceRouter from './client-portal-voice';
+import clientPortalAdminBillingRouter from './client-portal-admin-billing';
+import clientPortalAgentRouter from './client-portal-agent';
+
 const router = Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
@@ -79,6 +86,16 @@ function generateOrderNumber(): string {
   const random = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `ORD-${dateStr}-${random}`;
 }
+
+// ==================== MOUNT ENHANCED CLIENT PORTAL ROUTES ====================
+// These routes require client authentication
+router.use('/projects', requireClientAuth, clientPortalProjectsRouter);
+router.use('/billing', requireClientAuth, clientPortalBillingRouter);
+router.use('/voice', requireClientAuth, clientPortalVoiceRouter);
+router.use('/agent', requireClientAuth, clientPortalAgentRouter);
+
+// Admin routes for billing/invoice management (requires admin auth)
+router.use('/admin', clientPortalAdminBillingRouter);
 
 // ==================== CLIENT AUTHENTICATION ====================
 

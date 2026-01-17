@@ -22,6 +22,7 @@ export interface CallSession {
   callControlId: string;        // Provider's call control ID (Telnyx)
   callSessionId?: string;       // Provider's session ID
   streamSid?: string;           // Media stream ID
+  calledNumber?: string | null; // Dialed number (E.164) when available
   
   // Campaign/Contact context
   runId: string;
@@ -484,6 +485,7 @@ export interface CallCustomParams {
   call_attempt_id?: string;
   contact_id?: string;
   virtual_agent_id?: string;
+  called_number?: string;
   is_test_call?: boolean;
   test_call_id?: string;
   system_prompt?: string;

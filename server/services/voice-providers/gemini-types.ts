@@ -381,29 +381,163 @@ export function getVertexModelName(config: GeminiLiveConfig): string {
 
 /**
  * Available Gemini voices for audio output
+ * These are native audio voices with natural prosody and emotion
  */
 export const GEMINI_VOICES = {
-  // Original voices
+  // Original voices (Gemini 2.0)
   AOEDE: 'Aoede',     // Bright and warm
   CHARON: 'Charon',   // Deep and authoritative
   FENRIR: 'Fenrir',   // Calm and measured
   KORE: 'Kore',       // Soft and friendly (default)
   PUCK: 'Puck',       // Light and expressive
 
-  // Newer voices (from Gemini App)
-  ORION: 'Orion',
-  VEGA: 'Vega',
-  PEGASUS: 'Pegasus',
-  URSA: 'Ursa',
-  NOVA: 'Nova',
-  DIPPER: 'Dipper',
-  CAPELLA: 'Capella',
-  ORBIT: 'Orbit',
-  LYRA: 'Lyra',
-  ECLIPSE: 'Eclipse',
+  // Newer voices (Gemini 2.5+ Native Audio)
+  ORION: 'Orion',     // Professional, confident male voice
+  VEGA: 'Vega',       // Warm, engaging voice (best for sales)
+  PEGASUS: 'Pegasus', // Calm, professional (ideal for B2B)
+  URSA: 'Ursa',       // Deep, trustworthy voice
+  NOVA: 'Nova',       // Energetic, friendly voice
+  DIPPER: 'Dipper',   // Clear, articulate voice
+  CAPELLA: 'Capella', // Melodic, pleasant voice
+  ORBIT: 'Orbit',     // Neutral, versatile voice
+  LYRA: 'Lyra',       // Soft, soothing voice
+  ECLIPSE: 'Eclipse', // Bold, authoritative voice
 } as const;
 
 export type GeminiVoice = typeof GEMINI_VOICES[keyof typeof GEMINI_VOICES];
+
+/**
+ * Detailed voice descriptions for UI and agent configuration
+ */
+export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
+  name: string;
+  description: string;
+  gender: 'male' | 'female' | 'neutral';
+  style: string[];
+  bestFor: string[];
+}> = {
+  'Aoede': {
+    name: 'Aoede',
+    description: 'Bright and warm voice with natural enthusiasm',
+    gender: 'female',
+    style: ['friendly', 'warm', 'engaging'],
+    bestFor: ['customer support', 'outreach', 'general conversation'],
+  },
+  'Charon': {
+    name: 'Charon',
+    description: 'Deep and authoritative voice that commands attention',
+    gender: 'male',
+    style: ['authoritative', 'deep', 'professional'],
+    bestFor: ['executive calls', 'serious topics', 'B2B sales'],
+  },
+  'Fenrir': {
+    name: 'Fenrir',
+    description: 'Calm and measured voice for thoughtful conversations',
+    gender: 'male',
+    style: ['calm', 'measured', 'thoughtful'],
+    bestFor: ['consulting', 'technical discussions', 'complex topics'],
+  },
+  'Kore': {
+    name: 'Kore',
+    description: 'Soft and friendly voice - great default for most use cases',
+    gender: 'female',
+    style: ['soft', 'friendly', 'approachable'],
+    bestFor: ['general purpose', 'warm outreach', 'customer service'],
+  },
+  'Puck': {
+    name: 'Puck',
+    description: 'Light and expressive voice with natural energy',
+    gender: 'neutral',
+    style: ['expressive', 'light', 'dynamic'],
+    bestFor: ['creative content', 'entertainment', 'casual calls'],
+  },
+  'Orion': {
+    name: 'Orion',
+    description: 'Professional and confident male voice',
+    gender: 'male',
+    style: ['professional', 'confident', 'clear'],
+    bestFor: ['B2B sales', 'professional services', 'enterprise'],
+  },
+  'Vega': {
+    name: 'Vega',
+    description: 'Warm and engaging voice - excellent for building rapport',
+    gender: 'female',
+    style: ['warm', 'engaging', 'personable'],
+    bestFor: ['sales calls', 'relationship building', 'lead qualification'],
+  },
+  'Pegasus': {
+    name: 'Pegasus',
+    description: 'Calm and professional voice - ideal for business contexts',
+    gender: 'neutral',
+    style: ['calm', 'professional', 'trustworthy'],
+    bestFor: ['B2B outreach', 'financial services', 'consulting'],
+  },
+  'Ursa': {
+    name: 'Ursa',
+    description: 'Deep and trustworthy voice with gravitas',
+    gender: 'male',
+    style: ['deep', 'trustworthy', 'authoritative'],
+    bestFor: ['executive conversations', 'legal', 'insurance'],
+  },
+  'Nova': {
+    name: 'Nova',
+    description: 'Energetic and friendly voice with natural enthusiasm',
+    gender: 'female',
+    style: ['energetic', 'friendly', 'upbeat'],
+    bestFor: ['outbound sales', 'marketing', 'events'],
+  },
+  'Dipper': {
+    name: 'Dipper',
+    description: 'Clear and articulate voice with excellent diction',
+    gender: 'male',
+    style: ['clear', 'articulate', 'precise'],
+    bestFor: ['technical sales', 'product demos', 'training'],
+  },
+  'Capella': {
+    name: 'Capella',
+    description: 'Melodic and pleasant voice with natural flow',
+    gender: 'female',
+    style: ['melodic', 'pleasant', 'smooth'],
+    bestFor: ['customer experience', 'hospitality', 'healthcare'],
+  },
+  'Orbit': {
+    name: 'Orbit',
+    description: 'Neutral and versatile voice suitable for any context',
+    gender: 'neutral',
+    style: ['neutral', 'versatile', 'balanced'],
+    bestFor: ['general purpose', 'diverse audiences', 'surveys'],
+  },
+  'Lyra': {
+    name: 'Lyra',
+    description: 'Soft and soothing voice for gentle conversations',
+    gender: 'female',
+    style: ['soft', 'soothing', 'gentle'],
+    bestFor: ['support calls', 'sensitive topics', 'healthcare'],
+  },
+  'Eclipse': {
+    name: 'Eclipse',
+    description: 'Bold and authoritative voice that drives action',
+    gender: 'male',
+    style: ['bold', 'authoritative', 'commanding'],
+    bestFor: ['urgent calls', 'closing deals', 'executive outreach'],
+  },
+};
+
+/**
+ * Get recommended voice for a use case
+ */
+export function getRecommendedVoice(useCase: string): GeminiVoice {
+  const useCaseMap: Record<string, GeminiVoice> = {
+    'sales': 'Vega',
+    'b2b': 'Pegasus',
+    'support': 'Kore',
+    'executive': 'Charon',
+    'technical': 'Fenrir',
+    'outreach': 'Nova',
+    'default': 'Kore',
+  };
+  return useCaseMap[useCase.toLowerCase()] || useCaseMap['default'];
+}
 
 /**
  * Default generation config for voice calls

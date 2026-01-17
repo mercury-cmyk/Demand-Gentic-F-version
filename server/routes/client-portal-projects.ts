@@ -1,0 +1,506 @@
+import { Router, Request, Response } from 'express';
+import { db } from '../db';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import {
+  clientProjects,
+  clientProjectCampaigns,
+  clientActivityCosts,
+  clientDeliveryLinks,
+  verificationCampaigns,
+  clientCampaignAccess,
+} from '@shared/schema';
+import { z } from 'zod';
+
+const router = Router();
+
+// Middleware to require client auth is applied in parent router
+
+// ==================== PROJECT MANAGEMENT ====================
+
+// List all projects for client
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    const projects = await db
+      .select({
+        id: clientProjects.id,
+        name: clientProjects.name,
+        description: clientProjects.description,
+        projectCode: clientProjects.projectCode,
+        status: clientProjects.status,
+        startDate: clientProjects.startDate,
+        endDate: clientProjects.endDate,
+        budgetAmount: clientProjects.budgetAmount,
+        budgetCurrency: clientProjects.budgetCurrency,
+        createdAt: clientProjects.createdAt,
+      })
+      .from(clientProjects)
+      .where(eq(clientProjects.clientAccountId, clientAccountId))
+      .orderBy(desc(clientProjects.createdAt));
+
+    // Get campaign counts and total costs for each project
+    const projectsWithStats = await Promise.all(
+      projects.map(async (project) => {
+        // Count campaigns
+        const [campaignCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(clientProjectCampaigns)
+          .where(eq(clientProjectCampaigns.projectId, project.id));
+
+        // Sum costs
+        const [costSum] = await db
+          .select({ total: sql<string>`COALESCE(SUM(total_cost), 0)::text` })
+          .from(clientActivityCosts)
+          .where(eq(clientActivityCosts.projectId, project.id));
+
+        return {
+          ...project,
+          campaignCount: campaignCount?.count || 0,
+          totalCost: parseFloat(costSum?.total || '0'),
+        };
+      })
+    );
+
+    res.json(projectsWithStats);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] List projects error:', error);
+    res.status(500).json({ message: 'Failed to list projects' });
+  }
+});
+
+// Create project schema
+const createProjectSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  budgetAmount: z.number().optional(),
+  budgetCurrency: z.string().length(3).optional(),
+});
+
+// Create new project
+router.post('/', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const parsed = createProjectSchema.parse(req.body);
+
+    const [project] = await db
+      .insert(clientProjects)
+      .values({
+        clientAccountId,
+        name: parsed.name,
+        description: parsed.description,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        budgetAmount: parsed.budgetAmount?.toString(),
+        budgetCurrency: parsed.budgetCurrency,
+        status: 'draft',
+      })
+      .returning();
+
+    res.status(201).json(project);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('[CLIENT PORTAL] Create project error:', error);
+    res.status(500).json({ message: 'Failed to create project' });
+  }
+});
+
+// Get project details
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Get campaigns for this project
+    const campaigns = await db
+      .select({
+        id: verificationCampaigns.id,
+        name: verificationCampaigns.name,
+        assignedAt: clientProjectCampaigns.assignedAt,
+      })
+      .from(clientProjectCampaigns)
+      .innerJoin(
+        verificationCampaigns,
+        eq(clientProjectCampaigns.campaignId, verificationCampaigns.id)
+      )
+      .where(eq(clientProjectCampaigns.projectId, projectId));
+
+    // Get cost summary
+    const [costSummary] = await db
+      .select({
+        totalCost: sql<string>`COALESCE(SUM(total_cost), 0)::text`,
+        activityCount: sql<number>`count(*)::int`,
+      })
+      .from(clientActivityCosts)
+      .where(eq(clientActivityCosts.projectId, projectId));
+
+    res.json({
+      ...project,
+      campaigns,
+      costSummary: {
+        totalCost: parseFloat(costSummary?.totalCost || '0'),
+        activityCount: costSummary?.activityCount || 0,
+      },
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get project error:', error);
+    res.status(500).json({ message: 'Failed to get project' });
+  }
+});
+
+// Update project schema
+const updateProjectSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  status: z.enum(['draft', 'active', 'paused', 'completed', 'archived']).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  budgetAmount: z.number().optional(),
+});
+
+// Update project
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+    const parsed = updateProjectSchema.parse(req.body);
+
+    // Verify ownership
+    const [existing] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const [updated] = await db
+      .update(clientProjects)
+      .set({
+        ...(parsed.name && { name: parsed.name }),
+        ...(parsed.description !== undefined && { description: parsed.description }),
+        ...(parsed.status && { status: parsed.status }),
+        ...(parsed.startDate && { startDate: parsed.startDate }),
+        ...(parsed.endDate && { endDate: parsed.endDate }),
+        ...(parsed.budgetAmount !== undefined && { budgetAmount: parsed.budgetAmount?.toString() }),
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, projectId))
+      .returning();
+
+    res.json(updated);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('[CLIENT PORTAL] Update project error:', error);
+    res.status(500).json({ message: 'Failed to update project' });
+  }
+});
+
+// Get project campaigns
+router.get('/:id/campaigns', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    // Verify ownership
+    const [project] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const campaigns = await db
+      .select({
+        id: verificationCampaigns.id,
+        name: verificationCampaigns.name,
+        status: verificationCampaigns.status,
+        assignedAt: clientProjectCampaigns.assignedAt,
+      })
+      .from(clientProjectCampaigns)
+      .innerJoin(
+        verificationCampaigns,
+        eq(clientProjectCampaigns.campaignId, verificationCampaigns.id)
+      )
+      .where(eq(clientProjectCampaigns.projectId, projectId))
+      .orderBy(desc(clientProjectCampaigns.assignedAt));
+
+    res.json(campaigns);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get project campaigns error:', error);
+    res.status(500).json({ message: 'Failed to get project campaigns' });
+  }
+});
+
+// Get available campaigns to add to project
+router.get('/:id/available-campaigns', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    // Get campaigns client has access to
+    const accessibleCampaigns = await db
+      .select({ campaignId: clientCampaignAccess.campaignId })
+      .from(clientCampaignAccess)
+      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId));
+
+    if (accessibleCampaigns.length === 0) {
+      return res.json([]);
+    }
+
+    const campaignIds = accessibleCampaigns.map((c) => c.campaignId);
+
+    // Get campaigns already in this project
+    const assignedCampaigns = await db
+      .select({ campaignId: clientProjectCampaigns.campaignId })
+      .from(clientProjectCampaigns)
+      .where(eq(clientProjectCampaigns.projectId, projectId));
+
+    const assignedIds = new Set(assignedCampaigns.map((c) => c.campaignId));
+
+    // Filter out already assigned campaigns
+    const availableIds = campaignIds.filter((id) => !assignedIds.has(id));
+
+    if (availableIds.length === 0) {
+      return res.json([]);
+    }
+
+    const campaigns = await db
+      .select({
+        id: verificationCampaigns.id,
+        name: verificationCampaigns.name,
+      })
+      .from(verificationCampaigns)
+      .where(inArray(verificationCampaigns.id, availableIds));
+
+    res.json(campaigns);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get available campaigns error:', error);
+    res.status(500).json({ message: 'Failed to get available campaigns' });
+  }
+});
+
+// Add campaign to project
+router.post('/:id/campaigns', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+    const { campaignId } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ message: 'Campaign ID is required' });
+    }
+
+    // Verify project ownership
+    const [project] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Verify campaign access
+    const [access] = await db
+      .select({ id: clientCampaignAccess.id })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(clientCampaignAccess.campaignId, campaignId)
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ message: 'No access to this campaign' });
+    }
+
+    // Add to project
+    const [assignment] = await db
+      .insert(clientProjectCampaigns)
+      .values({
+        projectId,
+        campaignId,
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    res.status(201).json(assignment || { message: 'Campaign already in project' });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Add campaign to project error:', error);
+    res.status(500).json({ message: 'Failed to add campaign to project' });
+  }
+});
+
+// Remove campaign from project
+router.delete('/:id/campaigns/:campaignId', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+    const campaignId = req.params.campaignId;
+
+    // Verify project ownership
+    const [project] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    await db
+      .delete(clientProjectCampaigns)
+      .where(
+        and(
+          eq(clientProjectCampaigns.projectId, projectId),
+          eq(clientProjectCampaigns.campaignId, campaignId)
+        )
+      );
+
+    res.json({ message: 'Campaign removed from project' });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Remove campaign from project error:', error);
+    res.status(500).json({ message: 'Failed to remove campaign from project' });
+  }
+});
+
+// Get project costs
+router.get('/:id/costs', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    // Verify ownership
+    const [project] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const costs = await db
+      .select()
+      .from(clientActivityCosts)
+      .where(eq(clientActivityCosts.projectId, projectId))
+      .orderBy(desc(clientActivityCosts.activityDate))
+      .limit(100);
+
+    // Get summary by type
+    const summary = await db
+      .select({
+        activityType: clientActivityCosts.activityType,
+        totalCost: sql<string>`SUM(total_cost)::text`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(clientActivityCosts)
+      .where(eq(clientActivityCosts.projectId, projectId))
+      .groupBy(clientActivityCosts.activityType);
+
+    res.json({
+      costs,
+      summary: summary.map((s) => ({
+        ...s,
+        totalCost: parseFloat(s.totalCost),
+      })),
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get project costs error:', error);
+    res.status(500).json({ message: 'Failed to get project costs' });
+  }
+});
+
+// Get project deliveries
+router.get('/:id/deliveries', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    // Verify ownership
+    const [project] = await db
+      .select({ id: clientProjects.id })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    const deliveries = await db
+      .select()
+      .from(clientDeliveryLinks)
+      .where(eq(clientDeliveryLinks.projectId, projectId))
+      .orderBy(desc(clientDeliveryLinks.createdAt));
+
+    res.json(deliveries);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get project deliveries error:', error);
+    res.status(500).json({ message: 'Failed to get project deliveries' });
+  }
+});
+
+export default router;
