@@ -400,7 +400,7 @@ const DISPOSITION_FUNCTION_TOOLS: RealtimeToolDefinition[] = ([
         disposition: {
           type: "string",
           enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data"],
-          description: "The disposition code for this call. qualified_lead: STRICT CRITERIA - prospect must have (1) confirmed identity, (2) engaged in meaningful conversation for at least 30+ seconds, (3) expressed clear interest by asking questions about the offer/product OR explicitly requesting follow-up/materials. A simple 'yes' or 'sure' is NOT sufficient. not_interested: prospect declined or showed no engagement. do_not_call: prospect explicitly asked to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
+          description: "The disposition code for this call. qualified_lead: STRICT CRITERIA - prospect must have (1) confirmed identity, (2) engaged in meaningful conversation for at least 30+ seconds, (3) expressed clear interest by asking questions about the offer/product OR explicitly requesting follow-up/materials. A simple 'yes' or 'sure' is NOT sufficient. not_interested: prospect declined, showed no engagement, or had a conversation but wasn't interested - USE THIS for any completed conversation where they didn't express interest. do_not_call: prospect explicitly asked to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: ONLY use when the phone number is CONFIRMED wrong (someone says 'wrong number', 'no one by that name here') or the line is disconnected/out of service - NEVER use for completed conversations where you spoke with someone."
         },
         confidence: {
           type: "number",
@@ -1861,13 +1861,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     });
 
     provider.on('transcript:user', (event: any) => {
-      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
+        console.log(`${LOG_PREFIX} [Transcript] User: "${event.text}"`);
         session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+      }
     });
 
     provider.on('transcript:agent', (event: any) => {
-      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
+        console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
         session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+      }
     });
 
     provider.on('function:call', async (event: any) => {
@@ -1889,20 +1893,35 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // Store provider for Telnyx audio routing
     (session as any).geminiProvider = provider;
 
-    // Send opening message
+    // Prepare opening message
     let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
     if (!openingScript || !openingScript.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
       openingScript = `Hello, may I speak with ${fallbackName} please?`;
       console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
     }
-    // Wait briefly for setup to complete (usually fast)
-    setTimeout(() => {
-      if (session.isActive && provider.isConnected) {
-        console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
-        provider.sendOpeningMessage(openingScript);
-      }
-    }, 200);
+
+    // Send opening message when Gemini setup completes (fires 'connected' event)
+    // Use one-time listener to avoid duplicate sends
+    let openingSent = false;
+    const sendOpening = () => {
+      if (openingSent || !session.isActive) return;
+      openingSent = true;
+      console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
+      provider.sendOpeningMessage(openingScript);
+    };
+
+    // Listen for connected event (fires when setup completes)
+    provider.once('connected', () => {
+      console.log(`${LOG_PREFIX} Gemini connected event received, sending opening message`);
+      sendOpening();
+    });
+
+    // Fallback: if already connected (unlikely but safe), send immediately
+    if (provider.isConnected) {
+      console.log(`${LOG_PREFIX} Gemini already connected, sending opening message immediately`);
+      sendOpening();
+    }
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized`);
   } catch (error: any) {
@@ -1921,8 +1940,48 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
 // Handle Gemini function calls
 async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: string, args: Record<string, any>): Promise<any> {
+  const LOG_PREFIX = '[OpenAI-Realtime-Dialer]';
   switch (name) {
-    case 'submit_disposition': session.detectedDisposition = args.disposition as DispositionCode; return { success: true };
+    case 'submit_disposition': {
+      let disposition = args.disposition as DispositionCode;
+      const reason = args.reason || '';
+      const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+      const MINIMUM_QUALIFIED_DURATION = 30;
+
+      // Check if the reason indicates a legitimate invalid_data case
+      const reasonLower = reason.toLowerCase();
+      const isLegitimateInvalidData =
+        reasonLower.includes('wrong number') ||
+        reasonLower.includes('no one by that name') ||
+        reasonLower.includes('doesn\'t work here') ||
+        reasonLower.includes('does not work here') ||
+        reasonLower.includes('no longer works') ||
+        reasonLower.includes('left the company') ||
+        reasonLower.includes('disconnected') ||
+        reasonLower.includes('out of service') ||
+        reasonLower.includes('not in service') ||
+        reasonLower.includes('number not valid') ||
+        reasonLower.includes('invalid number');
+
+      // SAFEGUARD: Auto-correct invalid_data to not_interested if there was a meaningful conversation
+      // EXCEPTION: Keep invalid_data if AI explicitly confirmed wrong number/person left
+      if (disposition === 'invalid_data' && callDurationSeconds >= MINIMUM_QUALIFIED_DURATION && !isLegitimateInvalidData) {
+        console.warn(`${LOG_PREFIX} ⚠️ [Gemini] DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence. Auto-correcting to not_interested.`);
+        disposition = 'not_interested';
+      } else if (disposition === 'invalid_data' && isLegitimateInvalidData) {
+        console.log(`${LOG_PREFIX} ✅ [Gemini] invalid_data confirmed: ${reason}`);
+      }
+
+      // Also correct if there are transcripts indicating a real conversation (without wrong number indicators)
+      if (disposition === 'invalid_data' && session.transcripts.length > 2 && !isLegitimateInvalidData) {
+        console.warn(`${LOG_PREFIX} ⚠️ [Gemini] DISPOSITION CORRECTION: Call has ${session.transcripts.length} transcript entries but marked as invalid_data. Auto-correcting to not_interested.`);
+        disposition = 'not_interested';
+      }
+
+      session.detectedDisposition = disposition;
+      console.log(`${LOG_PREFIX} [Gemini] Disposition: ${args.disposition}${disposition !== args.disposition ? ` → ${disposition} (auto-corrected)` : ''} (duration: ${callDurationSeconds}s, reason: ${reason})`);
+      return { success: true };
+    }
     case 'submit_call_summary': session.callSummary = normalizeCallSummary(args); return { success: true };
     case 'schedule_callback': return { success: true, scheduled: args.callback_datetime };
     case 'transfer_to_human': session.detectedDisposition = 'qualified_lead'; return { success: true };
@@ -3124,9 +3183,51 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
           if (disposition === 'qualified_lead' && confidence > 0.7 && callDurationSeconds < MINIMUM_QUALIFIED_DURATION) {
             console.warn(`${LOG_PREFIX} ⚠️ HIGH CONFIDENCE SHORT CALL: AI has ${confidence} confidence for qualified_lead but call is only ${callDurationSeconds}s. This may indicate AI hallucination.`);
           }
-          
-          session.detectedDisposition = disposition;
-          console.log(`${LOG_PREFIX} Disposition detected: ${disposition} (confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
+
+          // SAFEGUARD: Auto-correct invalid_data to not_interested if there was a meaningful conversation
+          // invalid_data should ONLY be used for confirmed wrong numbers or disconnected lines
+          // EXCEPTION: If AI explicitly says it's a wrong number/gatekeeper block, keep as invalid_data
+          let finalDisposition = disposition;
+
+          // Check if the reason indicates a legitimate invalid_data case
+          const reasonLower = reason.toLowerCase();
+          const isLegitimateInvalidData =
+            reasonLower.includes('wrong number') ||
+            reasonLower.includes('no one by that name') ||
+            reasonLower.includes('doesn\'t work here') ||
+            reasonLower.includes('does not work here') ||
+            reasonLower.includes('no longer works') ||
+            reasonLower.includes('left the company') ||
+            reasonLower.includes('disconnected') ||
+            reasonLower.includes('out of service') ||
+            reasonLower.includes('not in service') ||
+            reasonLower.includes('number not valid') ||
+            reasonLower.includes('invalid number');
+
+          if (disposition === 'invalid_data' && callDurationSeconds >= MINIMUM_QUALIFIED_DURATION && !isLegitimateInvalidData) {
+            // If it's a long call without explicit wrong number indication, auto-correct
+            console.warn(`${LOG_PREFIX} ⚠️ DISPOSITION CORRECTION: AI marked ${callDurationSeconds}s call as invalid_data without wrong number evidence.`);
+            console.warn(`${LOG_PREFIX} ⚠️ Auto-correcting disposition from invalid_data to not_interested. Reason given: ${reason}`);
+            finalDisposition = 'not_interested';
+          } else if (disposition === 'invalid_data' && isLegitimateInvalidData) {
+            console.log(`${LOG_PREFIX} ✅ invalid_data confirmed: ${reason}`);
+          }
+
+          // Also check transcript content for conversation indicators
+          if (disposition === 'invalid_data' && session.transcripts.length > 2 && !isLegitimateInvalidData) {
+            console.warn(`${LOG_PREFIX} ⚠️ SUSPICIOUS invalid_data: Call has ${session.transcripts.length} transcript entries but marked as invalid_data.`);
+            if (finalDisposition === 'invalid_data') {
+              console.warn(`${LOG_PREFIX} ⚠️ Auto-correcting to not_interested based on transcript activity.`);
+              finalDisposition = 'not_interested';
+            }
+          }
+
+          session.detectedDisposition = finalDisposition;
+          if (finalDisposition !== disposition) {
+            console.log(`${LOG_PREFIX} Disposition: ${disposition} → ${finalDisposition} (auto-corrected, confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
+          } else {
+            console.log(`${LOG_PREFIX} Disposition detected: ${disposition} (confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
+          }
           
           if (session.openaiWs?.readyState === WebSocket.OPEN) {
             session.openaiWs.send(JSON.stringify({
@@ -4073,7 +4174,15 @@ async function handlePostCallArtifacts(params: {
       return;
     }
 
-    const summaryText = params.callSummary?.summary || `Call completed with disposition ${params.disposition}.`;
+    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
+    const recap = buildAutoCallRecap({
+      contactName: contact.fullName || contact.firstName || undefined,
+      jobTitle: contact.jobTitle || undefined,
+      disposition: params.disposition,
+      callOutcome,
+      summary: params.callSummary,
+    });
+
     const keyNotes = [
       params.callSummary?.summary,
       params.callSummary?.primary_challenge,
@@ -4084,10 +4193,11 @@ async function handlePostCallArtifacts(params: {
       accountId: contact.accountId,
       contactId: params.contactId,
       callAttemptId: params.callAttemptId,
-      summary: summaryText,
+      summary: recap.text,
       payload: {
         disposition: params.disposition,
         call_summary: params.callSummary,
+        call_recap: recap.meta,
       },
     });
 
@@ -4099,7 +4209,6 @@ async function handlePostCallArtifacts(params: {
       return;
     }
 
-    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
     const followupEmail = await generatePostCallFollowupEmail({
       accountId: contact.accountId,
       contactId: params.contactId,
@@ -4122,6 +4231,50 @@ async function handlePostCallArtifacts(params: {
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to create post-call artifacts:`, error);
   }
+}
+
+function buildAutoCallRecap(options: {
+  contactName?: string;
+  jobTitle?: string;
+  disposition: DispositionCode;
+  callOutcome: string;
+  summary: CallSummary | null;
+}): { text: string; meta: Record<string, unknown> } {
+  const engagement = options.summary?.engagement_level || "unknown";
+  const sentiment = options.summary?.sentiment || "unknown";
+  const timePressure = options.summary?.time_pressure ? "yes" : "no";
+  const primaryChallenge = options.summary?.primary_challenge || "Not captured";
+  const followUpConsent = options.summary?.follow_up_consent || "unknown";
+  const nextStep = options.summary?.next_step || "None recorded";
+  const introHighlight = options.summary?.summary || `Call completed with disposition ${options.disposition}.`;
+
+  const lines: string[] = [
+    "[Call Recap]",
+    `Reached: ${options.contactName || "Contact"}${options.jobTitle ? ` (${options.jobTitle})` : ""}`,
+    `Disposition: ${options.disposition}`,
+    `Intro/Highlights: ${introHighlight}`,
+    `Response: engagement ${engagement}, sentiment ${sentiment}, time pressure ${timePressure}`,
+    `Outcome: ${options.callOutcome}${nextStep !== "None recorded" ? ` | Next step: ${nextStep}` : ""}`,
+    `Challenge: ${primaryChallenge}`,
+    `Follow-up consent: ${followUpConsent}`,
+  ];
+
+  return {
+    text: lines.join("\n"),
+    meta: {
+      contact_name: options.contactName,
+      job_title: options.jobTitle,
+      disposition: options.disposition,
+      call_outcome: options.callOutcome,
+      engagement,
+      sentiment,
+      time_pressure: options.summary?.time_pressure ?? null,
+      primary_challenge: options.summary?.primary_challenge || null,
+      follow_up_consent: options.summary?.follow_up_consent || null,
+      next_step: options.summary?.next_step || null,
+      summary: options.summary?.summary || null,
+    },
+  };
 }
 
 function mapDispositionToCallOutcome(
@@ -4933,11 +5086,17 @@ Call this when you determine the call outcome. REQUIRED at end of every call.
 
 **Disposition codes:**
 - qualified_lead: All 3 criteria above met. Prospect engaged and interested.
-- not_interested: Prospect politely declined or showed no engagement
+- not_interested: Prospect politely declined or showed no engagement. USE THIS for any completed conversation where they didn't express clear interest.
 - do_not_call: Prospect explicitly asked not to be called again
 - voicemail: Reached voicemail or answering machine
 - no_answer: Call connected but no meaningful human interaction
 - callback_requested: Prospect asked to be called back
+- invalid_data: ONLY use when phone number is CONFIRMED wrong ("wrong number", "no one by that name") or line is disconnected/out of service. NEVER use for completed conversations.
+
+**CRITICAL: invalid_data vs not_interested**
+- If you had ANY conversation with a human (even brief), use not_interested or qualified_lead - NOT invalid_data
+- invalid_data means the phone number itself is bad - not that the call didn't go well
+- When in doubt between invalid_data and not_interested, choose not_interested
 
 ## end_call
 Use this to explicitly hang up the call. Call flow:

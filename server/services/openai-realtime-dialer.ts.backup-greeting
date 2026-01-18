@@ -3736,7 +3736,15 @@ async function handlePostCallArtifacts(params: {
       return;
     }
 
-    const summaryText = params.callSummary?.summary || `Call completed with disposition ${params.disposition}.`;
+    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
+    const recap = buildAutoCallRecap({
+      contactName: contact.fullName || contact.firstName || undefined,
+      jobTitle: contact.jobTitle || undefined,
+      disposition: params.disposition,
+      callOutcome,
+      summary: params.callSummary,
+    });
+
     const keyNotes = [
       params.callSummary?.summary,
       params.callSummary?.primary_challenge,
@@ -3747,10 +3755,11 @@ async function handlePostCallArtifacts(params: {
       accountId: contact.accountId,
       contactId: params.contactId,
       callAttemptId: params.callAttemptId,
-      summary: summaryText,
+      summary: recap.text,
       payload: {
         disposition: params.disposition,
         call_summary: params.callSummary,
+        call_recap: recap.meta,
       },
     });
 
@@ -3762,7 +3771,6 @@ async function handlePostCallArtifacts(params: {
       return;
     }
 
-    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
     const followupEmail = await generatePostCallFollowupEmail({
       accountId: contact.accountId,
       contactId: params.contactId,
@@ -3785,6 +3793,50 @@ async function handlePostCallArtifacts(params: {
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to create post-call artifacts:`, error);
   }
+}
+
+function buildAutoCallRecap(options: {
+  contactName?: string;
+  jobTitle?: string;
+  disposition: DispositionCode;
+  callOutcome: string;
+  summary: CallSummary | null;
+}): { text: string; meta: Record<string, unknown> } {
+  const engagement = options.summary?.engagement_level || "unknown";
+  const sentiment = options.summary?.sentiment || "unknown";
+  const timePressure = options.summary?.time_pressure ? "yes" : "no";
+  const primaryChallenge = options.summary?.primary_challenge || "Not captured";
+  const followUpConsent = options.summary?.follow_up_consent || "unknown";
+  const nextStep = options.summary?.next_step || "None recorded";
+  const introHighlight = options.summary?.summary || `Call completed with disposition ${options.disposition}.`;
+
+  const lines: string[] = [
+    "[Call Recap]",
+    `Reached: ${options.contactName || "Contact"}${options.jobTitle ? ` (${options.jobTitle})` : ""}`,
+    `Disposition: ${options.disposition}`,
+    `Intro/Highlights: ${introHighlight}`,
+    `Response: engagement ${engagement}, sentiment ${sentiment}, time pressure ${timePressure}`,
+    `Outcome: ${options.callOutcome}${nextStep !== "None recorded" ? ` | Next step: ${nextStep}` : ""}`,
+    `Challenge: ${primaryChallenge}`,
+    `Follow-up consent: ${followUpConsent}`,
+  ];
+
+  return {
+    text: lines.join("\n"),
+    meta: {
+      contact_name: options.contactName,
+      job_title: options.jobTitle,
+      disposition: options.disposition,
+      call_outcome: options.callOutcome,
+      engagement,
+      sentiment,
+      time_pressure: options.summary?.time_pressure ?? null,
+      primary_challenge: options.summary?.primary_challenge || null,
+      follow_up_consent: options.summary?.follow_up_consent || null,
+      next_step: options.summary?.next_step || null,
+      summary: options.summary?.summary || null,
+    },
+  };
 }
 
 function mapDispositionToCallOutcome(
