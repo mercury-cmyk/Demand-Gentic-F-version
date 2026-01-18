@@ -57,6 +57,7 @@ import openaiWebrtcRouter from './routes/openai-webrtc';
 import telnyxWebrtcRouter from './routes/telnyx-webrtc';
 import virtualAgentsRouter from './routes/virtual-agents';
 import voiceProviderRouter from './routes/voice-provider-routes';
+import agentDefaultsRouter from './routes/agent-defaults';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
@@ -67,6 +68,7 @@ import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-
 import problemIntelligenceRouter from './routes/problem-intelligence-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import previewStudioRouter from './routes/preview-studio';
+import simulationsRouter from './routes/simulations';
 import healthRouter from './routes/health';
 import vertexAiRouter from './routes/vertex-ai';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
@@ -13292,6 +13294,10 @@ Provide JSON response with:
 
   app.use("/api/voice-providers", voiceProviderRouter);
 
+  // ==================== AGENT DEFAULTS (Global Agent Configuration) ====================
+
+  app.use("/api/agent-defaults", agentDefaultsRouter);
+
   // ==================== HYBRID CAMPAIGN AGENTS ====================
 
   app.use("/api/campaigns", hybridCampaignAgentsRouter);
@@ -13324,6 +13330,11 @@ Provide JSON response with:
   // ==================== PREVIEW STUDIO ====================
   // Preview and test campaign content (emails, call plans, live simulation)
   app.use("/api/preview-studio", previewStudioRouter);
+
+  // ==================== SIMULATIONS ====================
+  // TRUE telephony-free simulation - NO dialer, NO phone, NO SIP
+  // call_mode: "SIMULATION" enforced - completely decoupled from telephony
+  app.use("/api/simulations", simulationsRouter);
 
   // ==================== KNOWLEDGE BLOCKS ====================
   // Modular, versioned agent knowledge management

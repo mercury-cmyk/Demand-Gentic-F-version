@@ -126,8 +126,10 @@ interface LiveSimulationPanelProps {
   onAnalysisReady?: (report: EvaluationReport) => void;
 }
 
-type SimulationMode = 'phone' | 'browser';
+type SimulationMode = 'text' | 'voice' | 'phone';
 type CallStatus = 'idle' | 'initiating' | 'ringing' | 'in_progress' | 'completed' | 'failed';
+type TextSimStatus = 'idle' | 'running' | 'completed' | 'error';
+type VoiceSimStatus = 'idle' | 'connecting' | 'active' | 'completed' | 'error';
 
 interface BrowserSimulationMessage {
   role: 'user' | 'assistant';
@@ -144,8 +146,8 @@ export function LiveSimulationPanel({
   const [mode, setMode] = useState<SimulationMode>('phone');
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [voiceProvider, setVoiceProvider] = useState<"openai" | "google">("openai");
-  const [selectedVoice, setSelectedVoice] = useState<string>("marin");
+  const [voiceProvider, setVoiceProvider] = useState<"openai" | "google">("google");
+  const [selectedVoice, setSelectedVoice] = useState<string>("Kore");
   // OpenAI Realtime configuration
   const [turnDetection, setTurnDetection] = useState<string>("server_vad");
   const [eagerness, setEagerness] = useState<string>("medium");
@@ -162,9 +164,21 @@ export function LiveSimulationPanel({
   const [browserInputValue, setBrowserInputValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [callDuration, setCallDuration] = useState(0);
+  // Text simulation state
+  const [textSimStatus, setTextSimStatus] = useState<TextSimStatus>('idle');
+  const [selectedPersona, setSelectedPersona] = useState<string>('neutral_dm');
+  const [textSimResult, setTextSimResult] = useState<any>(null);
+  // Voice simulation state
+  const [voiceSimStatus, setVoiceSimStatus] = useState<VoiceSimStatus>('idle');
+  const [voiceSimTranscripts, setVoiceSimTranscripts] = useState<TranscriptEntry[]>([]);
+  const [isMuted, setIsMuted] = useState(false);
+  const voiceSimWsRef = useRef<WebSocket | null>(null);
+  const voiceSimDurationRef = useRef<number>(0);
+  const [voiceSimDuration, setVoiceSimDuration] = useState(0);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const voiceSimTimerRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const playPreviewRef = useRef<HTMLAudioElement | null>(null);
@@ -438,6 +452,309 @@ export function LiveSimulationPanel({
     phoneTestMutation.mutate();
   };
 
+  // TRUE TEXT SIMULATION - No telephony required
+  const textSimulationMutation = useMutation({
+    mutationFn: async () => {
+      // Build simulation request with assembled prompt
+      const simRequest: any = {
+        campaignId: campaignId || undefined,
+        accountId: accountId || undefined,
+        contactId: contactId || undefined,
+        personaPreset: selectedPersona,
+        maxTurns: 12,
+        runFullSimulation: true,
+      };
+      
+      // Always include prompt if available (from Preview Studio auto-load)
+      if (customSystemPrompt) {
+        simRequest.customSystemPrompt = customSystemPrompt;
+      }
+      if (customFirstMessage) {
+        simRequest.customFirstMessage = customFirstMessage;
+      }
+      
+      console.log('[TextSim] Starting with config:', {
+        campaignId: simRequest.campaignId,
+        accountId: simRequest.accountId,
+        hasSystemPrompt: !!simRequest.customSystemPrompt,
+        promptLength: simRequest.customSystemPrompt?.length,
+      });
+      
+      const res = await apiRequest('POST', '/api/simulations/start', simRequest);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Simulation failed');
+      }
+      return res.json();
+    },
+    onMutate: () => {
+      setTextSimStatus('running');
+      setError(null);
+      setTextSimResult(null);
+    },
+    onSuccess: (data) => {
+      setTextSimStatus('completed');
+      setTextSimResult(data.session);
+      toast({
+        title: 'Simulation Complete',
+        description: `Score: ${data.session?.evaluation?.overallScore || 0}/100`,
+      });
+    },
+    onError: (error: Error) => {
+      setTextSimStatus('error');
+      setError(error.message);
+      toast({
+        variant: 'destructive',
+        title: 'Simulation Failed',
+        description: error.message,
+      });
+    },
+  });
+
+  const handleStartTextSimulation = () => {
+    textSimulationMutation.mutate();
+  };
+
+  const handleResetTextSimulation = () => {
+    setTextSimStatus('idle');
+    setTextSimResult(null);
+    setError(null);
+  };
+
+  // Speech synthesis for TTS
+  const speakText = useCallback((text: string) => {
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      // Try to use a natural voice
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v => 
+        v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha')
+      ) || voices[0];
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  }, []);
+
+  // Speech recognition ref
+  const recognitionRef = useRef<any>(null);
+
+  // VOICE SIMULATION - Browser-based with Speech Recognition & TTS
+  const handleStartVoiceSimulation = async () => {
+    try {
+      setVoiceSimStatus('connecting');
+      setError(null);
+      setVoiceSimTranscripts([]);
+      setVoiceSimDuration(0);
+      voiceSimDurationRef.current = 0;
+
+      // Check for speech recognition support
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        throw new Error('Speech recognition not supported in this browser. Try Chrome.');
+      }
+
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Build simulation request with assembled prompt
+      const simRequest: any = {
+        campaignId: campaignId || undefined,
+        accountId: accountId || undefined,
+        contactId: contactId || undefined,
+        personaPreset: selectedPersona || 'neutral_dm',
+        maxTurns: 20,
+        runFullSimulation: false, // Interactive mode
+      };
+      
+      // Always include prompt if available (from Preview Studio auto-load)
+      if (customSystemPrompt) {
+        simRequest.customSystemPrompt = customSystemPrompt;
+      }
+      if (customFirstMessage) {
+        simRequest.customFirstMessage = customFirstMessage;
+      }
+      
+      console.log('[VoiceSim] Starting with config:', {
+        campaignId: simRequest.campaignId,
+        accountId: simRequest.accountId,
+        hasSystemPrompt: !!simRequest.customSystemPrompt,
+        promptLength: simRequest.customSystemPrompt?.length,
+      });
+      
+      const res = await apiRequest('POST', '/api/simulations/start', simRequest);
+
+      if (!res.ok) {
+        stream.getTracks().forEach(track => track.stop());
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to start voice simulation');
+      }
+
+      const data = await res.json();
+      
+      // Store session
+      (window as any).__voiceSimSession = data.session;
+      (window as any).__voiceSimStream = stream;
+
+      // Set up speech recognition
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognitionRef.current = recognition;
+
+      recognition.onresult = async (event: any) => {
+        const last = event.results.length - 1;
+        const userText = event.results[last][0].transcript;
+        
+        if (userText.trim()) {
+          // Add user message to transcript
+          setVoiceSimTranscripts(prev => [...prev, {
+            role: 'user',
+            content: userText,
+            timestamp: new Date(),
+          }]);
+
+          // Send to simulation API for AI response
+          try {
+            const msgRes = await apiRequest('POST', '/api/simulations/message', {
+              sessionId: (window as any).__voiceSimSession?.id,
+              humanMessage: userText,
+            });
+            
+            if (msgRes.ok) {
+              const msgData = await msgRes.json();
+              const aiResponse = msgData.agentResponse || msgData.response;
+              
+              if (aiResponse) {
+                // Add AI response to transcript
+                setVoiceSimTranscripts(prev => [...prev, {
+                  role: 'agent',
+                  content: aiResponse,
+                  timestamp: new Date(),
+                }]);
+                
+                // Speak the response
+                speakText(aiResponse);
+              }
+            }
+          } catch (err) {
+            console.error('Failed to get AI response:', err);
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          setError('Microphone access denied');
+        }
+      };
+
+      recognition.onend = () => {
+        // Restart if still active
+        if (voiceSimStatus === 'active' && recognitionRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch (e) {
+            // Already started or stopped
+          }
+        }
+      };
+
+      // Start recognition
+      recognition.start();
+      setVoiceSimStatus('active');
+
+      // Start duration timer
+      voiceSimTimerRef.current = setInterval(() => {
+        voiceSimDurationRef.current += 1;
+        setVoiceSimDuration(voiceSimDurationRef.current);
+      }, 1000);
+
+      // Speak initial greeting
+      if (data.session?.transcript?.length > 0) {
+        const firstTurn = data.session.transcript[0];
+        setVoiceSimTranscripts([{
+          role: 'agent',
+          content: firstTurn.content,
+          timestamp: new Date(),
+        }]);
+        // Speak the greeting
+        setTimeout(() => speakText(firstTurn.content), 500);
+      }
+
+      toast({
+        title: 'Voice Simulation Active',
+        description: 'Listening... Speak to interact with the AI agent.',
+      });
+
+    } catch (err: any) {
+      console.error('Voice simulation error:', err);
+      setVoiceSimStatus('error');
+      setError(err.message || 'Failed to start voice simulation');
+      toast({
+        variant: 'destructive',
+        title: 'Voice Simulation Failed',
+        description: err.message || 'Could not access microphone or start simulation',
+      });
+    }
+  };
+
+  const handleEndVoiceSimulation = () => {
+    // Stop speech recognition
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
+
+    // Stop any ongoing speech
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    // Stop timer
+    if (voiceSimTimerRef.current) {
+      clearInterval(voiceSimTimerRef.current);
+      voiceSimTimerRef.current = null;
+    }
+
+    // Stop microphone stream
+    const stream = (window as any).__voiceSimStream;
+    if (stream) {
+      stream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      delete (window as any).__voiceSimStream;
+    }
+
+    // Clean up session
+    delete (window as any).__voiceSimSession;
+
+    setVoiceSimStatus('completed');
+    toast({
+      title: 'Voice Session Ended',
+      description: `Duration: ${formatDuration(voiceSimDuration)}`,
+    });
+  };
+
+  const handleResetVoiceSimulation = () => {
+    setVoiceSimStatus('idle');
+    setVoiceSimTranscripts([]);
+    setVoiceSimDuration(0);
+    voiceSimDurationRef.current = 0;
+    setError(null);
+  };
+
   // Mutation to hang up call
   const hangupMutation = useMutation({
     mutationFn: async (sessionId: string) => {
@@ -516,16 +833,494 @@ export function LiveSimulationPanel({
           Simulation Lab
         </h2>
         <p className="text-sm text-muted-foreground">
-          Validate your AI agent with real voice calls. For testing without making actual calls, use the Text Simulation tab.
+          Validate your AI agent with text simulations (free) or real voice calls.
         </p>
       </div>
+
+      {/* Mode Tabs */}
+      <Tabs value={mode} onValueChange={(v) => setMode(v as SimulationMode)} className="w-full">
+        <TabsList className="grid w-full grid-cols-3 mb-4">
+          <TabsTrigger value="text" className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Text Sim
+            <Badge variant="secondary" className="ml-1 text-xs">Free</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="voice" className="flex items-center gap-2">
+            <Mic className="h-4 w-4" />
+            Voice Sim
+            <Badge variant="secondary" className="ml-1 text-xs">Free</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="phone" className="flex items-center gap-2">
+            <Phone className="h-4 w-4" />
+            Live Call
+          </TabsTrigger>
+        </TabsList>
+
+        {/* TEXT SIMULATION TAB */}
+        <TabsContent value="text" className="space-y-4">
+          <Alert className="border-green-200 bg-green-50 dark:bg-green-950/20">
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <AlertDescription className="text-sm text-green-900 dark:text-green-100">
+              <strong>No Phone Required</strong> - This runs a full conversation simulation using AI personas. No telephony costs.
+            </AlertDescription>
+          </Alert>
+
+          <Card className="border-0 shadow-lg bg-white dark:bg-card relative overflow-hidden ring-1 ring-border/50">
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500" />
+            <CardContent className="p-6 space-y-4">
+              {error && mode === 'text' && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {textSimStatus === 'idle' && (
+                <>
+                  {/* Persona Selection */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium flex items-center gap-2">
+                      <User className="h-4 w-4 text-primary" />
+                      Simulated Human Persona
+                    </Label>
+                    <Select value={selectedPersona} onValueChange={setSelectedPersona}>
+                      <SelectTrigger className="h-12">
+                        <SelectValue placeholder="Select persona" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="friendly_dm">
+                          <div className="flex items-center gap-2">
+                            <span>Friendly Decision Maker</span>
+                            <Badge variant="outline" className="text-xs">Easy</Badge>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="neutral_dm">
+                          <div className="flex items-center gap-2">
+                            <span>Neutral Decision Maker</span>
+                            <Badge variant="outline" className="text-xs">Normal</Badge>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="skeptical_dm">
+                          <div className="flex items-center gap-2">
+                            <span>Skeptical Decision Maker</span>
+                            <Badge variant="outline" className="text-xs">Hard</Badge>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="hostile_dm">
+                          <div className="flex items-center gap-2">
+                            <span>Hostile Decision Maker</span>
+                            <Badge variant="destructive" className="text-xs">Very Hard</Badge>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="busy_executive">
+                          <div className="flex items-center gap-2">
+                            <span>Busy Executive</span>
+                            <Badge variant="outline" className="text-xs">Time-limited</Badge>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="gatekeeper_assistant">
+                          <div className="flex items-center gap-2">
+                            <span>Gatekeeper (Assistant)</span>
+                            <Badge variant="outline" className="text-xs">Screening</Badge>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Context Info */}
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {campaignId && <Badge variant="secondary">Campaign selected</Badge>}
+                    {accountId && <Badge variant="secondary">Account selected</Badge>}
+                    {promptLoaded && <Badge variant="secondary">Prompt loaded</Badge>}
+                    {!campaignId && !accountId && (
+                      <span className="text-amber-600">Optional: Select campaign/account for context</span>
+                    )}
+                  </div>
+
+                  {/* Start Button */}
+                  <Button
+                    onClick={handleStartTextSimulation}
+                    disabled={textSimulationMutation.isPending}
+                    className="w-full h-12 text-lg gap-2"
+                    size="lg"
+                  >
+                    {textSimulationMutation.isPending ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Brain className="h-5 w-5" />
+                    )}
+                    {textSimulationMutation.isPending ? 'Running Simulation...' : 'Run Text Simulation'}
+                  </Button>
+                </>
+              )}
+
+              {textSimStatus === 'running' && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                  <h3 className="text-lg font-semibold">Running Simulation...</h3>
+                  <p className="text-sm text-muted-foreground">AI is conversing with the simulated human</p>
+                </div>
+              )}
+
+              {textSimStatus === 'completed' && textSimResult && (
+                <div className="space-y-4">
+                  {/* Score Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-14 h-14 rounded-full flex items-center justify-center",
+                        (textSimResult.evaluation?.overallScore || 0) >= 70 
+                          ? "bg-green-500/20" 
+                          : (textSimResult.evaluation?.overallScore || 0) >= 40
+                          ? "bg-yellow-500/20"
+                          : "bg-red-500/20"
+                      )}>
+                        <span className={cn(
+                          "text-xl font-bold",
+                          (textSimResult.evaluation?.overallScore || 0) >= 70 
+                            ? "text-green-600" 
+                            : (textSimResult.evaluation?.overallScore || 0) >= 40
+                            ? "text-yellow-600"
+                            : "text-red-600"
+                        )}>
+                          {textSimResult.evaluation?.overallScore || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold">Simulation Complete</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {textSimResult.currentTurn || 0} turns completed
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="outline" onClick={handleResetTextSimulation} className="gap-2">
+                      <RotateCcw className="h-4 w-4" />
+                      Run Again
+                    </Button>
+                  </div>
+
+                  {/* Transcript */}
+                  {textSimResult.transcript && textSimResult.transcript.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Conversation Transcript</Label>
+                      <ScrollArea className="h-[300px] border rounded-lg p-4 bg-muted/30">
+                        <div className="space-y-3">
+                          {textSimResult.transcript.map((turn: any, idx: number) => (
+                            <div key={idx} className={cn(
+                              "flex gap-3",
+                              turn.role === 'agent' ? "justify-start" : "justify-end"
+                            )}>
+                              <div className={cn(
+                                "max-w-[80%] rounded-lg p-3 text-sm",
+                                turn.role === 'agent' 
+                                  ? "bg-primary/10 text-foreground" 
+                                  : "bg-muted text-foreground"
+                              )}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  {turn.role === 'agent' ? (
+                                    <Bot className="h-3 w-3" />
+                                  ) : (
+                                    <User className="h-3 w-3" />
+                                  )}
+                                  <span className="text-xs font-medium uppercase">
+                                    {turn.role === 'agent' ? 'AI Agent' : 'Human'}
+                                  </span>
+                                </div>
+                                <p>{turn.content}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+
+                  {/* Evaluation Metrics */}
+                  {textSimResult.evaluation?.metrics && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Evaluation Metrics</Label>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <span>Identity Confirmed</span>
+                          {textSimResult.evaluation.metrics.identityConfirmation ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <span>Value Proposition</span>
+                          {textSimResult.evaluation.metrics.valuePropositionDelivered ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <span>Objections Handled</span>
+                          <Badge variant="secondary">{textSimResult.evaluation.metrics.objectionsHandled || 0}</Badge>
+                        </div>
+                        <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                          <span>Professional Tone</span>
+                          {textSimResult.evaluation.metrics.toneProfessional ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {textSimStatus === 'error' && (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <AlertTriangle className="h-12 w-12 text-red-500 mb-4" />
+                  <h3 className="text-lg font-semibold">Simulation Failed</h3>
+                  <p className="text-sm text-muted-foreground mb-4">{error}</p>
+                  <Button variant="outline" onClick={handleResetTextSimulation}>
+                    Try Again
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* VOICE SIMULATION TAB */}
+        <TabsContent value="voice" className="space-y-4">
+          <Alert className="border-purple-200 bg-purple-50 dark:bg-purple-950/20">
+            <Mic className="h-4 w-4 text-purple-600" />
+            <AlertDescription className="text-sm text-purple-900 dark:text-purple-100">
+              <strong>Browser Voice Simulation</strong> - Talk directly to your AI agent using your microphone. No phone or telephony costs.
+            </AlertDescription>
+          </Alert>
+
+          <Card className="border-0 shadow-lg bg-white dark:bg-card relative overflow-hidden ring-1 ring-border/50">
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-purple-500 via-violet-500 to-indigo-500" />
+            <CardContent className="p-6 space-y-4">
+              {error && mode === 'voice' && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {voiceSimStatus === 'idle' && (
+                <>
+                  {/* Voice Selection Info */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium flex items-center gap-2">
+                      <Volume2 className="h-4 w-4 text-primary" />
+                      AI Agent Voice
+                    </Label>
+                    <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                      <Badge variant="secondary">
+                        {selectedVoice || 'Default Voice'}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        Your agent will speak using this voice
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Context Info */}
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {promptLoaded && <Badge variant="secondary">Prompt loaded</Badge>}
+                    <span>Uses browser microphone for input</span>
+                  </div>
+
+                  {/* Requirements */}
+                  <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                    <Info className="h-4 w-4" />
+                    <span>Microphone access required. Make sure to allow when prompted.</span>
+                  </div>
+
+                  {/* Start Button */}
+                  <Button
+                    onClick={() => handleStartVoiceSimulation()}
+                    className="w-full h-12 text-lg gap-2 bg-gradient-to-r from-purple-500 to-violet-500 hover:from-purple-600 hover:to-violet-600"
+                    size="lg"
+                  >
+                    <Mic className="h-5 w-5" />
+                    Start Voice Conversation
+                  </Button>
+                </>
+              )}
+
+              {voiceSimStatus === 'connecting' && (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="h-12 w-12 animate-spin text-purple-500 mb-4" />
+                  <h3 className="text-lg font-semibold">Connecting...</h3>
+                  <p className="text-sm text-muted-foreground">Initializing voice simulation</p>
+                </div>
+              )}
+
+              {voiceSimStatus === 'active' && (
+                <div className="space-y-4">
+                  {/* Active Call Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center animate-pulse">
+                        <Mic className="h-6 w-6 text-purple-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold">Voice Session Active</h3>
+                        <p className="text-sm text-muted-foreground font-mono">
+                          {formatDuration(voiceSimDuration)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setIsMuted(!isMuted)}
+                        className={cn(isMuted && "bg-red-100 dark:bg-red-900/20")}
+                      >
+                        {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleEndVoiceSimulation}
+                        className="gap-2"
+                      >
+                        <PhoneOff className="h-4 w-4" />
+                        End
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Audio Visualization Placeholder */}
+                  <div className="h-20 bg-gradient-to-r from-purple-100 to-violet-100 dark:from-purple-950/30 dark:to-violet-950/30 rounded-lg flex items-center justify-center">
+                    <div className="flex items-center gap-1">
+                      {[...Array(20)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="w-1 bg-purple-500/60 rounded-full animate-pulse"
+                          style={{
+                            height: `${Math.random() * 40 + 10}px`,
+                            animationDelay: `${i * 50}ms`
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Live Transcript */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Live Transcript</Label>
+                    <ScrollArea className="h-[200px] border rounded-lg p-4 bg-muted/30">
+                      <div className="space-y-3">
+                        {voiceSimTranscripts.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">
+                            Speak into your microphone to start the conversation...
+                          </p>
+                        ) : (
+                          voiceSimTranscripts.map((t, idx) => (
+                            <div key={idx} className={cn(
+                              "flex gap-3",
+                              t.role === 'agent' ? "justify-start" : "justify-end"
+                            )}>
+                              <div className={cn(
+                                "max-w-[80%] rounded-lg p-3 text-sm",
+                                t.role === 'agent' 
+                                  ? "bg-purple-100 dark:bg-purple-900/30" 
+                                  : "bg-muted"
+                              )}>
+                                <div className="flex items-center gap-2 mb-1">
+                                  {t.role === 'agent' ? (
+                                    <Bot className="h-3 w-3" />
+                                  ) : (
+                                    <User className="h-3 w-3" />
+                                  )}
+                                  <span className="text-xs font-medium uppercase">
+                                    {t.role === 'agent' ? 'AI Agent' : 'You'}
+                                  </span>
+                                </div>
+                                <p>{t.content}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+              )}
+
+              {voiceSimStatus === 'completed' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <CheckCircle2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold">Voice Session Complete</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Duration: {formatDuration(voiceSimDuration)}
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="outline" onClick={handleResetVoiceSimulation} className="gap-2">
+                      <RotateCcw className="h-4 w-4" />
+                      Start New
+                    </Button>
+                  </div>
+
+                  {/* Transcript Review */}
+                  {voiceSimTranscripts.length > 0 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Conversation Transcript</Label>
+                      <ScrollArea className="h-[300px] border rounded-lg p-4 bg-muted/30">
+                        <div className="space-y-3">
+                          {voiceSimTranscripts.map((t, idx) => (
+                            <div key={idx} className={cn(
+                              "flex gap-3",
+                              t.role === 'agent' ? "justify-start" : "justify-end"
+                            )}>
+                              <div className={cn(
+                                "max-w-[80%] rounded-lg p-3 text-sm",
+                                t.role === 'agent' 
+                                  ? "bg-purple-100 dark:bg-purple-900/30" 
+                                  : "bg-muted"
+                              )}>
+                                <p>{t.content}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {voiceSimStatus === 'error' && (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <AlertTriangle className="h-12 w-12 text-red-500 mb-4" />
+                  <h3 className="text-lg font-semibold">Voice Simulation Failed</h3>
+                  <p className="text-sm text-muted-foreground mb-4">{error}</p>
+                  <Button variant="outline" onClick={handleResetVoiceSimulation}>
+                    Try Again
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* PHONE CALL TAB */}
+        <TabsContent value="phone" className="space-y-4">
       
       {/* Info Alert */}
       <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-950/20">
         <Info className="h-4 w-4 text-blue-600" />
         <AlertDescription className="text-sm text-blue-900 dark:text-blue-100">
           <strong>Live Testing</strong> makes real phone calls to validate your agent. This will use your Telnyx account and incur costs.
-          For free testing, use the <strong>Text Simulation</strong> tab instead.
         </AlertDescription>
       </Alert>
 
@@ -533,7 +1328,7 @@ export function LiveSimulationPanel({
       <Card className="border-0 shadow-lg bg-white dark:bg-card relative overflow-hidden ring-1 ring-border/50">
         <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500" />
         <CardContent className="p-6">
-          {error && (
+          {error && mode === 'phone' && (
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
@@ -1055,14 +1850,18 @@ export function LiveSimulationPanel({
       )}
 
       {/* Quick Help Tip */}
-      {callStatus === 'idle' && (
+      {callStatus === 'idle' && mode === 'phone' && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground px-1 mb-8">
           <Info className="h-4 w-4 shrink-0" />
           <span>Enter your number, review settings, and click Start Call to begin the simulation.</span>
         </div>
       )}
 
-      {/* Sticky Action Footer */}
+        </TabsContent>
+      </Tabs>
+
+      {/* Sticky Action Footer - Only show for phone mode */}
+      {mode === 'phone' && (
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-6 pointer-events-none">
         <div className="pointer-events-auto shadow-2xl rounded-full p-2 bg-background/80 backdrop-blur-xl border flex items-center gap-2 justify-between ring-1 ring-black/5 dark:ring-white/10">
             <div className="pl-4 pr-2">
@@ -1114,6 +1913,7 @@ export function LiveSimulationPanel({
             )}
         </div>
       </div>
+      )}
     </div>
   );
 }

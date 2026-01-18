@@ -372,11 +372,23 @@ router.get("/preview-voice", requireAuth, async (req, res) => {
 
       // Map Gemini Live voices to approx Neural2 voices for preview
       const voiceMap: Record<string, string> = {
-        'Puck': 'en-US-Neural2-A',
-        'Charon': 'en-US-Neural2-D',
-        'Kore': 'en-US-Neural2-C',
-        'Fenrir': 'en-US-Neural2-J',
-        'Aoede': 'en-US-Neural2-F',
+        // Original voices
+        'Puck': 'en-US-Neural2-A',      // Light & Expressive
+        'Charon': 'en-US-Neural2-D',    // Deep & Authoritative
+        'Kore': 'en-US-Neural2-C',      // Soft & Friendly (Default)
+        'Fenrir': 'en-US-Neural2-J',    // Calm & Measured
+        'Aoede': 'en-US-Neural2-F',     // Bright & Warm
+        // Additional Gemini Live voices
+        'Orion': 'en-US-Neural2-I',     // Balanced & Clear
+        'Vega': 'en-US-Neural2-E',      // Warm & Confident (Sales)
+        'Pegasus': 'en-US-Neural2-J',   // Calm & Professional (B2B)
+        'Ursa': 'en-US-Neural2-D',      // Strong & Steady
+        'Nova': 'en-US-Neural2-F',      // Bright & Energetic
+        'Dipper': 'en-US-Neural2-A',    // Clear & Articulate
+        'Capella': 'en-US-Neural2-C',   // Melodic & Smooth
+        'Orbit': 'en-US-Neural2-I',     // Modern & Dynamic
+        'Lyra': 'en-US-Neural2-E',      // Elegant & Refined
+        'Eclipse': 'en-US-Neural2-D',   // Bold & Distinctive
       };
       
       const targetVoice = voiceMap[String(voice)] || String(voice);
@@ -1325,6 +1337,8 @@ const updateVirtualAgentSchema = insertVirtualAgentSchema.partial();
 
 router.patch("/:id", requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    console.log("[Virtual Agents] Updating agent:", req.params.id, "with fields:", Object.keys(req.body));
+    
     const [existing] = await db
       .select()
       .from(virtualAgents)
@@ -1335,7 +1349,14 @@ router.patch("/:id", requireAuth, requireRole('admin'), async (req, res) => {
       return res.status(404).json({ message: "Virtual agent not found" });
     }
     
-    const parsed = updateVirtualAgentSchema.parse(req.body);
+    // Use safeParse for better error handling
+    const parseResult = updateVirtualAgentSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      console.error("[Virtual Agents] Validation failed:", JSON.stringify(parseResult.error.errors, null, 2));
+      return res.status(400).json({ message: "Validation error", errors: parseResult.error.errors });
+    }
+    
+    const parsed = parseResult.data;
     
     const [updated] = await db
       .update(virtualAgents)
@@ -1346,9 +1367,10 @@ router.patch("/:id", requireAuth, requireRole('admin'), async (req, res) => {
       .where(eq(virtualAgents.id, req.params.id))
       .returning();
     
+    console.log("[Virtual Agents] Successfully updated agent:", req.params.id);
     res.json(updated);
   } catch (error) {
-    console.error("[Virtual Agents] Error updating agent:", error);
+    console.error("[Virtual Agents] Error updating agent:", error instanceof Error ? error.message : String(error));
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: "Validation error", errors: error.errors });
     }

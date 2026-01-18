@@ -63,6 +63,7 @@ export const ROUTES = {
   SETTINGS_BACKGROUND_JOBS: '/settings/background-jobs',
   SETTINGS_COMPLIANCE: '/settings/compliance',
   SETTINGS_DATA: '/settings/data',
+  SETTINGS_AGENT_DEFAULTS: '/settings/agent-defaults',
 
   // Super Organization Settings (Owner-only)
   SETTINGS_SUPER_ORG: '/settings/super-org',

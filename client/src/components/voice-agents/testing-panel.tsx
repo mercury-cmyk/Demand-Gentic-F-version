@@ -3,6 +3,8 @@
  *
  * Quick test functionality and Preview Studio integration for virtual agents.
  * Shows recent test results and provides quick testing actions.
+ * 
+ * Includes TRUE SIMULATION mode that bypasses all telephony.
  */
 
 import { useState } from 'react';
@@ -15,6 +17,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Phone,
   PhoneCall,
@@ -26,6 +36,9 @@ import {
   MessageSquare,
   Mic,
   Loader2,
+  Sparkles,
+  Users,
+  Zap,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -50,9 +63,24 @@ export interface TestingPanelProps {
 
 export function TestingPanel({ agentId, agentName, className }: TestingPanelProps) {
   const [testPhoneNumber, setTestPhoneNumber] = useState('');
+  const [testMode, setTestMode] = useState<'simulation' | 'phone'>('simulation');
+  const [selectedPersona, setSelectedPersona] = useState('neutral_dm');
+  const [simulationResult, setSimulationResult] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { token } = useAuth();
+
+  // Fetch available personas
+  const { data: personasData } = useQuery<{ personas: { id: string; name: string; disposition: string }[] }>({
+    queryKey: ['/api/simulations/personas'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/simulations/personas');
+      return res.json();
+    },
+    enabled: !!token,
+  });
+
+  const personas = personasData?.personas || [];
 
   // Fetch recent test results (mock data for now)
   const { data: testResults = [], isLoading: resultsLoading } = useQuery<TestResult[]>({
@@ -89,7 +117,7 @@ export function TestingPanel({ agentId, agentName, className }: TestingPanelProp
     enabled: !!agentId && !!token,
   });
 
-  // Start test call mutation
+  // Start test call mutation (for LIVE mode)
   const startTestCallMutation = useMutation({
     mutationFn: async ({ agentId, phoneNumber }: { agentId: string; phoneNumber?: string }) => {
       return await apiRequest('POST', '/api/test-calls/start', {
@@ -113,8 +141,42 @@ export function TestingPanel({ agentId, agentName, className }: TestingPanelProp
     },
   });
 
+  // TRUE SIMULATION - No telephony
+  const startSimulationMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/simulations/start', {
+        campaignId: null, // Will use default campaign context
+        accountId: null,  // Will use default account context
+        virtualAgentId: agentId,
+        personaPreset: selectedPersona,
+        maxTurns: 12,
+        runFullSimulation: true,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setSimulationResult(data.session);
+      toast({
+        title: 'Simulation Complete',
+        description: `Score: ${data.session.evaluation?.overallScore || 0}/100`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/virtual-agents', agentId, 'test-results'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Simulation Failed',
+        description: error.message || 'Failed to run simulation',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const handleQuickTest = () => {
-    startTestCallMutation.mutate({ agentId });
+    if (testMode === 'simulation') {
+      startSimulationMutation.mutate();
+    } else {
+      startTestCallMutation.mutate({ agentId });
+    }
   };
 
   const handlePhoneTest = () => {
@@ -150,54 +212,131 @@ export function TestingPanel({ agentId, agentName, className }: TestingPanelProp
         <CardDescription>Test {agentName} with quick simulations or real calls</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <Button
-            onClick={handleQuickTest}
-            disabled={startTestCallMutation.isPending}
-            className="h-auto py-4 flex-col items-center gap-2"
-          >
-            {startTestCallMutation.isPending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Play className="h-5 w-5" />
-            )}
-            <span className="text-sm">Quick Test</span>
-            <span className="text-xs text-primary-foreground/70">Simulated call</span>
-          </Button>
+        {/* Test Mode Toggle */}
+        <Tabs value={testMode} onValueChange={(v) => setTestMode(v as 'simulation' | 'phone')}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="simulation" className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />
+              Simulation
+            </TabsTrigger>
+            <TabsTrigger value="phone" className="flex items-center gap-2">
+              <Phone className="h-4 w-4" />
+              Live Call
+            </TabsTrigger>
+          </TabsList>
 
+          <TabsContent value="simulation" className="mt-4 space-y-4">
+            {/* Simulation Mode - NO PHONE REQUIRED */}
+            <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="text-sm font-medium">No Phone Required</span>
+              </div>
+              <p className="text-xs text-green-600/80 dark:text-green-400/80 mt-1">
+                True simulation - bypasses all telephony
+              </p>
+            </div>
+
+            {/* Persona Selection */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">
+                <Users className="h-4 w-4 inline mr-1" />
+                Simulated Human
+              </Label>
+              <Select value={selectedPersona} onValueChange={setSelectedPersona}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select persona" />
+                </SelectTrigger>
+                <SelectContent>
+                  {personas.length > 0 ? personas.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span>{p.name}</span>
+                      <Badge variant="outline" className="ml-2 text-xs">{p.disposition}</Badge>
+                    </SelectItem>
+                  )) : (
+                    <>
+                      <SelectItem value="friendly_dm">Friendly Decision Maker</SelectItem>
+                      <SelectItem value="skeptical_dm">Skeptical Decision Maker</SelectItem>
+                      <SelectItem value="hostile_dm">Hostile Decision Maker</SelectItem>
+                      <SelectItem value="gatekeeper_assistant">Gatekeeper (Assistant)</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              onClick={handleQuickTest}
+              disabled={startSimulationMutation.isPending}
+              className="w-full"
+            >
+              {startSimulationMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Zap className="h-4 w-4 mr-2" />
+              )}
+              Run Simulation
+            </Button>
+
+            {/* Simulation Result */}
+            {simulationResult?.evaluation && (
+              <div className="p-4 rounded-lg border bg-muted/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">Last Result</span>
+                  <Badge variant={simulationResult.evaluation.overallScore >= 70 ? 'default' : 'secondary'}>
+                    {simulationResult.evaluation.overallScore}/100
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {simulationResult.transcript?.length || 0} turns • {simulationResult.evaluation.conversationStages?.join(' → ')}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="phone" className="mt-4 space-y-4">
+            {/* Phone Test Mode - LIVE */}
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                Live mode requires a phone number and uses real telephony.
+              </p>
+            </div>
+
+            {/* Real Phone Test */}
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Phone Number</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="+1 (555) 123-4567"
+                  value={testPhoneNumber}
+                  onChange={e => setTestPhoneNumber(e.target.value)}
+                  type="tel"
+                />
+                <Button
+                  variant="default"
+                  onClick={handlePhoneTest}
+                  disabled={startTestCallMutation.isPending || !testPhoneNumber}
+                >
+                  <PhoneCall className="h-4 w-4 mr-2" />
+                  Call
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 gap-3">
           <Button variant="outline" className="h-auto py-4 flex-col items-center gap-2" asChild>
             <Link href={`/preview-studio?agent=${agentId}`}>
               <MessageSquare className="h-5 w-5" />
               <span className="text-sm">Preview Studio</span>
-              <span className="text-xs text-muted-foreground">Full testing suite</span>
+              <span className="text-xs text-muted-foreground">Full testing suite with all modes</span>
             </Link>
           </Button>
         </div>
 
-        {/* Real Phone Test */}
-        <div className="p-4 rounded-lg border bg-muted/20">
-          <Label className="text-sm font-medium mb-2 block">Test with Real Phone</Label>
-          <div className="flex gap-2">
-            <Input
-              placeholder="+1 (555) 123-4567"
-              value={testPhoneNumber}
-              onChange={e => setTestPhoneNumber(e.target.value)}
-              type="tel"
-            />
-            <Button
-              variant="secondary"
-              onClick={handlePhoneTest}
-              disabled={startTestCallMutation.isPending || !testPhoneNumber}
-            >
-              <PhoneCall className="h-4 w-4 mr-2" />
-              Call
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Make a real test call to verify agent behavior
-          </p>
-        </div>
+        {/* REMOVED: Old phone test section - now in tabs above */}
 
         {/* Recent Test Results */}
         <div>

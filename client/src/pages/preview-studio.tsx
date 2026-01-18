@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   BarChart3,
 } from "lucide-react";
+import { PageLayout, PageHeader, PageContent } from "@/components/layout/page-layout";
 import { ContextSelectorPanel } from "@/components/preview-studio/context-selector-panel";
 import { CallPlanPanel } from "@/components/preview-studio/call-plan-panel";
 import { PromptInspectorPanel } from "@/components/preview-studio/prompt-inspector-panel";
@@ -116,73 +117,69 @@ export default function PreviewStudioPage() {
   ];
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-br from-background to-muted/20">
-      {/* Header */}
-      <div className="border-b bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h1 className="text-2xl font-bold flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                </div>
-                Preview Studio
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Test and validate AI agent behavior before going live
-              </p>
-            </div>
+    <PageLayout className="bg-gradient-to-br from-background to-muted/20">
+      <PageHeader>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-primary" />
+              </div>
+              Preview Studio
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Test and validate AI agent behavior before going live
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRegenerate}
+              disabled={!hasRequiredSelection || contextLoading}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${contextLoading ? 'animate-spin' : ''}`} />
+              Refresh Context
+            </Button>
+          </div>
+        </div>
+
+        {/* Context Status Bar */}
+        {hasRequiredSelection && (
+          <div className="flex items-center gap-4 mt-4 pt-4 border-t">
+            <span className="text-sm font-medium text-muted-foreground">Context:</span>
             <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRegenerate}
-                disabled={!hasRequiredSelection || contextLoading}
-                className="gap-2"
-              >
-                <RefreshCw className={`h-4 w-4 ${contextLoading ? 'animate-spin' : ''}`} />
-                Refresh Context
-              </Button>
+              {contextItems.map((item) => (
+                <div
+                  key={item.label}
+                  className={`flex items-center gap-1.5 text-sm ${
+                    item.ready
+                      ? 'text-foreground'
+                      : item.optional
+                        ? 'text-muted-foreground/50'
+                        : 'text-yellow-600 dark:text-yellow-500'
+                  }`}
+                >
+                  {item.ready ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  <span>{item.label}</span>
+                  {item.optional && !item.ready && (
+                    <span className="text-xs">(optional)</span>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
+        )}
+      </PageHeader>
 
-          {/* Context Status Bar */}
-          {hasRequiredSelection && (
-            <div className="flex items-center gap-4 mt-4 pt-4 border-t">
-              <span className="text-sm font-medium text-muted-foreground">Context:</span>
-              <div className="flex items-center gap-3">
-                {contextItems.map((item) => (
-                  <div
-                    key={item.label}
-                    className={`flex items-center gap-1.5 text-sm ${
-                      item.ready
-                        ? 'text-foreground'
-                        : item.optional
-                          ? 'text-muted-foreground/50'
-                          : 'text-yellow-600 dark:text-yellow-500'
-                    }`}
-                  >
-                    {item.ready ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4" />
-                    )}
-                    <span>{item.label}</span>
-                    {item.optional && !item.ready && (
-                      <span className="text-xs">(optional)</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <PageContent className="flex">
         {/* Left Sidebar - Context Selector */}
-        <div className="w-80 border-r bg-background/50 overflow-y-auto">
+        <div className="w-80 border-r bg-background/50 flex flex-col">
           <div className="p-4 border-b bg-muted/30">
             <h2 className="font-semibold text-sm flex items-center gap-2">
               <Target className="h-4 w-4 text-primary" />
@@ -192,20 +189,22 @@ export default function PreviewStudioPage() {
               Select campaign, account, and contact to preview
             </p>
           </div>
-          <ContextSelectorPanel
-            selectedCampaignId={selectedCampaignId}
-            selectedAccountId={selectedAccountId}
-            selectedContactId={selectedContactId}
-            onSelectionChange={handleSelectionChange}
-            previewContext={previewContext}
-            isLoading={contextLoading}
-          />
+          <div className="flex-1 overflow-y-auto">
+            <ContextSelectorPanel
+              selectedCampaignId={selectedCampaignId}
+              selectedAccountId={selectedAccountId}
+              selectedContactId={selectedContactId}
+              onSelectionChange={handleSelectionChange}
+              previewContext={previewContext}
+              isLoading={contextLoading}
+            />
+          </div>
         </div>
 
         {/* Main Preview Area */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 flex flex-col">
           {!hasRequiredSelection ? (
-            <div className="flex-1 flex items-center justify-center p-8">
+            <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
               <Card className="max-w-lg border-2 border-dashed">
                 <CardContent className="py-16 text-center">
                   <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-6">
@@ -240,7 +239,7 @@ export default function PreviewStudioPage() {
               </Card>
             </div>
           ) : (
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
               <div className="border-b px-6 py-2 bg-background/50">
                 <TabsList className="h-11">
                   <TabsTrigger value="text-simulation" className="gap-2 px-4">
@@ -278,8 +277,8 @@ export default function PreviewStudioPage() {
                 </TabsList>
               </div>
 
-              <div className="flex-1 overflow-hidden">
-                <TabsContent value="text-simulation" className="h-full m-0 p-6 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto">
+                <TabsContent value="text-simulation" className="h-full m-0 p-6">
                   <TextSimulationPanel
                     campaignId={selectedCampaignId}
                     accountId={selectedAccountId}
@@ -288,7 +287,7 @@ export default function PreviewStudioPage() {
                   />
                 </TabsContent>
                 
-                <TabsContent value="simulation" className="h-full m-0 p-6 overflow-y-auto">
+                <TabsContent value="simulation" className="h-full m-0 p-6">
                   <LiveSimulationPanel
                     campaignId={selectedCampaignId}
                     accountId={selectedAccountId}
@@ -297,7 +296,7 @@ export default function PreviewStudioPage() {
                   />
                 </TabsContent>
 
-                <TabsContent value="call-plan" className="h-full m-0 p-6 overflow-y-auto">
+                <TabsContent value="call-plan" className="h-full m-0 p-6">
                   <CallPlanPanel
                     campaignId={selectedCampaignId}
                     accountId={selectedAccountId}
@@ -307,7 +306,7 @@ export default function PreviewStudioPage() {
                   />
                 </TabsContent>
 
-                <TabsContent value="prompts" className="h-full m-0 p-6 overflow-y-auto">
+                <TabsContent value="prompts" className="h-full m-0 p-6">
                   <PromptInspectorPanel
                     campaignId={selectedCampaignId}
                     accountId={selectedAccountId}
@@ -315,14 +314,14 @@ export default function PreviewStudioPage() {
                   />
                 </TabsContent>
 
-                <TabsContent value="analysis" className="h-full m-0 p-6 overflow-y-auto">
+                <TabsContent value="analysis" className="h-full m-0 p-6">
                   <CallAnalysisPanel
                     report={analysisReport}
                     source={analysisSource}
                   />
                 </TabsContent>
 
-                <TabsContent value="email" className="h-full m-0 p-6 overflow-y-auto">
+                <TabsContent value="email" className="h-full m-0 p-6">
                   <Card>
                     <CardContent className="py-12 text-center">
                       <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -337,7 +336,7 @@ export default function PreviewStudioPage() {
             </Tabs>
           )}
         </div>
-      </div>
-    </div>
+      </PageContent>
+    </PageLayout>
   );
 }

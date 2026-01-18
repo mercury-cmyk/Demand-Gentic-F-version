@@ -115,18 +115,17 @@ interface VirtualAgentFormData {
   name: string;
   description: string;
   provider: string;
-  externalAgentId: string;
   voice: string;
-  systemPrompt: string;
-  firstMessage: string;
+  externalAgentId?: string | null;
+  systemPrompt?: string;
+  firstMessage?: string;
+  // Foundational training applied automatically - no per-agent configuration needed
+  // Settings are simplified - campaign context drives behavior
   settings: VirtualAgentSettings;
   isActive: boolean;
-  demandAgentType: 'demand_intel' | 'demand_qual' | 'demand_engage' | null;
-  // Organization Intelligence Injection Model
-  orgIntelligenceConfig?: OrgIntelligenceConfig;
-  // Foundation Agent fields (Foundation + Campaign Layer Architecture)
-  isFoundationAgent: boolean;
-  foundationCapabilities: string[];
+  demandAgentType?: VirtualAgent['demandAgentType'];
+  isFoundationAgent?: boolean;
+  foundationCapabilities?: string[];
 }
 
 // Preview Studio Types - Agent Preview Lab specification
@@ -353,10 +352,13 @@ const PANEL_COLORS = {
 } as const;
 
 type OrgPromptData = {
+  orgIntelligence: string[];
+  compliancePolicy: string[];
+  platformPolicies: string[];
   agentVoiceDefaults: string[];
 };
 
-type TrainingCenter = Record<'generic' | 'general_intelligence' | 'demand_intel' | 'demand_qual' | 'demand_engage', string[]>;
+type TrainingCenter = Record<'general_intelligence' | 'demand_intel' | 'demand_qual' | 'demand_engage', string[]>;
 
 // OpenAI voice options
 const OPENAI_VOICES = [
@@ -368,25 +370,28 @@ const OPENAI_VOICES = [
   { value: 'shimmer', label: 'Shimmer - Clear & professional', provider: 'openai' },
 ];
 
-// Google Cloud TTS voice options
+// Google Gemini Live voice options (Vertex AI)
 const GOOGLE_VOICES = [
-  { value: 'en-US-Neural2-A', label: 'US Male - Conversational', provider: 'google' },
-  { value: 'en-US-Neural2-C', label: 'US Female - Professional', provider: 'google' },
-  { value: 'en-US-Neural2-D', label: 'US Male - Authoritative', provider: 'google' },
-  { value: 'en-US-Neural2-F', label: 'US Female - Warm', provider: 'google' },
-  { value: 'en-US-Neural2-G', label: 'US Female - Upbeat', provider: 'google' },
-  { value: 'en-US-Neural2-H', label: 'US Female - Clear', provider: 'google' },
-  { value: 'en-US-Neural2-I', label: 'US Male - Deep', provider: 'google' },
-  { value: 'en-US-Neural2-J', label: 'US Male - Friendly', provider: 'google' },
-  { value: 'en-GB-Neural2-A', label: 'UK Male - British', provider: 'google' },
-  { value: 'en-GB-Neural2-B', label: 'UK Male - Refined', provider: 'google' },
-  { value: 'en-GB-Neural2-C', label: 'UK Female - British', provider: 'google' },
-  { value: 'en-GB-Neural2-D', label: 'UK Female - Professional', provider: 'google' },
+  { value: 'Kore', label: 'Kore - Soft & Friendly (Default)', provider: 'google' },
+  { value: 'Puck', label: 'Puck - Light & Expressive', provider: 'google' },
+  { value: 'Charon', label: 'Charon - Deep & Authoritative', provider: 'google' },
+  { value: 'Fenrir', label: 'Fenrir - Calm & Measured', provider: 'google' },
+  { value: 'Aoede', label: 'Aoede - Bright & Warm', provider: 'google' },
+  { value: 'Orion', label: 'Orion - Balanced & Clear', provider: 'google' },
+  { value: 'Vega', label: 'Vega - Warm & Confident (Sales)', provider: 'google' },
+  { value: 'Pegasus', label: 'Pegasus - Calm & Professional (B2B)', provider: 'google' },
+  { value: 'Ursa', label: 'Ursa - Strong & Steady', provider: 'google' },
+  { value: 'Nova', label: 'Nova - Bright & Energetic', provider: 'google' },
+  { value: 'Dipper', label: 'Dipper - Clear & Articulate', provider: 'google' },
+  { value: 'Capella', label: 'Capella - Melodic & Smooth', provider: 'google' },
+  { value: 'Orbit', label: 'Orbit - Modern & Dynamic', provider: 'google' },
+  { value: 'Lyra', label: 'Lyra - Elegant & Refined', provider: 'google' },
+  { value: 'Eclipse', label: 'Eclipse - Bold & Distinctive', provider: 'google' },
 ];
 
 const PROVIDER_OPTIONS = [
+  { value: 'google', label: 'Google Gemini Live (Recommended)' },
   { value: 'openai', label: 'OpenAI Realtime' },
-  { value: 'google', label: 'Google Cloud TTS' },
 ];
 
 const PREVIEW_TOKEN_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
@@ -613,7 +618,7 @@ const applyPreviewValues = (input: string, values: Record<string, string>) => {
 const normalizePreviewTranscript = (input: string) =>
   input
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/[^a-z0-9]+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -784,9 +789,9 @@ const PREVIEW_LANGUAGE_OPTIONS = [
 ];
 
 const AGENT_TYPE_OPTIONS = [
-  { value: 'demand_intel', label: 'Demand Intelligence Agent', description: 'Account research and buying signal analysis' },
-  { value: 'demand_qual', label: 'Voice Qualification Agent', description: 'BANT qualification and objection handling' },
-  { value: 'demand_engage', label: 'Email Engagement Agent', description: 'Personalized email sequences and optimization' },
+  { value: 'demand_qual', label: 'Voice Agent', description: 'Voice calls - BANT qualification and objection handling' },
+  { value: 'demand_engage', label: 'Email Agent', description: 'Personalized email sequences and optimization' },
+  { value: 'demand_intel', label: 'Research & Reason Agent', description: 'Account research, buying signals, and intelligence analysis' },
 ];
 
 const DEFAULT_TRAINING_CENTER: TrainingCenter = {
@@ -839,9 +844,19 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
     'LEARNING CATEGORIES: Humanity, Tone, Responsiveness, Politeness, Conversational flow',
     'Any feedback like "Sound warmer", "Too robotic", "Responded too late", "Didn\'t acknowledge" should influence all future interactions',
   ],
-  generic: [
+  demand_intel: [
+    'Summarize key buying signals',
+    'Capture competitor mentions',
+    'Highlight tech stack clues',
+    'Identify decision-making patterns',
+    'Research account context before engagement',
+  ],
+  demand_qual: [
+    // Core voice agent training
     'Handle greetings politely',
     'If unsure, ask a concise clarifying question',
+    'Confirm need, timeline, and authority',
+    'Surface objections and summarize responses',
     // VOICEMAIL POLICY (MANDATORY - NO EXCEPTIONS)
     'NEVER leave voicemail - no exceptions, no fallback, no shortened version',
     'First spoken line must be: "Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?"',
@@ -852,31 +867,25 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
     // HUMANITY, KINDNESS & PROFESSIONAL ETIQUETTE (MANDATORY)
     'Be kind, respectful, warm but not casual, professional never robotic, humble never entitled, calm never rushed',
     'Sound like a thoughtful professional who respects time, appreciates permission, and never assumes access',
-    // GRATITUDE (Always express when someone: allows you to speak, gives time, answers questions, considers follow-up, or listens)',
+    // GRATITUDE (Always express when someone: allows you to speak, gives time, answers questions, considers follow-up, or listens)
     'Use gratitude phrases naturally: "Thank you — I appreciate that", "I really appreciate you giving me a moment", "Thanks for taking the time", "I appreciate you hearing me out", "That\'s very kind of you — thank you"',
-    // POLITE APOLOGY FOR INTERRUPTION (cold call, busy signal, hesitation)',
+    // POLITE APOLOGY FOR INTERRUPTION (cold call, busy signal, hesitation)
     'Use apology phrases when interrupting: "I apologize for the interruption", "Sorry to catch you unexpectedly", "I\'ll be very brief — I appreciate your patience", "I understand this may not be a good time"',
-    // RESPECT PERMISSION - When given "20 seconds" or "briefly", stay within that time and acknowledge it',
+    // RESPECT PERMISSION - When given "20 seconds" or "briefly", stay within that time and acknowledge it
     'When permission granted, acknowledge: "Thank you — I\'ll keep this to the 20 seconds you offered"',
-    // WARM ACCEPTANCE - When interest shown, respond with genuine appreciation',
+    // WARM ACCEPTANCE - When interest shown, respond with genuine appreciation
     'When interest shown: "Thank you very much — I really appreciate that", "That\'s great, thank you for your openness", "I appreciate you being willing to explore this"',
-    // GRACEFUL EXIT - Every call must end kindly, even blocked ones',
+    // GRACEFUL EXIT - Every call must end kindly, even blocked ones
     'End calls gracefully: "Thank you for your time — I appreciate it", "Thanks again, have a great rest of your day", "I appreciate your help — thank you"',
-    // FORBIDDEN: Sounding rushed, entitled, indifferent, overly cheerful/salesy, over-apologizing, emotional manipulation',
+    // FORBIDDEN: Sounding rushed, entitled, indifferent, overly cheerful/salesy, over-apologizing, emotional manipulation
   ],
-  demand_intel: ['Summarize key buying signals', 'Capture competitor mentions', 'Highlight tech stack clues'],
-  demand_qual: [
-    'Confirm need, timeline, and authority',
-    'Surface objections and summarize responses',
-    // VOICEMAIL POLICY (MANDATORY)
-    'NEVER leave voicemail under any circumstances',
-    'If voicemail detected or offered, politely decline and end call immediately',
-    // HUMANITY LAYER
-    'Always express gratitude when given time or permission',
-    'Apologize politely for interruption at call start',
-    'End every call with warm, professional gratitude',
-  ],
-  demand_engage: ['Personalize by ICP and role', 'Suggest next-step CTAs tuned to engagement level'],
+  demand_engage: [
+    'Personalize by ICP and role',
+    'Suggest next-step CTAs tuned to engagement level',
+    'Craft subject lines that drive opens',
+    'Match tone to recipient seniority',
+    'Include relevant social proof',
+  ]
 };
 
 const ECHO_GUARD_WINDOW_MS = 2500;
@@ -902,23 +911,18 @@ const FOUNDATION_CAPABILITIES = [
 const defaultFormData: VirtualAgentFormData = {
   name: '',
   description: '',
-  provider: 'openai',
+  provider: 'google',
+  voice: 'Kore',
   externalAgentId: '',
-  voice: 'nova',
   systemPrompt: '',
-  firstMessage: DEFAULT_FIRST_MESSAGE,
+  firstMessage: '',
   settings: {
     systemTools: DEFAULT_SYSTEM_TOOLS,
     advanced: DEFAULT_ADVANCED_SETTINGS,
     trainingData: [],
   },
   isActive: true,
-  demandAgentType: null,
-  // Organization Intelligence defaults to "use existing" for agency model
-  orgIntelligenceConfig: {
-    mode: 'use_existing',
-  },
-  // Foundation Agent defaults
+  demandAgentType: 'demand_qual',
   isFoundationAgent: false,
   foundationCapabilities: [],
 };
@@ -1179,7 +1183,7 @@ export default function VirtualAgentsPage() {
   });
   const [orgPromptLoading, setOrgPromptLoading] = useState(false);
   const [trainingCenter, setTrainingCenter] = useState<TrainingCenter>(DEFAULT_TRAINING_CENTER);
-  const [activeTrainingType, setActiveTrainingType] = useState<'generic' | 'demand_intel' | 'demand_qual' | 'demand_engage'>('generic');
+  const [activeTrainingType, setActiveTrainingType] = useState<'demand_intel' | 'demand_qual' | 'demand_engage'>('demand_qual');
   const [testCallAgent, setTestCallAgent] = useState<VirtualAgent | null>(null);
   const [testCallAgentCampaignId, setTestCallAgentCampaignId] = useState<string | null>(null);
   const [testCallAgentCampaigns, setTestCallAgentCampaigns] = useState<Array<{ campaignId: string; campaignName: string; isActive: boolean }>>([]);
@@ -1327,6 +1331,37 @@ export default function VirtualAgentsPage() {
     void loadOrgPrompt();
   }, [toast]);
 
+  // Load agent defaults when creating a new agent
+  useEffect(() => {
+    const loadAgentDefaults = async () => {
+      if (isCreateOpen && !editingAgent) {
+        try {
+          const response = await apiRequest('GET', '/api/agent-defaults');
+          const defaults = await response.json();
+          
+          setFormData({
+            name: '',
+            description: '',
+            provider: defaults.defaultVoiceProvider || 'google',
+            voice: defaults.defaultVoice || 'Kore',
+            settings: {
+              systemTools: DEFAULT_SYSTEM_TOOLS,
+              advanced: DEFAULT_ADVANCED_SETTINGS,
+              trainingData: [],
+            },
+            isActive: true,
+          });
+        } catch (error) {
+          console.error('Failed to load agent defaults', error);
+          // Fall back to hardcoded defaults
+          setFormData(defaultFormData);
+        }
+      }
+    };
+
+    void loadAgentDefaults();
+  }, [isCreateOpen, editingAgent]);
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem('virtual-agent-training-center');
@@ -1340,7 +1375,7 @@ export default function VirtualAgentsPage() {
   }, []);
 
   useEffect(() => {
-    const nextType = formData.demandAgentType ?? 'generic';
+    const nextType = formData.demandAgentType ?? 'demand_qual';
     setActiveTrainingType(nextType);
   }, [formData.demandAgentType]);
 
@@ -1490,7 +1525,7 @@ export default function VirtualAgentsPage() {
 
     setPreviewMessages((current) => {
       if (current.length > 0) return current;
-      return [{ role: 'assistant', content: previewOpeningMessage }];
+      return [{ role: 'assistant', content: previewOpeningMessage, timestamp: new Date(), stage: 'opening' }];
     });
   }, [testCallAgent, previewOpeningMessage]);
 
@@ -1635,8 +1670,9 @@ export default function VirtualAgentsPage() {
       envVars?: Record<string, string>;
     }) => {
       // Always send required settings for preview session
+      const testAdvanced = ((testCallAgent?.settings as VirtualAgentSettings | null)?.advanced ?? {}) as Partial<AdvancedSettings>;
       const requiredSettings = {
-        voice: voice ?? testCallAgent?.voice ?? 'nova',
+        voice: voice ?? testCallAgent?.voice ?? 'Kore',
         settings: {
           systemTools: {
             ...DEFAULT_SYSTEM_TOOLS,
@@ -1644,10 +1680,10 @@ export default function VirtualAgentsPage() {
           },
           advanced: {
             ...DEFAULT_ADVANCED_SETTINGS,
-            ...(testCallAgent?.settings?.advanced ?? {}),
+            ...testAdvanced,
             conversational: {
               ...DEFAULT_ADVANCED_SETTINGS.conversational,
-              ...(testCallAgent?.settings?.advanced?.conversational ?? {}),
+              ...(testAdvanced.conversational ?? {}),
               eagerness: 'normal',
               takeTurnAfterSilenceSeconds: 0.5, // 0.50 seconds
               endConversationAfterSilenceSeconds: 60,
@@ -1655,6 +1691,7 @@ export default function VirtualAgentsPage() {
             },
             asr: {
               ...DEFAULT_ADVANCED_SETTINGS.asr,
+              ...(testAdvanced.asr ?? {}),
               model: 'default',
               inputFormat: 'pcm_16000',
               keywords: '',
@@ -1730,6 +1767,10 @@ export default function VirtualAgentsPage() {
           ...DEFAULT_ADVANCED_SETTINGS.conversational,
           ...(rawSettings.advanced?.conversational ?? {}),
         },
+        realtime: {
+          ...DEFAULT_ADVANCED_SETTINGS.realtime,
+          ...(rawSettings.advanced?.realtime ?? {}),
+        },
         softTimeout: {
           ...DEFAULT_ADVANCED_SETTINGS.softTimeout,
           ...(rawSettings.advanced?.softTimeout ?? {}),
@@ -1761,6 +1802,11 @@ export default function VirtualAgentsPage() {
       isFoundationAgent: agent.isFoundationAgent ?? false,
       foundationCapabilities: agent.foundationCapabilities || [],
     });
+    // Initialize preview tools from saved settings
+    const savedFunctions = mergedSettings.advanced?.realtime?.functions;
+    if (savedFunctions && Array.isArray(savedFunctions)) {
+      setPreviewTools(savedFunctions);
+    }
     setEditingAgent(agent);
   };
 
@@ -2566,8 +2612,6 @@ export default function VirtualAgentsPage() {
     // Append recommendation to system prompt
     const currentPrompt = previewSystemPrompt || '';
     const updatedPrompt = `${currentPrompt}\n\n[Coaching note: ${learning.recommendedFix}]`;
-    setPreviewSystemPrompt(updatedPrompt);
-    
     toast({
       title: "Learning applied",
       description: "Coaching note added to agent prompt",
@@ -3064,7 +3108,13 @@ export default function VirtualAgentsPage() {
         campaignId: testCallAgentCampaignId || undefined,
         systemPrompt: previewSystemPrompt || undefined,
         firstMessage: previewOpeningMessage || undefined,
-        messages: nextMessages.map(m => ({ role: m.role, content: m.content })),
+        messages: nextMessages.map(m => ({
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp ?? new Date(),
+          stage: m.stage,
+          turnDuration: m.turnDuration,
+        })),
         provider: previewProvider,
         envVars: previewEnvVars.reduce((acc, curr) => ({...acc, [curr.key]: curr.value}), {} as Record<string, string>),
       });
@@ -3507,98 +3557,102 @@ export default function VirtualAgentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Primary: Full Page Creation Experience */}
+          {/* Primary: Simple Create Dialog - matches Edit flow */}
           <Button 
             data-testid="button-create-agent" 
             size="lg" 
             className="shadow-lg gap-2"
-            onClick={() => setLocation('/virtual-agents/create')}
+            onClick={() => {
+              setFormData(defaultFormData);
+              setPreviewTools(['detect_voicemail_and_hangup']);
+              setIsCreateOpen(true);
+              setCreationMode('manual');
+            }}
           >
             <Plus className="h-5 w-5" />
             Create New Agent
           </Button>
-          {/* Secondary: Quick Manual Create Dialog */}
+          {/* Secondary: Skill-Based Create Dialog */}
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="lg">
-                <Settings2 className="h-4 w-4 mr-2" />
-                Quick Create
+                <Sparkles className="h-4 w-4 mr-2" />
+                Skill-Based
               </Button>
             </DialogTrigger>
           <DialogContent className="max-w-4xl max-h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
-            <div className="px-6 py-4 border-b flex-shrink-0 bg-background z-10">
-              <DialogHeader>
-                <DialogTitle>Create AI Voice Agent</DialogTitle>
-                <DialogDescription>
-                  Choose between skill-based (recommended) or manual configuration
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-
-            <Tabs value={creationMode} onValueChange={(v) => setCreationMode(v as 'skill' | 'manual')} className="w-full flex-1 flex flex-col overflow-hidden">
-              <div className="px-6 pt-4">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="skill">
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Skill-Based (Recommended)
-                  </TabsTrigger>
-                  <TabsTrigger value="manual">
-                    <Settings2 className="h-4 w-4 mr-2" />
-                    Manual Configuration
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-
-              <TabsContent value="skill" className="px-6 py-4 flex-1 overflow-y-auto">
-                <SkillBasedAgentCreator
-                  onCreateAgent={handleSkillBasedCreate}
-                  isCreating={createSkillBasedAgentMutation.isPending}
-                />
-              </TabsContent>
-
-              <TabsContent value="manual" className="mt-0 h-full data-[state=active]:flex data-[state=active]:flex-col">
-                <div className="px-6 py-3 border-b flex-shrink-0 flex items-start justify-between">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-sm">Manual Agent Configuration</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Full control over system prompts and settings
-                    </p>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <Button size="sm" variant="outline" onClick={handleCloseDialog} data-testid="button-cancel">
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleCreate}
-                      disabled={createMutation.isPending || !formData.name.trim()}
-                      data-testid="button-submit"
-                    >
-                      {createMutation.isPending ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-                      ) : null}
-                      Create Agent
-                    </Button>
+            {creationMode === 'manual' ? (
+              /* Simple Create Form - matches Edit flow */
+              <>
+                <div className="px-6 py-4 border-b flex-shrink-0 bg-background z-10">
+                  <div className="flex items-start justify-between mb-2">
+                    <DialogHeader className="flex-1">
+                      <DialogTitle>Create AI Voice Agent</DialogTitle>
+                      <DialogDescription>
+                        Configure your AI agent's voice and behavior
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex gap-2 ml-4">
+                      <Button variant="ghost" size="sm" onClick={() => setCreationMode('skill')}>
+                        <Sparkles className="h-4 w-4 mr-1" />
+                        Use Skill-Based
+                      </Button>
+                      <Button variant="outline" onClick={handleCloseDialog} data-testid="button-cancel">
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleCreate}
+                        disabled={createMutation.isPending || !formData.name.trim()}
+                        data-testid="button-submit"
+                      >
+                        {createMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : null}
+                        Create Agent
+                      </Button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto min-h-0">
-                  <AgentForm
-                    formData={formData}
-                    setFormData={setFormData}
-                    onSubmit={handleCreate}
-                    onCancel={handleCloseDialog}
-                    isLoading={createMutation.isPending}
-                    submitLabel="Create Agent"
-                    toast={toast}
-                    orgPromptData={orgPromptData}
-                    orgPromptLoading={orgPromptLoading}
-                    trainingCenter={trainingCenter}
-                    activeTrainingType={activeTrainingType}
-                    editingAgent={null}
+                <AgentForm
+                  formData={formData}
+                  setFormData={setFormData}
+                  onSubmit={handleCreate}
+                  onCancel={handleCloseDialog}
+                  isLoading={createMutation.isPending}
+                  submitLabel="Create Agent"
+                  toast={toast}
+                  orgPromptData={orgPromptData}
+                  orgPromptLoading={orgPromptLoading}
+                  trainingCenter={trainingCenter}
+                  activeTrainingType={activeTrainingType}
+                  editingAgent={null}
+                />
+              </>
+            ) : (
+              /* Skill-Based Creation */
+              <>
+                <div className="px-6 py-4 border-b flex-shrink-0 bg-background z-10">
+                  <DialogHeader>
+                    <DialogTitle>Create AI Voice Agent - Skill-Based</DialogTitle>
+                    <DialogDescription>
+                      Create an agent from a pre-defined skill template
+                    </DialogDescription>
+                  </DialogHeader>
+                </div>
+                <div className="px-6 py-4 flex-1 overflow-y-auto">
+                  <div className="flex justify-end mb-4">
+                    <Button variant="ghost" size="sm" onClick={() => setCreationMode('manual')}>
+                      <Settings2 className="h-4 w-4 mr-1" />
+                      Switch to Manual
+                    </Button>
+                  </div>
+                  <SkillBasedAgentCreator
+                    onCreateAgent={handleSkillBasedCreate}
+                    isCreating={createSkillBasedAgentMutation.isPending}
                   />
                 </div>
-              </TabsContent>
-            </Tabs>
+              </>
+            )}
           </DialogContent>
         </Dialog>
         </div>
@@ -3724,13 +3778,9 @@ export default function VirtualAgentsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {agent.demandAgentType ? (
-                        <Badge variant="secondary" className="text-xs">
-                          {AGENT_TYPE_OPTIONS.find(t => t.value === agent.demandAgentType)?.label || agent.demandAgentType}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">Generic</span>
-                      )}
+                      <Badge variant="secondary" className="text-xs">
+                        {AGENT_TYPE_OPTIONS.find(t => t.value === (agent.demandAgentType || 'demand_qual'))?.label || 'Voice Agent'}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="capitalize">
@@ -5602,7 +5652,7 @@ function AgentForm({
   orgPromptData: OrgPromptData;
   orgPromptLoading: boolean;
   trainingCenter: TrainingCenter;
-  activeTrainingType: 'generic' | 'demand_intel' | 'demand_qual' | 'demand_engage';
+  activeTrainingType: 'demand_intel' | 'demand_qual' | 'demand_engage';
   editingAgent?: VirtualAgent | null;
 }) {
   const [agentGoal, setAgentGoal] = useState('');
@@ -5628,7 +5678,7 @@ function AgentForm({
   const realtimeConfig = advanced.realtime ?? DEFAULT_ADVANCED_SETTINGS.realtime;
   const trainingDefaults = trainingCenter[activeTrainingType] ?? [];
   const trainingLabel =
-    AGENT_TYPE_OPTIONS.find((opt) => opt.value === activeTrainingType)?.label || 'Generic Agent';
+    AGENT_TYPE_OPTIONS.find((opt) => opt.value === activeTrainingType)?.label || 'Voice Agent';
   const activeToolCount = Object.values(systemTools).filter((v) => typeof v === 'boolean' && v).length;
 
   const formatCsv = (values: string[]) => values.join(', ');
@@ -5797,11 +5847,10 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
     <div className="overflow-y-auto">
       <div className="px-6 py-4">
         <Tabs defaultValue="essentials" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-4">
-            <TabsTrigger value="essentials">Essentials</TabsTrigger>
-            <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
-            <TabsTrigger value="tools">System Tools</TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+          {/* Simplified Agent Creation - Voice Configuration Only */}
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="essentials">Voice Configuration</TabsTrigger>
+            <TabsTrigger value="tools">Call Handling</TabsTrigger>
           </TabsList>
 
         <TabsContent value="essentials" className="space-y-3 mt-0">
@@ -5867,28 +5916,62 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
               </div>
             </div>
           </div>
-          {/* Tool selection for preview session */}
+          {/* Tool selection - saved with agent */}
           <div className="space-y-2 rounded-lg border p-4 mb-4">
-            <Label className="font-semibold">Function Tools (Preview Only)</Label>
+            <Label className="font-semibold">Function Tools</Label>
             <div className="flex flex-wrap gap-2">
-              {['detect_voicemail_and_hangup', 'enforce_max_call_duration', 'navigate_and_dial', 'connect_to_operator'].map(tool => (
-                <Button
-                  key={tool}
-                  size="sm"
-                  variant={previewTools.includes(tool) ? 'default' : 'outline'}
-                  onClick={() => setPreviewTools(tools => tools.includes(tool) ? tools.filter(t => t !== tool) : [...tools, tool])}
-                >
-                  {tool}
-                </Button>
-              ))}
+              {['detect_voicemail_and_hangup', 'enforce_max_call_duration', 'navigate_and_dial', 'connect_to_operator'].map(tool => {
+                const currentFunctions = formData.settings?.advanced?.realtime?.functions ?? previewTools;
+                const isEnabled = currentFunctions.includes(tool);
+                return (
+                  <Button
+                    key={tool}
+                    size="sm"
+                    variant={isEnabled ? 'default' : 'outline'}
+                    onClick={() => {
+                      const newFunctions = isEnabled
+                        ? currentFunctions.filter((t: string) => t !== tool)
+                        : [...currentFunctions, tool];
+                      // Update both preview tools and formData settings
+                      setPreviewTools(newFunctions);
+                      setFormData(prev => ({
+                        ...prev,
+                        settings: {
+                          ...prev.settings,
+                          advanced: {
+                            ...prev.settings?.advanced,
+                            realtime: {
+                              ...prev.settings?.advanced?.realtime,
+                              functions: newFunctions,
+                            },
+                          },
+                        },
+                      }));
+                    }}
+                  >
+                    {tool}
+                  </Button>
+                );
+              })}
             </div>
-            <p className="text-xs text-muted-foreground">Select which function tools are available for this preview session.</p>
+            <p className="text-xs text-muted-foreground">Select which function tools are available for this agent.</p>
           </div>
-          <Accordion type="multiple" defaultValue={['details', 'voice', 'prompt', ...(formData.systemPrompt ? ['prompt-preview'] : [])]} className="space-y-2">
+          <Accordion type="multiple" defaultValue={['details', 'voice']} className="space-y-2">
             <AccordionItem value="details" className="rounded-lg border px-3">
-              <AccordionTrigger>Agent details</AccordionTrigger>
+              <AccordionTrigger>Agent Details</AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-4 pb-2">
+                  <div className="rounded-lg border p-4 bg-blue-50/50 dark:bg-blue-950/20">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Layers className="h-4 w-4 text-blue-600" />
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Voice Configuration Agent</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Virtual agents define voice and basic call handling. All agents automatically receive foundational B2B training.
+                      Campaign context, objectives, and specific skills are defined at the campaign level.
+                    </p>
+                  </div>
+
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="name">Agent Name *</Label>
@@ -5896,12 +5979,15 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
                         id="name"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="e.g., Sales Qualifier"
+                        placeholder="e.g., Professional Female Voice"
                         data-testid="input-agent-name"
                       />
+                      <p className="text-xs text-muted-foreground">
+                        Use a descriptive name for the voice (e.g., "Friendly Female", "Professional Male")
+                      </p>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="provider">Provider</Label>
+                      <Label htmlFor="provider">Voice Provider</Label>
                       <Select
                         value={formData.provider}
                         onValueChange={(value) => setFormData({ ...formData, provider: value })}
@@ -5915,96 +6001,19 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
                           ))}
                         </SelectContent>
                       </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Google (Gemini) is recommended for cost-effectiveness
+                      </p>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="agentType">Agent Type</Label>
-                    <Select
-                      value={formData.demandAgentType || 'none'}
-                      onValueChange={(value) => setFormData({ ...formData, demandAgentType: value === 'none' ? null : (value as 'demand_intel' | 'demand_qual' | 'demand_engage') })}
-                    >
-                      <SelectTrigger data-testid="select-agent-type">
-                        <SelectValue placeholder="Select an agent type (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None (Generic Agent)</SelectItem>
-                        {AGENT_TYPE_OPTIONS.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {formData.demandAgentType
-                        ? AGENT_TYPE_OPTIONS.find(t => t.value === formData.demandAgentType)?.description
-                        : 'Specialized agent roles for coordinated demand generation'}
-                    </p>
-                  </div>
-
-                  {/* Foundation Agent Section */}
-                  <div className="space-y-4 p-4 rounded-lg border bg-blue-50/50 dark:bg-blue-950/20">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Layers className="h-4 w-4 text-blue-600" />
-                        <Label htmlFor="isFoundationAgent" className="font-medium">Foundation Agent</Label>
-                      </div>
-                      <Switch
-                        id="isFoundationAgent"
-                        checked={formData.isFoundationAgent}
-                        onCheckedChange={(checked) => setFormData({ ...formData, isFoundationAgent: checked })}
-                        data-testid="switch-foundation-agent"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Mark this agent as a reusable foundation that can be assigned to multiple campaigns.
-                      Foundation agents have core capabilities that campaigns can extend with specific context.
-                    </p>
-
-                    {formData.isFoundationAgent && (
-                      <div className="space-y-3">
-                        <Label className="text-sm">Foundation Capabilities</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Select the core capabilities this agent should have. These will be injected into the system prompt.
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {FOUNDATION_CAPABILITIES.map((cap) => (
-                            <div
-                              key={cap.id}
-                              className="flex items-start space-x-2 p-2 rounded border bg-background hover:bg-muted/50 transition-colors"
-                            >
-                              <Switch
-                                id={`cap-${cap.id}`}
-                                checked={formData.foundationCapabilities.includes(cap.id)}
-                                onCheckedChange={(checked) => {
-                                  setFormData({
-                                    ...formData,
-                                    foundationCapabilities: checked
-                                      ? [...formData.foundationCapabilities, cap.id]
-                                      : formData.foundationCapabilities.filter(c => c !== cap.id)
-                                  });
-                                }}
-                                className="mt-0.5"
-                              />
-                              <div className="flex-1">
-                                <Label htmlFor={`cap-${cap.id}`} className="text-sm font-medium cursor-pointer">
-                                  {cap.label}
-                                </Label>
-                                <p className="text-xs text-muted-foreground">{cap.description}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="description">Description</Label>
+                    <Label htmlFor="description">Description (Optional)</Label>
                     <Input
                       id="description"
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      placeholder="Brief description of this agent's purpose"
+                      placeholder="Brief description of this voice configuration"
                       data-testid="input-description"
                     />
                   </div>
@@ -6012,349 +6021,84 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
               </AccordionContent>
             </AccordionItem>
 
-            {/* Organization Intelligence Setup - The 3-Mode Model */}
-            <AccordionItem value="org-intelligence" className="rounded-lg border px-3">
-              <AccordionTrigger>
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4" />
-                  Organization Intelligence
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="pb-2">
-                  <OrganizationIntelligenceSetup
-                    config={formData.orgIntelligenceConfig || { mode: 'use_existing' }}
-                    onConfigChange={(config) => setFormData({ ...formData, orgIntelligenceConfig: config })}
-                  />
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
             <AccordionItem value="voice" className="rounded-lg border px-3">
-              <AccordionTrigger>Voice</AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-2 pb-2">
-                  <Label htmlFor="voice">Voice</Label>
-                  <div className="flex gap-2">
-                    <Select
-                      value={formData.voice}
-                      onValueChange={(value) => setFormData({ ...formData, voice: value })}
-                    >
-                      <SelectTrigger data-testid="select-voice" className="flex-1">
-                        <SelectValue placeholder="Select a voice" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(formData.provider === 'openai' ? OPENAI_VOICES : GOOGLE_VOICES).map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {formData.voice && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={async () => {
-                          try {
-                            const response = await apiRequest('GET', `/api/virtual-agents/preview-voice?voice=${formData.voice}&provider=${formData.provider}&text=${encodeURIComponent('Hello! This is a preview of the voice you selected for your virtual agent.')}`);
-                            const audioBlob = await response.blob();
-                            const audioUrl = URL.createObjectURL(audioBlob);
-                            const audio = new Audio(audioUrl);
-                            audio.play();
-                            audio.onended = () => URL.revokeObjectURL(audioUrl);
-                          } catch (error) {
-                            toast({
-                              title: "Preview failed",
-                              description: error instanceof Error ? error.message : "Could not play voice preview",
-                              variant: "destructive"
-                            });
-                          }
-                        }}
-                        title="Preview voice"
-                      >
-                        <PhoneCall className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formData.provider === 'openai' ? 'OpenAI Realtime voices' : 'Google Cloud TTS voices'}
-                  </p>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-
-            <AccordionItem value="prompt" className="rounded-lg border px-3">
-              <AccordionTrigger>Prompt and opening</AccordionTrigger>
+              <AccordionTrigger>Voice Selection</AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-4 pb-2">
                   <div className="space-y-2">
-                    <Label htmlFor="agentGoal">Agent goal (used to auto-generate prompt)</Label>
+                    <Label htmlFor="voice">Select Voice *</Label>
                     <div className="flex gap-2">
-                      <Input
-                        id="agentGoal"
-                        value={agentGoal}
-                        onChange={(e) => setAgentGoal(e.target.value)}
-                        placeholder="e.g., Qualify inbound leads and route to sales"
-                        data-testid="input-agent-goal"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleGeneratePrompt}
-                        disabled={orgPromptLoading}
-                        data-testid="button-generate-prompt"
+                      <Select
+                        value={formData.voice}
+                        onValueChange={(value) => setFormData({ ...formData, voice: value })}
                       >
-                        {orgPromptLoading ? 'Loading org intel...' : 'Generate prompt'}
-                      </Button>
+                        <SelectTrigger data-testid="select-voice" className="flex-1">
+                          <SelectValue placeholder="Select a voice" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(formData.provider === 'openai' ? OPENAI_VOICES : GOOGLE_VOICES).map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {formData.voice && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={async () => {
+                            try {
+                              const response = await apiRequest('GET', `/api/virtual-agents/preview-voice?voice=${formData.voice}&provider=${formData.provider}&text=${encodeURIComponent('Hello! This is a preview of the voice you selected. I will be making professional B2B outreach calls.')}`);
+                              const audioBlob = await response.blob();
+                              const audioUrl = URL.createObjectURL(audioBlob);
+                              const audio = new Audio(audioUrl);
+                              audio.play();
+                              audio.onended = () => URL.revokeObjectURL(audioUrl);
+                            } catch (error) {
+                              toast({
+                                title: "Preview failed",
+                                description: error instanceof Error ? error.message : "Could not play voice preview",
+                                variant: "destructive"
+                              });
+                            }
+                          }}
+                          title="Preview voice"
+                        >
+                          <PhoneCall className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Combines your goal with organization intelligence, compliance, platform policies, and training defaults for the selected agent type.
+                      {formData.provider === 'google' 
+                        ? 'Google Gemini voices - optimized for natural conversation' 
+                        : 'OpenAI Realtime voices'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <p className="text-sm font-medium mb-1">Voice Recommendation</p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Kore</strong> (default) - Soft, friendly, professional. Ideal for B2B sales calls.<br/>
+                      <strong>Pegasus</strong> - Calm, authoritative. Good for executive outreach.<br/>
+                      <strong>Aoede</strong> - Bright, energetic. Suitable for high-volume prospecting.
                     </p>
                   </div>
                 </div>
               </AccordionContent>
             </AccordionItem>
-
-            {/* Prompt Preview Section */}
-            {formData.systemPrompt && (
-              <AccordionItem value="prompt-preview" className="rounded-lg border px-3 bg-gradient-to-r from-primary/5 to-transparent">
-                <AccordionTrigger>
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-4 w-4 text-primary" />
-                    <span>Generated Prompt Preview</span>
-                    {promptSources.generatedAt && (
-                      <Badge variant="secondary" className="ml-2 text-xs">
-                        {totalSourceCount} sources
-                      </Badge>
-                    )}
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-4 pb-2">
-                    {/* Sources Breakdown */}
-                    {promptSources.generatedAt && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">Sources Used</Label>
-                          <span className="text-xs text-muted-foreground">
-                            Generated {format(promptSources.generatedAt, 'MMM d, h:mm a')}
-                          </span>
-                        </div>
-
-                        <div className="grid gap-2 md:grid-cols-2">
-                          {/* User Goal */}
-                          {promptSources.goal && (
-                            <div className="rounded-lg border p-3 bg-blue-50/50 dark:bg-blue-950/20">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Target className="h-4 w-4 text-blue-600" />
-                                <span className="text-sm font-medium text-blue-700 dark:text-blue-400">Agent Goal</span>
-                              </div>
-                              <p className="text-sm text-muted-foreground">{promptSources.goal}</p>
-                            </div>
-                          )}
-
-                          {/* Org Intelligence */}
-                          {promptSources.orgIntelligence.length > 0 && (
-                            <div className="rounded-lg border p-3 bg-purple-50/50 dark:bg-purple-950/20">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Building2 className="h-4 w-4 text-purple-600" />
-                                <span className="text-sm font-medium text-purple-700 dark:text-purple-400">
-                                  Org Intelligence ({promptSources.orgIntelligence.length})
-                                </span>
-                              </div>
-                              <ul className="text-xs text-muted-foreground space-y-1 max-h-20 overflow-y-auto">
-                                {promptSources.orgIntelligence.slice(0, 3).map((item, idx) => (
-                                  <li key={idx} className="truncate">- {item}</li>
-                                ))}
-                                {promptSources.orgIntelligence.length > 3 && (
-                                  <li className="text-purple-600">+{promptSources.orgIntelligence.length - 3} more...</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Training Defaults */}
-                          {promptSources.trainingDefaults.length > 0 && (
-                            <div className="rounded-lg border p-3 bg-green-50/50 dark:bg-green-950/20">
-                              <div className="flex items-center gap-2 mb-2">
-                                <GraduationCap className="h-4 w-4 text-green-600" />
-                                <span className="text-sm font-medium text-green-700 dark:text-green-400">
-                                  Training ({promptSources.trainingDefaults.length})
-                                </span>
-                              </div>
-                              <ul className="text-xs text-muted-foreground space-y-1 max-h-20 overflow-y-auto">
-                                {promptSources.trainingDefaults.slice(0, 3).map((item, idx) => (
-                                  <li key={idx} className="truncate">- {item}</li>
-                                ))}
-                                {promptSources.trainingDefaults.length > 3 && (
-                                  <li className="text-green-600">+{promptSources.trainingDefaults.length - 3} more...</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Compliance Policy */}
-                          {promptSources.compliancePolicy.length > 0 && (
-                            <div className="rounded-lg border p-3 bg-amber-50/50 dark:bg-amber-950/20">
-                              <div className="flex items-center gap-2 mb-2">
-                                <FileText className="h-4 w-4 text-amber-600" />
-                                <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                                  Compliance ({promptSources.compliancePolicy.length})
-                                </span>
-                              </div>
-                              <ul className="text-xs text-muted-foreground space-y-1 max-h-20 overflow-y-auto">
-                                {promptSources.compliancePolicy.slice(0, 2).map((item, idx) => (
-                                  <li key={idx} className="truncate">- {item}</li>
-                                ))}
-                                {promptSources.compliancePolicy.length > 2 && (
-                                  <li className="text-amber-600">+{promptSources.compliancePolicy.length - 2} more...</li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Additional sources row */}
-                        <div className="flex flex-wrap gap-2">
-                          {promptSources.platformPolicies.length > 0 && (
-                            <Badge variant="outline" className="text-xs">
-                              Platform Policies: {promptSources.platformPolicies.length}
-                            </Badge>
-                          )}
-                          {promptSources.agentVoiceDefaults.length > 0 && (
-                            <Badge variant="outline" className="text-xs">
-                              Voice Defaults: {promptSources.agentVoiceDefaults.length}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Full Prompt Preview */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">Final System Prompt</Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleCopyPrompt}
-                          className="h-8"
-                        >
-                          {copiedPrompt ? (
-                            <>
-                              <Check className="h-3 w-3 mr-1 text-green-600" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="h-3 w-3 mr-1" />
-                              Copy
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                      <div className="rounded-lg border bg-muted/30 p-4 max-h-[300px] overflow-y-auto">
-                        <pre className="text-sm whitespace-pre-wrap font-mono text-foreground/90">
-                          {formData.systemPrompt}
-                        </pre>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        This is the complete system prompt that will be sent to the AI model during conversations.
-                      </p>
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            )}
           </Accordion>
-
-          <div className="flex items-center justify-between rounded-lg border p-4">
-            <div className="space-y-0.5">
-              <Label>Active Status</Label>
-              <p className="text-sm text-muted-foreground">
-                Only active agents can be assigned to campaigns
-              </p>
-            </div>
-            <Switch
-              checked={formData.isActive}
-              onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
-              data-testid="switch-active"
-            />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="knowledge" className="space-y-3 mt-0">
-          {editingAgent ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border p-4">
-                <h4 className="font-medium mb-2 flex items-center gap-2">
-                  <Layers className="h-4 w-4" />
-                  Runtime Knowledge Inspector
-                </h4>
-                <p className="text-xs text-muted-foreground mb-4">
-                  View exactly what this agent knows at runtime. Knowledge is assembled from modular blocks that can be individually edited or overridden.
-                </p>
-                <KnowledgeInspector
-                  agentId={editingAgent.id}
-                  agentName={editingAgent.name}
-                />
-              </div>
-              <div className="rounded-lg border p-4">
-                <h4 className="font-medium mb-2 flex items-center gap-2">
-                  <Eye className="h-4 w-4" />
-                  Full Prompt Preview
-                </h4>
-                <p className="text-xs text-muted-foreground mb-4">
-                  Preview the complete prompt that will be sent to the model, including campaign context and variable substitution.
-                </p>
-                <PromptPreviewPanel
-                  agentId={editingAgent.id}
-                  agentName={editingAgent.name}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="text-center text-muted-foreground py-8">
-              <p>Save the agent first to view knowledge blocks</p>
-            </div>
-          )}
         </TabsContent>
 
         <TabsContent value="tools" className="space-y-3 mt-0">
-          <div className="space-y-3 rounded-lg border p-4">
-            <div>
-              <Label>System tools</Label>
-              <p className="text-xs text-muted-foreground">
-                Allow the agent to perform built-in actions. {activeToolCount} active tool{activeToolCount === 1 ? '' : 's'}
-              </p>
+          <div className="rounded-lg border p-4 bg-blue-50/50 dark:bg-blue-950/20 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Settings2 className="h-4 w-4 text-blue-600" />
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Basic Call Handling</p>
             </div>
-            <div className="space-y-2">
-              {SYSTEM_TOOL_OPTIONS.map((tool) => (
-                <div key={tool.key} className="flex items-center justify-between rounded-lg border p-3">
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-medium">{tool.label}</div>
-                    <p className="text-xs text-muted-foreground">{tool.description}</p>
-                  </div>
-                  <Switch
-                    checked={systemTools[tool.key]}
-                    onCheckedChange={(checked) =>
-                      setFormData({
-                        ...formData,
-                        settings: {
-                          ...baseSettings,
-                          systemTools: {
-                            ...systemTools,
-                            [tool.key]: checked,
-                          },
-                        },
-                      })
-                    }
-                    data-testid={`switch-system-tool-${tool.key}`}
-                  />
-                </div>
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Configure basic call handling features. Advanced conversation skills and behaviors are automatically 
+              applied based on campaign objectives and foundational B2B training.
+            </p>
           </div>
 
           {/* Voicemail Detection Configuration */}
@@ -6456,533 +6200,25 @@ If you detect an answering machine or voicemail, hang up immediately. Do not lea
               </div>
             )}
           </div>
-        </TabsContent>
 
-        <TabsContent value="advanced" className="space-y-3 mt-0">
-          {/* Simplified Advanced Settings - Only Conversational Behavior */}
-          <div className="space-y-4 rounded-lg border p-4">
-            <div>
-              <Label className="text-base font-semibold">Conversational Behavior</Label>
-              <p className="text-xs text-muted-foreground">
-                Configure how the agent manages conversation flow and timing.
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label>Active Status</Label>
+              <p className="text-sm text-muted-foreground">
+                Only active agents can be assigned to campaigns
               </p>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="eagerness">Eagerness</Label>
-              <Select
-                value={advanced.conversational.eagerness}
-                onValueChange={(value) =>
-                  setFormData({
-                    ...formData,
-                    settings: {
-                      ...baseSettings,
-                      advanced: {
-                        ...advanced,
-                        conversational: {
-                          ...advanced.conversational,
-                          eagerness: value as AdvancedSettings['conversational']['eagerness'],
-                        },
-                      },
-                    },
-                  })
-                }
-              >
-                <SelectTrigger id="eagerness">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low - Wait longer before responding</SelectItem>
-                  <SelectItem value="normal">Normal (Recommended)</SelectItem>
-                  <SelectItem value="high">High - Respond quickly</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Controls how quickly the agent responds after detecting end of speech.
-              </p>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="takeTurnAfterSilence">Take turn after silence (sec)</Label>
-                <Input
-                  id="takeTurnAfterSilence"
-                  type="number"
-                  min={1}
-                  max={30}
-                  step={1}
-                  value={advanced.conversational.takeTurnAfterSilenceSeconds}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          conversational: {
-                            ...advanced.conversational,
-                            takeTurnAfterSilenceSeconds: Number.isNaN(value) ? 4 : Math.max(1, Math.min(30, value)),
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 4 seconds</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="endAfterSilence">End conversation after silence (sec)</Label>
-                <Input
-                  id="endAfterSilence"
-                  type="number"
-                  min={10}
-                  max={300}
-                  step={5}
-                  value={advanced.conversational.endConversationAfterSilenceSeconds}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          conversational: {
-                            ...advanced.conversational,
-                            endConversationAfterSilenceSeconds: Number.isNaN(value) ? 60 : Math.max(10, Math.min(300, value)),
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 60 seconds</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxConversationDuration">Max conversation duration (sec)</Label>
-                <Input
-                  id="maxConversationDuration"
-                  type="number"
-                  min={60}
-                  max={1800}
-                  step={30}
-                  value={advanced.conversational.maxConversationDurationSeconds}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          conversational: {
-                            ...advanced.conversational,
-                            maxConversationDurationSeconds: Number.isNaN(value) ? 200 : Math.max(60, Math.min(1800, value)),
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 200 seconds</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-lg border p-4">
-            <div>
-              <Label className="text-base font-semibold">Turn Detection</Label>
-              <p className="text-xs text-muted-foreground">
-                Control automatic turn detection and voice activity thresholds.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="turnDetectionMode">Automatic turn detection</Label>
-              <Select
-                value={realtimeConfig.turnDetection.mode}
-                onValueChange={(value) =>
-                  setFormData({
-                    ...formData,
-                    settings: {
-                      ...baseSettings,
-                      advanced: {
-                        ...advanced,
-                        realtime: {
-                          ...realtimeConfig,
-                          turnDetection: {
-                            ...realtimeConfig.turnDetection,
-                            mode: value as AdvancedSettings['realtime']['turnDetection']['mode'],
-                          },
-                        },
-                      },
-                    },
-                  })
-                }
-              >
-                <SelectTrigger id="turnDetectionMode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="semantic">Semantic</SelectItem>
-                  <SelectItem value="disabled">Disabled</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Normal uses server VAD, Semantic uses intent-aware detection, Disabled requires manual response.
-              </p>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="turnThreshold">Threshold</Label>
-                <Input
-                  id="turnThreshold"
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={realtimeConfig.turnDetection.threshold}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            turnDetection: {
-                              ...realtimeConfig.turnDetection,
-                              threshold: Number.isNaN(value) ? 0.5 : Math.max(0, Math.min(1, value)),
-                            },
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 0.50</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="prefixPadding">Prefix padding (ms)</Label>
-                <Input
-                  id="prefixPadding"
-                  type="number"
-                  min={0}
-                  max={2000}
-                  step={10}
-                  value={realtimeConfig.turnDetection.prefixPaddingMs}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            turnDetection: {
-                              ...realtimeConfig.turnDetection,
-                              prefixPaddingMs: Number.isNaN(value) ? 300 : Math.max(0, Math.min(2000, value)),
-                            },
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 300</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="silenceDuration">Silence duration (ms)</Label>
-                <Input
-                  id="silenceDuration"
-                  type="number"
-                  min={0}
-                  max={5000}
-                  step={50}
-                  value={realtimeConfig.turnDetection.silenceDurationMs}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            turnDetection: {
-                              ...realtimeConfig.turnDetection,
-                              silenceDurationMs: Number.isNaN(value) ? 500 : Math.max(0, Math.min(5000, value)),
-                            },
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Default: 500</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="idleTimeout">Idle timeout (ms)</Label>
-                <Input
-                  id="idleTimeout"
-                  type="number"
-                  min={0}
-                  max={120000}
-                  step={1000}
-                  value={realtimeConfig.turnDetection.idleTimeoutMs}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            turnDetection: {
-                              ...realtimeConfig.turnDetection,
-                              idleTimeoutMs: Number.isNaN(value) ? 0 : Math.max(0, Math.min(120000, value)),
-                            },
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">0 disables idle timeout</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-lg border p-4">
-            <div>
-              <Label className="text-base font-semibold">Realtime Model & Tools</Label>
-              <p className="text-xs text-muted-foreground">
-                Configure model routing, tools, and transcript preferences.
-              </p>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="realtimeModel">Model</Label>
-                <Input
-                  id="realtimeModel"
-                  value={realtimeConfig.model}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            model: e.target.value,
-                          },
-                        },
-                      },
-                    })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="userTranscriptModel">User transcript model</Label>
-                <Input
-                  id="userTranscriptModel"
-                  value={realtimeConfig.userTranscriptModel}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            userTranscriptModel: e.target.value,
-                          },
-                        },
-                      },
-                    })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="noiseReduction">Noise reduction</Label>
-                <Select
-                  value={realtimeConfig.noiseReduction}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            noiseReduction: value as AdvancedSettings['realtime']['noiseReduction'],
-                          },
-                        },
-                      },
-                    })
-                  }
-                >
-                  <SelectTrigger id="noiseReduction">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="enabled">Enabled</SelectItem>
-                    <SelectItem value="disabled">Disabled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxTokens">Max tokens</Label>
-                <Input
-                  id="maxTokens"
-                  type="number"
-                  min={1}
-                  max={4096}
-                  step={1}
-                  value={realtimeConfig.maxTokens}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            maxTokens: Number.isNaN(value) ? 4096 : Math.max(1, Math.min(4096, value)),
-                          },
-                        },
-                      },
-                    });
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="toolChoice">Tool choice</Label>
-                <Select
-                  value={realtimeConfig.toolChoice}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      settings: {
-                        ...baseSettings,
-                        advanced: {
-                          ...advanced,
-                          realtime: {
-                            ...realtimeConfig,
-                            toolChoice: value as AdvancedSettings['realtime']['toolChoice'],
-                          },
-                        },
-                      },
-                    })
-                  }
-                >
-                  <SelectTrigger id="toolChoice">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto</SelectItem>
-                    <SelectItem value="required">Required</SelectItem>
-                    <SelectItem value="none">Disabled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="functions">Functions</Label>
-              <Input
-                id="functions"
-                value={formatCsv(realtimeConfig.functions)}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    settings: {
-                      ...baseSettings,
-                      advanced: {
-                        ...advanced,
-                        realtime: {
-                          ...realtimeConfig,
-                          functions: parseCsv(e.target.value),
-                        },
-                      },
-                    },
-                  })
-                }
-                placeholder="detect_voicemail_and_hangup, enforce_max_call_duration, navigate_and_dial, connect_to_operator"
-              />
-              <p className="text-xs text-muted-foreground">Comma-separated list of allowed function names.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mcpServers">MCP servers</Label>
-              <Input
-                id="mcpServers"
-                value={formatCsv(realtimeConfig.mcpServers)}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    settings: {
-                      ...baseSettings,
-                      advanced: {
-                        ...advanced,
-                        realtime: {
-                          ...realtimeConfig,
-                          mcpServers: parseCsv(e.target.value),
-                        },
-                      },
-                    },
-                  })
-                }
-                placeholder="crm, docs, calendar"
-              />
-              <p className="text-xs text-muted-foreground">Comma-separated MCP server identifiers.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="modelConfig">Model configuration</Label>
-              <Textarea
-                id="modelConfig"
-                value={realtimeConfig.modelConfig}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    settings: {
-                      ...baseSettings,
-                      advanced: {
-                        ...advanced,
-                        realtime: {
-                          ...realtimeConfig,
-                          modelConfig: e.target.value,
-                        },
-                      },
-                    },
-                  })
-                }
-                placeholder='{"temperature":0.7,"top_p":0.95}'
-                rows={4}
-              />
-            </div>
+            <Switch
+              checked={formData.isActive}
+              onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+              data-testid="switch-active"
+            />
           </div>
         </TabsContent>
+
+        {/* Removed: knowledge tab - handled automatically
+            Removed: advanced tab - handled at campaign level */}
+
       </Tabs>
       </div>
     </div>

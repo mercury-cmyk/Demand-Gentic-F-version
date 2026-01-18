@@ -35,7 +35,7 @@ interface SettingsNavItem {
 // Exported type for category
 export type { SettingsNavItem };
 
-const SETTINGS_NAV: SettingsNavItem[] = [
+export const SETTINGS_NAV: SettingsNavItem[] = [
   // Personal Settings
   {
     id: 'profile',
@@ -90,6 +90,14 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     category: 'infrastructure',
   },
   {
+    id: 'agent-defaults',
+    label: 'Agent Defaults',
+    href: ROUTES.SETTINGS_AGENT_DEFAULTS,
+    icon: Settings,
+    description: 'Global agent configuration',
+    category: 'infrastructure',
+  },
+  {
     id: 'integrations',
     label: 'Integrations',
     href: ROUTES.SETTINGS_INTEGRATIONS,
@@ -123,7 +131,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
 type SettingsCategory = 'personal' | 'organization' | 'infrastructure' | 'system' | 'super';
 
 // Group items by category
-const CATEGORIES: readonly { id: SettingsCategory; label: string }[] = [
+export const CATEGORIES: readonly { id: SettingsCategory; label: string }[] = [
   { id: 'personal', label: 'Personal' },
   { id: 'organization', label: 'Organization' },
   { id: 'infrastructure', label: 'Infrastructure' },
@@ -226,8 +234,3 @@ export function SettingsLayout({ children, title, description }: SettingsLayoutP
 export function getSettingsPageInfo(location: string) {
   return SETTINGS_NAV.find(item => location.startsWith(item.href));
 }
-
-/**
- * Export navigation config for use in other components
- */
-export { SETTINGS_NAV, CATEGORIES };

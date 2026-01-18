@@ -167,8 +167,13 @@ export const campaignContactStateEnum = pgEnum('campaign_contact_state', [
 ]);
 
 // AI Voice Agent Enums
+// Includes both OpenAI Realtime voices and Google Gemini Live voices
 export const aiVoiceEnum = pgEnum('ai_voice', [
-  'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'
+  // OpenAI Realtime voices
+  'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer',
+  // Google Gemini Live voices (primary platform)
+  'Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede',
+  'Orion', 'Vega', 'Pegasus', 'Ursa', 'Dipper', 'Capella', 'Orbit', 'Lyra', 'Eclipse'
 ]);
 
 export const aiHandoffTriggerEnum = pgEnum('ai_handoff_trigger', [
@@ -1319,15 +1324,29 @@ export type AccountMessagingBrief = typeof accountMessagingBriefs.$inferSelect;
 export const insertAccountCallBriefSchema = createInsertSchema(accountCallBriefs);
 export type AccountCallBrief = typeof accountCallBriefs.$inferSelect;
 
+// Global Agent Defaults - centralized default configuration for all virtual agents
+export const agentDefaults = pgTable("agent_defaults", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  defaultFirstMessage: text("default_first_message").notNull(),
+  defaultSystemPrompt: text("default_system_prompt").notNull(),
+  defaultTrainingGuidelines: jsonb("default_training_guidelines").notNull().$type<string[]>(),
+  defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
+  defaultVoice: text("default_voice").notNull().default('Kore'),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type AgentDefaults = typeof agentDefaults.$inferSelect;
+
 // Campaign Agent Assignments table (enforces one-campaign-per-agent rule)
 // Virtual Agents - AI agent personas that can be assigned to campaigns like human agents
 export const virtualAgents = pgTable("virtual_agents", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
-  provider: text("provider").notNull().default('openai_realtime'), // openai_realtime, elevenlabs, etc.
+  provider: text("provider").notNull().default('gemini_live'), // gemini_live, openai_realtime, elevenlabs, etc.
   externalAgentId: text("external_agent_id"), // Provider-specific agent ID
-  voice: aiVoiceEnum("voice").default('nova'),
+  voice: aiVoiceEnum("voice").default('Kore'), // Default to Gemini voice (Google-first platform)
   systemPrompt: text("system_prompt"),
   firstMessage: text("first_message"),
   settings: jsonb("settings"), // Provider-specific settings (temperature, persona, etc.)

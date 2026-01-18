@@ -48,6 +48,20 @@ type VirtualAgentConfig = {
   settings: Partial<VirtualAgentSettings> | null;
 };
 
+type PromptVariantPerspective =
+  | 'consultative'
+  | 'direct_value'
+  | 'pain_point'
+  | 'social_proof'
+  | 'educational'
+  | 'urgent'
+  | 'relationship';
+
+type VariantSelectionMethod = 'default' | 'manual';
+
+const PREVIEW_PHONE_TEST_DEFAULT_FIRST_MESSAGE =
+  "Hello, may I speak with the person responsible for technology decisions?";
+
 async function resolveVirtualAgentId(params: {
   campaignId: string;
   virtualAgentId?: string | null;
@@ -179,7 +193,7 @@ const initiatePhoneTestSchema = z.object({
   virtualAgentId: z.string().optional(),
   variantId: z.string().optional(), // Prompt variant ID for A/B testing
   testPhoneNumber: z.string().min(10, "Valid phone number required"),
-  voiceProvider: z.enum(["openai", "google"]).optional().default("openai"),
+  voiceProvider: z.enum(["openai", "google"]).optional().default("google"),
   voice: z.string().optional(),
   // OpenAI Realtime configuration
   turnDetection: z.enum(["server_vad", "semantic", "disabled"]).optional().default("server_vad"),
@@ -958,6 +972,24 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       : null;
     const mergedSettings = mergeAgentSettings(agentConfig?.settings ?? undefined);
 
+    const buildCustomOrAssembledPrompt = async () => {
+      if (hasCustomPrompt && !resolvedVirtualAgentId) {
+        return {
+          systemPrompt: customSystemPrompt!,
+          firstMessage: customFirstMessage || PREVIEW_PHONE_TEST_DEFAULT_FIRST_MESSAGE,
+        };
+      }
+
+      return await buildAssembledPrompt({
+        campaignId,
+        accountId,
+        contactId: contactId || undefined,
+        virtualAgentId: resolvedVirtualAgentId!,
+        agentConfig,
+        agentSettings: mergedSettings,
+      });
+    };
+
     // Get account and contact info for context
     const [account] = await db
       .select()
@@ -1011,9 +1043,12 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     }).returning();
 
     // Build the system prompt with full context (same as campaign test calls)
-    // If custom prompt is provided and no agent, we use a simplified prompt builder
     let promptResponse: { systemPrompt: string; firstMessage: string };
-    let variantInfo = { variantId: null, perspective: null, selectionMethod: 'default' };
+    let variantInfo: {
+      variantId: string | null;
+      perspective: PromptVariantPerspective | null;
+      selectionMethod: VariantSelectionMethod;
+    } = { variantId: null, perspective: null, selectionMethod: 'default' };
 
     // Load variant if specified (for A/B testing)
     if (variantId) {
@@ -1023,63 +1058,28 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
         if (variantData) {
           promptResponse = {
             systemPrompt: variantData.variant.systemPrompt,
-            firstMessage: variantData.variant.firstMessage || "Hello, may I speak with the person responsible for technology decisions?",
+            firstMessage: variantData.variant.firstMessage || PREVIEW_PHONE_TEST_DEFAULT_FIRST_MESSAGE,
           };
           variantInfo = {
             variantId: variantData.variant.id,
             perspective: variantData.variant.perspective,
             selectionMethod: 'manual',
           };
-          console.log(`[Preview Studio Phone Test] Using prompt variant: ${variantData.variant.variantName} (${variantData.variant.perspective})`);
+          console.log(
+            `[Preview Studio Phone Test] Using prompt variant: ${variantData.variant.variantName} (${variantData.variant.perspective})`
+          );
         } else {
-          console.warn(`[Preview Studio Phone Test] Variant ${variantId} not found, falling back to default`);
-          hasCustomPrompt && !resolvedVirtualAgentId ? {
-            systemPrompt: customSystemPrompt!,
-            firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
-          } : await buildAssembledPrompt({
-            campaignId,
-            accountId,
-            contactId: contactId || undefined,
-            virtualAgentId: resolvedVirtualAgentId!,
-            agentConfig,
-            agentSettings: mergedSettings,
-          });
+          console.warn(
+            `[Preview Studio Phone Test] Variant ${variantId} not found, falling back to default`
+          );
+          promptResponse = await buildCustomOrAssembledPrompt();
         }
       } catch (err) {
         console.warn('[Preview Studio Phone Test] Error loading variant:', err);
-        // Fall through to default
-        if (hasCustomPrompt && !resolvedVirtualAgentId) {
-          promptResponse = {
-            systemPrompt: customSystemPrompt!,
-            firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
-          };
-        } else {
-          promptResponse = await buildAssembledPrompt({
-            campaignId,
-            accountId,
-            contactId: contactId || undefined,
-            virtualAgentId: resolvedVirtualAgentId!,
-            agentConfig,
-            agentSettings: mergedSettings,
-          });
-        }
+        promptResponse = await buildCustomOrAssembledPrompt();
       }
-    } else if (hasCustomPrompt && !resolvedVirtualAgentId) {
-      // Use custom prompts directly (no agent to pull from)
-      promptResponse = {
-        systemPrompt: customSystemPrompt!,
-        firstMessage: customFirstMessage || "Hello, may I speak with the person responsible for technology decisions?",
-      };
     } else {
-      // Build assembled prompt from agent config
-      promptResponse = await buildAssembledPrompt({
-        campaignId,
-        accountId,
-        contactId: contactId || undefined,
-        virtualAgentId: resolvedVirtualAgentId!,
-        agentConfig,
-        agentSettings: mergedSettings,
-      });
+      promptResponse = await buildCustomOrAssembledPrompt();
     }
 
     // Use custom prompts if provided, otherwise use assembled prompt
@@ -1174,35 +1174,42 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     console.log('[Preview Studio Phone Test] Initiating Telnyx call to:', normalizedPhone);
 
     // Initiate Telnyx TeXML call
-    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
-    const telnyxResponse = await fetch(telnyxEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${telnyxApiKey}`,
-      },
-      body: JSON.stringify({
-        To: normalizedPhone,
-        From: fromNumber,
-        Url: texmlUrl,
-        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
-      }),
-    });
+    // REAL CALLS DISABLED FOR SIMULATION PANEL
+    console.log('[Preview Studio Phone Test] SIMULATION MODE: Real call disabled.');
+    const telnyxResponse = {
+      ok: true,
+      json: () => Promise.resolve({ data: { call_control_id: `simulated-${Date.now()}` } }),
+    };
+    // const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+    // const telnyxResponse = await fetch(telnyxEndpoint, {
+    //   method: "POST",
+    //   headers: {
+    //     "Content-Type": "application/json",
+    //     "Authorization": `Bearer ${telnyxApiKey}`,
+    //   },
+    //   body: JSON.stringify({
+    //     To: normalizedPhone,
+    //     From: fromNumber,
+    //     Url: texmlUrl,
+    //     StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+    //   }),
+    // });
 
     if (!telnyxResponse.ok) {
-      const errorText = await telnyxResponse.text();
-      console.error(`[Preview Studio Phone Test] Telnyx API error: ${telnyxResponse.status} - ${errorText}`);
+      // const errorText = await telnyxResponse.text();
+      const errorText = "Simulated Telnyx Error";
+      console.error(`[Preview Studio Phone Test] Telnyx API error: SIMULATED`);
 
-      let friendlyMessage = `Telnyx API error: ${telnyxResponse.status}`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        if (errorJson.errors && errorJson.errors.length > 0) {
-          const firstError = errorJson.errors[0];
-          friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
-        }
-      } catch (e) {
-        // ignore parse error
-      }
+      let friendlyMessage = `Telnyx API error: SIMULATED`;
+      // try {
+      //   const errorJson = JSON.parse(errorText);
+      //   if (errorJson.errors && errorJson.errors.length > 0) {
+      //     const firstError = errorJson.errors[0];
+      //     friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
+      //   }
+      // } catch (e) {
+      //   // ignore parse error
+      // }
 
       await db.update(previewStudioSessions)
         .set({
@@ -1225,11 +1232,11 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       })
       .where(eq(previewStudioSessions.id, session.id));
 
-    console.log(`[Preview Studio Phone Test] Call initiated successfully: ${callControlId}`);
+    console.log(`[Preview Studio Phone Test] Call initiated successfully (SIMULATED): ${callControlId}`);
 
     const response: PhoneTestStartResponse = {
       success: true,
-      message: "Phone test initiated - your phone should ring shortly",
+      message: "SIMULATION: Call test initiated. This is a playback-only simulation.",
       sessionId: session.id,
       testCallId,
       callControlId,

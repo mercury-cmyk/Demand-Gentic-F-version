@@ -26,7 +26,8 @@ const initiateTestCallSchema = z.object({
   testJobTitle: z.string().optional(),
   testContactEmail: z.string().email().optional().or(z.literal('')).transform(val => val || undefined),
   customVariables: z.record(z.unknown()).optional(),
-  voiceProvider: z.enum(["openai", "google"]).optional().default("openai"),
+  // Default to Google for Google-native platform
+  voiceProvider: z.enum(["openai", "google"]).optional().default("google"),
 });
 
 /**
