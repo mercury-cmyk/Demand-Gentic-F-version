@@ -213,12 +213,12 @@ export async function configureCampaignAgents(campaignId: string, type: string) 
   // Generate the system prompt
   const systemPrompt = generateAgentSystemPrompt(config);
 
-  // Check if a virtual agent is already assigned
+  // Check if an AI (virtual) agent is already assigned
   const existingAssignments = await db.select()
     .from(campaignAgentAssignments)
     .where(and(
         eq(campaignAgentAssignments.campaignId, campaignId),
-        eq(campaignAgentAssignments.agentType, 'virtual')
+        eq(campaignAgentAssignments.agentType, 'ai')
     ));
 
   let virtualAgentId: string | null = null;
@@ -259,7 +259,7 @@ export async function configureCampaignAgents(campaignId: string, type: string) 
     await db.insert(campaignAgentAssignments).values({
       campaignId: campaignId,
       virtualAgentId: newAgent.id,
-      agentType: 'virtual',
+      agentType: 'ai',
       isActive: true,
       assignedBy: null // System assigned
     });
