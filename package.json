@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "fix-audio": "tsx fix-audio-one-command.ts",
     "diagnose-audio": "tsx diagnose-audio.ts",
-    "test-audio": "tsx test-audio-transmission.ts"
+    "test-audio": "tsx test-audio-transmission.ts",
+    "check-orchestrator": "tsx check-orchestrator-readiness.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
