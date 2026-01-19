@@ -268,11 +268,62 @@ const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
 };
 
 /**
+ * Normalize country name to handle common typos and variations
+ * Maps typos/variations to canonical country names that exist in ENABLED_CALLING_REGIONS
+ */
+function normalizeCountryName(country: string): string {
+  const normalized = country.toUpperCase().trim();
+
+  // Common typos and variations mapping to canonical names
+  const COUNTRY_TYPOS: Record<string, string> = {
+    // United States typos
+    'UNITEDF STATES': 'UNITED STATES',
+    'UNITEDSTATES': 'UNITED STATES',
+    'UNITED STATE': 'UNITED STATES',
+    'UNTED STATES': 'UNITED STATES',
+    'UNITD STATES': 'UNITED STATES',
+    'UNTIED STATES': 'UNITED STATES',
+    'UITED STATES': 'UNITED STATES',
+    'U.S.A.': 'USA',
+    'U.S.A': 'USA',
+    'U.S.': 'US',
+    'U.S': 'US',
+    'UNITED STATES OF AMERICA': 'UNITED STATES',
+
+    // United Kingdom typos
+    'UITED KINGDOM': 'UNITED KINGDOM',
+    'UNTED KINGDOM': 'UNITED KINGDOM',
+    'UNITD KINGDOM': 'UNITED KINGDOM',
+    'UNITED KINGDON': 'UNITED KINGDOM',
+    'UNITED KINGOM': 'UNITED KINGDOM',
+    'UNITEDKINGDOM': 'UNITED KINGDOM',
+    'U.K.': 'UK',
+    'U.K': 'UK',
+    'GREAT BRITAIN': 'UNITED KINGDOM',
+    'BRITAIN': 'UNITED KINGDOM',
+
+    // Other common typos
+    'AUSTRLIA': 'AUSTRALIA',
+    'AUSTRALA': 'AUSTRALIA',
+    'AUSTALIA': 'AUSTRALIA',
+    'CANDA': 'CANADA',
+    'CANANDA': 'CANADA',
+    'GEMANY': 'GERMANY',
+    'GERAMNY': 'GERMANY',
+    'FRNCE': 'FRANCE',
+    'INDAI': 'INDIA',
+  };
+
+  return COUNTRY_TYPOS[normalized] || normalized;
+}
+
+/**
  * Check if a contact's country is in an enabled calling region
  */
 function isCountryEnabled(country: string | null | undefined): boolean {
   if (!country) return false;
-  return ENABLED_CALLING_REGIONS[country.toUpperCase().trim()] === true;
+  const normalizedCountry = normalizeCountryName(country);
+  return ENABLED_CALLING_REGIONS[normalizedCountry] === true;
 }
 
 interface OrchestratorJobData {
