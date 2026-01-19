@@ -21,6 +21,7 @@ import {
   reason,
   generateWithFunctions,
   generateEmbedding,
+  generateImage,
   type ChatMessage,
   type FunctionDeclaration,
 } from "./vertex-client";
@@ -37,10 +38,13 @@ import { eq, and, sql, desc } from "drizzle-orm";
 
 export interface AgentTask {
   id: string;
-  type: "intel" | "qual" | "engage";
+  type: "intel" | "qual" | "engage" | "reporting" | "creative" | "setup" | "script_refinement" | "simulation";
   status: "pending" | "running" | "completed" | "failed";
   priority: "low" | "medium" | "high" | "urgent";
-  accountId: string;
+  accountId?: string; // Optional for some task types
+  userId?: string; // ID of the user triggering the task (for role scoping)
+  orgId?: string; // ID of the organization (for boundaries)
+  roleContext?: "client" | "agent" | "admin"; // Explicit capability scope
   contactId?: string;
   campaignId?: string;
   input: Record<string, any>;
@@ -228,6 +232,21 @@ export class VertexAgenticOperator extends EventEmitter {
           break;
         case "engage":
           output = await this.runEngageAgent(task);
+          break;
+        case "reporting":
+          output = await this.runReportingAgent(task);
+          break;
+        case "creative":
+          output = await this.runCreativeAgent(task);
+          break;
+        case "setup":
+          output = await this.runSetupAgent(task);
+          break;
+        case "script_refinement":
+          output = await this.runScriptRefinementAgent(task);
+          break;
+        case "simulation":
+          output = await this.runSimulationAgent(task);
           break;
         default:
           throw new Error(`Unknown task type: ${task.type}`);
@@ -429,7 +448,7 @@ Return JSON:
    * Run the Engage Agent for email sequence generation
    */
   private async runEngageAgent(task: AgentTask): Promise<EngagementPlan> {
-    const { accountId, contactId, input } = task;
+    const { accountId, contactId, input, roleContext } = task;
 
     if (!contactId) {
       throw new Error("Contact ID required for engagement");
@@ -442,27 +461,51 @@ Return JSON:
       .where(eq(contacts.id, contactId))
       .limit(1);
 
-    const [account] = await db
-      .select()
-      .from(accounts)
-      .where(eq(accounts.id, accountId))
-      .limit(1);
+    // Account is optional for some flows, but usually required
+    let accountName = "Unknown Company";
+    let accountIndustry = "Unknown Industry";
+    if (accountId) {
+        const [account] = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.id, accountId))
+        .limit(1);
+        if (account) {
+            accountName = account.name;
+            accountIndustry = account.industry || "Unknown";
+        }
+    }
 
-    if (!contact || !account) {
-      throw new Error("Contact or account not found");
+
+    if (!contact) {
+      throw new Error("Contact not found");
     }
 
     const sequenceType = input.sequenceType || "cold";
     const personalizationLevel = input.personalizationLevel || 2;
     const touchCount = sequenceType === "cold" ? 7 : sequenceType === "warm" ? 5 : 4;
 
-    const prompt = `You are a B2B email engagement specialist. Create a personalized email sequence.
+    // MANDATORY STANDARD: Agentic Email Process
+    const emailStandardPrompt = `
+MANDATORY EMAIL STANDARDS (STRICT ENFORCEMENT):
+1. COMPATIBILITY: Output must be optimized for Outlook (Desktop/Web) and Gmail. Avoid complex CSS, background images, or flash.
+2. DELIVERABILITY: Use best practices. No spam trigger words (e.g., 'Guarantee', '$$$', 'Free'). text-to-image ratio < 40%.
+3. FORMATTING: Clean HTML. Tables for layout if necessary. No external stylesheets.
+4. FORMS: If a call-to-action link is included, it MUST support pre-fill parameters (e.g., ?email={{email}}) to reduce friction.
+5. PROFESSIONALISM: Tone must be highly professional, conversion-oriented, and concise.
+
+ROLE CONTEXT: ${roleContext || 'system'}
+`;
+
+    const prompt = `You are a B2B email engagement specialist. Create a personalized email sequence adhering to strict standards.
+
+${emailStandardPrompt}
 
 CONTACT INFORMATION:
 - Name: ${contact.firstName} ${contact.lastName}
 - Title: ${contact.title || "Unknown"}
-- Company: ${account.name}
-- Industry: ${account.industry || "Unknown"}
+- Company: ${accountName}
+- Industry: ${accountIndustry}
 
 ${input.intelligence ? `ACCOUNT INTELLIGENCE:\n${JSON.stringify(input.intelligence, null, 2)}\n` : ""}
 ${input.orgContext ? `OUR COMPANY CONTEXT:\n${input.orgContext}\n` : ""}
@@ -505,6 +548,216 @@ Return JSON:
       startDate: new Date(),
       status: "draft",
     };
+  }
+
+  // ==================== REPORTING AGENT ====================
+
+  /**
+   * Run Reporting Agent for client-specific analysis
+   */
+  private async runReportingAgent(task: AgentTask): Promise<any> {
+    const { campaignId, accountId, input } = task;
+
+    let contextData = "";
+
+    if (campaignId) {
+      const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+      contextData += `CAMPAIGN: ${campaign?.name || 'Unknown'}\n`;
+      // In a real implementation, we would fetch aggregated stats here
+    }
+
+    if (accountId) {
+      const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId));
+      contextData += `CLIENT ACCOUNT: ${account?.name || 'Unknown'}\n`;
+    }
+
+    const reportType = input.reportType || "performance_analysis";
+
+    const prompt = `You are a B2B marketing data analyst. Generate a ${reportType} report.
+    
+CONTEXT:
+${contextData}
+
+DATA:
+${JSON.stringify(input.data || {}, null, 2)}
+
+REQUIREMENTS:
+- Analyze metrics and identify trends
+- Provide actionable insights
+- Compare against industry benchmarks
+- Format as structured JSON for rendering
+
+Return JSON:
+{
+  "summary": "Executive summary of findings",
+  "metrics": { "key": "value" },
+  "insights": ["insight 1", "insight 2"],
+  "recommendations": ["rec 1", "rec 2"]
+}`;
+
+    const result = await generateJSON(prompt);
+    return result;
+  }
+
+  // ==================== CREATIVE AGENT ====================
+
+  /**
+   * Run Creative Agent for image generation and asset creation
+   */
+  private async runCreativeAgent(task: AgentTask): Promise<any> {
+    const { input } = task;
+    const prompt = input.prompt;
+    const aspectRatio = input.aspectRatio || "16:9";
+
+    if (!prompt) throw new Error("Prompt required for creative generation");
+
+    // 1. Refine prompt using Gemini
+    const refinementPrompt = `Optimize this image generation prompt for Imagen 3 photorealism: "${prompt}". Return only the refined prompt text.`;
+    const refinedPrompt = await chat(refinementPrompt, []);
+
+    // 2. Generate image using Imagen 3
+    const imageBase64 = await generateImage(refinedPrompt, aspectRatio);
+
+    if (!imageBase64) {
+      throw new Error("Failed to generate image");
+    }
+
+    return {
+      originalPrompt: prompt,
+      refinedPrompt,
+      imageUrl: imageBase64, // In prod, upload to GCS/S3 and return URL
+      createdAt: new Date()
+    };
+  }
+
+  // ==================== SETUP AGENT ====================
+
+  /**
+   * Run Setup Agent for autonomous campaign creation
+   * Updated to support Client Capabilities: Order Creation, Context Ingestion
+   */
+  private async runSetupAgent(task: AgentTask): Promise<any> {
+    const { input, roleContext } = task;
+    const goal = input.goal;
+    const briefContent = input.briefContent || ""; // Pasted inputs or uploaded brief text
+    const contextUrls = input.contextUrls || []; // Landing pages to visit
+    
+    // In a real implementation, we would fetch the contextUrls content here.
+    // For now, we simulate extraction if URLs are provided.
+    let extractedUrlContent = "";
+    if (contextUrls.length > 0) {
+        extractedUrlContent = `EXTRACTED CONTENT FROM ${contextUrls.join(', ')}: (Simulated extraction of landing page copy, value propositions, and pricing)`;
+    }
+
+    const prompt = `You are a Campaign Architect AI. Create a complete B2B outreach campaign structure.
+
+ROLE CONTEXT: ${roleContext || 'client'} (Ensure recommendations are scoped to this organization's capabilities)
+
+GOAL: "${goal}"
+
+CONTEXT SOURCES:
+${briefContent ? `UPLOADED BRIEF:\n${briefContent}\n` : ""}
+${extractedUrlContent ? `WEB CONTEXT:\n${extractedUrlContent}\n` : ""}
+
+TASKS:
+1. Parse campaign objective (Lead Gen, Webinar, SQL, etc.)
+2. Define Target Audience (ICP) based on context
+3. Extract Messaging Context (Value props, pain points) from brief/web
+4. Create Voice Agent Persona
+5. Draft Strategy
+
+Return JSON:
+{
+  "campaignOrder": {
+    "objective": "Objective extracted",
+    "type": "campaign type",
+    "targetAudience": {
+        "industries": ["..."],
+        "roles": ["..."],
+        "locations": ["..."]
+    },
+    "messagingContext": {
+        "valuePropositions": ["..."],
+        "painPoints": ["..."],
+        "offer": "..."
+    }
+  },
+  "strategy": "Strategy description",
+  "channels": ["voice", "email"],
+  "voicePersona": { "name": "", "role": "", "style": "", "instructions": "..." },
+  "emailStrategy": { "touchPoints": 5, "theme": "" },
+  "filters": { "industry": [], "role": [] }
+}`;
+
+    const result = await generateJSON(prompt);
+    return result;
+  }
+
+  // ==================== HTML SCRIPT REFINEMENT AGENT ====================
+
+  /**
+   * Run Script Refinement Agent for Human Agents
+   */
+  private async runScriptRefinementAgent(task: AgentTask): Promise<any> {
+      const { input } = task;
+      const script = input.script;
+      const performanceData = input.performanceData || "No historical data";
+
+      const prompt = `You are a Conversion Copywriting AI. Refine this script for better performance.
+
+CURRENT SCRIPT:
+${script}
+
+PERFORMANCE CONTEXT:
+${performanceData}
+
+TASKS:
+1. Analyze weak points (openers, objection handlers)
+2. Inject predictive cues based on best-performing patterns
+3. Refine for tone and clarity
+
+Return JSON:
+{
+    "refinedScript": "...",
+    "changes": ["Changed opener to..."],
+    "cues": [
+        {"trigger": "Price objection", "suggestion": "Mention ROI calculator"}
+    ]
+}`;
+      return await generateJSON(prompt);
+  }
+
+  // ==================== SIMULATION AGENT ====================
+
+  /**
+   * Run Simulation Agent for Client Campaign Testing
+   */
+  private async runSimulationAgent(task: AgentTask): Promise<any> {
+    const { input, accountId } = task;
+    const campaignId = input.campaignId;
+    const scenario = input.scenario || "Standard gatekeeper";
+
+    // In a real implementation, this would trigger the dedicated simulator service.
+    // Here we generate the expected dialogue flow for the client to review.
+
+    const prompt = `You are a Voice Simulation AI. Simulate a call for Campaign ${campaignId}.
+
+SCENARIO: ${scenario}
+ACCOUNT ID: ${accountId} (Scope check: Agent can only access this account's resources)
+
+Generate a predicted dialogue transcript based on the campaign's agent persona and the scenario.
+
+Return JSON:
+{
+    "simulationId": "sim-${Date.now()}",
+    "transcript": [
+        {"role": "agent", "text": "..."},
+        {"role": "prospect", "text": "..."}
+    ],
+    "outcome": "predicted outcome",
+    "analysis": "Agent handled objection X well..."
+}`;
+    return await generateJSON(prompt);
   }
 
   // ==================== ORCHESTRATION ====================

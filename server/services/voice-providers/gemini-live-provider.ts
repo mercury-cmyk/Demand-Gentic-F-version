@@ -75,8 +75,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private speechClient: SpeechClient | null = null;
   private recognizeStream: ReturnType<SpeechClient['streamingRecognize']> | null = null;
   private sttEnabled: boolean = false;
+  private sttActive: boolean = false; // Track if STT should be actively running
   private currentUserTranscript: string = '';
   private sttRestartTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lastAudioReceivedTime: number = 0; // Track when we last received audio
+  private sttIdleTimeout: ReturnType<typeof setTimeout> | null = null;
 
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -340,13 +343,24 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         this.ws.send(JSON.stringify(message));
         this.audioBytesSent += audioBuffer.length;
 
+        // Track when audio was received for STT idle detection
+        this.lastAudioReceivedTime = Date.now();
+
         // Also stream to Speech-to-Text for user transcription
         // Note: The streaming recognize stream expects raw PCM audio bytes
-        if (this.sttEnabled && this.recognizeStream) {
-          try {
-            this.recognizeStream.write(pcmBuffer);
-          } catch (sttErr) {
-            // Ignore write errors - stream may be restarting
+        if (this.sttEnabled) {
+          // Activate STT on demand when audio arrives
+          if (!this.sttActive) {
+            this.sttActive = true;
+            this.startRecognizeStream().catch(() => {});
+          }
+
+          if (this.recognizeStream) {
+            try {
+              this.recognizeStream.write(pcmBuffer);
+            } catch (sttErr) {
+              // Ignore write errors - stream may be restarting
+            }
           }
         }
     } catch (e) {
@@ -356,7 +370,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   /**
    * Initialize Google Cloud Speech-to-Text for user speech transcription.
-   * This runs in parallel with Gemini to transcribe user input.
+   * This only initializes the client - actual streaming starts on demand when audio arrives.
    */
   private async initializeSpeechToText(): Promise<void> {
     // Skip if STT is explicitly disabled
@@ -368,8 +382,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     try {
       this.speechClient = new SpeechClient();
       this.sttEnabled = true;
-      await this.startRecognizeStream();
-      console.log(`${LOG_PREFIX} Speech-to-Text initialized for user transcription`);
+      // Don't start stream yet - it will start on demand when audio arrives
+      console.log(`${LOG_PREFIX} Speech-to-Text client initialized (stream starts on audio)`);
     } catch (error: any) {
       console.warn(`${LOG_PREFIX} Speech-to-Text initialization failed (user transcripts will be unavailable):`, error.message);
       this.sttEnabled = false;
@@ -379,9 +393,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   /**
    * Start or restart the streaming recognition stream.
    * Streams have a ~5 minute limit, so we need to restart periodically.
+   * Only starts if STT is active (audio is being received).
    */
   private async startRecognizeStream(): Promise<void> {
-    if (!this.speechClient || !this.sttEnabled) return;
+    if (!this.speechClient || !this.sttEnabled || !this.sttActive) return;
 
     // Close existing stream if any
     if (this.recognizeStream) {
@@ -390,11 +405,19 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       } catch (e) {
         // Ignore close errors
       }
+      this.recognizeStream = null;
     }
 
     // Clear any pending restart timeout
     if (this.sttRestartTimeout) {
       clearTimeout(this.sttRestartTimeout);
+      this.sttRestartTimeout = null;
+    }
+
+    // Clear idle timeout if exists
+    if (this.sttIdleTimeout) {
+      clearTimeout(this.sttIdleTimeout);
+      this.sttIdleTimeout = null;
     }
 
     const request: protos.google.cloud.speech.v1.IStreamingRecognitionConfig = {
@@ -411,6 +434,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     this.recognizeStream = this.speechClient.streamingRecognize(request);
 
     this.recognizeStream.on('data', (response: protos.google.cloud.speech.v1.IStreamingRecognizeResponse) => {
+      // Update last audio time on any data received
+      this.lastAudioReceivedTime = Date.now();
+
       const results = response.results || [];
       for (const result of results) {
         const alternatives = result.alternatives || [];
@@ -436,28 +462,44 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     });
 
     this.recognizeStream.on('error', (error: any) => {
-      // DEADLINE_EXCEEDED is expected after ~5 minutes, restart the stream
+      // DEADLINE_EXCEEDED is expected after ~5 minutes, restart if still active
       if (error.code === 4 || error.message?.includes('DEADLINE_EXCEEDED')) {
-        console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
-        this.startRecognizeStream().catch(() => {});
+        if (this.sttActive) {
+          console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
+          this.startRecognizeStream().catch(() => {});
+        }
       } else {
         console.warn(`${LOG_PREFIX} STT stream error:`, error.message || error);
       }
     });
 
     this.recognizeStream.on('end', () => {
-      // Stream ended, restart if still enabled
-      if (this.sttEnabled) {
+      // Stream ended - only restart if still active and recently received audio
+      const timeSinceLastAudio = Date.now() - this.lastAudioReceivedTime;
+      if (this.sttEnabled && this.sttActive && timeSinceLastAudio < 30000) {
+        // Clear safety timeout if exists to prevent leaks
+        if (this.sttRestartTimeout) {
+            clearTimeout(this.sttRestartTimeout);
+            this.sttRestartTimeout = null;
+        }
+
+        // Only restart if audio was received within the last 30 seconds
         this.sttRestartTimeout = setTimeout(() => {
-          this.startRecognizeStream().catch(() => {});
-        }, 100);
+          if (this.sttActive) {
+            this.startRecognizeStream().catch(() => {});
+          }
+        }, 500); // Wait 500ms before restarting
+      } else {
+        // No recent audio - deactivate STT to prevent restart loop
+        this.sttActive = false;
+        this.recognizeStream = null;
       }
     });
 
     // Set a timeout to restart the stream before Google's 5-minute limit
     this.sttRestartTimeout = setTimeout(() => {
-      if (this.sttEnabled) {
-        console.log(`${LOG_PREFIX} STT stream timeout, restarting...`);
+      if (this.sttEnabled && this.sttActive) {
+        console.log(`${LOG_PREFIX} STT stream approaching limit, restarting...`);
         this.startRecognizeStream().catch(() => {});
       }
     }, 4 * 60 * 1000); // 4 minutes (before 5-minute limit)
@@ -468,10 +510,16 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    */
   private stopSpeechToText(): void {
     this.sttEnabled = false;
+    this.sttActive = false;
 
     if (this.sttRestartTimeout) {
       clearTimeout(this.sttRestartTimeout);
       this.sttRestartTimeout = null;
+    }
+
+    if (this.sttIdleTimeout) {
+      clearTimeout(this.sttIdleTimeout);
+      this.sttIdleTimeout = null;
     }
 
     if (this.recognizeStream) {

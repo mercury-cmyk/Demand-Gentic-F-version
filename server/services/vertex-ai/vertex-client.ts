@@ -37,10 +37,11 @@ const defaultConfig: VertexAIConfig = {
   projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || "pivotalb2b-2026",
   location: process.env.VERTEX_AI_LOCATION || "us-central1",
   models: {
-    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
+    chat: process.env.VERTEX_CHAT_MODEL || "gemini-3-flash-preview",
     reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.0-flash-thinking-exp-01-21",
     embedding: process.env.VERTEX_EMBEDDING_MODEL || "text-embedding-004",
-    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-1.5-pro-002",
+    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.0-flash-001",
+    image: process.env.VERTEX_IMAGE_MODEL || "imagen-3.0-generate-001",
   },
   safetySettings: {
     harassmentThreshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
@@ -144,6 +145,52 @@ export function getMultimodalModel(): GenerativeModel {
       maxOutputTokens: 8192,
     },
   });
+}
+
+/**
+ * Get the image generation model (Imagen 3)
+ */
+export function getImageModel(): GenerativeModel {
+  const vertex = getVertexAI();
+  return vertex.getGenerativeModel({
+    model: currentConfig.models.image,
+  });
+}
+
+/**
+ * Generate an image from a text prompt using Imagen 3
+ */
+export async function generateImage(prompt: string, aspectRatio: string = "16:9"): Promise<string | null> {
+  const model = getImageModel();
+  
+  try {
+    // Imagen 3 request format
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        // @ts-ignore - Vertex AI SDK types might not have implicit support for specific imagen params yet in basic config
+        sampleCount: 1,
+        aspectRatio: aspectRatio,
+      } as any
+    });
+
+    const response = result.response;
+    // Imagen returns base64 string in the response candidates usually under a specific structure or directly as bytes
+    // For Vertex AI SDK, it maps to standard response structure but verify payload
+    // Usually it's in candidates[0].content.parts[0].inlineData or similar
+    
+    // Note: This implementation depends on how Imagen 3 specifically returns data via the GenerativeModel interface
+    // Ideally we check for inlineData
+    const part = response.candidates?.[0]?.content?.parts?.[0];
+    if (part && 'inlineData' in part && part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[VertexAI] Image generation failed:`, error);
+    return null;
+  }
 }
 
 // ==================== GENERATION UTILITIES ====================
@@ -539,6 +586,7 @@ export default {
   getChatModel,
   getReasoningModel,
   getMultimodalModel,
+  getImageModel,
   generateText,
   generateJSON,
   chat,
@@ -547,5 +595,6 @@ export default {
   generateEmbeddings,
   generateEmbedding,
   generateWithFunctions,
+  generateImage,
   healthCheck,
 };

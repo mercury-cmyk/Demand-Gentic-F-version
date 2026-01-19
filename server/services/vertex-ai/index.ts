@@ -82,6 +82,57 @@ export {
   type MatchingEngineConfig,
 } from "./vertex-vector-search";
 
+// ==================== CLIENT AGENTIC HUB ====================
+export {
+  VertexClientAgenticHub,
+  createClientAgenticHub,
+  type ClientAgenticContext,
+  type AgentResponse,
+  type CampaignOrderRequest,
+  type CampaignOrderResult,
+  type VoiceSimulationRequest,
+  type VoiceSimulationResult,
+  type EmailGenerationRequest,
+  type GeneratedEmail,
+  type ImageGenerationRequest,
+  type GeneratedImage,
+  type ReportRequest,
+  type CampaignReport,
+  type TargetAudienceCriteria,
+  type SimulationPersona,
+  type ChartData,
+  type ReportInsight,
+} from "./vertex-client-agentic-hub";
+
+// ==================== GEMINI LIVE SIMULATION ====================
+export {
+  GeminiLiveSimulation,
+  createSimulation,
+  runTextSimulation,
+  type SimulationSession,
+  type SimulationConfig,
+  type SimulationAnalysis,
+  type TranscriptEntry,
+} from "./gemini-live-simulation";
+
+// ==================== PROMPT REFINEMENT (MANDATORY FOR VOICE AGENTS) ====================
+export {
+  VertexPromptRefiner,
+  getPromptRefiner,
+  refineCampaignPrompt,
+  refineAccountPrompt,
+  refineContactPrompt,
+  refineCombinedPrompt,
+  refinePromptBatch,
+  GEMINI_VOICE_GUIDELINES,
+  COMPLIANCE_RULES,
+  type PromptRefinementRequest,
+  type PromptContext,
+  type RefinementOptions,
+  type RefinedPrompt,
+  type VoiceDirectives,
+} from "./vertex-prompt-refiner";
+
 // ==================== INITIALIZATION ====================
 
 import { healthCheck } from "./vertex-client";

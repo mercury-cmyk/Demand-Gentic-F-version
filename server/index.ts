@@ -1,9 +1,8 @@
 // Suppress noisy warnings FIRST (before any other imports)
 import "./suppress-warnings";
 
-import { config } from "dotenv";
-// Load environment variables from .env.local
-config({ path: ".env.local" });
+// Validate and load environment variables
+import "./env";
 
 // Global Error Handlers - catch unhandled exceptions to prevent silent crashes
 process.on('unhandledRejection', (reason, promise) => {
@@ -108,14 +107,6 @@ app.use((req, res, next) => {
   // Create server with Express app as the default handler
   // WebSocket upgrades will be handled separately via server.on('upgrade')
   const server = createServer(app);
-
-  // === Telnyx Credentials Debug Logging ===
-  console.log('--- Telnyx Credentials Debug ---');
-  console.log('TELNYX_API_KEY:', process.env.TELNYX_API_KEY ? 'SET (' + process.env.TELNYX_API_KEY.slice(0, 8) + '...)' : 'NOT SET');
-  console.log('TELNYX_CONNECTION_ID:', process.env.TELNYX_CONNECTION_ID ? 'SET (' + process.env.TELNYX_CONNECTION_ID.slice(0, 8) + '...)' : 'NOT SET');
-  console.log('TELNYX_CALL_CONTROL_APP_ID:', process.env.TELNYX_CALL_CONTROL_APP_ID ? 'SET (' + process.env.TELNYX_CALL_CONTROL_APP_ID.slice(0, 8) + '...)' : 'NOT SET');
-  console.log('TELNYX_FROM_NUMBER:', process.env.TELNYX_FROM_NUMBER ? 'SET (' + process.env.TELNYX_FROM_NUMBER + ')' : 'NOT SET');
-  console.log('-------------------------------');
 
   // Initialize database with default admin if needed
   await initializeDatabase();

@@ -14,6 +14,8 @@ import {
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import openai from "../lib/openai";
+import { env } from "../env";
+
 
 const router = Router();
 
@@ -100,20 +102,13 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
     }
 
     // Check environment configuration
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = process.env.TELNYX_FROM_NUMBER;
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    const googleApiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
-    const googleProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+    const telnyxApiKey = env.TELNYX_API_KEY;
+    const fromNumber = env.TELNYX_FROM_NUMBER;
+    const openaiApiKey = env.OPENAI_API_KEY;
+    const googleApiKey = env.GOOGLE_AI_API_KEY || env.GEMINI_API_KEY;
+    const googleProjectId = env.GOOGLE_CLOUD_PROJECT || env.GCP_PROJECT_ID;
     // For TeXML outbound calls, use ONLY TELNYX_TEXML_APP_ID
-    const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
-
-    if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
-      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER in your .env.local file." });
-    }
-    if (!texmlAppId) {
-      return res.status(500).json({ message: "Telnyx TeXML Application ID not configured. Please set TELNYX_TEXML_APP_ID in your .env.local file." });
-    }
+    const texmlAppId = env.TELNYX_TEXML_APP_ID;
 
     // Validate provider-specific credentials
     if (validatedData.voiceProvider === 'google') {
@@ -193,7 +188,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
 
     // Determine provider - default to Google Gemini Live
-    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
+    const defaultProvider = env.VOICE_PROVIDER?.toLowerCase() || 'google';
     const isGoogleDefault = !defaultProvider.includes('openai');
     const effectiveProvider = validatedData.voiceProvider || (isGoogleDefault ? 'google' : 'openai');
 
@@ -262,7 +257,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
     // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
-    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    const webhookHost = env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
@@ -294,7 +289,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         To: payload.to,
         From: payload.from,
         Url: payload.url,
-        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+        StatusCallback: `https://${env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
       }),
     });
 
@@ -367,6 +362,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     res.status(500).json({ message: "Failed to initiate test call", error: String(error) });
   }
 });
+
 
 /**
  * GET /api/campaigns/:campaignId/test-calls
@@ -520,8 +516,7 @@ router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireR
       }
     }
 
-    // Use OpenAI to analyze the transcript
-    const hasOpenAI = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+    const hasOpenAI = !!(env.AI_INTEGRATIONS_OPENAI_API_KEY || env.OPENAI_API_KEY);
     if (!hasOpenAI) {
       return res.status(503).json({
         message: "OpenAI is not configured. Cannot perform transcript analysis."
@@ -619,7 +614,7 @@ Analyze the call and return a JSON object with:
       message: "Failed to analyze test call", 
       error: String(error),
       details: error.message || "Unknown error",
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -762,7 +757,7 @@ router.post("/webhook", async (req, res) => {
           const callControlId = payload?.call_control_id;
           if (callControlId) {
             try {
-              const telnyxApiKey = process.env.TELNYX_API_KEY;
+              const telnyxApiKey = env.TELNYX_API_KEY;
               await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
                 method: 'POST',
                 headers: {

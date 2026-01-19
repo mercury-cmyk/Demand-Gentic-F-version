@@ -44,6 +44,11 @@ import {
   getOrBuildParticipantCallPlan,
 } from "../account-call-service";
 import { ensureVoiceAgentControlLayer } from "../voice-agent-control-defaults";
+import {
+  refineCombinedPrompt,
+  type RefinedPrompt,
+  type RefinementOptions,
+} from "./vertex-prompt-refiner";
 
 // ==================== TYPES ====================
 
@@ -189,13 +194,14 @@ export class VertexVoiceAgent extends EventEmitter {
   private conversationHistory: ChatMessage[] = [];
   private callId: string;
   private systemPrompt: string = "";
+  private refinedPromptData: RefinedPrompt | null = null;
   private loggedInfo: { infoType: string; details: string }[] = [];
 
   constructor(settings: VertexAgentSettings, context: VertexCallContext) {
     super();
     this.settings = settings;
     this.context = context;
-    this.callId = `vertex-call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.callId = `vertex-call-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   }
 
   private interpolateScript(script: string): string {
@@ -325,9 +331,72 @@ IMPORTANT:
 - If you don't understand something, ask for clarification
 - Log any key information the prospect shares for follow-up`;
 
-    return ensureVoiceAgentControlLayer(
-      `${basePrompt}\n\n---\n\n${accountContextSection}\n\n---\n\n${callPlanContextSection}`
+    // Combine all context into the raw prompt
+    const rawPrompt = ensureVoiceAgentControlLayer(
+      `${basePrompt}\n\n---\n\n${accountContextSection || ""}\n\n---\n\n${callPlanContextSection || ""}`
     );
+
+    // ============================================================
+    // MANDATORY: Refine prompt through Vertex AI before deployment
+    // All voice agent prompts MUST be refined for Gemini optimization
+    // ============================================================
+    console.log(`[VertexVoiceAgent] Refining prompt through Vertex AI for call ${this.callId}...`);
+
+    try {
+      this.refinedPromptData = await refineCombinedPrompt(
+        rawPrompt,
+        {
+          campaignId: this.context.campaignId || undefined,
+          accountId: accountId || undefined,
+          contactId: contactId || undefined,
+          agentPersona: {
+            name: this.settings.persona.name,
+            role: this.settings.persona.role,
+            company: this.settings.persona.companyName,
+            tone: "professional",
+          },
+          callObjective: "Qualify lead and schedule meeting",
+        },
+        {
+          voiceProvider: "gemini",
+          emotionalTone: "professional",
+          pacePreference: "normal",
+          complianceLevel: "strict",
+          enforceBrandVoice: true,
+        }
+      );
+
+      console.log(
+        `[VertexVoiceAgent] Prompt refined. Quality score: ${this.refinedPromptData.qualityScore}/100. ` +
+        `Optimizations: ${this.refinedPromptData.optimizations.length}, Warnings: ${this.refinedPromptData.warnings.length}`
+      );
+
+      // Log any warnings
+      if (this.refinedPromptData.warnings.length > 0) {
+        console.warn(`[VertexVoiceAgent] Prompt warnings:`, this.refinedPromptData.warnings);
+      }
+
+      // Use the refined prompt
+      return this.refinedPromptData.refinedPrompt;
+    } catch (refineError) {
+      // If refinement fails, log error but fall back to raw prompt
+      console.error(`[VertexVoiceAgent] Prompt refinement failed, using raw prompt:`, refineError);
+      return rawPrompt;
+    }
+  }
+
+  /**
+   * Get the refined prompt data (for debugging/analytics)
+   */
+  getRefinedPromptData(): RefinedPrompt | null {
+    return this.refinedPromptData;
+  }
+
+  /**
+   * Get voice directives from the refined prompt
+   */
+  getVoiceDirectives(): RefinedPrompt["voiceDirectives"] | null {
+    return this.refinedPromptData?.voiceDirectives || null;
   }
 
   async startConversation(): Promise<void> {
