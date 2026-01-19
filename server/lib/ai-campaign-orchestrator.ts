@@ -197,6 +197,36 @@ function getBestPriorityPhone(contact: any): { phone: string | null; priority: n
 // Alias for backward compatibility
 const getBestUkPhone = getBestPriorityPhone;
 
+/**
+ * Enabled calling regions/countries
+ * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom
+ */
+const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
+  // Australia
+  'AU': true, 'AUSTRALIA': true,
+  // Middle East (Sun-Thu work week)
+  'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
+  'SA': true, 'SAUDI ARABIA': true,
+  'IL': true, 'ISRAEL': true,
+  'QA': true, 'QATAR': true,
+  'KW': true, 'KUWAIT': true,
+  'BH': true, 'BAHRAIN': true,
+  'OM': true, 'OMAN': true,
+  // North America
+  'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
+  'CA': true, 'CANADA': true,
+  // United Kingdom
+  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
+};
+
+/**
+ * Check if a contact's country is in an enabled calling region
+ */
+function isCountryEnabled(country: string | null | undefined): boolean {
+  if (!country) return false;
+  return ENABLED_CALLING_REGIONS[country.toUpperCase().trim()] === true;
+}
+
 interface OrchestratorJobData {
   type: 'tick' | 'campaign-replenish';
   campaignId?: string;
@@ -590,6 +620,7 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   let skipped = 0;
   let noPhone = 0;
   let outsideBusinessHours = 0;
+  let countryNotEnabled = 0;
 
   // Build prioritized list with phone priority scores
   const candidateItems: Array<{ item: any; phone: string; priority: number; contact: any }> = [];
@@ -608,6 +639,12 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
     const country = (item as any).country;
     const state = (item as any).state;
     const timezone = (item as any).timezone;
+    
+    // Check if country is in enabled calling regions (AU, ME, NA, UK)
+    if (!isCountryEnabled(country)) {
+      countryNotEnabled++;
+      continue; // Skip contacts from disabled regions
+    }
     
     // Check business hours for this contact's timezone/country FIRST
     // Use stored timezone if available, fall back to country/state detection
@@ -719,6 +756,9 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   }
   
   // Log business hours filtering by timezone
+  if (countryNotEnabled > 0) {
+    console.log(`[AI Orchestrator] Region filter: ${countryNotEnabled} contacts skipped (country not in enabled regions: AU, ME, NA, UK)`);
+  }
   console.log(`[AI Orchestrator] Business hours check: ${outsideBusinessHours} contacts skipped (outside their local business hours)`);
   for (const [tz, stats] of timezoneStats.entries()) {
     if (stats.total > 0) {

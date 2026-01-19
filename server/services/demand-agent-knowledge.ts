@@ -850,7 +850,7 @@ export function getDefaultFirstMessage(type: 'demand_intel' | 'demand_qual' | 'd
     case 'demand_intel':
       return 'Initiating account research and intelligence gathering...';
     case 'demand_qual':
-      return 'Hello! This is [Agent Name] calling from [Company]. Do you have a quick moment?';
+      return 'Hello, may I please speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?';
     case 'demand_engage':
       return 'Preparing personalized email sequence based on account intelligence...';
     default:

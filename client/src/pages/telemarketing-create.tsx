@@ -2,6 +2,7 @@ import { useLocation } from "wouter";
 import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-builder/campaign-wizard";
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
 import { Step2TelemarketingContent } from "@/components/campaign-builder/step2-telemarketing-content";
+import { Step0CampaignType } from "@/components/campaign-builder/step0-campaign-type";
 import { Step2bDialModeConfig } from "@/components/campaign-builder/step2b-dial-mode-config";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
 import { Step4Compliance } from "@/components/campaign-builder/step4-compliance";
@@ -16,6 +17,12 @@ export default function TelemarketingCreatePage() {
   const { toast } = useToast();
 
   const steps: CampaignWizardStep[] = [
+    {
+      id: "type",
+      title: "Type",
+      description: "Select campaign objective",
+      component: Step0CampaignType,
+    },
     {
       id: "audience",
       title: "Audience",
@@ -107,7 +114,7 @@ export default function TelemarketingCreatePage() {
 
       const campaignPayload = {
         name: data.name || `Dialer Campaign ${new Date().toISOString()}`,
-        type: "call",
+        type: data.type || "call",
         status: data.action === "draft" ? "draft" : "active",
         problemIntelligenceOrgId: data.organizationId || null,
         audienceRefs,

@@ -33,7 +33,7 @@ spec:
             - name: TELNYX_WEBHOOK_URL
               value: "https://demandgentic.ai/api/webhooks/telnyx"
             - name: PUBLIC_WEBSOCKET_URL
-              value: "wss://demandgentic.ai/openai-realtime-dialer"
+              value: "wss://demandgentic.ai/voice-dialer"
             - name: PUBLIC_WEBHOOK_HOST
               value: "demandgentic.ai"
             - name: BASE_URL

@@ -738,7 +738,7 @@ router.post("/simulation/chat", requireAuth, async (req, res) => {
         const { GoogleGenerativeAI } = await import("@google/generative-ai");
         const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
         const model = genai.getGenerativeModel({
-          model: "gemini-2.0-flash-exp",
+          model: "gemini-2.5-flash",
           systemInstruction: systemPrompt,
         });
 
@@ -1123,6 +1123,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       queue_item_id: `preview-queue-${testCallId}`,
       call_attempt_id: `preview-attempt-${testCallId}`,
       contact_id: contactId || `preview-contact-${testCallId}`,
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: resolvedVirtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
@@ -1150,6 +1151,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       queue_item_id: customParams.queue_item_id,
       call_attempt_id: customParams.call_attempt_id,
       contact_id: customParams.contact_id,
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: resolvedVirtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
@@ -1174,42 +1176,35 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     console.log('[Preview Studio Phone Test] Initiating Telnyx call to:', normalizedPhone);
 
     // Initiate Telnyx TeXML call
-    // REAL CALLS DISABLED FOR SIMULATION PANEL
-    console.log('[Preview Studio Phone Test] SIMULATION MODE: Real call disabled.');
-    const telnyxResponse = {
-      ok: true,
-      json: () => Promise.resolve({ data: { call_control_id: `simulated-${Date.now()}` } }),
-    };
-    // const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
-    // const telnyxResponse = await fetch(telnyxEndpoint, {
-    //   method: "POST",
-    //   headers: {
-    //     "Content-Type": "application/json",
-    //     "Authorization": `Bearer ${telnyxApiKey}`,
-    //   },
-    //   body: JSON.stringify({
-    //     To: normalizedPhone,
-    //     From: fromNumber,
-    //     Url: texmlUrl,
-    //     StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
-    //   }),
-    // });
+    const telnyxEndpoint = `https://api.telnyx.com/v2/texml/calls/${texmlAppId}`;
+    const telnyxResponse = await fetch(telnyxEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${telnyxApiKey}`,
+      },
+      body: JSON.stringify({
+        To: normalizedPhone,
+        From: fromNumber,
+        Url: texmlUrl,
+        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+      }),
+    });
 
     if (!telnyxResponse.ok) {
-      // const errorText = await telnyxResponse.text();
-      const errorText = "Simulated Telnyx Error";
-      console.error(`[Preview Studio Phone Test] Telnyx API error: SIMULATED`);
+      const errorText = await telnyxResponse.text();
+      console.error(`[Preview Studio Phone Test] Telnyx API error:`, errorText);
 
-      let friendlyMessage = `Telnyx API error: SIMULATED`;
-      // try {
-      //   const errorJson = JSON.parse(errorText);
-      //   if (errorJson.errors && errorJson.errors.length > 0) {
-      //     const firstError = errorJson.errors[0];
-      //     friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
-      //   }
-      // } catch (e) {
-      //   // ignore parse error
-      // }
+      let friendlyMessage = `Telnyx API error`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.errors && errorJson.errors.length > 0) {
+          const firstError = errorJson.errors[0];
+          friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
+        }
+      } catch (e) {
+        // ignore parse error
+      }
 
       await db.update(previewStudioSessions)
         .set({
@@ -1232,11 +1227,11 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       })
       .where(eq(previewStudioSessions.id, session.id));
 
-    console.log(`[Preview Studio Phone Test] Call initiated successfully (SIMULATED): ${callControlId}`);
+    console.log(`[Preview Studio Phone Test] Call initiated successfully: ${callControlId}`);
 
     const response: PhoneTestStartResponse = {
       success: true,
-      message: "SIMULATION: Call test initiated. This is a playback-only simulation.",
+      message: "Phone test initiated. Your phone will ring shortly.",
       sessionId: session.id,
       testCallId,
       callControlId,

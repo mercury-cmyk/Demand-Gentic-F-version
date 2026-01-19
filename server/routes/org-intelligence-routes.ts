@@ -227,8 +227,8 @@ async function performMultiModelAnalysis(params: {
           const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genai = new GoogleGenerativeAI(geminiKey);
 
-          // Use working Gemini models (gemini-2.0-flash works, 1.5 models deprecated)
-          const candidateModels = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash-8b"];
+          // Use Gemini 2.5 Flash (best balance of speed and capability)
+          const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b"];
           let result = null;
           let lastError = null;
           let successModel = null;
@@ -425,7 +425,7 @@ async function performMultiModelAnalysis(params: {
           const { GoogleGenerativeAI } = await import("@google/generative-ai");
           const genai = new GoogleGenerativeAI(geminiKey);
 
-          const candidateModels = ["gemini-2.0-flash-exp", "gemini-2.0-flash", synthModel];
+          const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", synthModel];
           let parsed = null;
           let successModel = null;
           

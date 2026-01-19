@@ -543,7 +543,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   const voiceProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
   const isGeminiActive = !voiceProvider.includes('openai');
   const fallbackEnabled = process.env.VOICE_PROVIDER_FALLBACK === 'true';
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} 🎙️  VOICE PROVIDER CONFIGURATION`);
@@ -2765,6 +2765,19 @@ function createOutOfBandResponse(
 function detectIdentityConfirmation(transcript: string): boolean {
   const normalizedText = transcript.toLowerCase().trim();
 
+  // EXCLUSIONS: Gatekeeper phrases (Definitive NO for identity confirmation)
+  // If these words appear, it is NOT identity confirmation, even if "yes" is present
+  const gatekeeperPhrases = [
+    'available', 'transfer', 'connect', 'hold', 'moment', 'one second', 
+    'wait', 'check', 'see if', 'patch', 'through', 'reception', 'assistant',
+    'secretary', 'office', 'desk', 'line', 'he is', 'she is', 'they are',
+    'reason for', 'fail to', 'message', 'leave'
+  ];
+
+  if (gatekeeperPhrases.some(phrase => normalizedText.includes(phrase))) {
+    return false;
+  }
+
   // Short affirmatives that confirm identity
   const identityConfirmPatterns = [
     /^yes$/,
@@ -3687,7 +3700,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         .join('\n')
     : '';
 
-  let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
+  let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome, session);
   if (disposition === 'no_answer' && fullTranscript && isVoicemailTranscript(fullTranscript)) {
     console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript, overriding disposition to voicemail`);
     disposition = 'voicemail';
@@ -3989,15 +4002,37 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   activeSessions.delete(callId);
 }
 
-  function mapOutcomeToDisposition(outcome: string): DispositionCode {
+  function mapOutcomeToDisposition(outcome: string, session?: VoiceDialerSession): DispositionCode {
     switch (outcome) {
       case 'voicemail':
         return 'voicemail';
       case 'no_answer':
         return 'no_answer';
       case 'error':
-        return 'invalid_data';
+        // Technical errors (Gemini disconnect, WebSocket issues, etc.) should NOT mark contact as invalid_data
+        // Instead, use 'no_answer' to allow retry - the contact's data is fine, it was a system issue
+        // Check if there was meaningful conversation before the error
+        if (session && session.transcripts.some(t => t.role === 'user' && t.text.trim().length > 0)) {
+          console.log(`${LOG_PREFIX} Error occurred after user conversation - marking as no_answer for retry (technical issue, not invalid data)`);
+        } else {
+          console.log(`${LOG_PREFIX} Error before user conversation - marking as no_answer for retry (connection issue)`);
+        }
+        return 'no_answer';
       default:
+        // Handle "completed" and other outcomes where AI didn't set a disposition
+        if (session) {
+          // If human was explicitly detected (via audio patterns), treat user hangup as not_interested
+          if (session.audioDetection?.humanDetected) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with human detected - marking as not_interested (likely user hangup)`);
+            return 'not_interested';
+          }
+          
+          // If we have distinct user transcripts, also treat as not_interested
+          if (session.transcripts.some(t => t.role === 'user' && t.text.trim().length > 0)) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts - marking as not_interested (likely user hangup)`);
+            return 'not_interested';
+          }
+        }
         return 'no_answer';
     }
   }
@@ -4777,33 +4812,38 @@ async function buildSystemPrompt(
       const geminiPreamble = `<critical_instructions>
 ## CRITICAL CONVERSATION RULES (MUST FOLLOW)
 
-### IDENTITY CONFIRMATION (REQUIRED FIRST)
-1. Your FIRST task is to confirm you are speaking with the right person by name.
-2. Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
-3. If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
-4. Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+### 1. IDENTITY CONFIRMATION (REQUIRED FIRST)
+- Your FIRST task is to confirm you are speaking with the right person by name.
+- Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
+- If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+- Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
 
-### CONVERSATION FLOW
-5. Ask ONE question at a time, then STOP and LISTEN for their response.
-6. After speaking, wait in silence - do NOT fill silence with "okay", "great", or filler words.
-7. Acknowledge their responses naturally ("I understand", "That makes sense") to build rapport.
-8. Keep responses concise - under 30 seconds of speaking at a time.
+### 2. SILENT TOOL USE (ABSOLUTE RULE)
+- NEVER speak the name of tools (like "submit_disposition" or "hangup").
+- EXECUTE tools silently in the background.
+- If you need to hang up, simply say a polite goodbye and then trigger the hangup action silently.
+- Do NOT say "I will now submit the disposition" or "logging call outcome". Just do it.
 
-### FOLLOW-UP CONSENT (REQUIRED BEFORE ENDING)
-9. Before ending any positive call, you MUST ask for follow-up consent.
-10. Use a short, intelligent question like: "Would it be okay if I send you a quick follow-up email with some details?" or "Can I reach out with more information?"
-11. WAIT for their explicit "yes" or "no" response before proceeding.
-12. Record their answer - this is required for compliance and tracking.
-13. If they agree, confirm what they'll receive: "Great, I'll send that right over."
+### 3. HANG UP & DISPOSITION PROTOCOL
+- Hang up immediately when the conversation is naturally over or the user asks to end.
+- Use the 'submit_disposition' tool to log the outcome, then the 'hangup' tool.
+- If the user is not interested, be polite, log it, and hang up. Do not pester.
 
-### RAPPORT BUILDING
-14. Listen actively - reference what they said in your responses.
-15. Show genuine interest in their situation before pitching.
-16. If they seem busy, offer to schedule a better time.
+### 4. CONVERSATION STYLE & TONE (HUMAN-LIKE)
+- **Be Curious & Warm:** Sound like a real person, not a robot. Use a little smile in your voice.
+- **Micro-Pauses:** Use natural pauses (e.g., "hmm...", "well...", slight hesitations) to sound authentic.
+- **Short Turns:** Keep your responses SHORT (1-2 sentences max). Do NOT monologue.
+- **One Question Rule:** Ask only ONE question at a time. Wait for the answer.
+- **No Robot Speak:** Avoid formal phrases like "I understand" or "That is correct". Use "Got it", "Makes sense", "Oh, I see".
 
-### COMPLIANCE
-17. NEVER say the organization name until identity is confirmed.
-18. Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
+### 5. FOLLOW-UP CONSENT (REQUIRED)
+- Before ending a positive call, ask: "Would it be okay if I send you a quick follow-up email?"
+- WAIT for a clear "yes" or "no".
+- If yes, say: "Great, I'll send that over. Have a good one!" and then hang up.
+
+### 6. COMPLIANCE
+- NEVER say the organization name until identity is confirmed.
+- Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
 </critical_instructions>
 
 `;
@@ -4869,33 +4909,38 @@ async function buildSystemPrompt(
       const geminiPreamble = `<critical_instructions>
 ## CRITICAL CONVERSATION RULES (MUST FOLLOW)
 
-### IDENTITY CONFIRMATION (REQUIRED FIRST)
-1. Your FIRST task is to confirm you are speaking with the right person by name.
-2. Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
-3. If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
-4. Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+### 1. IDENTITY CONFIRMATION (REQUIRED FIRST)
+- Your FIRST task is to confirm you are speaking with the right person by name.
+- Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
+- If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+- Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
 
-### CONVERSATION FLOW
-5. Ask ONE question at a time, then STOP and LISTEN for their response.
-6. After speaking, wait in silence - do NOT fill silence with "okay", "great", or filler words.
-7. Acknowledge their responses naturally ("I understand", "That makes sense") to build rapport.
-8. Keep responses concise - under 30 seconds of speaking at a time.
+### 2. SILENT TOOL USE (ABSOLUTE RULE)
+- NEVER speak the name of tools (like "submit_disposition" or "hangup").
+- EXECUTE tools silently in the background.
+- If you need to hang up, simply say a polite goodbye and then trigger the hangup action silently.
+- Do NOT say "I will now submit the disposition" or "logging call outcome". Just do it.
 
-### FOLLOW-UP CONSENT (REQUIRED BEFORE ENDING)
-9. Before ending any positive call, you MUST ask for follow-up consent.
-10. Use a short, intelligent question like: "Would it be okay if I send you a quick follow-up email with some details?" or "Can I reach out with more information?"
-11. WAIT for their explicit "yes" or "no" response before proceeding.
-12. Record their answer - this is required for compliance and tracking.
-13. If they agree, confirm what they'll receive: "Great, I'll send that right over."
+### 3. HANG UP & DISPOSITION PROTOCOL
+- Hang up immediately when the conversation is naturally over or the user asks to end.
+- Use the 'submit_disposition' tool to log the outcome, then the 'hangup' tool.
+- If the user is not interested, be polite, log it, and hang up. Do not pester.
 
-### RAPPORT BUILDING
-14. Listen actively - reference what they said in your responses.
-15. Show genuine interest in their situation before pitching.
-16. If they seem busy, offer to schedule a better time.
+### 4. CONVERSATION STYLE & TONE (HUMAN-LIKE)
+- **Be Curious & Warm:** Sound like a real person, not a robot. Use a little smile in your voice.
+- **Micro-Pauses:** Use natural pauses (e.g., "hmm...", "well...", slight hesitations) to sound authentic.
+- **Short Turns:** Keep your responses SHORT (1-2 sentences max). Do NOT monologue.
+- **One Question Rule:** Ask only ONE question at a time. Wait for the answer.
+- **No Robot Speak:** Avoid formal phrases like "I understand" or "That is correct". Use "Got it", "Makes sense", "Oh, I see".
 
-### COMPLIANCE
-17. NEVER say the organization name until identity is confirmed.
-18. Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
+### 5. FOLLOW-UP CONSENT (REQUIRED)
+- Before ending a positive call, ask: "Would it be okay if I send you a quick follow-up email?"
+- WAIT for a clear "yes" or "no".
+- If yes, say: "Great, I'll send that over. Have a good one!" and then hang up.
+
+### 6. COMPLIANCE
+- NEVER say the organization name until identity is confirmed.
+- Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
 </critical_instructions>
 
 `;
@@ -5356,7 +5401,7 @@ export function getRealtimeStatus(): {
   // Get the default provider from env or use 'google' as default
   const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
   const isGoogleDefault = !defaultProvider.includes('openai');
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
   return {
     activeSessions: sessionStates.length,

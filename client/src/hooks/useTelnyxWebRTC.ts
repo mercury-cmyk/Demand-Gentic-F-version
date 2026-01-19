@@ -221,15 +221,29 @@ export function useSIPWebRTC({
       });
       console.log('SDK version:', (TelnyxRTC as any).version || '2.25.10');
 
-      // Initialize TelnyxRTC with standard configuration
-      // If DNS resolution fails for rtc.telnyx.com, the call will fall back to callback mode
+      // Initialize TelnyxRTC with TURN relay configuration for NAT traversal
       telnyxClient = new TelnyxRTC({
         login: sipUsername,
         password: sipPassword,
-        // Use standard Telnyx RTC host (requires DNS resolution)
-        // If your network blocks rtc.telnyx.com, calls will use callback mode instead
+        // Use Telnyx SIP domain
+        ringtoneFile: undefined,
+        ringbackFile: undefined,
         debug: true,
         debugOutput: 'console',
+        // ICE configuration with TURN relay for better NAT traversal
+        iceServers: [
+          { urls: 'stun:stun.telnyx.com:3478' },
+          {
+            urls: 'turn:turn.telnyx.com:3478',
+            username: sipUsername,
+            credential: sipPassword,
+          },
+          {
+            urls: 'turn:turn.telnyx.com:443?transport=tcp',
+            username: sipUsername,
+            credential: sipPassword,
+          },
+        ],
         // Prefetch ICE candidates for faster connection
         prefetchIceCandidates: true,
       } as any);

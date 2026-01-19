@@ -15,7 +15,7 @@
 export interface BidiGenerateContentSetup {
   setup: {
     /**
-     * Model to use (e.g., 'models/gemini-2.0-flash-exp')
+     * Model to use (e.g., 'models/gemini-live-2.5-flash-native-audio')
      * For Vertex AI: 'projects/{project}/locations/{location}/publishers/google/models/{model}'
      */
     model: string;
@@ -341,7 +341,7 @@ export interface GeminiLiveConfig {
   location: string;
 
   /**
-   * Model name (e.g., 'gemini-2.0-flash-exp')
+   * Model name (e.g., 'gemini-live-2.5-flash-native-audio')
    */
   model: string;
 

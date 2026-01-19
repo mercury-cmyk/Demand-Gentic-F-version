@@ -83,7 +83,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
     // Use Gemini 2.5 Flash Native Audio for the Live API
     // Note: Model name format differs between Google AI and Vertex AI
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
     // Check for API key (Google AI Studio) or use ADC (Vertex AI)
     // Accept multiple env var names for flexibility
@@ -185,7 +185,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             console.error(`${LOG_PREFIX} 💡 Try getting a new API key from https://aistudio.google.com/apikey`);
           }
           if (error.message?.includes('404')) {
-            console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp'})`);
+            console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'})`);
           }
           this.emitError('connection_error', error.message, false);
           reject(error);
@@ -263,9 +263,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use Gemini 2.0 Flash for the Live API (Multimodal Live)
+    // Use Gemini 2.5 Flash Native Audio for the Live API
     // Note: Model name format differs between Google AI and Vertex AI
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
     const useVertexAI = !!projectId && !apiKey;
 

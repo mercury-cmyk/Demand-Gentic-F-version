@@ -18,8 +18,80 @@ import { db } from "../db";
 import { campaignQueue, contacts, accounts, campaigns, virtualAgents } from "@shared/schema";
 import { eq, and, sql, inArray, or, isNull, lte } from "drizzle-orm";
 import { getBestPhoneForContact } from "../lib/phone-utils";
+import { 
+  detectContactTimezone, 
+  isWithinBusinessHours, 
+  getBusinessHoursForCountry 
+} from "../utils/business-hours";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
+
+/**
+ * Enabled calling regions/countries
+ * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom
+ */
+const ENABLED_CALLING_REGIONS = {
+  // Australia
+  'AU': true, 'AUSTRALIA': true,
+  // Middle East (Sun-Thu work week)
+  'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
+  'SA': true, 'SAUDI ARABIA': true,
+  'IL': true, 'ISRAEL': true,
+  'QA': true, 'QATAR': true,
+  'KW': true, 'KUWAIT': true,
+  'BH': true, 'BAHRAIN': true,
+  'OM': true, 'OMAN': true,
+  // North America
+  'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
+  'CA': true, 'CANADA': true,
+  // United Kingdom
+  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
+};
+
+/**
+ * Check if a contact's country is in an enabled calling region
+ */
+function isCountryEnabled(country: string | null | undefined): boolean {
+  if (!country) return false;
+  return ENABLED_CALLING_REGIONS[country.toUpperCase().trim() as keyof typeof ENABLED_CALLING_REGIONS] === true;
+}
+
+/**
+ * Check if contact is within their local business hours
+ * Returns priority score: higher = should call sooner
+ * - 100: Currently within business hours (should call now)
+ * - 50: Known timezone but outside hours (skip for now)
+ * - 0: Unknown timezone (skip)
+ */
+function getContactCallPriority(contact: {
+  country?: string | null;
+  state?: string | null;
+  timezone?: string | null;
+}): { canCallNow: boolean; priority: number; timezone: string | null; reason?: string } {
+  const timezone = detectContactTimezone({
+    country: contact.country || undefined,
+    state: contact.state || undefined,
+    timezone: contact.timezone || undefined,
+  });
+
+  if (!timezone) {
+    return { canCallNow: false, priority: 0, timezone: null, reason: 'Unknown timezone' };
+  }
+
+  // Get country-specific business hours config
+  const config = getBusinessHoursForCountry(contact.country);
+  config.timezone = timezone;
+  config.respectContactTimezone = false;
+
+  const canCallNow = isWithinBusinessHours(config, undefined, new Date());
+
+  return {
+    canCallNow,
+    priority: canCallNow ? 100 : 50,
+    timezone,
+    reason: canCallNow ? undefined : `Outside business hours (${config.startTime}-${config.endTime} ${timezone})`,
+  };
+}
 
 export interface CampaignTask {
   taskId: string;
@@ -363,6 +435,7 @@ class CampaignRunnerService {
 
       // Get queued queue items with contact and account info
       // Filter out contacts that are suppressed (next_call_eligible_at > NOW())
+      // Order by priority and creation time (timezone filtering done post-query)
       const queueItems = await db.select({
         queueItem: campaignQueue,
         contact: contacts,
@@ -381,11 +454,89 @@ class CampaignRunnerService {
         )
       ))
       .orderBy(campaignQueue.priority, campaignQueue.createdAt)
-      .limit(50); // Load in batches
+      .limit(200); // Load more to allow for timezone filtering
 
-      const tasks: CampaignTask[] = [];
+      // === TIMEZONE-BASED PRIORITIZATION ===
+      // Prioritize contacts currently within their local business hours
+      // Filter to enabled regions: Australia, Middle East, North America, UK
+      
+      interface QueueItemWithPriority {
+        item: typeof queueItems[0];
+        callPriority: number;
+        timezone: string | null;
+        canCallNow: boolean;
+        reason?: string;
+      }
+      
+      const prioritizedItems: QueueItemWithPriority[] = [];
+      let skippedCountryNotEnabled = 0;
+      let skippedOutsideHours = 0;
+      let skippedNoTimezone = 0;
+      const timezoneStats: Record<string, { total: number; callable: number }> = {};
 
       for (const item of queueItems) {
+        const contact = item.contact;
+        
+        // Check if country is in enabled calling regions
+        if (!isCountryEnabled(contact.country)) {
+          skippedCountryNotEnabled++;
+          continue;
+        }
+        
+        // Check timezone and business hours
+        const callPriority = getContactCallPriority({
+          country: contact.country,
+          state: contact.state,
+          timezone: contact.timezone,
+        });
+        
+        // Track timezone stats
+        const tzKey = callPriority.timezone || 'unknown';
+        if (!timezoneStats[tzKey]) {
+          timezoneStats[tzKey] = { total: 0, callable: 0 };
+        }
+        timezoneStats[tzKey].total++;
+        
+        if (!callPriority.timezone) {
+          skippedNoTimezone++;
+          continue;
+        }
+        
+        if (!callPriority.canCallNow) {
+          skippedOutsideHours++;
+          continue; // Skip contacts outside business hours - they'll be called later
+        }
+        
+        timezoneStats[tzKey].callable++;
+        
+        prioritizedItems.push({
+          item,
+          callPriority: callPriority.priority,
+          timezone: callPriority.timezone,
+          canCallNow: callPriority.canCallNow,
+          reason: callPriority.reason,
+        });
+      }
+      
+      // Sort by priority (highest first = currently in business hours)
+      prioritizedItems.sort((a, b) => b.callPriority - a.callPriority);
+      
+      // Log timezone distribution for debugging
+      const tzSummary = Object.entries(timezoneStats)
+        .map(([tz, stats]) => `${tz}: ${stats.callable}/${stats.total}`)
+        .join(', ');
+      if (Object.keys(timezoneStats).length > 0) {
+        console.log(`${LOG_PREFIX} Timezone distribution: ${tzSummary}`);
+      }
+      
+      if (skippedCountryNotEnabled > 0 || skippedOutsideHours > 0 || skippedNoTimezone > 0) {
+        console.log(`${LOG_PREFIX} Skipped: ${skippedCountryNotEnabled} country not enabled, ${skippedOutsideHours} outside hours, ${skippedNoTimezone} no timezone`);
+      }
+
+      const tasks: CampaignTask[] = [];
+      const maxTasks = 50; // Limit tasks per batch
+
+      for (const { item } of prioritizedItems.slice(0, maxTasks)) {
         const phoneResult = getBestPhoneForContact(item.contact);
         if (!phoneResult.phone) continue;
 

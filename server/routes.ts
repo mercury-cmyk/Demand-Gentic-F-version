@@ -4980,6 +4980,15 @@ export function registerRoutes(app: Express) {
       }
       
       const campaign = await storage.createCampaign(campaignData);
+
+      // AUTO-CONFIGURE AGENTS based on Campaign Type
+      try {
+        const { configureCampaignAgents } = await import('./services/campaign-configuration');
+        // Cast type to string as it comes from DB/API and might match the enum
+        await configureCampaignAgents(campaign.id, campaign.type);
+      } catch (err) {
+        console.error('[Campaign Creation] Failed to auto-configure agents:', err);
+      }
       
       // Return campaign immediately - queue population happens in background
       invalidateDashboardCache();
@@ -5032,11 +5041,25 @@ export function registerRoutes(app: Express) {
               }
             }
 
-            // Remove duplicates and filter contacts with accountId
+            // Remove duplicates and log all contacts from lists
             const uniqueContacts = Array.from(
               new Map(contacts.map(c => [c.id, c])).values()
             );
+            
+            console.log(`[Campaign Creation] Total unique contacts from lists/segments: ${uniqueContacts.length}`);
+            
+            // Separate contacts with and without accounts
             const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+            const contactsWithoutAccount = uniqueContacts.filter(c => !c.accountId);
+            
+            if (contactsWithoutAccount.length > 0) {
+              console.log(`[Campaign Creation] ⚠️ ${contactsWithoutAccount.length} contacts have no accountId - they will be skipped (DB constraint requires accountId)`);
+              // Log first 5 for debugging
+              const sample = contactsWithoutAccount.slice(0, 5);
+              for (const c of sample) {
+                console.log(`  - ${c.firstName} ${c.lastName} (${c.email}) - no account linked`);
+              }
+            }
 
             // PHONE VALIDATION: Filter contacts with callable phone numbers
             // Fetch full contact data with account/HQ phone info if not already present
@@ -5075,7 +5098,11 @@ export function registerRoutes(app: Express) {
                 return bestPhone.phone !== null;
               });
 
+              const skippedNoPhone = fullContacts.length - contactsWithCallablePhones.length;
               console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
+              if (skippedNoPhone > 0) {
+                console.log(`[Campaign Creation] ⚠️ ${skippedNoPhone} contacts have no callable phone and will be skipped`);
+              }
 
               // Bulk enqueue all contacts with callable phones
               const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
@@ -6637,8 +6664,26 @@ export function registerRoutes(app: Express) {
         });
 
       } else {
-        // Legacy direct mode - call prospect directly (no agent bridge)
+        // Direct mode - call prospect directly (audio via ngrok WebSocket streaming)
+        console.log(`[CALL START] ========================================`);
         console.log(`[CALL START] Direct mode - calling prospect at ${to}`);
+        console.log(`[CALL START] From: ${fromNumber}`);
+        console.log(`[CALL START] Connection ID: ${connectionId}`);
+
+        // Debug: Log webhook URL construction for direct mode
+        const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
+        console.log(`[CALL START] Webhook URL: ${webhookUrl}`);
+        console.log(`[CALL START] ========================================`);
+
+        // Create client_state to track the direct call context
+        const clientState = Buffer.from(JSON.stringify({
+          type: 'human_agent_direct',
+          agentId,
+          prospectNumber: to,
+          campaignId,
+          contactId,
+          queueItemId,
+        })).toString('base64');
 
         const response = await fetch("https://api.telnyx.com/v2/calls", {
           method: "POST",
@@ -6650,6 +6695,8 @@ export function registerRoutes(app: Express) {
             connection_id: connectionId,
             to,
             from: fromNumber,
+            client_state: clientState,
+            webhook_url: webhookUrl,
           }),
         });
 
@@ -6668,6 +6715,20 @@ export function registerRoutes(app: Express) {
         if (!callControlId) {
           return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
         }
+
+        // Track this direct call session for status polling
+        activeHumanCalls.set(callControlId, {
+          agentCallId: callControlId,
+          agentId,
+          prospectNumber: to,
+          status: 'calling_prospect',
+          startedAt: new Date(),
+          campaignId,
+          contactId,
+          queueItemId,
+        });
+
+        console.log(`[CALL START] Direct call initiated: ${callControlId} to ${to}`);
 
         res.json({
           success: true,
@@ -12705,13 +12766,22 @@ export function registerRoutes(app: Express) {
               console.error(`[Human-Call Webhook] Error bridging call:`, err);
             }
           } else if (payload.client_state) {
-            // Prospect answered - bridge the calls
-            console.log(`[Human-Call Webhook] *** PROSPECT ANSWERED (has client_state) ***`);
+            // Has client_state - could be callback prospect leg or direct mode
+            console.log(`[Human-Call Webhook] *** CALL ANSWERED (has client_state) ***`);
             console.log(`[Human-Call Webhook] Raw client_state: ${payload.client_state}`);
             try {
               const clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString());
               console.log(`[Human-Call Webhook] Decoded client_state:`, JSON.stringify(clientState));
-              if (clientState.type === 'human_agent_prospect_leg' && clientState.agentCallId) {
+
+              if (clientState.type === 'human_agent_direct') {
+                // Direct mode - prospect answered the call
+                console.log(`[Human-Call Webhook] *** DIRECT MODE: PROSPECT ANSWERED ***`);
+                if (callSession) {
+                  callSession.status = 'active';
+                  console.log(`[Human-Call Webhook] Direct call now active with prospect`);
+                }
+              } else if (clientState.type === 'human_agent_prospect_leg' && clientState.agentCallId) {
+                // Callback mode - prospect answered, need to bridge
                 const agentSession = activeHumanCalls.get(clientState.agentCallId);
                 console.log(`[Human-Call Webhook] Looking for agent session with ID: ${clientState.agentCallId}`);
                 console.log(`[Human-Call Webhook] Agent session found: ${!!agentSession}`);
@@ -12746,11 +12816,16 @@ export function registerRoutes(app: Express) {
                   console.log(`[Human-Call Webhook] Agent session not found! Available sessions:`, Array.from(activeHumanCalls.keys()));
                 }
               } else {
-                console.log(`[Human-Call Webhook] client_state type is not 'human_agent_prospect_leg' or missing agentCallId`);
+                console.log(`[Human-Call Webhook] client_state type not recognized:`, clientState.type);
               }
             } catch (err) {
               console.error(`[Human-Call Webhook] Error parsing client_state:`, err);
             }
+          } else if (callSession && callSession.status === 'calling_prospect') {
+            // Direct mode: prospect answered
+            console.log(`[Human-Call Webhook] *** PROSPECT ANSWERED (Direct mode) ***`);
+            callSession.status = 'active';
+            console.log(`[Human-Call Webhook] Direct call now active with prospect`);
           } else {
             console.log(`[Human-Call Webhook] call.answered but no session or client_state - might be a different call type`);
           }

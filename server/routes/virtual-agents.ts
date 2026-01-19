@@ -654,7 +654,7 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
         const { GoogleGenerativeAI } = await import("@google/generative-ai");
         const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
         const model = genai.getGenerativeModel({ 
-          model: "gemini-2.0-flash-exp", 
+          model: "gemini-2.5-flash", 
           systemInstruction: fullSystemPrompt
         });
         

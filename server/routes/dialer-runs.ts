@@ -991,7 +991,7 @@ router.get("/voice-dialer/status", async (req, res) => {
       activeSessions: getActiveSessionCount(),
       websocketPath: "/voice-dialer",
       provider: "google",
-      model: "gemini-2.0-flash-exp"
+      model: "gemini-2.5-flash"
     });
   } catch (error) {
     console.error("[Dialer Runs] OpenAI Realtime status error:", error);

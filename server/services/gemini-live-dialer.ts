@@ -14,7 +14,7 @@ import { eq, or } from "drizzle-orm";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-2.0-flash";
+const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
 
 // ==================== PLACEHOLDER SUBSTITUTION ====================
@@ -74,9 +74,9 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     result = result.replace(/\[Contact Name\]/g, context.contactName);
   }
   
-  // Always identify as DemandGentic AI on behalf of organization
+  // Use organization name directly
   if (context.organizationName) {
-    result = result.replace(/\[Organization\]/g, `DemandGentic AI on behalf of ${context.organizationName}`);
+    result = result.replace(/\[Organization\]/g, context.organizationName);
     result = result.replace(/\[Company\]/g, context.organizationName);
   } else {
     result = result.replace(/\[Organization\]/g, 'DemandGentic AI');
@@ -90,13 +90,11 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
  * Build DemandGentic AI identity preamble for the system prompt
  */
 function buildDemandGenticIdentityPreamble(context: CallContext): string {
-  const orgRef = context.organizationName 
-    ? `DemandGentic AI on behalf of ${context.organizationName}`
-    : 'DemandGentic AI';
+  const orgRef = context.organizationName || 'DemandGentic AI';
     
   return `## YOUR IDENTITY (CRITICAL)
 
-You are an AI voice assistant from DemandGentic AI.
+You are an AI voice assistant from ${orgRef}.
 
 **How to introduce yourself after identity is confirmed:**
 - Say: "I'm calling from ${orgRef}."

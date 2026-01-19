@@ -1065,6 +1065,7 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
       queue_item_id: queueItemId,
       call_attempt_id: callAttemptId,
       contact_id: contactId,
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: virtualAgentId || 'test-agent',
       system_prompt: systemPrompt,
       first_message: firstMessage,
@@ -1238,6 +1239,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     const customParams = {
       call_id: callId,
       campaign_id: campaignId || 'test-campaign',
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: virtualAgentId || 'test-agent',
       system_prompt: systemPrompt,
       voice, // Dynamic voice selection for automatic synchronization

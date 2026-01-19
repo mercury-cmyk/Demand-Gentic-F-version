@@ -220,6 +220,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       queue_item_id: `test-queue-${testCallId}`,
       call_attempt_id: `test-attempt-${testCallId}`,
       contact_id: `test-contact-${testCallId}`,
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: assignment.virtualAgentId,
       is_test_call: true,
       test_call_id: testCallId,
@@ -246,6 +247,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       queue_item_id: customParams.queue_item_id,
       call_attempt_id: customParams.call_attempt_id,
       contact_id: customParams.contact_id,
+      called_number: normalizedPhone, // Required for database tracking
       virtual_agent_id: assignment.virtualAgentId || undefined,
       is_test_call: true,
       test_call_id: testCallId,

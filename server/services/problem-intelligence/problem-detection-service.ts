@@ -70,11 +70,13 @@ export async function detectAccountSignals(accountId: string): Promise<AccountSi
     .orderBy(desc(pipelineOpportunities.updatedAt))
     .limit(1);
 
-  // Get last touch (most recent call attempt)
+  // Get last touch (most recent call attempt for any contact at this account)
+  // Note: callAttempts doesn't have accountId directly - join through contacts
   const [lastTouch] = await db
     .select({ lastTouchAt: callAttempts.createdAt })
     .from(callAttempts)
-    .where(eq(callAttempts.accountId, accountId))
+    .innerJoin(contacts, eq(callAttempts.contactId, contacts.id))
+    .where(eq(contacts.accountId, accountId))
     .orderBy(desc(callAttempts.createdAt))
     .limit(1);
 
@@ -90,10 +92,10 @@ export async function detectAccountSignals(accountId: string): Promise<AccountSi
 
   return {
     firmographic: {
-      industry: account.industryStandardized || account.industry || null,
+      industry: account.industryStandardized || account.industryRaw || null,
       subIndustry: account.industryAiSuggested || null,
       revenue: parseRevenue(account.annualRevenue, account.revenueRange),
-      employees: parseEmployees(account.staffCount, account.employees),
+      employees: parseEmployees(account.staffCount, account.employeesSizeRange),
       region: extractRegion(account),
       yearFounded: parseYearFounded(account),
     },
@@ -376,8 +378,8 @@ function extractRegion(account: Account): string | null {
   if (account.hqCity) return account.hqCity;
 
   // Try normalized address
-  if (account.hqAddressNormalized) {
-    const parts = account.hqAddressNormalized.split(",");
+  if (account.hqAddress) {
+    const parts = account.hqAddress.split(",");
     return parts[parts.length - 1]?.trim() || null;
   }
 
@@ -528,16 +530,17 @@ function matchFirmographics(
   // Revenue range check
   if (rules.minRevenue !== undefined || rules.maxRevenue !== undefined) {
     weight += 0.1;
-    if (firmographic.revenue !== null) {
+    if (typeof firmographic.revenue === 'number') {
+      const revenue = firmographic.revenue;
       const inRange =
-        (rules.minRevenue === undefined || firmographic.revenue >= rules.minRevenue) &&
-        (rules.maxRevenue === undefined || firmographic.revenue <= rules.maxRevenue);
+        (rules.minRevenue === undefined || revenue >= rules.minRevenue) &&
+        (rules.maxRevenue === undefined || revenue <= rules.maxRevenue);
 
       if (inRange) {
         matchedWeight += 0.1;
         signals.push({
           signalType: "firmographic",
-          signalValue: `Revenue: $${(firmographic.revenue / 1_000_000).toFixed(1)}M`,
+          signalValue: `Revenue: $${(revenue / 1_000_000).toFixed(1)}M`,
           matchedRule: "Revenue in target range",
           contribution: 0.1,
         });
@@ -548,16 +551,17 @@ function matchFirmographics(
   // Employee range check
   if (rules.minEmployees !== undefined || rules.maxEmployees !== undefined) {
     weight += 0.1;
-    if (firmographic.employees !== null) {
+    if (typeof firmographic.employees === 'number') {
+      const employees = firmographic.employees;
       const inRange =
-        (rules.minEmployees === undefined || firmographic.employees >= rules.minEmployees) &&
-        (rules.maxEmployees === undefined || firmographic.employees <= rules.maxEmployees);
+        (rules.minEmployees === undefined || employees >= rules.minEmployees) &&
+        (rules.maxEmployees === undefined || employees <= rules.maxEmployees);
 
       if (inRange) {
         matchedWeight += 0.1;
         signals.push({
           signalType: "firmographic",
-          signalValue: `Employees: ${firmographic.employees}`,
+          signalValue: `Employees: ${employees}`,
           matchedRule: "Company size in target range",
           contribution: 0.1,
         });

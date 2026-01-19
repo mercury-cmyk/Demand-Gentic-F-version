@@ -195,7 +195,7 @@ router.get('/gemini/voices', requireAuth, async (req: Request, res: Response) =>
     res.json({
       provider: 'gemini',
       isDefault: isGeminiDefault,
-      model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp',  // Gemini 2.0 Flash Native Audio
+      model: process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio',  // Gemini 2.5 Flash Native Audio
       voices: voiceList,
       defaultVoice: 'Kore',
       recommendedForSales: 'Vega',
@@ -263,7 +263,7 @@ router.get('/default', requireAuth, async (req: Request, res: Response) => {
       provider: isGeminiDefault ? 'google' : 'openai',
       providerName: isGeminiDefault ? 'Gemini Live' : 'OpenAI Realtime',
       model: isGeminiDefault
-        ? (process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash')
+        ? (process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio')
         : 'gpt-4o-realtime-preview-2024-12-17',
       defaultVoice: isGeminiDefault ? 'Kore' : 'marin',
       costInfo: isGeminiDefault
@@ -277,6 +277,65 @@ router.get('/default', requireAuth, async (req: Request, res: Response) => {
     console.error(`${LOG_PREFIX} Error getting default provider:`, error);
     res.status(500).json({
       error: 'Failed to get default provider',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// ==================== TTS SCHEMA ====================
+
+const ttsRequestSchema = z.object({
+  text: z.string().min(1, 'Text is required'),
+  voiceId: z.string().min(1, 'Voice ID is required'),
+  provider: z.enum(['openai', 'gemini'], {
+    errorMap: () => ({ message: 'Provider must be "openai" or "gemini"' }),
+  }),
+});
+
+/**
+ * POST /api/voice-providers/tts
+ *
+ * Generates text-to-speech audio for simulation playback.
+ * Uses Google Cloud TTS for Gemini voices, OpenAI TTS for OpenAI voices.
+ * Returns MP3 audio data.
+ *
+ * Body:
+ * - text: string - The text to synthesize
+ * - voiceId: string - The voice identifier (e.g., 'Kore', 'alloy')
+ * - provider: 'openai' | 'gemini' - The voice provider
+ */
+router.post('/tts', requireAuth, async (req: Request, res: Response) => {
+  try {
+    // Validate request body
+    const parseResult = ttsRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Invalid request',
+        details: parseResult.error.errors,
+      });
+    }
+
+    const { text, voiceId, provider } = parseResult.data;
+    console.log(`${LOG_PREFIX} POST /tts requested for ${provider}/${voiceId} (${text.length} chars)`);
+
+    // Import the synthesize function from voice-discovery-service
+    const { generateTTSAudio } = await import('../services/voice-discovery-service');
+    
+    const audioBuffer = await generateTTSAudio(text, voiceId, provider);
+
+    // Set appropriate headers for audio response
+    res.set('Content-Type', 'audio/mpeg');
+    res.set('Content-Length', audioBuffer.length.toString());
+    res.set('Content-Disposition', 'inline; filename="tts-audio.mp3"');
+
+    // Short cache for TTS (same text + voice should be cached)
+    res.set('Cache-Control', 'private, max-age=60');
+
+    res.send(audioBuffer);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error generating TTS audio:`, error);
+    res.status(500).json({
+      error: 'Failed to generate TTS audio',
       details: error instanceof Error ? error.message : 'Unknown error',
     });
   }

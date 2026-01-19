@@ -86,11 +86,11 @@ async function getSecretsToSync(): Promise<SecretConfig[]> {
     { name: 'TELNYX_CALL_CONTROL_APP_ID', value: envLocal.TELNYX_CALL_CONTROL_APP_ID, description: 'Telnyx Call Control app ID' },
     { name: 'TELNYX_TEXML_APP_ID', value: envLocal.TELNYX_TEXML_APP_ID, description: 'Telnyx TeXML app ID' },
     
-    // URLs (with ngrok replaced by production domain)
-    { name: 'BASE_URL', value: replaceNgrokUrls(envLocal.BASE_URL), description: 'Application base URL' },
-    { name: 'TELNYX_WEBHOOK_URL', value: replaceNgrokUrls(envLocal.TELNYX_WEBHOOK_URL), description: 'Telnyx webhook URL' },
-    { name: 'PUBLIC_WEBSOCKET_URL', value: replaceNgrokUrls(envLocal.PUBLIC_WEBSOCKET_URL), description: 'Public WebSocket URL' },
-    { name: 'PUBLIC_WEBHOOK_HOST', value: replaceNgrokUrls(envLocal.PUBLIC_WEBHOOK_HOST).replace('https://', '').replace('http://', ''), description: 'Public webhook host (domain only)' },
+    // URLs (Hardcoded to demandgentic.ai for production)
+    { name: 'BASE_URL', value: 'https://demandgentic.ai', description: 'Application base URL' },
+    { name: 'TELNYX_WEBHOOK_URL', value: 'https://demandgentic.ai/api/webhooks/telnyx', description: 'Telnyx webhook URL' },
+    { name: 'PUBLIC_WEBSOCKET_URL', value: 'wss://demandgentic.ai/voice-dialer', description: 'Public WebSocket URL' },
+    { name: 'PUBLIC_WEBHOOK_HOST', value: 'demandgentic.ai', description: 'Public webhook host (domain only)' },
     
     // Search & Intelligence
     { name: 'BRAVE_SEARCH_API_KEY', value: envLocal.BRAVE_SEARCH_API_KEY, description: 'Brave Search API key' },
@@ -118,13 +118,23 @@ async function getSecretsToSync(): Promise<SecretConfig[]> {
     // Configuration
     { name: 'S3_REGION', value: envLocal.S3_REGION || 'ap-south-1', description: 'AWS S3 region' },
     { name: 'VOICE_PROVIDER', value: envLocal.VOICE_PROVIDER || 'openai', description: 'Voice provider (openai/google)' },
-    { name: 'GEMINI_LIVE_MODEL', value: envLocal.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp', description: 'Gemini Live model name' },
+    { name: 'GEMINI_LIVE_MODEL', value: envLocal.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio', description: 'Gemini Live model name' },
     { name: 'ORG_INTELLIGENCE_OPENAI_MODEL', value: envLocal.ORG_INTELLIGENCE_OPENAI_MODEL || 'gpt-4o', description: 'OpenAI model for org intelligence' },
-    { name: 'ORG_INTELLIGENCE_GEMINI_MODEL', value: envLocal.ORG_INTELLIGENCE_GEMINI_MODEL || 'gemini-2.5-pro', description: 'Gemini model for org intelligence' },
-    { name: 'ORG_INTELLIGENCE_CLAUDE_MODEL', value: envLocal.ORG_INTELLIGENCE_CLAUDE_MODEL || 'claude-3-5-sonnet-20241022', description: 'Claude model for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_GEMINI_MAX_OUTPUT_TOKENS', value: envLocal.ORG_INTELLIGENCE_GEMINI_MAX_OUTPUT_TOKENS || '6500', description: 'Max tokens for Gemini' },
+    { name: 'ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS', value: envLocal.ORG_INTELLIGENCE_CLAUDE_MAX_OUTPUT_TOKENS || '6500', description: 'Max tokens for Claude' },
   ];
   
-  return secrets.filter(s => s.value && s.value !== 'undefined');
+  return secrets.filter(s => {
+    if (!s.value || s.value === 'undefined') return false;
+    
+    // Safety check: Don't sync localhost Redis to production
+    if (s.name === 'REDIS_URL' && (s.value.includes('localhost') || s.value.includes('127.0.0.1'))) {
+      console.warn('⚠️  Skipping REDIS_URL because it points to localhost. Configure a production Redis instance in GCP.');
+      return false;
+    }
+    
+    return true;
+  });
 }
 
 // Create or update secret in GCP Secret Manager

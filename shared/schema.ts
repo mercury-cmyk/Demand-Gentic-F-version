@@ -50,7 +50,23 @@ export const organizationTypeEnum = pgEnum('organization_type', ['super', 'clien
  */
 export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
 
-export const campaignTypeEnum = pgEnum('campaign_type', ['email', 'call', 'combo']);
+export const campaignTypeEnum = pgEnum('campaign_type', [
+  'email', 
+  'call', 
+  'combo',
+  'content_syndication',
+  'live_webinar',
+  'on_demand_webinar',
+  'high_quality_leads',
+  'executive_dinner',
+  'leadership_forum',
+  'conference',
+  'sql',
+  'appointment_generation',
+  'lead_qualification',
+  'data_validation',
+  'bant_leads'
+]);
 export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
 export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
 export const campaignStatusEnum = pgEnum('campaign_status', [

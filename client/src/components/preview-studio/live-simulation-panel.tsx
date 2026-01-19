@@ -533,38 +533,53 @@ export function LiveSimulationPanel({
   const isSpeakingRef = useRef<boolean>(false);
   // Track if we're waiting for AI response (to keep recognition alive)
   const isWaitingForAIRef = useRef<boolean>(false);
+  // Audio element ref for server-side TTS playback
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Speech synthesis for TTS with echo prevention
-  const speakText = useCallback((text: string) => {
-    if ('speechSynthesis' in window) {
-      // Cancel any ongoing speech
-      window.speechSynthesis.cancel();
+  // Server-side TTS with Gemini voices - consistent voice across all messages
+  const speakText = useCallback(async (text: string) => {
+    // Pause recognition to prevent echo
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
+    isSpeakingRef.current = true;
+
+    try {
+      // Use the selected voice and provider (Gemini Kore by default)
+      const provider = voiceProvider === 'google' ? 'gemini' : 'openai';
+      const voice = selectedVoice || 'Kore';
       
-      // Pause recognition to prevent echo
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch (e) {}
+      console.log(`[VoiceSim] Generating TTS with ${provider}/${voice}`);
+      
+      // Call server TTS API
+      const response = await apiRequest('POST', '/api/voice-providers/tts', {
+        text,
+        voiceId: voice,
+        provider,
+      });
+
+      if (!response.ok) {
+        throw new Error('TTS API request failed');
       }
-      isSpeakingRef.current = true;
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
       
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
-      
-      // Try to use a natural voice
-      const voices = window.speechSynthesis.getVoices();
-      const preferredVoice = voices.find(v => 
-        v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha')
-      ) || voices[0];
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
+      // Clean up previous audio element
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        URL.revokeObjectURL(ttsAudioRef.current.src);
       }
-      
-      // Resume recognition after TTS finishes
-      utterance.onend = () => {
+
+      const audio = new Audio(audioUrl);
+      ttsAudioRef.current = audio;
+
+      // Resume recognition after audio finishes
+      audio.onended = () => {
         isSpeakingRef.current = false;
+        URL.revokeObjectURL(audioUrl);
         console.log('[VoiceSim] TTS ended, restarting mic. Status ref:', voiceSimStatusRef.current);
         // Wait a moment after TTS ends to avoid catching tail-end audio
         setTimeout(() => {
@@ -578,10 +593,11 @@ export function LiveSimulationPanel({
           }
         }, 300);
       };
-      
-      utterance.onerror = () => {
+
+      audio.onerror = () => {
         isSpeakingRef.current = false;
-        console.log('[VoiceSim] TTS error, restarting mic');
+        URL.revokeObjectURL(audioUrl);
+        console.log('[VoiceSim] TTS audio error, restarting mic');
         // Resume recognition even on error
         setTimeout(() => {
           if (recognitionRef.current && voiceSimStatusRef.current === 'active') {
@@ -591,10 +607,21 @@ export function LiveSimulationPanel({
           }
         }, 300);
       };
-      
-      window.speechSynthesis.speak(utterance);
+
+      await audio.play();
+    } catch (error) {
+      console.error('[VoiceSim] Server TTS failed:', error);
+      isSpeakingRef.current = false;
+      // Resume recognition on error
+      setTimeout(() => {
+        if (recognitionRef.current && voiceSimStatusRef.current === 'active') {
+          try {
+            recognitionRef.current.start();
+          } catch (e) {}
+        }
+      }, 300);
     }
-  }, []);
+  }, [voiceProvider, selectedVoice]);
 
   // Speech recognition ref
   const recognitionRef = useRef<any>(null);

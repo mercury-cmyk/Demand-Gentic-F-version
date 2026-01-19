@@ -338,6 +338,91 @@ export async function getVoiceById(voiceId: string, provider: 'openai' | 'gemini
 }
 
 /**
+ * Generate TTS audio for any text using the specified voice.
+ * Used for simulation playback with Gemini/OpenAI voices.
+ * Returns MP3 audio buffer.
+ */
+export async function generateTTSAudio(
+  text: string,
+  voiceId: string,
+  provider: 'openai' | 'gemini'
+): Promise<Buffer> {
+  console.log(`${LOG_PREFIX} Generating TTS audio for ${provider}/${voiceId} (${text.length} chars)`);
+
+  if (provider === 'gemini') {
+    // Use Google Cloud TTS with the mapped voice
+    const previewConfig = GEMINI_TO_TTS_PREVIEW_MAP[voiceId];
+    if (!previewConfig) {
+      throw new Error(`Unknown Gemini voice: ${voiceId}`);
+    }
+
+    try {
+      const client = getTTSClient();
+      const [response] = await client.synthesizeSpeech({
+        input: { text },
+        voice: {
+          name: previewConfig.ttsVoice,
+          languageCode: 'en-US',
+        },
+        audioConfig: {
+          audioEncoding: protos.google.cloud.texttospeech.v1.AudioEncoding.MP3,
+          speakingRate: 1.0,
+          pitch: 0,
+        },
+      });
+
+      if (!response.audioContent) {
+        throw new Error('No audio content returned from Google TTS');
+      }
+
+      console.log(`${LOG_PREFIX} Generated Gemini TTS: ${(response.audioContent as Buffer).length} bytes`);
+      return Buffer.from(response.audioContent as Uint8Array);
+    } catch (googleTtsError) {
+      // Google TTS failed, fall back to OpenAI TTS
+      console.warn(`${LOG_PREFIX} Google TTS failed, using OpenAI TTS as fallback:`, googleTtsError instanceof Error ? googleTtsError.message : 'Unknown error');
+
+      try {
+        const openai = getOpenAIClient();
+        const fallbackVoice = mapGeminiToOpenAIVoice(voiceId);
+
+        const response = await openai.audio.speech.create({
+          model: 'tts-1',
+          voice: fallbackVoice as any,
+          input: text,
+          response_format: 'mp3',
+        });
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        console.log(`${LOG_PREFIX} Generated Gemini TTS via OpenAI fallback: ${buffer.length} bytes`);
+        return buffer;
+      } catch (openaiError) {
+        console.error(`${LOG_PREFIX} OpenAI fallback also failed:`, openaiError);
+        throw new Error('TTS generation failed: Neither Google TTS nor OpenAI TTS available');
+      }
+    }
+  } else {
+    // Use OpenAI TTS
+    const openai = getOpenAIClient();
+    const ttsVoice = mapOpenAIRealtimeToTTS(voiceId);
+
+    const response = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: ttsVoice as any,
+      input: text,
+      response_format: 'mp3',
+    });
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    console.log(`${LOG_PREFIX} Generated OpenAI TTS: ${buffer.length} bytes`);
+    return buffer;
+  }
+}
+
+/**
  * Check if voice discovery service is healthy
  */
 export async function checkVoiceServiceHealth(): Promise<{

@@ -51,8 +51,7 @@ import { QueueControls } from "@/components/queue-controls";
 import { ContactMismatchDialog } from "@/components/contact-mismatch-dialog";
 import { LeadVerificationModal } from "@/components/lead-verification-modal";
 import { useCallControl } from "@/hooks/useCallControl";
-// WebRTC DISABLED - SIP credentials failing, using callback mode instead
-// import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 
 // Call state type for Call Control API calls
 type CallState = 'idle' | 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
@@ -64,6 +63,7 @@ type CallStatus = CallState | 'wrap-up';
 const COUNTRY_NAME_TO_CODE: Record<string, string> = {
   // Common variations
   'United Kingdom': 'GB',
+  'United Kingdom Uk': 'GB',  // Handle "United Kingdom Uk" variant from data imports
   'UK': 'GB',
   'Great Britain': 'GB',
   'England': 'GB',
@@ -177,8 +177,29 @@ function getCountryCode(country: string | null | undefined): string {
   const trimmed = country.trim();
   // If it's already a 2-letter code, return uppercase
   if (trimmed.length === 2) return trimmed.toUpperCase();
-  // Look up in mapping
-  return COUNTRY_NAME_TO_CODE[trimmed] || 'US';
+
+  // Direct lookup first
+  if (COUNTRY_NAME_TO_CODE[trimmed]) {
+    return COUNTRY_NAME_TO_CODE[trimmed];
+  }
+
+  // Case-insensitive lookup for better matching
+  const lowerTrimmed = trimmed.toLowerCase();
+  for (const [key, value] of Object.entries(COUNTRY_NAME_TO_CODE)) {
+    if (key.toLowerCase() === lowerTrimmed) {
+      return value;
+    }
+  }
+
+  // Partial match for common patterns (e.g., "United Kingdom Uk" contains "United Kingdom")
+  for (const [key, value] of Object.entries(COUNTRY_NAME_TO_CODE)) {
+    if (lowerTrimmed.includes(key.toLowerCase()) || key.toLowerCase().includes(lowerTrimmed)) {
+      return value;
+    }
+  }
+
+  console.warn(`⚠️ Unknown country: "${country}" - defaulting to US`);
+  return 'US';
 }
 
 // Helper function to validate and normalize phone number to E.164
@@ -202,10 +223,26 @@ function normalizePhoneToE164(phone: string | null, country: string = 'US'): str
   }
 
   // Handle numbers starting with country dialing code but no +
-  // e.g., "441onal234567890" for UK, "12025551234" for US
+  // e.g., "447595566608" for UK, "12025551234" for US
   if (!cleanedPhone.startsWith('+')) {
-    // Check if it starts with the country's dialing code
-    if (cleanedPhone.startsWith(dialingCode)) {
+    // First check if it already starts with a known country dialing code
+    // This handles cases where phone is stored with country code but no +
+    const knownDialingCodes = ['44', '1', '49', '33', '34', '39', '31', '91', '86', '81', '61', '64', '353'];
+    let detectedDialingCode: string | null = null;
+
+    for (const code of knownDialingCodes) {
+      if (cleanedPhone.startsWith(code) && cleanedPhone.length > code.length + 8) {
+        detectedDialingCode = code;
+        break;
+      }
+    }
+
+    if (detectedDialingCode) {
+      cleanedPhone = '+' + cleanedPhone;
+      console.log('📞 Added + prefix to number with detected country code:', cleanedPhone);
+    }
+    // Check if it starts with the contact's country dialing code
+    else if (cleanedPhone.startsWith(dialingCode) && cleanedPhone.length > dialingCode.length + 8) {
       cleanedPhone = '+' + cleanedPhone;
       console.log('📞 Added + prefix to number starting with dialing code:', cleanedPhone);
     }
@@ -223,6 +260,15 @@ function normalizePhoneToE164(phone: string | null, country: string = 'US'): str
         if (cleanedPhone.length === 10) {
           cleanedPhone = '+1' + cleanedPhone;
           console.log('📞 Added US/CA country code:', cleanedPhone);
+        } else {
+          // Number doesn't look like US format, try to detect country from leading digits
+          if (cleanedPhone.startsWith('44') && cleanedPhone.length >= 11) {
+            cleanedPhone = '+' + cleanedPhone; // UK number stored without +
+            console.log('📞 Detected UK number (starts with 44):', cleanedPhone);
+          } else {
+            cleanedPhone = '+1' + cleanedPhone;
+            console.log('📞 Added US/CA country code (fallback):', cleanedPhone);
+          }
         }
       } else if (countryCode === 'GB') {
         // UK: typically 10-11 digits after country code
@@ -412,10 +458,73 @@ export default function AgentConsolePage() {
     });
   }, [isConnected, callState, callControlId]);
 
-  // WebRTC DISABLED - SIP credentials failing with "Login Incorrect"
-  // Using Call Control API with callback mode instead (calls your phone for audio)
-  // To re-enable WebRTC: Fix TELNYX_WEBRTC_USERNAME and TELNYX_WEBRTC_PASSWORD in .env.local
-  const webrtcConnected = false;
+  // Fetch SIP trunk credentials for WebRTC
+  const { data: sipTrunkConfig } = useQuery<{
+    sipUsername: string;
+    sipPassword: string;
+    sipDomain: string;
+    connectionId?: string;
+  }>({
+    queryKey: ['/api/sip-trunks/default'],
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
+  // WebRTC SIP connection for browser-based audio
+  const {
+    isConnected: webrtcConnected,
+    callStatus: webrtcCallStatus,
+    callDuration: webrtcCallDuration,
+    makeCall: webrtcMakeCall,
+    hangup: webrtcHangup,
+    hold: webrtcHold,
+    unhold: webrtcUnhold,
+    mute: webrtcMute,
+    unmute: webrtcUnmute,
+    isMuted: webrtcIsMuted,
+    isOnHold,
+    error: webrtcError,
+  } = useSIPWebRTC({
+    sipUri: sipTrunkConfig?.sipUsername,
+    sipPassword: sipTrunkConfig?.sipPassword,
+  });
+
+  // Log WebRTC connection status
+  useEffect(() => {
+    console.log('[AGENT CONSOLE] WebRTC status:', {
+      webrtcConnected,
+      webrtcCallStatus,
+      webrtcError,
+      sipUsername: sipTrunkConfig?.sipUsername,
+      hasSipPassword: !!sipTrunkConfig?.sipPassword,
+    });
+  }, [webrtcConnected, webrtcCallStatus, webrtcError, sipTrunkConfig]);
+
+  // Sync WebRTC call status with component callStatus
+  // When using WebRTC for calls, update the component's callStatus state
+  useEffect(() => {
+    if (webrtcConnected && webrtcCallStatus) {
+      console.log('[AGENT CONSOLE] Syncing WebRTC status to callStatus:', webrtcCallStatus);
+      // Map WebRTC statuses to our CallStatus type
+      switch (webrtcCallStatus) {
+        case 'connecting':
+        case 'ringing':
+          setCallStatus('connecting');
+          break;
+        case 'active':
+          setCallStatus('active');
+          break;
+        case 'held':
+          setCallStatus('held');
+          break;
+        case 'hangup':
+          setCallStatus('wrap-up');
+          break;
+        case 'idle':
+          // Don't change to idle automatically - let wrap-up complete first
+          break;
+      }
+    }
+  }, [webrtcConnected, webrtcCallStatus]);
 
   // Additional UI state
   const [isHeld, setIsHeld] = useState(false);
@@ -439,29 +548,42 @@ export default function AgentConsolePage() {
     setTransferNumber('');
   };
 
-  // Call Control API-based call initiation
-  // Uses direct mode: calls prospect directly, audio streams via ngrok WebSocket
+  // Call initiation - uses WebRTC when connected, falls back to Call Control API
   const makeCall = async (phoneNumber: string, options?: { campaignId?: string; contactId?: string; queueItemId?: string }) => {
     console.log('[AGENT CONSOLE] makeCall invoked:', {
       phoneNumber,
       isConnected,
+      webrtcConnected,
       options,
     });
 
-    // Use Call Control API with direct mode (calls prospect directly)
-    console.log('[AGENT CONSOLE] Making Call Control API call (direct mode) to:', phoneNumber);
-    await apiMakeCall(phoneNumber, {
-      campaignId: options?.campaignId || selectedCampaignId,
-      contactId: options?.contactId,
-      queueItemId: options?.queueItemId,
-      mode: 'direct', // Direct mode - calls prospect directly
-    });
+    // Set connecting status immediately so UI shows hang up button
+    setCallStatus('connecting');
+
+    if (webrtcConnected && webrtcMakeCall) {
+      // Use WebRTC for browser-based audio
+      console.log('[AGENT CONSOLE] Making WebRTC call to:', phoneNumber);
+      webrtcMakeCall(phoneNumber);
+    } else {
+      // Fallback to Call Control API with direct mode
+      console.log('[AGENT CONSOLE] WebRTC not connected - using Call Control API (direct mode) to:', phoneNumber);
+      await apiMakeCall(phoneNumber, {
+        campaignId: options?.campaignId || selectedCampaignId,
+        contactId: options?.contactId,
+        queueItemId: options?.queueItemId,
+        mode: 'direct',
+      });
+    }
   };
 
-  // Hangup call via Call Control API
+  // Hangup call - uses WebRTC when active, falls back to Call Control API
   const hangup = async () => {
     console.log('[AGENT CONSOLE] Hanging up call');
-    await apiHangup();
+    if (webrtcConnected && webrtcHangup && webrtcCallStatus !== 'idle') {
+      webrtcHangup();
+    } else {
+      await apiHangup();
+    }
     setIsHeld(false);
   };
 
@@ -532,6 +654,10 @@ export default function AgentConsolePage() {
     dialMode?: 'manual' | 'hybrid' | 'ai_agent';
     callScript?: string;
     scriptId?: string | null;
+    campaignObjective?: string;
+    campaignContextBrief?: string;
+    targetAudienceDescription?: string;
+    talkingPoints?: string[];
     qualificationQuestions?: Array<{
       id: string;
       label: string;
@@ -1933,13 +2059,69 @@ export default function AgentConsolePage() {
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
             {/* LEFT: SCRIPT PANEL - Clean & Readable */}
             <div className="w-full lg:flex-[2] border-b lg:border-b-0 lg:border-r bg-white dark:bg-background min-h-[300px] lg:min-h-0 flex flex-col">
-              <div className="flex-shrink-0 px-6 py-4 border-b bg-muted/30">
-                <div className="flex items-center gap-2.5">
-                  <FileText className="h-5 w-5 text-primary" />
-                  <h3 className="font-semibold text-base text-foreground">Call Script</h3>
-                </div>
-              </div>
               <div className="flex-1 min-h-0 overflow-auto">
+                {/* Campaign Context Section */}
+                {(campaignDetails?.campaignObjective || campaignDetails?.campaignContextBrief || (campaignDetails?.talkingPoints && campaignDetails.talkingPoints.length > 0)) && (
+                  <div className="border-b">
+                    <div className="px-6 py-4 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 border-b">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
+                          <Target className="h-4 w-4 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-base text-foreground">Campaign Context</h3>
+                          <p className="text-xs text-muted-foreground">Background & key messaging points</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      {/* Objective */}
+                      {campaignDetails?.campaignObjective && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground mb-1.5 flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">Objective</Badge>
+                          </h4>
+                          <p className="text-sm text-foreground/80 leading-relaxed">{campaignDetails.campaignObjective}</p>
+                        </div>
+                      )}
+
+                      {/* Context Brief */}
+                      {campaignDetails?.campaignContextBrief && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground mb-1.5 flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">Brief</Badge>
+                          </h4>
+                          <p className="text-sm text-foreground/80 leading-relaxed">{campaignDetails.campaignContextBrief}</p>
+                        </div>
+                      )}
+
+                      {/* Talking Points */}
+                      {campaignDetails?.talkingPoints && campaignDetails.talkingPoints.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">Talking Points</Badge>
+                          </h4>
+                          <ul className="space-y-2">
+                            {campaignDetails.talkingPoints.map((point, idx) => (
+                              <li key={idx} className="flex items-start gap-2 text-sm text-foreground/80">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                                <span className="leading-relaxed">{point}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Call Script Section */}
+                <div className="flex-shrink-0 px-6 py-4 border-b bg-muted/30">
+                  <div className="flex items-center gap-2.5">
+                    <FileText className="h-5 w-5 text-primary" />
+                    <h3 className="font-semibold text-base text-foreground">Call Script</h3>
+                  </div>
+                </div>
                 <div className="p-6">
                   {(assignedScript?.content || campaignDetails?.callScript) ? (
                     renderFormattedScript(assignedScript?.content || campaignDetails?.callScript || '')
