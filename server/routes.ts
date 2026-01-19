@@ -9092,8 +9092,7 @@ export function registerRoutes(app: Express) {
   // ==================== LEADS & QA ====================
 
   // Unified QA Conversations endpoint - fetches ALL interactions (calls, test calls, emails)
-  // @ts-ignore
-  app.get("/api/qa/conversations", async (req, res) => {
+  app.get("/api/qa/conversations", requireAuth, async (req, res) => {
     try {
       console.log(`[QA] GET /api/qa/conversations query:`, req.query);
       const { campaignId, type, status, search, limit = '100', offset = '0' } = req.query;

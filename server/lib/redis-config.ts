@@ -110,11 +110,11 @@ export function getRedisConnectionOptions() {
     enableReadyCheck: false,
 
     // Connection timeouts (shorter in dev, longer in prod for VPC latency)
-    connectTimeout: isProduction ? 15000 : 5000,
+    connectTimeout: 15000,
 
     // Command timeout - prevent hanging on slow responses
-    // Increased for production to handle VPC network latency spikes
-    commandTimeout: isProduction ? 30000 : 10000,
+    // Increased to prevent "Command timed out" errors during high load
+    commandTimeout: 30000,
 
     // Retry strategy with exponential backoff and max attempts
     retryStrategy: (times: number) => {

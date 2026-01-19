@@ -245,6 +245,7 @@ app.use((req, res, next) => {
   const { startBackgroundJobs } = await import("./services/background-jobs");
   if (hasRedis) {
     startBackgroundJobs();
+    // console.log("[BackgroundJobs] Temporarily disabled for stability");
   } else {
     console.log("[BackgroundJobs] Skipped - Redis not configured (set REDIS_URL or REDIS_URL_PROD)");
   }
@@ -299,8 +300,7 @@ app.use((req, res, next) => {
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
   const { initializeAiCampaignOrchestrator } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
-    // initializeAiCampaignOrchestrator();
-    console.log("[AI Orchestrator] Temporarily disabled for debugging API stability");
+    initializeAiCampaignOrchestrator();
   }
 
   // Initialize Vertex AI Agentic CRM Operator
