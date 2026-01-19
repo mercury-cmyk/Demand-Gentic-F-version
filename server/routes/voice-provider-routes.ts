@@ -195,7 +195,7 @@ router.get('/gemini/voices', requireAuth, async (req: Request, res: Response) =>
     res.json({
       provider: 'gemini',
       isDefault: isGeminiDefault,
-      model: process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash',  // Gemini 3 Flash Native Audio
+      model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp',  // Gemini 2.0 Flash Native Audio
       voices: voiceList,
       defaultVoice: 'Kore',
       recommendedForSales: 'Vega',

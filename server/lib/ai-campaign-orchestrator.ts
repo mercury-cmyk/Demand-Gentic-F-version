@@ -851,7 +851,7 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
 
         // PRE-LOCK: Mark as in_progress BEFORE initiation to prevent race conditions
         // if the WebSocket connects before this function returns.
-        // CRITICAL: Also set virtual_agent_id here to prevent validation errors in openai-realtime-dialer
+        // CRITICAL: Also set virtual_agent_id here to prevent validation errors in voice-dialer
         const virtualAgentIdValue = virtualAgent?.id || null;
         console.log(`[AI Orchestrator] PRE-LOCK: Setting queue item ${item.id} to in_progress with virtual_agent_id=${virtualAgentIdValue}`);
         await db.execute(sql`

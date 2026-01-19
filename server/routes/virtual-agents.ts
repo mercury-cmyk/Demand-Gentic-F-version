@@ -41,7 +41,7 @@ import {
 } from "../services/call-cost-tracker";
 import {
   getActiveSessionCount,
-} from "../services/openai-realtime-dialer";
+} from "../services/voice-dialer";
 import {
   createPreviewSession,
   getPreviewSession,
@@ -65,7 +65,7 @@ const insertVirtualAgentSchema = createInsertSchema(virtualAgents).omit({
 
 // Default B2B System Prompt - uses canonical structure for consistency
 // Note: This is a fallback when no custom prompt is provided
-// The actual prompt with contact data is built by buildSystemPrompt() in openai-realtime-dialer.ts
+// The actual prompt with contact data is built by buildSystemPrompt() in voice-dialer.ts
 const DEFAULT_B2B_SYSTEM_PROMPT = `# Personality
 
 You are a professional outbound caller representing the organization.

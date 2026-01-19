@@ -888,11 +888,11 @@ const DEFAULT_TRAINING_CENTER: TrainingCenter = {
   ]
 };
 
-const ECHO_GUARD_WINDOW_MS = 2500;
+const ECHO_GUARD_WINDOW_MS = 1200;
 const ECHO_MIN_LENGTH = 12;
-const ASSISTANT_MIN_COOLDOWN_MS = 2000;
-const ASSISTANT_WORD_MS = 450;
-const ASSISTANT_POST_PLAYBACK_COOLDOWN_MS = 800;
+const ASSISTANT_MIN_COOLDOWN_MS = 1200;
+const ASSISTANT_WORD_MS = 250;
+const ASSISTANT_POST_PLAYBACK_COOLDOWN_MS = 200;
 
 const DEFAULT_FIRST_MESSAGE = 'Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?';
 
@@ -1510,12 +1510,10 @@ export default function VirtualAgentsPage() {
   }, [previewValues, testCallAgent, previewPromptVariants, activePromptVariant]);
 
   const previewOpeningMessage = useMemo(() => {
-    if (!testCallAgent?.firstMessage?.trim()) {
-      console.log('[Voice Preview] previewOpeningMessage empty - testCallAgent:', !!testCallAgent, 'firstMessage:', testCallAgent?.firstMessage);
-      return '';
-    }
-    const result = applyPreviewValues(testCallAgent.firstMessage, previewValues);
-    console.log('[Voice Preview] previewOpeningMessage computed:', result);
+    // Use agent's firstMessage if available, otherwise use default
+    const rawFirstMessage = testCallAgent?.firstMessage?.trim() || DEFAULT_FIRST_MESSAGE;
+    const result = applyPreviewValues(rawFirstMessage, previewValues);
+    console.log('[Voice Preview] previewOpeningMessage computed:', result, 'from:', testCallAgent?.firstMessage ? 'agent config' : 'DEFAULT_FIRST_MESSAGE');
     return result;
   }, [previewValues, testCallAgent]);
 
@@ -2673,10 +2671,8 @@ export default function VirtualAgentsPage() {
       audio.onloadedmetadata = () => {
         const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
         if (durationMs > 0) {
-          assistantPlaybackUntilRef.current = Math.max(
-            assistantPlaybackUntilRef.current,
-            Date.now() + durationMs + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
-          );
+          // Use precise duration; do not keep earlier overestimates
+          assistantPlaybackUntilRef.current = Date.now() + durationMs + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS;
         }
       };
       const cleanupPlayback = () => {
@@ -2687,14 +2683,15 @@ export default function VirtualAgentsPage() {
         if (normalizedText) {
           lastAssistantSpokenAtRef.current = Date.now();
         }
-        assistantPlaybackUntilRef.current = Math.max(
-          assistantPlaybackUntilRef.current,
-          Date.now() + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS
-        );
+        // After playback ends, accept speech quickly
+        assistantPlaybackUntilRef.current = Date.now() + ASSISTANT_POST_PLAYBACK_COOLDOWN_MS;
         playbackLockRef.current = false;
         if (allowAutoResume) {
           manualStopRef.current = false;
+          suppressAutoRestartRef.current = false; // CRITICAL: Reset this so mic can restart
+          console.log('[Voice Preview] Audio playback ended, starting mic in 200ms...');
           setTimeout(() => {
+            console.log('[Voice Preview] Starting mic after playback...');
             startListeningRef.current();
           }, 200);
         }
@@ -2734,6 +2731,13 @@ export default function VirtualAgentsPage() {
     // Reset voice initialized flag so useEffect can start fresh
     voiceInitializedRef.current = false;
     console.log('[Voice Preview] Reset voiceInitializedRef, setting simulationStarted to true');
+    
+    // CRITICAL: Initialize voice listening refs BEFORE setting simulationStarted
+    // This ensures handlePlayPreviewVoice knows to auto-resume listening after playback
+    autoListenRef.current = true;
+    manualStopRef.current = false;
+    criticalSpeechErrorRef.current = false;
+    suppressAutoRestartRef.current = false;
     
     setSimulationStarted(true);
     setSimulationStartTime(new Date());
@@ -2791,11 +2795,14 @@ export default function VirtualAgentsPage() {
       suggestions: [],
     });
     
-    // Auto-play opening message
-    if (autoPlayVoice && testCallAgent?.voice) {
+    // Auto-play opening message - mic will start after playback ends
+    if (autoPlayVoice && previewVoice) {
       void handlePlayPreviewVoice(previewOpeningMessage);
+    } else if (speechSupported) {
+      // No audio to play, start listening immediately
+      startListening();
     }
-  }, [previewOpeningMessage, previewScenario, autoPlayVoice, testCallAgent, toast]);
+  }, [previewOpeningMessage, previewScenario, autoPlayVoice, previewVoice, toast, handlePlayPreviewVoice, speechSupported, startListening]);
 
   const handleResetPreview = () => {
     setSimulationStarted(false);

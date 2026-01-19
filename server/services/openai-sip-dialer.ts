@@ -540,12 +540,15 @@ async function openSidebandConnection(session: SipDialerSession, apiKey: string)
         sessionUpdate.session.instructions = session.systemPromptOverride;
       }
 
-      // Configure turn detection
+      // Configure turn detection with semantic_vad for natural conversation flow
+      // Eagerness: "low" = waits longer, "medium" = balanced, "high" = responds quickly
+      // Use "medium" for professional B2B calls to avoid interruptions
+      const vadEagerness = process.env.OPENAI_VAD_EAGERNESS || 'medium';
       sessionUpdate.session.audio = {
         input: {
           turn_detection: {
             type: "semantic_vad",
-            eagerness: "high",
+            eagerness: vadEagerness,
             create_response: true,
             interrupt_response: true,
           },

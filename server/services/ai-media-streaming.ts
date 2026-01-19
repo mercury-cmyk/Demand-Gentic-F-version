@@ -286,15 +286,14 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
       // Use g711_ulaw end-to-end to match Telnyx media streaming format
       // This eliminates all PCM/resampling conversions
       //
-      // VAD TUNING: Set OPENAI_VAD_DISABLED=true to disable VAD for testing
-      // If noise bursts followed by silence, try disabling VAD to rule out gating issues
+      // TURN DETECTION: Use semantic_vad for natural turn-taking
+      // semantic_vad understands speech patterns and provides more natural conversation flow
       const vadDisabled = process.env.OPENAI_VAD_DISABLED === 'true';
-      const vadThreshold = parseFloat(process.env.OPENAI_VAD_THRESHOLD || '0.5');
-      // Use 2500ms (2.5 seconds) silence for proper turn-taking in B2B calls
-      // This ensures the agent waits for the full response and doesn't interrupt
-      const vadSilenceMs = parseInt(process.env.OPENAI_VAD_SILENCE_MS || '2500', 10);
+      // Eagerness: "low" = waits longer before responding, "medium" = balanced, "high" = responds quickly
+      // For B2B calls with professional discourse, use "medium" for natural pacing
+      const vadEagerness = process.env.OPENAI_VAD_EAGERNESS || 'medium';
 
-      console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadThreshold=${vadThreshold}, vadSilenceMs=${vadSilenceMs}`);
+      console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadEagerness=${vadEagerness}, mode=semantic_vad`);
 
       const configMessage = {
         type: "session.update",
@@ -307,13 +306,13 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
           input_audio_transcription: {
             model: "whisper-1",
           },
-          // VAD can cause noise->silence patterns if too aggressive
-          // Disable with OPENAI_VAD_DISABLED=true, or tune threshold/silence
+          // Use semantic_vad for natural turn-taking - it understands speech patterns
+          // better than server_vad threshold-based detection
           turn_detection: vadDisabled ? null : {
-            type: "server_vad",
-            threshold: vadThreshold,        // Default 0.5, lower = more sensitive
-            prefix_padding_ms: 300,
-            silence_duration_ms: vadSilenceMs, // Default 500, higher = longer pauses allowed
+            type: "semantic_vad",
+            eagerness: vadEagerness,        // "low", "medium", or "high"
+            create_response: true,          // Auto-create response when turn ends
+            interrupt_response: true,       // Allow user to interrupt agent
           },
         },
       };
@@ -665,11 +664,75 @@ function convertPCMToMuLaw(pcmData: Buffer): Buffer {
 function getSystemInstructions(callId: string): string {
   const bridge = getTelnyxAiBridge();
   const activeCall = bridge.getActiveCall(callId);
+  
+  // Base professional instructions with voicemail/call state detection
+  const baseInstructions = `You are a professional B2B voice agent. Follow these rules:
+
+## CALL STATE AWARENESS (CRITICAL)
+
+### Voicemail Detection - IMMEDIATELY detect and hangup:
+If you hear ANY of these indicators, call detect_voicemail_and_hangup immediately:
+- "Leave a message after the beep"
+- "Please leave your message"
+- "The person you are calling is not available"
+- "Hi, you've reached the voicemail of..."
+- "At the tone, please record your message"
+- A long beep/tone after a greeting
+- "Mailbox is full"
+- Automated IVR systems without human transfer option
+
+### Call Concluded Detection - End gracefully:
+Recognize when the conversation has naturally ended:
+- Prospect says "goodbye", "thanks, bye", "have a good day"
+- Prospect says "I need to go", "I have another call"
+- Clear hang-up signals or sudden silence after "bye"
+- Prospect explicitly ends: "okay, that's it", "we're done"
+
+When call is concluded:
+1. Say a brief, warm goodbye: "Thank you for your time. Have a great day!"
+2. Do NOT continue speaking after goodbye is said
+3. Call submit_disposition with appropriate outcome
+
+### No Human Response Detection:
+If after 10 seconds of your greeting, there is:
+- Complete silence (no voice detected)
+- Only background noise or static
+- Repeated "Hello?" with no response
+
+Then call submit_disposition with "no_answer" and end the call politely.
+
+## NATURAL TURN-TAKING
+
+### Response Timing:
+- Listen completely before responding - never interrupt
+- Use natural pauses (0.5-1 second) before responding
+- If prospect is mid-thought, wait for completion
+- If you hear "um", "uh", or thinking sounds, wait patiently
+
+### Avoid Awkward Overlaps:
+- Do NOT speak immediately when you detect silence
+- Give the prospect a moment to add to their thought
+- If you accidentally overlap, stop and say "Sorry, please go ahead"
+
+## VOICE QUALITY
+
+- Speak clearly at a natural pace (not too fast)
+- Use warm, professional tone
+- Vary intonation naturally - don't sound robotic
+- Match the prospect's energy level appropriately
+
+## RIGHT-PARTY VERIFICATION
+
+1. Start with: "Hello, may I speak with [Name]?"
+2. WAIT silently for response
+3. Only proceed after explicit confirmation: "Yes", "Speaking", "That's me"
+4. If not the right person or gatekeeper, handle politely`;
+
   if (!activeCall) {
-    return "You are a professional sales representative making an outbound call.";
+    return baseInstructions;
   }
   
-  return "You are a professional sales representative making an outbound call. Be friendly, listen carefully, and respond naturally.";
+  return baseInstructions;
 }
 
 function getVoiceForCall(callId: string): string {

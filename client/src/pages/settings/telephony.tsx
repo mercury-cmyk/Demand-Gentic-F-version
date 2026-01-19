@@ -43,7 +43,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSipTrunkConfigSchema } from "@shared/schema";
 import { z } from "zod";
-import { Phone, Plus, Trash2, Star, Power, Settings, Download } from "lucide-react";
+import { Phone, Plus, Trash2, Star, Power, Settings, Download, User, PhoneCall } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,6 +89,56 @@ export default function TelephonySettingsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<SipTrunkConfig | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Agent callback phone state
+  const [callbackPhone, setCallbackPhone] = useState('');
+  const [sipExtension, setSipExtension] = useState('');
+  const [isLoadingTelephony, setIsLoadingTelephony] = useState(true);
+  const [isSavingTelephony, setIsSavingTelephony] = useState(false);
+
+  // Fetch user's telephony settings
+  useEffect(() => {
+    const loadTelephonySettings = async () => {
+      try {
+        const response = await apiRequest('GET', '/api/users/me/telephony');
+        const data = await response.json();
+        setCallbackPhone(data.callbackPhone || '');
+        setSipExtension(data.sipExtension || '');
+      } catch (error) {
+        console.error('Failed to load telephony settings:', error);
+      } finally {
+        setIsLoadingTelephony(false);
+      }
+    };
+    loadTelephonySettings();
+  }, []);
+
+  // Save callback phone settings
+  const handleSaveTelephonySettings = async () => {
+    setIsSavingTelephony(true);
+    try {
+      const response = await apiRequest('PUT', '/api/users/me/telephony', {
+        callbackPhone: callbackPhone.trim() || null,
+        sipExtension: sipExtension.trim() || null,
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: 'Settings Saved',
+          description: 'Your telephony settings have been updated.',
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Save Failed',
+        description: error.message || 'Failed to save telephony settings',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingTelephony(false);
+    }
+  };
 
   // Fetch all SIP trunk configs
   const { data: configs = [], isLoading } = useQuery<SipTrunkConfig[]>({
@@ -272,10 +322,86 @@ export default function TelephonySettingsPage() {
 
   return (
     <SettingsLayout
-      title="Telephony (SIP)"
-      description="Configure SIP trunk connections for voice calling"
+      title="Telephony"
+      description="Configure your calling settings and SIP trunk connections"
     >
       <div className="space-y-6">
+        {/* Agent Callback Phone Settings */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PhoneCall className="h-5 w-5" />
+              Click-to-Call Settings
+            </CardTitle>
+            <CardDescription>
+              Configure your callback phone for human-initiated calls from the Agent Console.
+              When you click "Call Now", the system will first call your phone, then connect you to the prospect.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isLoadingTelephony ? (
+              <div className="text-center py-4 text-muted-foreground">
+                Loading settings...
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <label htmlFor="callback-phone" className="text-sm font-medium">
+                    Callback Phone Number
+                  </label>
+                  <Input
+                    id="callback-phone"
+                    type="tel"
+                    placeholder="+1 (555) 123-4567"
+                    value={callbackPhone}
+                    onChange={(e) => setCallbackPhone(e.target.value)}
+                    className="max-w-md font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Enter your phone number in E.164 format (e.g., +14155551234). This is the phone that will ring when you initiate a call.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="sip-extension" className="text-sm font-medium">
+                    SIP Extension (Optional)
+                  </label>
+                  <Input
+                    id="sip-extension"
+                    type="text"
+                    placeholder="1001"
+                    value={sipExtension}
+                    onChange={(e) => setSipExtension(e.target.value)}
+                    className="max-w-md font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    If using WebRTC softphone, enter your SIP extension here.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleSaveTelephonySettings}
+                  disabled={isSavingTelephony}
+                  className="mt-2"
+                >
+                  {isSavingTelephony ? 'Saving...' : 'Save Settings'}
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* SIP Trunk Section Header */}
+        <div className="pt-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Phone className="h-5 w-5" />
+            SIP Trunk Configuration
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Configure SIP trunk connections for WebRTC calling (Admin only)
+          </p>
+        </div>
+
         {/* Actions */}
         <div className="flex justify-between items-center">
           <div className="flex gap-2">

@@ -842,7 +842,7 @@ router.post("/simulation/start", requireAuth, async (req, res) => {
   }).returning();
 
     // Build WebSocket URL
-    const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] ||
+    const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0] ||
                    process.env.REPLIT_DEV_DOMAIN ||
                    req.get('X-Public-Host') ||
                    req.get('host') ||

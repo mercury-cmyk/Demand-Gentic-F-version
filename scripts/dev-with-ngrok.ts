@@ -163,7 +163,7 @@ function startDevServer() {
   );
 
   const publicWsUrl = tunnelUrl
-    ? `${tunnelUrl}/openai-realtime-dialer`  // Always use ngrok URL when available
+    ? `${tunnelUrl}/voice-dialer`  // Always use ngrok URL when available
     : (isPlaceholderUrl ? `http://localhost:${PORT}` : (envPublicWsUrl || `http://localhost:${PORT}`));
 
   // Extract the hostname from the ngrok tunnel URL for webhooks

@@ -623,6 +623,9 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").notNull().default('agent'), // Deprecated - use user_roles table instead
   firstName: text("first_name"),
   lastName: text("last_name"),
+  // Agent telephony settings
+  callbackPhone: text("callback_phone"), // Phone number to call agent for click-to-call
+  sipExtension: text("sip_extension"), // Optional SIP extension for WebRTC
   // TOTP/Google Authenticator MFA fields
   mfaEnabled: boolean("mfa_enabled").notNull().default(false),
   totpSecret: text("totp_secret"), // Encrypted TOTP secret

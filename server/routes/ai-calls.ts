@@ -7,7 +7,7 @@ import { isVoiceVariablePreflightError } from "../services/voice-variable-contra
 import { validatePreflight, generatePreflightErrorResponse } from "../services/preflight-validator";
 import { z } from "zod";
 import { db } from "../db";
-import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents } from "@shared/schema";
+import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns } from "@shared/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 // OpenAI is loaded lazily to avoid startup failures when not configured
 import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025 } from "../utils/business-hours";
@@ -923,11 +923,11 @@ function getPublicWsUrl(req: any, path: string): string {
 }
 
 /**
- * Test endpoint for OpenAI Realtime Voice API calls
+ * Test endpoint for Voice Dialer calls (Gemini/OpenAI)
  * POST /api/ai/test-openai-realtime
  * 
- * This initiates a test call using the OpenAI Realtime Voice API (not ElevenLabs)
- * by making a Telnyx call with media streaming to the /openai-realtime-dialer WebSocket
+ * This initiates a test call using the Voice Dialer (supports Gemini Live or OpenAI Realtime)
+ * by making a Telnyx call with media streaming to the /voice-dialer WebSocket
  */
 const testOpenAIRealtimeSchema = z.object({
   phoneNumber: z.string().min(10, "Phone number required"),
@@ -1020,7 +1020,7 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
       normalizedPhone = '+' + normalizedPhone.replace(/^0+/, '');
     }
 
-    // Build the WebSocket URL for OpenAI Realtime dialer
+    // Build the WebSocket URL for Voice Dialer
     // Priority: PUBLIC_WEBSOCKET_URL env var > X-Public-Host header > request host
     // This is critical for Telnyx to reach the endpoint (Telnyx can't reach localhost)
     let wsUrl = process.env.PUBLIC_WEBSOCKET_URL;
@@ -1028,14 +1028,14 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     if (!wsUrl) {
       const publicHost = req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
       const protocol = publicHost.includes('localhost') ? 'ws' : 'wss';
-      wsUrl = `${protocol}://${publicHost}/openai-realtime-dialer`;
+      wsUrl = `${protocol}://${publicHost}/voice-dialer`;
       
       // WARN if localhost is being used (Telnyx won't be able to reach it)
       if (publicHost.includes('localhost')) {
-        console.warn(`[OpenAI Realtime Test] ⚠️  CRITICAL: Using localhost WebSocket URL ${wsUrl}`);
-        console.warn(`[OpenAI Realtime Test] ⚠️  Telnyx CANNOT reach localhost! Audio will NOT flow.`);
-        console.warn(`[OpenAI Realtime Test] ⚠️  Set PUBLIC_WEBSOCKET_URL env var or pass X-Public-Host header`);
-        console.warn(`[OpenAI Realtime Test] ⚠️  Example: PUBLIC_WEBSOCKET_URL=wss://1234-56-789.ngrok.io/openai-realtime-dialer`);
+        console.warn(`[Voice Dialer Test] ⚠️  CRITICAL: Using localhost WebSocket URL ${wsUrl}`);
+        console.warn(`[Voice Dialer Test] ⚠️  Telnyx CANNOT reach localhost! Audio will NOT flow.`);
+        console.warn(`[Voice Dialer Test] ⚠️  Set PUBLIC_WEBSOCKET_URL env var or pass X-Public-Host header`);
+        console.warn(`[Voice Dialer Test] ⚠️  Example: PUBLIC_WEBSOCKET_URL=wss://1234-56-789.ngrok.io/voice-dialer`);
       }
     }
 
@@ -1158,6 +1158,12 @@ const testGeminiLiveSchema = z.object({
   systemPrompt: z.string().optional(),
   voice: z.string().optional(),
   settings: z.record(z.unknown()).optional(),
+  // Contact context for proper placeholder substitution
+  contactName: z.string().optional(),
+  contactFirstName: z.string().optional(),
+  contactJobTitle: z.string().optional(),
+  accountName: z.string().optional(),
+  organizationName: z.string().optional(),
 });
 
 router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
@@ -1169,6 +1175,11 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       systemPrompt: systemPromptOverride,
       voice: voiceOverride,
       settings: settingsOverride,
+      contactName,
+      contactFirstName,
+      contactJobTitle,
+      accountName,
+      organizationName,
     } = testGeminiLiveSchema.parse(req.body);
 
     const sipConfig = await storage.getDefaultSipTrunkConfig();
@@ -1191,6 +1202,20 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
 
     let systemPrompt = "You are a professional AI assistant.";
     let voice = "Pumice"; // Default Gemini Live voice
+    let campaignOrgName = organizationName;
+    
+    // Load campaign info if campaignId provided
+    if (campaignId) {
+      try {
+        const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+        if (campaign && !campaignOrgName) {
+          // Get organization name from campaign if available
+          campaignOrgName = (campaign as any).organizationName || (campaign as any).organization_name;
+        }
+      } catch (e) {
+        console.warn("[AI Calls] Failed to load campaign for org name:", e);
+      }
+    }
     
     if (virtualAgentId) {
       const [agent] = await db.select().from(virtualAgents).where(eq(virtualAgents.id, virtualAgentId)).limit(1);
@@ -1209,6 +1234,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     const wsUrl = getPublicWsUrl(req, '/gemini-live-dialer');
     const callId = `gemini-test-${Date.now()}`;
     
+    // Include contact context for proper placeholder substitution
     const customParams = {
       call_id: callId,
       campaign_id: campaignId || 'test-campaign',
@@ -1217,6 +1243,12 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       voice, // Dynamic voice selection for automatic synchronization
       agent_settings: settingsOverride,
       provider: 'gemini_live',
+      // Contact context for DemandGentic AI identity
+      contact_name: contactName,
+      contact_first_name: contactFirstName,
+      contact_job_title: contactJobTitle,
+      account_name: accountName,
+      organization_name: campaignOrgName,
     };
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');

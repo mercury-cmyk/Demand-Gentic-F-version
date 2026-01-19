@@ -90,7 +90,7 @@ import {
 type DispositionCode = CanonicalDisposition;
 
 
-const LOG_PREFIX = "[OpenAI-Realtime-Dialer]";
+const LOG_PREFIX = "[Voice-Dialer]";
 
 // Telnyx media streaming expects real-time G.711 packetization.
 // For 8kHz μ-law: 20ms == 160 bytes.
@@ -532,7 +532,7 @@ const DISPOSITION_FUNCTION_TOOLS: RealtimeToolDefinition[] = ([
   }
 ]).filter(Boolean) as RealtimeToolDefinition[];
 
-export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketServer {
+export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   // We do NOT pass the server instance here because we are handling upgrades manually in index.ts
   // Passing 'server' would cause ws to try to attach its own upgrade listener, conflicting with ours.
   const wss = new WebSocketServer({
@@ -543,7 +543,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
   const voiceProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
   const isGeminiActive = !voiceProvider.includes('openai');
   const fallbackEnabled = process.env.VOICE_PROVIDER_FALLBACK === 'true';
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
 
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} 🎙️  VOICE PROVIDER CONFIGURATION`);
@@ -554,7 +554,7 @@ export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketSer
   console.log(`${LOG_PREFIX} Fallback: ${fallbackEnabled ? `✅ ${fallbackTarget === 'openai' ? 'OpenAI Realtime' : 'Gemini Live'}` : '❌ Disabled (Gemini-only mode)'}`);
   console.log(`${LOG_PREFIX} Cost Savings: ${isGeminiActive ? '~50-70% vs OpenAI Realtime' : 'N/A'}`);
   console.log(`${LOG_PREFIX} ========================================`);
-  console.log(`${LOG_PREFIX} WebSocket server initialized on /openai-realtime-dialer`);
+  console.log(`${LOG_PREFIX} WebSocket server initialized on /voice-dialer`);
 
   wss.on("error", (err) => {
     console.error(`${LOG_PREFIX} WebSocket server error:`, err.message);
@@ -1718,6 +1718,7 @@ openaiWs.on("open", async () => {
 // Uses the voice-providers abstraction for Google's real-time voice API
 async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<void> {
   console.log(`${LOG_PREFIX} Initializing Google Gemini Live session for call: ${session.callId}`);
+  const initStartTime = Date.now();
 
   // Check for required environment variables
   const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
@@ -1739,15 +1740,27 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     const provider = new GeminiLiveProvider();
 
-    // Connect to Gemini Live API
-    console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
-    await provider.connect();
-    console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API`);
+    // PARALLEL INITIALIZATION: Run Gemini connection AND database calls concurrently
+    // This significantly reduces initialization time (from ~10-20s serial to ~3-5s parallel)
+    console.log(`${LOG_PREFIX} Starting parallel initialization (Gemini + DB)...`);
 
-    // Get campaign and agent config
-    const campaignConfig = await getCampaignConfig(session.campaignId);
-    let contactInfo = await getContactInfo(session.contactId);
-    const agentConfig = session.virtualAgentId ? await getVirtualAgentConfig(session.virtualAgentId) : null;
+    const [geminiConnected, campaignConfig, contactInfoResult, agentConfig] = await Promise.all([
+      // Gemini connection
+      (async () => {
+        console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
+        await provider.connect();
+        console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
+        return true;
+      })(),
+      // Database calls - all in parallel
+      getCampaignConfig(session.campaignId),
+      getContactInfo(session.contactId),
+      session.virtualAgentId ? getVirtualAgentConfig(session.virtualAgentId) : Promise.resolve(null),
+    ]);
+
+    console.log(`${LOG_PREFIX} Parallel init complete (+${Date.now() - initStartTime}ms)`);
+
+    let contactInfo = contactInfoResult;
 
     // For test sessions, fill in missing fields from test contact data
     if (session.isTestSession && session.testContact) {
@@ -1818,6 +1831,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       'google'  // Use Google/Gemini provider for prompt formatting
     );
     const systemPrompt = interpolateVoiceTemplate(baseSystemPrompt, voiceTemplateValues);
+    console.log(`${LOG_PREFIX} System prompt built (+${Date.now() - initStartTime}ms)`);
 
     // Log system prompt length and key sections for debugging
     console.log(`${LOG_PREFIX} [Gemini] System Prompt Stats:`, {
@@ -1838,6 +1852,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       parameters: tool.parameters as { type: 'object'; properties: Record<string, any>; required?: string[] },
     }));
 
+    console.log(`${LOG_PREFIX} Configuring Gemini provider (sending setup + waiting for setupComplete)...`);
     await provider.configure({
       systemPrompt,
       voice: geminiVoice,
@@ -1849,6 +1864,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       maxResponseTokens: costSettings.maxResponseTokens || 512,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
     });
+    console.log(`${LOG_PREFIX} ✅ Gemini configured (+${Date.now() - initStartTime}ms)`);
 
     // Event handlers: Audio from Gemini -> Telnyx
     provider.on('audio:delta', (event: any) => {
@@ -1901,29 +1917,12 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
     }
 
-    // Send opening message when Gemini setup completes (fires 'connected' event)
-    // Use one-time listener to avoid duplicate sends
-    let openingSent = false;
-    const sendOpening = () => {
-      if (openingSent || !session.isActive) return;
-      openingSent = true;
-      console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
-      provider.sendOpeningMessage(openingScript);
-    };
+    // IMMEDIATE OPENING: Since configure() now waits for setupComplete,
+    // we can send the opening message immediately - no need to wait for 'connected' event
+    console.log(`${LOG_PREFIX} Gemini ready, sending opening message (+${Date.now() - initStartTime}ms): "${openingScript.substring(0, 60)}..."`);
+    provider.sendOpeningMessage(openingScript);
 
-    // Listen for connected event (fires when setup completes)
-    provider.once('connected', () => {
-      console.log(`${LOG_PREFIX} Gemini connected event received, sending opening message`);
-      sendOpening();
-    });
-
-    // Fallback: if already connected (unlikely but safe), send immediately
-    if (provider.isConnected) {
-      console.log(`${LOG_PREFIX} Gemini already connected, sending opening message immediately`);
-      sendOpening();
-    }
-
-    console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized`);
+    console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
   } catch (error: any) {
     console.error(`${LOG_PREFIX} ❌ Gemini init failed:`, error.message || error);
     console.error(`${LOG_PREFIX} Stack:`, error.stack);
@@ -1940,7 +1939,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
 // Handle Gemini function calls
 async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: string, args: Record<string, any>): Promise<any> {
-  const LOG_PREFIX = '[OpenAI-Realtime-Dialer]';
+  const LOG_PREFIX = '[Voice-Dialer]';
   switch (name) {
     case 'submit_disposition': {
       let disposition = args.disposition as DispositionCode;
@@ -4772,24 +4771,44 @@ async function buildSystemPrompt(
     // This ensures proper call handling even with custom prompts
     let finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
 
-    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
-    // Gemini tends to be more literal with system instructions and may introduce itself with org name
+    // For Gemini: Add critical compliance preamble with identity confirmation and conversation flow
+    // Gemini tends to be more literal with system instructions
     if (provider === 'google') {
       const geminiPreamble = `<critical_instructions>
-## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+## CRITICAL CONVERSATION RULES (MUST FOLLOW)
 
-1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
-2. **NEVER introduce yourself with your company name** at the start of the call.
-3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
-4. Do NOT assume, predict, or continue speaking after asking a question.
-5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
-6. The person must EXPLICITLY confirm their identity before you proceed with any context.
-7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+### IDENTITY CONFIRMATION (REQUIRED FIRST)
+1. Your FIRST task is to confirm you are speaking with the right person by name.
+2. Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
+3. If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+4. Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+
+### CONVERSATION FLOW
+5. Ask ONE question at a time, then STOP and LISTEN for their response.
+6. After speaking, wait in silence - do NOT fill silence with "okay", "great", or filler words.
+7. Acknowledge their responses naturally ("I understand", "That makes sense") to build rapport.
+8. Keep responses concise - under 30 seconds of speaking at a time.
+
+### FOLLOW-UP CONSENT (REQUIRED BEFORE ENDING)
+9. Before ending any positive call, you MUST ask for follow-up consent.
+10. Use a short, intelligent question like: "Would it be okay if I send you a quick follow-up email with some details?" or "Can I reach out with more information?"
+11. WAIT for their explicit "yes" or "no" response before proceeding.
+12. Record their answer - this is required for compliance and tracking.
+13. If they agree, confirm what they'll receive: "Great, I'll send that right over."
+
+### RAPPORT BUILDING
+14. Listen actively - reference what they said in your responses.
+15. Show genuine interest in their situation before pitching.
+16. If they seem busy, offer to schedule a better time.
+
+### COMPLIANCE
+17. NEVER say the organization name until identity is confirmed.
+18. Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
 </critical_instructions>
 
 `;
       finalPrompt = geminiPreamble + finalPrompt;
-      console.log(`${LOG_PREFIX} Added Gemini compliance preamble to prevent org name disclosure`);
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble with conversation flow`);
     }
 
     const tokenEstimate = estimateTokenCount(finalPrompt);
@@ -4845,18 +4864,38 @@ async function buildSystemPrompt(
     // Apply organization intelligence and training rules
     let finalPrompt = await buildAgentSystemPrompt(prompt);
 
-    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+    // For Gemini: Add critical compliance preamble with identity confirmation and conversation flow
     if (provider === 'google') {
       const geminiPreamble = `<critical_instructions>
-## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+## CRITICAL CONVERSATION RULES (MUST FOLLOW)
 
-1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
-2. **NEVER introduce yourself with your company name** at the start of the call.
-3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
-4. Do NOT assume, predict, or continue speaking after asking a question.
-5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
-6. The person must EXPLICITLY confirm their identity before you proceed with any context.
-7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+### IDENTITY CONFIRMATION (REQUIRED FIRST)
+1. Your FIRST task is to confirm you are speaking with the right person by name.
+2. Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
+3. If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+4. Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+
+### CONVERSATION FLOW
+5. Ask ONE question at a time, then STOP and LISTEN for their response.
+6. After speaking, wait in silence - do NOT fill silence with "okay", "great", or filler words.
+7. Acknowledge their responses naturally ("I understand", "That makes sense") to build rapport.
+8. Keep responses concise - under 30 seconds of speaking at a time.
+
+### FOLLOW-UP CONSENT (REQUIRED BEFORE ENDING)
+9. Before ending any positive call, you MUST ask for follow-up consent.
+10. Use a short, intelligent question like: "Would it be okay if I send you a quick follow-up email with some details?" or "Can I reach out with more information?"
+11. WAIT for their explicit "yes" or "no" response before proceeding.
+12. Record their answer - this is required for compliance and tracking.
+13. If they agree, confirm what they'll receive: "Great, I'll send that right over."
+
+### RAPPORT BUILDING
+14. Listen actively - reference what they said in your responses.
+15. Show genuine interest in their situation before pitching.
+16. If they seem busy, offer to schedule a better time.
+
+### COMPLIANCE
+17. NEVER say the organization name until identity is confirmed.
+18. Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
 </critical_instructions>
 
 `;
@@ -5186,18 +5225,38 @@ Before calling: say "I understand. Let me connect you with someone who can help.
 
   let finalPrompt = await buildAgentSystemPrompt(prompt);
 
-  // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+  // For Gemini: Add critical compliance preamble with identity confirmation and conversation flow
   if (provider === 'google') {
     const geminiPreamble = `<critical_instructions>
-## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+## CRITICAL CONVERSATION RULES (MUST FOLLOW)
 
-1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
-2. **NEVER introduce yourself with your company name** at the start of the call.
-3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
-4. Do NOT assume, predict, or continue speaking after asking a question.
-5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
-6. The person must EXPLICITLY confirm their identity before you proceed with any context.
-7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+### IDENTITY CONFIRMATION (REQUIRED FIRST)
+1. Your FIRST task is to confirm you are speaking with the right person by name.
+2. Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
+3. If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+4. Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+
+### CONVERSATION FLOW
+5. Ask ONE question at a time, then STOP and LISTEN for their response.
+6. After speaking, wait in silence - do NOT fill silence with "okay", "great", or filler words.
+7. Acknowledge their responses naturally ("I understand", "That makes sense") to build rapport.
+8. Keep responses concise - under 30 seconds of speaking at a time.
+
+### FOLLOW-UP CONSENT (REQUIRED BEFORE ENDING)
+9. Before ending any positive call, you MUST ask for follow-up consent.
+10. Use a short, intelligent question like: "Would it be okay if I send you a quick follow-up email with some details?" or "Can I reach out with more information?"
+11. WAIT for their explicit "yes" or "no" response before proceeding.
+12. Record their answer - this is required for compliance and tracking.
+13. If they agree, confirm what they'll receive: "Great, I'll send that right over."
+
+### RAPPORT BUILDING
+14. Listen actively - reference what they said in your responses.
+15. Show genuine interest in their situation before pitching.
+16. If they seem busy, offer to schedule a better time.
+
+### COMPLIANCE
+17. NEVER say the organization name until identity is confirmed.
+18. Focus on the CAMPAIGN CONTEXT section - this is your call purpose.
 </critical_instructions>
 
 `;
@@ -5297,11 +5356,11 @@ export function getRealtimeStatus(): {
   // Get the default provider from env or use 'google' as default
   const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
   const isGoogleDefault = !defaultProvider.includes('openai');
-  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+  const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
 
   return {
     activeSessions: sessionStates.length,
-    websocketPath: '/openai-realtime-dialer',
+    websocketPath: '/voice-dialer',
     provider: isGoogleDefault ? 'google' : 'openai',
     model: isGoogleDefault ? geminiModel : 'gpt-4o-realtime-preview-2024-12-17',
     sessions: sessionStates,

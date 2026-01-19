@@ -29,6 +29,9 @@ import OpenAI from "openai";
 import { getVirtualAgentConfig, mergeAgentSettings } from "./virtual-agent-settings";
 import { getOrBuildAccountIntelligence } from "./account-messaging-service";
 import { getOrBuildParticipantCallPlan, buildParticipantCallContext } from "./account-call-service";
+import { resolveContactVariables } from "./knowledge-assembly-service";
+import { interpolateVoiceTemplate } from "./voice-variable-contract";
+import { ensureVoiceAgentControlLayer } from "./voice-agent-control-defaults";
 
 // ============================================================================
 // TYPES - Simulation-Specific (NO telephony types)
@@ -260,8 +263,19 @@ export class SimulationEngine {
     agentName: string;
   }> {
     let systemPrompt = "";
-    let firstMessage = "Hello, this is AI calling from our company. May I speak with the decision maker?";
+    let firstMessage = "Hi, may I speak with {{contact.full_name}}, the {{contact.job_title}} at {{account.name}}?";
     let agentName = "AI Agent";
+    
+    // Variable context for template substitution
+    const variableContext: {
+      agentName?: string;
+      orgName?: string;
+      accountName?: string;
+      contactFullName?: string;
+      contactFirstName?: string;
+      contactJobTitle?: string;
+      contactEmail?: string;
+    } = {};
     
     // PRIORITY 1: Use custom prompts from Preview Studio if provided
     if (session.customSystemPrompt) {
@@ -297,10 +311,21 @@ export class SimulationEngine {
         agentName = campaign.name || agentName;
       }
     }
+    variableContext.agentName = agentName;
     
-    // Get account intelligence
+    // Get account data for variable substitution
     if (session.accountId) {
       try {
+        const [account] = await db
+          .select()
+          .from(accounts)
+          .where(eq(accounts.id, session.accountId))
+          .limit(1);
+        
+        if (account) {
+          variableContext.accountName = account.name || undefined;
+        }
+        
         const accountIntel = await getOrBuildAccountIntelligence(session.accountId);
         if (accountIntel?.payloadJson) {
           systemPrompt += `\n\n## ACCOUNT CONTEXT\n${JSON.stringify(accountIntel.payloadJson, null, 2)}`;
@@ -310,7 +335,7 @@ export class SimulationEngine {
       }
     }
     
-    // Get contact context if available
+    // Get contact context for variable substitution
     if (session.contactId) {
       const [contact] = await db
         .select()
@@ -319,9 +344,42 @@ export class SimulationEngine {
         .limit(1);
       
       if (contact) {
-        systemPrompt += `\n\n## CONTACT CONTEXT\nName: ${contact.firstName} ${contact.lastName}\nTitle: ${contact.jobTitle || 'Unknown'}\nEmail: ${contact.email || 'Unknown'}`;
+        const fullName = `${contact.firstName || ''} ${contact.lastName || ''}`.trim();
+        variableContext.contactFullName = fullName || undefined;
+        variableContext.contactFirstName = contact.firstName || undefined;
+        variableContext.contactJobTitle = contact.jobTitle || undefined;
+        variableContext.contactEmail = contact.email || undefined;
+        
+        systemPrompt += `\n\n## CONTACT CONTEXT\nName: ${fullName}\nTitle: ${contact.jobTitle || 'Unknown'}\nEmail: ${contact.email || 'Unknown'}`;
       }
     }
+    
+    // Resolve template variables in system prompt and first message
+    console.log("[SimulationEngine] Resolving template variables with context:", variableContext);
+    
+    // Build voice template values dict for interpolateVoiceTemplate (handles aliases)
+    const voiceTemplateValues: Record<string, string> = {
+      'agent.name': variableContext.agentName || '',
+      'org.name': variableContext.orgName || '',
+      'account.name': variableContext.accountName || '',
+      'contact.full_name': variableContext.contactFullName || '',
+      'contact.first_name': variableContext.contactFirstName || '',
+      'contact.job_title': variableContext.contactJobTitle || '',
+      'contact.email': variableContext.contactEmail || '',
+    };
+    
+    // Use both interpolation methods (interpolateVoiceTemplate handles more aliases like ContactFullName, JobTitle, etc.)
+    systemPrompt = interpolateVoiceTemplate(systemPrompt, voiceTemplateValues);
+    systemPrompt = resolveContactVariables(systemPrompt, variableContext);
+    
+    // Apply voice agent control layer with call flow instructions (includes "who is calling" handling)
+    systemPrompt = ensureVoiceAgentControlLayer(systemPrompt, true);
+    console.log("[SimulationEngine] Applied voice agent control layer to system prompt");
+    
+    firstMessage = interpolateVoiceTemplate(firstMessage, voiceTemplateValues);
+    firstMessage = resolveContactVariables(firstMessage, variableContext);
+    
+    console.log("[SimulationEngine] First message after substitution:", firstMessage);
     
     return { systemPrompt, firstMessage, agentName };
   }
@@ -363,7 +421,7 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
 
     try {
       if (this.provider === "gemini" && this.gemini) {
-        const model = this.gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = this.gemini.getGenerativeModel({ model: "gemini-2.5-flash" });
         const result = await model.generateContent(personaPrompt);
         return result.response.text();
       } else if (this.openai) {
@@ -414,8 +472,9 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
     
     try {
       if (this.provider === "gemini" && this.gemini) {
+        console.log("[SimulationEngine] Using Gemini 2.5 Flash for agent response, session:", session.id);
         const model = this.gemini.getGenerativeModel({ 
-          model: "gemini-1.5-flash",
+          model: "gemini-2.5-flash",
           systemInstruction: context.systemPrompt,
         });
         
@@ -432,6 +491,8 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
           historyMessages = [];
         }
         
+        console.log("[SimulationEngine] Chat history length:", historyMessages.length, "Human message:", humanMessage?.substring(0, 50));
+        
         const chat = model.startChat({
           history: historyMessages.map(m => ({
             role: m.role === "assistant" ? "model" : "user",
@@ -440,7 +501,9 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
         });
         
         const result = await chat.sendMessage(humanMessage || "Hello");
-        return result.response.text();
+        const responseText = result.response.text();
+        console.log("[SimulationEngine] Gemini response:", responseText.substring(0, 100));
+        return responseText;
       } else if (this.openai) {
         const completion = await this.openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -454,6 +517,8 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
       }
     } catch (e) {
       console.error("[SimulationEngine] Error generating agent response:", e);
+      console.error("[SimulationEngine] Provider:", this.provider, "Gemini available:", !!this.gemini, "OpenAI available:", !!this.openai);
+      console.error("[SimulationEngine] Session ID:", session.id, "Current turn:", session.currentTurn);
     }
     
     return "I apologize, I'm having trouble processing. Could you please repeat that?";

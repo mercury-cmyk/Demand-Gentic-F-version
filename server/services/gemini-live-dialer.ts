@@ -9,13 +9,113 @@ import { WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Buffer } from 'buffer';
 import { db } from "../db";
-import { contacts } from "@shared/schema";
+import { contacts, campaigns } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-2.0-flash";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+
+// ==================== PLACEHOLDER SUBSTITUTION ====================
+
+interface CallContext {
+  contactName?: string;
+  contactFirstName?: string;
+  contactJobTitle?: string;
+  accountName?: string;
+  organizationName?: string;
+  campaignName?: string;
+  campaignPurpose?: string;
+}
+
+/**
+ * Substitute placeholders in system prompt with actual values
+ * This ensures the agent uses correct contact names, not "Agent Name"
+ */
+function substitutePromptPlaceholders(prompt: string, context: CallContext): string {
+  let result = prompt;
+  
+  // Standard placeholder substitutions
+  const substitutions: Record<string, string | undefined> = {
+    // Contact placeholders
+    '{{contact.full_name}}': context.contactName,
+    '{{contact.fullName}}': context.contactName,
+    '{{contact.first_name}}': context.contactFirstName,
+    '{{contact.firstName}}': context.contactFirstName,
+    '{{contact.job_title}}': context.contactJobTitle,
+    '{{contact.jobTitle}}': context.contactJobTitle,
+    
+    // Account/Organization placeholders
+    '{{account.name}}': context.accountName,
+    '{{org.name}}': context.organizationName || 'DemandGentic AI',
+    '{{organization.name}}': context.organizationName || 'DemandGentic AI',
+    
+    // Agent identity - ALWAYS use DemandGentic AI
+    '{{agent.name}}': 'DemandGentic AI',
+    '{{agent.fullName}}': 'DemandGentic AI',
+    '{{agent.firstName}}': 'DemandGentic',
+    
+    // Campaign placeholders
+    '{{campaign.name}}': context.campaignName,
+    '{{campaign.purpose}}': context.campaignPurpose,
+  };
+  
+  // Apply substitutions
+  for (const [placeholder, value] of Object.entries(substitutions)) {
+    if (value) {
+      result = result.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'g'), value);
+    }
+  }
+  
+  // Also handle bracket placeholders [Name], [Organization], etc.
+  if (context.contactName) {
+    result = result.replace(/\[Name\]/g, context.contactName);
+    result = result.replace(/\[Contact Name\]/g, context.contactName);
+  }
+  
+  // Always identify as DemandGentic AI on behalf of organization
+  if (context.organizationName) {
+    result = result.replace(/\[Organization\]/g, `DemandGentic AI on behalf of ${context.organizationName}`);
+    result = result.replace(/\[Company\]/g, context.organizationName);
+  } else {
+    result = result.replace(/\[Organization\]/g, 'DemandGentic AI');
+    result = result.replace(/\[Company\]/g, 'DemandGentic AI');
+  }
+  
+  return result;
+}
+
+/**
+ * Build DemandGentic AI identity preamble for the system prompt
+ */
+function buildDemandGenticIdentityPreamble(context: CallContext): string {
+  const orgRef = context.organizationName 
+    ? `DemandGentic AI on behalf of ${context.organizationName}`
+    : 'DemandGentic AI';
+    
+  return `## YOUR IDENTITY (CRITICAL)
+
+You are an AI voice assistant from DemandGentic AI.
+
+**How to introduce yourself after identity is confirmed:**
+- Say: "I'm calling from ${orgRef}."
+- Do NOT say your name is "Agent Name" or any placeholder
+- Do NOT say you are "Name" or leave placeholders unsubstituted
+${context.contactName ? `
+**The person you are calling:**
+- Contact Name: ${context.contactName}
+- Use their name naturally in conversation: "${context.contactFirstName || context.contactName}"
+` : ''}${context.contactJobTitle ? `- Job Title: ${context.contactJobTitle}` : ''}${context.accountName ? `
+- Company: ${context.accountName}` : ''}
+
+**Opening (after phone is answered):**
+"Hello, may I please speak with ${context.contactName || '[the contact]'}${context.contactJobTitle ? `, the ${context.contactJobTitle}` : ''}${context.accountName ? ` at ${context.accountName}` : ''}?"
+
+**After identity is confirmed:**
+"Great, thanks for confirming. I'm calling from ${orgRef}."
+
+`;};
 
 /**
  * Handles the WebSocket connection from Telnyx.
@@ -39,9 +139,10 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let voiceName: string = 'Pumice'; 
   let systemPrompt: string = 'You are a helpful AI assistant.';
   let aiTranscript: string = "";
+  let callContext: CallContext = {};
 
   // 1. Handle messages from Telnyx (Inbound from PSTN)
-  ws.on('message', (data: any) => {
+  ws.on('message', async (data: any) => {
     try {
       const msg = JSON.parse(data.toString());
 
@@ -60,8 +161,46 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
               // This ensures that as soon as Google releases a new voice (e.g., "Jade"), 
               // you can use it by simply updating your Virtual Agent settings without code changes.
               voiceName = config.voice || voiceName;
-              systemPrompt = config.system_prompt || systemPrompt;
+              
+              // Extract call context for placeholder substitution
+              callContext = {
+                contactName: config.contact_name || config.contactName,
+                contactFirstName: config.contact_first_name || config.contactFirstName,
+                contactJobTitle: config.contact_job_title || config.contactJobTitle,
+                accountName: config.account_name || config.accountName,
+                organizationName: config.organization_name || config.organizationName,
+                campaignName: config.campaign_name || config.campaignName,
+                campaignPurpose: config.campaign_purpose || config.campaignPurpose,
+              };
+              
+              // Try to load campaign organization if campaign_id is provided
+              if (config.campaign_id && config.campaign_id !== 'test-campaign') {
+                try {
+                  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, config.campaign_id)).limit(1);
+                  if (campaign) {
+                    callContext.campaignName = campaign.name;
+                    // Get organization name from campaign if available
+                    if ((campaign as any).organizationName) {
+                      callContext.organizationName = (campaign as any).organizationName;
+                    }
+                  }
+                } catch (dbErr) {
+                  console.warn('[Gemini Live] Failed to load campaign data:', dbErr);
+                }
+              }
+              
+              // Build the final system prompt with DemandGentic identity and substitutions
+              const identityPreamble = buildDemandGenticIdentityPreamble(callContext);
+              let basePrompt = config.system_prompt || systemPrompt;
+              
+              // Substitute all placeholders in the base prompt
+              basePrompt = substitutePromptPlaceholders(basePrompt, callContext);
+              
+              // Prepend identity preamble to ensure correct agent identity
+              systemPrompt = identityPreamble + basePrompt;
+              
               console.log(`[Gemini Live] Call ${config.call_id} started. Voice: ${voiceName}`);
+              console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Org: ${callContext.organizationName || 'DemandGentic AI'}`);
             } catch (e) {
               console.error('[Gemini Live] Failed to parse client_state', e);
             }

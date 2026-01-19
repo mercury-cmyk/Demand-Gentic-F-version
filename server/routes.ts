@@ -76,6 +76,7 @@ import agentPromptVisibilityRouter from './routes/agent-prompt-visibility-routes
 import superOrganizationRouter from './routes/super-organization-routes';
 import promptVariantsRouter from './routes/prompt-variants';
 import cloudLogsRouter from './routes/cloud-logs-routes';
+import campaignIngestionRouter from './routes/campaign-ingestion-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -768,6 +769,93 @@ export function registerRoutes(app: Express) {
       res.json({ message: "User deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete user" });
+    }
+  });
+
+  // ==================== USER TELEPHONY SETTINGS ====================
+
+  // Get current user's telephony settings
+  app.get("/api/users/me/telephony", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const [user] = await db
+        .select({
+          callbackPhone: users.callbackPhone,
+          sipExtension: users.sipExtension,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({
+        callbackPhone: user.callbackPhone || null,
+        sipExtension: user.sipExtension || null,
+      });
+    } catch (error: any) {
+      console.error("[USER TELEPHONY GET] Error:", error);
+      res.status(500).json({ message: error.message || "Failed to get telephony settings" });
+    }
+  });
+
+  // Update current user's telephony settings
+  app.put("/api/users/me/telephony", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const { callbackPhone, sipExtension } = req.body as {
+        callbackPhone?: string | null;
+        sipExtension?: string | null;
+      };
+
+      // Validate phone number format if provided
+      if (callbackPhone && callbackPhone.trim()) {
+        // Basic E.164 validation
+        const phoneRegex = /^\+[1-9]\d{1,14}$/;
+        if (!phoneRegex.test(callbackPhone.replace(/\s/g, ''))) {
+          return res.status(400).json({
+            message: "Invalid phone number format. Please use E.164 format (e.g., +14155551234)"
+          });
+        }
+      }
+
+      const [updated] = await db
+        .update(users)
+        .set({
+          callbackPhone: callbackPhone?.trim() || null,
+          sipExtension: sipExtension?.trim() || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+        .returning({
+          callbackPhone: users.callbackPhone,
+          sipExtension: users.sipExtension,
+        });
+
+      if (!updated) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      console.log(`[USER TELEPHONY] Updated for user ${userId}: callback=${updated.callbackPhone}`);
+
+      res.json({
+        success: true,
+        callbackPhone: updated.callbackPhone,
+        sipExtension: updated.sipExtension,
+      });
+    } catch (error: any) {
+      console.error("[USER TELEPHONY UPDATE] Error:", error);
+      res.status(500).json({ message: error.message || "Failed to update telephony settings" });
     }
   });
 
@@ -4892,107 +4980,119 @@ export function registerRoutes(app: Express) {
       }
       
       const campaign = await storage.createCampaign(campaignData);
+      
+      // Return campaign immediately - queue population happens in background
+      invalidateDashboardCache();
+      res.status(201).json({ ...campaign, queuePopulationStatus: 'pending' });
 
-      // Auto-populate queue from audience if defined
+      // ASYNC: Auto-populate queue from audience if defined (runs in background)
       if (campaign.audienceRefs && campaign.type === 'call') {
-        const audienceRefs = campaign.audienceRefs as any;
-        let contacts: any[] = [];
+        const startTime = Date.now();
+        console.log(`[Campaign Creation] Starting async queue population for campaign ${campaign.id}`);
+        
+        // Run queue population in background (don't await)
+        (async () => {
+          try {
+            const audienceRefs = campaign.audienceRefs as any;
+            let contacts: any[] = [];
 
-        // Resolve contacts from filterGroup (Advanced Filters)
-        if (audienceRefs.filterGroup) {
-          console.log(`[Campaign Creation] Resolving contacts from filterGroup for campaign ${campaign.id}`);
-          const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
-          contacts.push(...filterContacts);
-          console.log(`[Campaign Creation] Found ${filterContacts.length} contacts from filterGroup`);
-        }
-
-        // Resolve contacts from segments
-        if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
-          for (const segmentId of audienceRefs.selectedSegments) {
-            const segment = await storage.getSegment(segmentId);
-            if (segment && segment.definitionJson) {
-              const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-              contacts.push(...segmentContacts);
+            // Resolve contacts from filterGroup (Advanced Filters)
+            if (audienceRefs.filterGroup) {
+              console.log(`[Campaign Creation] Resolving contacts from filterGroup for campaign ${campaign.id}`);
+              const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
+              contacts.push(...filterContacts);
+              console.log(`[Campaign Creation] Found ${filterContacts.length} contacts from filterGroup`);
             }
-          }
-        }
 
-        // Resolve contacts from lists (with batching for large lists)
-        const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-        if (Array.isArray(listIds) && listIds.length > 0) {
-          for (const listId of listIds) {
-            const list = await storage.getList(listId);
-            if (list && list.recordIds && list.recordIds.length > 0) {
-              // Batch large lists to avoid SQL query limits
-              const batchSize = 1000;
-              for (let i = 0; i < list.recordIds.length; i += batchSize) {
-                const batch = list.recordIds.slice(i, i + batchSize);
-                const listContacts = await storage.getContactsByIds(batch);
-                contacts.push(...listContacts);
+            // Resolve contacts from segments
+            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
+              for (const segmentId of audienceRefs.selectedSegments) {
+                const segment = await storage.getSegment(segmentId);
+                if (segment && segment.definitionJson) {
+                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+                  contacts.push(...segmentContacts);
+                }
               }
             }
+
+            // Resolve contacts from lists (with batching for large lists)
+            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+            if (Array.isArray(listIds) && listIds.length > 0) {
+              for (const listId of listIds) {
+                const list = await storage.getList(listId);
+                if (list && list.recordIds && list.recordIds.length > 0) {
+                  // Batch large lists to avoid SQL query limits
+                  const batchSize = 1000;
+                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
+                    const batch = list.recordIds.slice(i, i + batchSize);
+                    const listContacts = await storage.getContactsByIds(batch);
+                    contacts.push(...listContacts);
+                  }
+                }
+              }
+            }
+
+            // Remove duplicates and filter contacts with accountId
+            const uniqueContacts = Array.from(
+              new Map(contacts.map(c => [c.id, c])).values()
+            );
+            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+
+            // PHONE VALIDATION: Filter contacts with callable phone numbers
+            // Fetch full contact data with account/HQ phone info if not already present
+            const contactIds = contactsWithAccount.map(c => c.id);
+            if (contactIds.length === 0) {
+              console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id}`);
+            } else {
+              // Batch to avoid PostgreSQL parameter limits
+              const fullContacts: any[] = [];
+              const batchSize = 500;
+              for (let i = 0; i < contactIds.length; i += batchSize) {
+                const batch = contactIds.slice(i, i + batchSize);
+                const batchResults = await db
+                  .select()
+                  .from(contactsTable)
+                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                  .where(inArray(contactsTable.id, batch));
+                fullContacts.push(...batchResults);
+              }
+
+              const contactsWithCallablePhones = fullContacts.filter(row => {
+                const contact = row.contacts;
+                const account = row.accounts;
+
+                const bestPhone = getBestPhoneForContact({
+                  directPhone: contact.directPhone,
+                  directPhoneE164: contact.directPhoneE164,
+                  mobilePhone: contact.mobilePhone,
+                  mobilePhoneE164: contact.mobilePhoneE164,
+                  country: contact.country,
+                  hqPhone: account?.mainPhone,
+                  hqPhoneE164: account?.mainPhoneE164,
+                  hqCountry: account?.hqCountry,
+                });
+
+                return bestPhone.phone !== null;
+              });
+
+              console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
+
+              // Bulk enqueue all contacts with callable phones
+              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
+                contactId: row.contacts.id,
+                accountId: row.contacts.accountId!,
+                priority: 0
+              }));
+
+              const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
+              const elapsed = Date.now() - startTime;
+              console.log(`[Campaign Creation] ✅ Async queue population complete: ${enqueued} contacts in ${elapsed}ms for campaign ${campaign.id}`);
+            }
+          } catch (bgError) {
+            console.error(`[Campaign Creation] ❌ Background queue population failed for campaign ${campaign.id}:`, bgError);
           }
-        }
-
-        // Remove duplicates and filter contacts with accountId
-        const uniqueContacts = Array.from(
-          new Map(contacts.map(c => [c.id, c])).values()
-        );
-        const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-
-        // PHONE VALIDATION: Filter contacts with callable phone numbers
-        // Fetch full contact data with account/HQ phone info if not already present
-        const contactIds = contactsWithAccount.map(c => c.id);
-        if (contactIds.length === 0) {
-          console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id}`);
-        } else {
-          // Batch to avoid PostgreSQL parameter limits
-          const fullContacts: any[] = [];
-          const batchSize = 500;
-          for (let i = 0; i < contactIds.length; i += batchSize) {
-            const batch = contactIds.slice(i, i + batchSize);
-            const batchResults = await db
-              .select()
-              .from(contactsTable)
-              .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-              .where(inArray(contactsTable.id, batch));
-            fullContacts.push(...batchResults);
-          }
-
-          const contactsWithCallablePhones = fullContacts.filter(row => {
-            const contact = row.contacts;
-            const account = row.accounts;
-
-            const bestPhone = getBestPhoneForContact({
-              directPhone: contact.directPhone,
-              directPhoneE164: contact.directPhoneE164,
-              mobilePhone: contact.mobilePhone,
-              mobilePhoneE164: contact.mobilePhoneE164,
-              country: contact.country,
-              hqPhone: account?.mainPhone,
-              hqPhoneE164: account?.mainPhoneE164,
-              hqCountry: account?.hqCountry,
-            });
-
-            return bestPhone.phone !== null;
-          });
-
-          console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
-
-          // Bulk enqueue all contacts with callable phones
-          const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
-            contactId: row.contacts.id,
-            accountId: row.contacts.accountId!,
-            priority: 0
-          }));
-
-          const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
-          console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
-        }
+        })();
       }
-
-      invalidateDashboardCache();
-      res.status(201).json(campaign);
     } catch (error) {
       console.error('Campaign creation error:', error);
       res.status(400).json({ message: error instanceof Error ? error.message : "Failed to create campaign" });
@@ -6380,12 +6480,38 @@ export function registerRoutes(app: Express) {
 
   // ==================== CALL ATTEMPTS ====================
 
-  // Start a manual call via Telnyx Call Control (server-side)
+  // In-memory store for active human agent calls (tracks call bridging state)
+  const activeHumanCalls = new Map<string, {
+    agentCallId: string;
+    prospectCallId?: string;
+    agentId: string;
+    prospectNumber: string;
+    status: 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'bridged' | 'ended';
+    startedAt: Date;
+    campaignId?: string;
+    contactId?: string;
+    queueItemId?: string;
+  }>();
+
+  // Start a human-agent call via Telnyx Call Control (click-to-call flow)
+  // Flow: 1) Call agent's callback phone, 2) When answered, bridge to prospect
   app.post("/api/calls/start", requireAuth, async (req, res) => {
     try {
-      const { to } = req.body as { to?: string };
+      const { to, campaignId, contactId, queueItemId, mode = 'callback' } = req.body as {
+        to?: string;
+        campaignId?: string;
+        contactId?: string;
+        queueItemId?: string;
+        mode?: 'callback' | 'direct'; // callback = call agent first, direct = legacy behavior
+      };
+
       if (!to || typeof to !== "string") {
         return res.status(400).json({ message: "Missing required field: to" });
+      }
+
+      const agentId = req.user?.userId;
+      if (!agentId) {
+        return res.status(401).json({ message: "Unauthorized" });
       }
 
       const telnyxApiKey = process.env.TELNYX_API_KEY;
@@ -6396,14 +6522,190 @@ export function registerRoutes(app: Express) {
       const connectionId =
         process.env.TELNYX_CALL_CONTROL_APP_ID ||
         process.env.TELNYX_CONNECTION_ID;
-      const fromNumber = process.env.TELNYX_FROM_NUMBER;
+      // Use dedicated human agent from number, fall back to default
+      const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
 
       if (!connectionId) {
         return res.status(500).json({ message: "TELNYX connection ID not configured" });
       }
       if (!fromNumber) {
-        return res.status(500).json({ message: "TELNYX_FROM_NUMBER not configured" });
+        return res.status(500).json({ message: "TELNYX_HUMAN_AGENT_FROM_NUMBER or TELNYX_FROM_NUMBER not configured" });
       }
+
+      // Get agent's callback phone for click-to-call mode
+      let agentCallbackPhone: string | null = null;
+      if (mode === 'callback') {
+        const [agent] = await db
+          .select({ callbackPhone: users.callbackPhone })
+          .from(users)
+          .where(eq(users.id, agentId))
+          .limit(1);
+
+        agentCallbackPhone = agent?.callbackPhone || null;
+
+        if (!agentCallbackPhone) {
+          return res.status(400).json({
+            message: "No callback phone configured. Please set your callback phone in Settings > Telephony.",
+            code: "NO_CALLBACK_PHONE"
+          });
+        }
+      }
+
+      // For callback mode: Call the agent first
+      if (mode === 'callback' && agentCallbackPhone) {
+        console.log(`[CALL START] ========================================`);
+        console.log(`[CALL START] Callback mode - calling agent`);
+        console.log(`[CALL START] Agent Callback Phone: ${agentCallbackPhone}`);
+        console.log(`[CALL START] Prospect Number: ${to}`);
+
+        // Debug: Log webhook URL construction
+        const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
+        console.log(`[CALL START] Webhook URL: ${webhookUrl}`);
+        console.log(`[CALL START] PUBLIC_WEBHOOK_HOST: ${process.env.PUBLIC_WEBHOOK_HOST || 'NOT SET'}`);
+        console.log(`[CALL START] Connection ID: ${connectionId}`);
+        console.log(`[CALL START] From Number: ${fromNumber}`);
+        console.log(`[CALL START] ========================================`);
+
+        // Create client_state to track the call context
+        const clientState = Buffer.from(JSON.stringify({
+          type: 'human_agent_callback',
+          agentId,
+          prospectNumber: to,
+          campaignId,
+          contactId,
+          queueItemId,
+        })).toString('base64');
+
+        const response = await fetch("https://api.telnyx.com/v2/calls", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${telnyxApiKey}`,
+          },
+          body: JSON.stringify({
+            connection_id: connectionId,
+            to: agentCallbackPhone,
+            from: fromNumber,
+            client_state: clientState,
+            webhook_url: webhookUrl,
+            answering_machine_detection: "disabled", // No AMD for agent leg
+          }),
+        });
+
+        const responseText = await response.text();
+        console.log(`[CALL START] Telnyx API Response Status: ${response.status}`);
+        console.log(`[CALL START] Telnyx API Response: ${responseText}`);
+
+        if (!response.ok) {
+          console.error(`[CALL START] Telnyx API error: ${response.status} - ${responseText}`);
+          return res.status(502).json({
+            message: "Failed to call agent phone",
+            status: response.status,
+            details: responseText,
+          });
+        }
+
+        const result = JSON.parse(responseText);
+        const agentCallControlId = result.data?.call_control_id;
+
+        if (!agentCallControlId) {
+          return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
+        }
+
+        // Track this call session
+        activeHumanCalls.set(agentCallControlId, {
+          agentCallId: agentCallControlId,
+          agentId,
+          prospectNumber: to,
+          status: 'calling_agent',
+          startedAt: new Date(),
+          campaignId,
+          contactId,
+          queueItemId,
+        });
+
+        console.log(`[CALL START] Agent call initiated: ${agentCallControlId}, will bridge to ${to} when answered`);
+
+        res.json({
+          success: true,
+          callControlId: agentCallControlId,
+          mode: 'callback',
+          status: 'calling_agent',
+          from: fromNumber,
+          agentPhone: agentCallbackPhone,
+          prospectPhone: to,
+        });
+
+      } else {
+        // Legacy direct mode - call prospect directly (no agent bridge)
+        console.log(`[CALL START] Direct mode - calling prospect at ${to}`);
+
+        const response = await fetch("https://api.telnyx.com/v2/calls", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${telnyxApiKey}`,
+          },
+          body: JSON.stringify({
+            connection_id: connectionId,
+            to,
+            from: fromNumber,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`[CALL START] Telnyx API error: ${response.status} - ${errorText}`);
+          return res.status(502).json({
+            message: "Failed to initiate Telnyx call",
+            status: response.status,
+          });
+        }
+
+        const result = await response.json();
+        const callControlId = result.data?.call_control_id;
+
+        if (!callControlId) {
+          return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
+        }
+
+        res.json({
+          success: true,
+          callControlId,
+          mode: 'direct',
+          from: fromNumber,
+          to,
+        });
+      }
+    } catch (error) {
+      console.error("[CALL START] Error:", error);
+      res.status(500).json({
+        message: "Failed to start call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Bridge agent call to prospect (called when agent answers callback)
+  app.post("/api/calls/bridge", requireAuth, async (req, res) => {
+    try {
+      const { agentCallControlId } = req.body as { agentCallControlId?: string };
+
+      if (!agentCallControlId) {
+        return res.status(400).json({ message: "Missing agentCallControlId" });
+      }
+
+      const callSession = activeHumanCalls.get(agentCallControlId);
+      if (!callSession) {
+        return res.status(404).json({ message: "Call session not found" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+      const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
+
+      // Call the prospect
+      callSession.status = 'calling_prospect';
 
       const response = await fetch("https://api.telnyx.com/v2/calls", {
         method: "POST",
@@ -6413,37 +6715,200 @@ export function registerRoutes(app: Express) {
         },
         body: JSON.stringify({
           connection_id: connectionId,
-          to,
+          to: callSession.prospectNumber,
           from: fromNumber,
+          answering_machine_detection: "detect_words",
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[CALL START] Telnyx API error: ${response.status} - ${errorText}`);
+        console.error(`[CALL BRIDGE] Failed to call prospect: ${errorText}`);
+        return res.status(502).json({ message: "Failed to call prospect" });
+      }
+
+      const result = await response.json();
+      const prospectCallId = result.data?.call_control_id;
+
+      callSession.prospectCallId = prospectCallId;
+
+      // Bridge the two calls together
+      const bridgeResponse = await fetch(`https://api.telnyx.com/v2/calls/${agentCallControlId}/actions/bridge`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({
+          call_control_id: prospectCallId,
+        }),
+      });
+
+      if (!bridgeResponse.ok) {
+        const errorText = await bridgeResponse.text();
+        console.error(`[CALL BRIDGE] Failed to bridge calls: ${errorText}`);
+        return res.status(502).json({ message: "Failed to bridge calls" });
+      }
+
+      callSession.status = 'bridged';
+      console.log(`[CALL BRIDGE] Calls bridged: agent=${agentCallControlId}, prospect=${prospectCallId}`);
+
+      res.json({
+        success: true,
+        agentCallId: agentCallControlId,
+        prospectCallId,
+        status: 'bridged',
+      });
+    } catch (error) {
+      console.error("[CALL BRIDGE] Error:", error);
+      res.status(500).json({
+        message: "Failed to bridge call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Get call session status
+  app.get("/api/calls/:callControlId/status", requireAuth, async (req, res) => {
+    const { callControlId } = req.params;
+    const session = activeHumanCalls.get(callControlId);
+
+    if (!session) {
+      return res.status(404).json({ message: "Call session not found" });
+    }
+
+    res.json({
+      ...session,
+      duration: Math.floor((Date.now() - session.startedAt.getTime()) / 1000),
+    });
+  });
+
+  // Transfer call to another number
+  app.post("/api/calls/transfer", requireAuth, async (req, res) => {
+    try {
+      const { callControlId, transferTo } = req.body as { callControlId?: string; transferTo?: string };
+
+      if (!callControlId || !transferTo) {
+        return res.status(400).json({ message: "Missing callControlId or transferTo" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/transfer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({
+          to: transferTo,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL TRANSFER] Telnyx API error: ${response.status} - ${errorText}`);
         return res.status(502).json({
-          message: "Failed to initiate Telnyx call",
+          message: "Failed to transfer call",
           status: response.status,
         });
       }
 
-      const result = await response.json();
-      const callControlId = result.data?.call_control_id;
+      console.log(`[CALL TRANSFER] Call ${callControlId} transferred to ${transferTo}`);
+      res.json({ success: true, transferredTo: transferTo });
+    } catch (error) {
+      console.error("[CALL TRANSFER] Error:", error);
+      res.status(500).json({
+        message: "Failed to transfer call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Hold call
+  app.post("/api/calls/hold", requireAuth, async (req, res) => {
+    try {
+      const { callControlId } = req.body as { callControlId?: string };
 
       if (!callControlId) {
-        return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
+        return res.status(400).json({ message: "Missing callControlId" });
       }
 
-      res.json({
-        success: true,
-        callControlId,
-        from: fromNumber,
-        to,
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hold`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({}),
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL HOLD] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to hold call",
+          status: response.status,
+        });
+      }
+
+      console.log(`[CALL HOLD] Call ${callControlId} put on hold`);
+      res.json({ success: true, held: true });
     } catch (error) {
-      console.error("[CALL START] Error:", error);
+      console.error("[CALL HOLD] Error:", error);
       res.status(500).json({
-        message: "Failed to start call",
+        message: "Failed to hold call",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Unhold (resume) call
+  app.post("/api/calls/unhold", requireAuth, async (req, res) => {
+    try {
+      const { callControlId } = req.body as { callControlId?: string };
+
+      if (!callControlId) {
+        return res.status(400).json({ message: "Missing callControlId" });
+      }
+
+      const telnyxApiKey = process.env.TELNYX_API_KEY;
+      if (!telnyxApiKey) {
+        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
+      }
+
+      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/unhold`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${telnyxApiKey}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[CALL UNHOLD] Telnyx API error: ${response.status} - ${errorText}`);
+        return res.status(502).json({
+          message: "Failed to resume call",
+          status: response.status,
+        });
+      }
+
+      console.log(`[CALL UNHOLD] Call ${callControlId} resumed`);
+      res.json({ success: true, held: false });
+    } catch (error) {
+      console.error("[CALL UNHOLD] Error:", error);
+      res.status(500).json({
+        message: "Failed to resume call",
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -6621,16 +7086,18 @@ export function registerRoutes(app: Express) {
   // Create call attempt when call connects (before disposition)
   app.post("/api/call-attempts/start", requireAuth, async (req, res) => {
     try {
-      const { campaignId, contactId, telnyxCallId, dialedNumber } = req.body;
+      // Accept either telnyxCallId or callControlId (callControlId is the new name)
+      const { campaignId, contactId, telnyxCallId, callControlId, dialedNumber } = req.body;
+      const actualCallId = telnyxCallId || callControlId; // Support both names
       const agentId = req.user?.userId;
 
       if (!agentId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      if (!campaignId || !contactId || !telnyxCallId) {
-        return res.status(400).json({ 
-          message: "Missing required fields: campaignId, contactId, telnyxCallId" 
+      if (!campaignId || !contactId || !actualCallId) {
+        return res.status(400).json({
+          message: "Missing required fields: campaignId, contactId, telnyxCallId/callControlId"
         });
       }
 
@@ -6643,7 +7110,7 @@ export function registerRoutes(app: Express) {
           campaignId,
           contactId,
           agentId,
-          telnyxCallId,
+          telnyxCallId: actualCallId,
           startedAt: new Date(),
         })
         .returning();
@@ -12135,6 +12602,222 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // ==================== HUMAN AGENT CALL WEBHOOK ====================
+  // Handles call events for human-initiated calls from Agent Console
+  // This is separate from AI/TeXML webhooks - uses Programmable Voice App ID: 2853482451592807572
+  app.post("/api/webhooks/human-call", async (req, res) => {
+    try {
+      // Acknowledge immediately
+      res.status(200).json({ received: true });
+
+      const eventType = req.body?.data?.event_type;
+      const payload = req.body?.data?.payload;
+      const callControlId = payload?.call_control_id;
+
+      // Enhanced debug logging
+      console.log(`[Human-Call Webhook] ========================================`);
+      console.log(`[Human-Call Webhook] Received webhook event`);
+      console.log(`[Human-Call Webhook] Event Type: ${eventType}`);
+      console.log(`[Human-Call Webhook] Call Control ID: ${callControlId}`);
+      console.log(`[Human-Call Webhook] Full payload:`, JSON.stringify(payload, null, 2));
+
+      if (!eventType || !callControlId) {
+        console.log("[Human-Call Webhook] Missing event_type or call_control_id");
+        return;
+      }
+
+      // Check if this is a tracked human agent call
+      const callSession = activeHumanCalls.get(callControlId);
+      console.log(`[Human-Call Webhook] Active calls count: ${activeHumanCalls.size}`);
+      console.log(`[Human-Call Webhook] Session found: ${!!callSession}`);
+      if (callSession) {
+        console.log(`[Human-Call Webhook] Session status: ${callSession.status}`);
+        console.log(`[Human-Call Webhook] Prospect number: ${callSession.prospectNumber}`);
+      }
+
+      switch (eventType) {
+        case 'call.answered':
+          console.log(`[Human-Call Webhook] Call answered: ${callControlId}`);
+
+          if (callSession && callSession.status === 'calling_agent') {
+            // Agent answered their phone - now bridge to prospect
+            console.log(`[Human-Call Webhook] *** AGENT ANSWERED ***`);
+            console.log(`[Human-Call Webhook] Agent answered, bridging to prospect: ${callSession.prospectNumber}`);
+            callSession.status = 'agent_connected';
+
+            // Automatically bridge to prospect
+            const telnyxApiKey = process.env.TELNYX_API_KEY;
+            const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
+            const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
+            const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
+
+            console.log(`[Human-Call Webhook] Using Connection ID: ${connectionId}`);
+            console.log(`[Human-Call Webhook] Using From Number: ${fromNumber}`);
+            console.log(`[Human-Call Webhook] Prospect Webhook URL: ${webhookUrl}`);
+
+            try {
+              // Play announcement to agent
+              console.log(`[Human-Call Webhook] Playing announcement to agent...`);
+              const speakResponse = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/speak`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${telnyxApiKey}`,
+                },
+                body: JSON.stringify({
+                  payload: "Connecting you to the prospect now.",
+                  voice: "female",
+                  language: "en-US",
+                }),
+              });
+              console.log(`[Human-Call Webhook] Speak response: ${speakResponse.status}`);
+
+              // Call the prospect
+              console.log(`[Human-Call Webhook] Calling prospect at ${callSession.prospectNumber}...`);
+              const prospectResponse = await fetch("https://api.telnyx.com/v2/calls", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${telnyxApiKey}`,
+                },
+                body: JSON.stringify({
+                  connection_id: connectionId,
+                  to: callSession.prospectNumber,
+                  from: fromNumber,
+                  answering_machine_detection: "detect_words",
+                  client_state: Buffer.from(JSON.stringify({
+                    type: 'human_agent_prospect_leg',
+                    agentCallId: callControlId,
+                  })).toString('base64'),
+                  webhook_url: webhookUrl,
+                }),
+              });
+
+              if (prospectResponse.ok) {
+                const prospectResult = await prospectResponse.json();
+                callSession.prospectCallId = prospectResult.data?.call_control_id;
+                callSession.status = 'calling_prospect';
+                console.log(`[Human-Call Webhook] Calling prospect: ${callSession.prospectCallId}`);
+              } else {
+                console.error(`[Human-Call Webhook] Failed to call prospect: ${await prospectResponse.text()}`);
+              }
+            } catch (err) {
+              console.error(`[Human-Call Webhook] Error bridging call:`, err);
+            }
+          } else if (payload.client_state) {
+            // Prospect answered - bridge the calls
+            console.log(`[Human-Call Webhook] *** PROSPECT ANSWERED (has client_state) ***`);
+            console.log(`[Human-Call Webhook] Raw client_state: ${payload.client_state}`);
+            try {
+              const clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString());
+              console.log(`[Human-Call Webhook] Decoded client_state:`, JSON.stringify(clientState));
+              if (clientState.type === 'human_agent_prospect_leg' && clientState.agentCallId) {
+                const agentSession = activeHumanCalls.get(clientState.agentCallId);
+                console.log(`[Human-Call Webhook] Looking for agent session with ID: ${clientState.agentCallId}`);
+                console.log(`[Human-Call Webhook] Agent session found: ${!!agentSession}`);
+                if (agentSession) {
+                  console.log(`[Human-Call Webhook] Prospect answered, bridging calls`);
+                  console.log(`[Human-Call Webhook] Agent Call ID: ${clientState.agentCallId}`);
+                  console.log(`[Human-Call Webhook] Prospect Call ID: ${callControlId}`);
+
+                  const telnyxApiKey = process.env.TELNYX_API_KEY;
+
+                  // Bridge agent to prospect
+                  console.log(`[Human-Call Webhook] Sending bridge command...`);
+                  const bridgeResponse = await fetch(`https://api.telnyx.com/v2/calls/${clientState.agentCallId}/actions/bridge`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "Authorization": `Bearer ${telnyxApiKey}`,
+                    },
+                    body: JSON.stringify({
+                      call_control_id: callControlId,
+                    }),
+                  });
+
+                  if (bridgeResponse.ok) {
+                    agentSession.status = 'bridged';
+                    console.log(`[Human-Call Webhook] *** CALLS BRIDGED SUCCESSFULLY ***`);
+                  } else {
+                    const errText = await bridgeResponse.text();
+                    console.error(`[Human-Call Webhook] Bridge failed: ${bridgeResponse.status} - ${errText}`);
+                  }
+                } else {
+                  console.log(`[Human-Call Webhook] Agent session not found! Available sessions:`, Array.from(activeHumanCalls.keys()));
+                }
+              } else {
+                console.log(`[Human-Call Webhook] client_state type is not 'human_agent_prospect_leg' or missing agentCallId`);
+              }
+            } catch (err) {
+              console.error(`[Human-Call Webhook] Error parsing client_state:`, err);
+            }
+          } else {
+            console.log(`[Human-Call Webhook] call.answered but no session or client_state - might be a different call type`);
+          }
+          break;
+
+        case 'call.hangup':
+          console.log(`[Human-Call Webhook] Call hangup: ${callControlId}, cause: ${payload?.hangup_cause}`);
+
+          if (callSession) {
+            callSession.status = 'ended';
+
+            // If agent leg hung up, also hang up prospect
+            if (callSession.prospectCallId && callControlId === callSession.agentCallId) {
+              try {
+                const telnyxApiKey = process.env.TELNYX_API_KEY;
+                await fetch(`https://api.telnyx.com/v2/calls/${callSession.prospectCallId}/actions/hangup`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${telnyxApiKey}`,
+                  },
+                  body: JSON.stringify({ cause: "normal_clearing" }),
+                });
+                console.log(`[Human-Call Webhook] Hung up prospect leg`);
+              } catch (err) {
+                console.error(`[Human-Call Webhook] Error hanging up prospect:`, err);
+              }
+            }
+
+            // Cleanup after a delay
+            setTimeout(() => {
+              activeHumanCalls.delete(callControlId);
+            }, 5000);
+          }
+          break;
+
+        case 'call.machine.detection.ended':
+          const amdResult = payload?.result;
+          console.log(`[Human-Call Webhook] AMD result: ${amdResult} for ${callControlId}`);
+
+          if (amdResult === 'machine' || amdResult === 'fax') {
+            // Hang up on machines/voicemail
+            try {
+              const telnyxApiKey = process.env.TELNYX_API_KEY;
+              await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${telnyxApiKey}`,
+                },
+                body: JSON.stringify({ cause: "normal_clearing" }),
+              });
+              console.log(`[Human-Call Webhook] Hung up machine-detected call`);
+            } catch (err) {
+              console.error(`[Human-Call Webhook] Error hanging up machine call:`, err);
+            }
+          }
+          break;
+
+        default:
+          console.log(`[Human-Call Webhook] Unhandled event: ${eventType}`);
+      }
+    } catch (error: any) {
+      console.error("[Human-Call Webhook] Error:", error.message);
+    }
+  });
+
   // ==================== WEBHOOKS (Resources Centre Reverse Webhook) ====================
   app.use("/api/webhooks", webhooksRouter);
 
@@ -13560,6 +14243,9 @@ Provide JSON response with:
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
   app.use('/api/campaigns', requireAuth, campaignEmailRouter);
   app.use('/api/campaigns', requireAuth, campaignSendRouter);
+
+  // ==================== CAMPAIGN INGESTION (AI Auto-Generate) ====================
+  app.use('/api/campaigns', requireAuth, campaignIngestionRouter);
 
   app.use(verificationCampaignsRouter);
   app.use(verificationContactsRouter);

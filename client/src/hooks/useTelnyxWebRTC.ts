@@ -24,7 +24,7 @@ interface UseSIPWebRTCProps {
 export function useSIPWebRTC({
   sipUri,
   sipPassword,
-  sipWebSocket = 'wss://rtc.telnyx.com:14938',
+  sipWebSocket,
   onCallStateChange,
   onCallEnd,
 }: UseSIPWebRTCProps = {}) {
@@ -213,29 +213,28 @@ export function useSIPWebRTC({
     let telnyxClient: TelnyxRTC | null = null;
 
     try {
-      // Use standard Telnyx WebRTC endpoint (port 443 for WSS)
-      // Note: sip.telnyx.com:14938 is often blocked by firewalls, use port 443 instead
-      const wsUrl = sipWebSocket || 'wss://sip.telnyx.com';
-
       console.log('=== TELNYX WebRTC CONNECTION START ===');
       console.log('Connection details:', {
         login: sipUsername,
-        domain: 'sip.telnyx.com',
         hasPassword: !!sipPassword,
         timestamp: new Date().toISOString(),
-        wsServer: wsUrl,
       });
       console.log('SDK version:', (TelnyxRTC as any).version || '2.25.10');
 
-      // Initialize TelnyxRTC - let SDK handle WebSocket configuration
-      // The SDK defaults to wss://sip.telnyx.com on port 443 which works through most firewalls
+      // Initialize TelnyxRTC with standard configuration
+      // If DNS resolution fails for rtc.telnyx.com, the call will fall back to callback mode
       telnyxClient = new TelnyxRTC({
         login: sipUsername,
         password: sipPassword,
-      });
+        // Use standard Telnyx RTC host (requires DNS resolution)
+        // If your network blocks rtc.telnyx.com, calls will use callback mode instead
+        debug: true,
+        debugOutput: 'console',
+        // Prefetch ICE candidates for faster connection
+        prefetchIceCandidates: true,
+      } as any);
 
-      console.log('Initiating WebRTC connection...');
-      telnyxClient.connect();
+      console.log('TelnyxRTC instance created, connecting...');
 
       // Set connection timeout (30 seconds)
       connectionTimeout = setTimeout(() => {
@@ -447,7 +446,7 @@ export function useSIPWebRTC({
         description: "Failed to initialize calling service",
       });
     }
-  }, [sipUri, sipPassword, sipWebSocket, attachRemoteStream, startAudioMonitor, stopAudioMonitor, toast]);
+  }, [sipUri, sipPassword, attachRemoteStream, startAudioMonitor, stopAudioMonitor, toast]);
 
   /**
    * Clean up audio element between calls

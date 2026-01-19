@@ -20,13 +20,13 @@ router.post("/ai-call", (req, res) => {
   // Determine if we have custom parameters passed from the initiation
   // These might be in ClientState (base64) or directly in the body if we added them to the URL
   
-  const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] || 
+  const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0] || 
                req.get('host') || 
                'localhost:8080';
                
   const wsUrl = host.startsWith('wss://') || host.startsWith('ws://') 
-    ? `${host}/openai-realtime-dialer`
-    : `wss://${host}/openai-realtime-dialer`;
+    ? `${host}/voice-dialer`
+    : `wss://${host}/voice-dialer`;
 
   // We can pass the same parameters we were using before
   // If we have clientState, we should pass it along to the WebSocket
@@ -69,7 +69,7 @@ router.post("/incoming", (req, res) => {
 <Response>
     <Say>Connecting you to the DemandGentic AI assistant.</Say>
     <Connect>
-        <Stream url="wss://${req.get('host')}/openai-realtime-dialer" bidirectionalMode="rtp" />
+        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" />
     </Connect>
 </Response>`);
 });

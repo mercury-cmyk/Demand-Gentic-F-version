@@ -81,9 +81,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use Gemini 3 Flash Native Audio for the Live API (Dec 2025)
+    // Use Gemini 2.5 Flash Native Audio for the Live API
     // Note: Model name format differs between Google AI and Vertex AI
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
 
     // Check for API key (Google AI Studio) or use ADC (Vertex AI)
     // Accept multiple env var names for flexibility
@@ -226,8 +226,33 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       throw new Error("WebSocket not connected");
     }
 
-    // Send setup message
-    this.sendSetupMessage(config);
+    // Send setup message and WAIT for setup to complete
+    // This ensures the 'connected' event fires AFTER configure() returns
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Gemini setup timeout - no response within 10 seconds"));
+      }, 10000);
+
+      // Listen for connected event (fires when setupComplete is received)
+      const onConnected = () => {
+        clearTimeout(timeout);
+        console.log(`${LOG_PREFIX} Setup complete, configure() resolving`);
+        resolve();
+      };
+
+      // Already connected (shouldn't happen but handle it)
+      if (this.setupComplete) {
+        clearTimeout(timeout);
+        resolve();
+        return;
+      }
+
+      this.once('connected', onConnected);
+
+      // Send setup message
+      this.sendSetupMessage(config);
+      console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete...`);
+    });
   }
 
   private sendSetupMessage(config: VoiceProviderConfig): void {
@@ -238,9 +263,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    // Use Gemini 3 Flash Native Audio for the Live API (Dec 2025)
+    // Use Gemini 2.0 Flash for the Live API (Multimodal Live)
     // Note: Model name format differs between Google AI and Vertex AI
-    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-3-flash';
+    const model = process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-exp';
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
     const useVertexAI = !!projectId && !apiKey;
 
@@ -560,29 +585,20 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // In Gemini, we send a text prompt and let the model generate audio
-    // CRITICAL: Strong instruction to prevent the model from continuing past the greeting
+    // In Gemini Live, we send a text prompt and the model generates audio
+    // Include essential instructions for proper conversation flow
     const message = {
       client_content: {
         turns: [{
           role: 'user',
-          parts: [{ text: `CRITICAL INSTRUCTION: Say ONLY this exact greeting, then STOP completely and wait in ABSOLUTE SILENCE.
+          parts: [{ text: `Say ONLY this exact message now: "${text}"
 
-Say exactly this and nothing more: "${text}"
-
-CRITICAL RULES - VIOLATION IS UNACCEPTABLE:
-1. Do NOT add any words before or after the message above.
-2. Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement.
-3. Do NOT assume, predict, or anticipate the person's response.
-4. Do NOT assume the person confirmed their identity - you MUST hear them EXPLICITLY say "yes" or their name.
-5. Do NOT proceed with any pitch or introduction until you HEAR explicit confirmation.
-6. If you hear silence, continue waiting - do NOT fill the silence.
-
-After saying this exact message, you MUST:
-- STOP speaking immediately
-- Wait in complete silence
-- Listen for the person's ACTUAL spoken response
-- The NEXT words must come from THEM, not from you` }],
+CRITICAL RULES:
+- Do NOT add anything before or after this message
+- After speaking, STOP and WAIT in silence for their response
+- Do NOT assume they confirmed identity - wait for explicit "yes" or name confirmation
+- Do NOT proceed to pitch until you HEAR explicit confirmation
+- Listen carefully - the next words must come from THEM` }],
         }],
         turn_complete: true,
       },

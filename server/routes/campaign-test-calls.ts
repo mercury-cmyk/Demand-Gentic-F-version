@@ -160,16 +160,16 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       testedBy: userId,
     }).returning();
 
-    // Build WebSocket URL for OpenAI Realtime dialer
-    const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/openai-realtime-dialer')[0] ||
+    // Build WebSocket URL for Voice Dialer
+    const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0] ||
                    process.env.REPLIT_DEV_DOMAIN ||
                    req.get('X-Public-Host') ||
                    req.get('host') ||
                    'localhost:5000';
 
     const wsUrl = wsHost.startsWith('wss://') || wsHost.startsWith('ws://')
-      ? `${wsHost}/openai-realtime-dialer`
-      : `wss://${wsHost}/openai-realtime-dialer`;
+      ? `${wsHost}/voice-dialer`
+      : `wss://${wsHost}/voice-dialer`;
 
     // Prepare system prompt with test contact variables
     const agentSettings = assignment.settings as any || {};
@@ -224,7 +224,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       is_test_call: true,
       test_call_id: testCallId,
       // Store large data in Redis, not in URL
-      // system_prompt will be fetched from virtual_agent in openai-realtime-dialer
+      // system_prompt will be fetched from virtual_agent in voice-dialer
       first_message: assignment.firstMessage,
       voice,
       agent_name: assignment.agentName,

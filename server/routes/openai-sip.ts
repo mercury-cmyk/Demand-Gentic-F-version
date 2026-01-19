@@ -165,6 +165,9 @@ function openRealtimeMonitor(callId: string, apiKey: string, config: SidebandCon
     console.log(`${LOG_PREFIX} Sideband connection established for call ${callId}`);
 
     if (sendSessionUpdate && (config.instructions || config.toolChoice || typeof config.maxOutputTokens !== "undefined")) {
+      // Configure turn detection with semantic_vad for natural conversation flow
+      // Eagerness: "low" = waits longer, "medium" = balanced, "high" = responds quickly
+      const vadEagerness = process.env.OPENAI_VAD_EAGERNESS || 'medium';
       ws.send(
         JSON.stringify({
           type: "session.update",
@@ -178,7 +181,7 @@ function openRealtimeMonitor(callId: string, apiKey: string, config: SidebandCon
               input: {
                 turn_detection: {
                   type: "semantic_vad",
-                  eagerness: "high",
+                  eagerness: vadEagerness,
                   create_response: true,
                   interrupt_response: true,
                 },

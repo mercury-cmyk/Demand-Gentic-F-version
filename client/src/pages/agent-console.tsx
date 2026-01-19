@@ -2,16 +2,19 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { 
-  Phone, 
-  PhoneOff, 
-  Mic, 
+import {
+  Phone,
+  PhoneOff,
+  PhoneForwarded,
+  Mic,
   MicOff,
   Clock,
   User,
@@ -36,6 +39,8 @@ import {
   ArrowRight,
   Star,
   Check,
+  Pause,
+  Play,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -45,37 +50,215 @@ import { CONTACT_FIELD_LABELS, ACCOUNT_FIELD_LABELS } from '@shared/field-labels
 import { QueueControls } from "@/components/queue-controls";
 import { ContactMismatchDialog } from "@/components/contact-mismatch-dialog";
 import { LeadVerificationModal } from "@/components/lead-verification-modal";
+import { useCallControl } from "@/hooks/useCallControl";
+// WebRTC DISABLED - SIP credentials failing, using callback mode instead
+// import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 
-// Call state type for server-managed calls
-type CallState = 'idle' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
+// Call state type for Call Control API calls
+type CallState = 'idle' | 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
 
 // Backwards compatibility type alias
 type CallStatus = CallState | 'wrap-up';
+
+// Country name to ISO 3166-1 alpha-2 code mapping
+const COUNTRY_NAME_TO_CODE: Record<string, string> = {
+  // Common variations
+  'United Kingdom': 'GB',
+  'UK': 'GB',
+  'Great Britain': 'GB',
+  'England': 'GB',
+  'Scotland': 'GB',
+  'Wales': 'GB',
+  'Northern Ireland': 'GB',
+  'United States': 'US',
+  'USA': 'US',
+  'US': 'US',
+  'United States of America': 'US',
+  'America': 'US',
+  'Canada': 'CA',
+  'Australia': 'AU',
+  'New Zealand': 'NZ',
+  'Ireland': 'IE',
+  'Germany': 'DE',
+  'France': 'FR',
+  'Spain': 'ES',
+  'Italy': 'IT',
+  'Netherlands': 'NL',
+  'Belgium': 'BE',
+  'Switzerland': 'CH',
+  'Austria': 'AT',
+  'Sweden': 'SE',
+  'Norway': 'NO',
+  'Denmark': 'DK',
+  'Finland': 'FI',
+  'Poland': 'PL',
+  'Portugal': 'PT',
+  'Greece': 'GR',
+  'Czech Republic': 'CZ',
+  'Czechia': 'CZ',
+  'Hungary': 'HU',
+  'Romania': 'RO',
+  'Bulgaria': 'BG',
+  'Croatia': 'HR',
+  'Slovakia': 'SK',
+  'Slovenia': 'SI',
+  'Estonia': 'EE',
+  'Latvia': 'LV',
+  'Lithuania': 'LT',
+  'Luxembourg': 'LU',
+  'Malta': 'MT',
+  'Cyprus': 'CY',
+  'Iceland': 'IS',
+  'India': 'IN',
+  'China': 'CN',
+  'Japan': 'JP',
+  'South Korea': 'KR',
+  'Korea': 'KR',
+  'Singapore': 'SG',
+  'Hong Kong': 'HK',
+  'Taiwan': 'TW',
+  'Malaysia': 'MY',
+  'Thailand': 'TH',
+  'Philippines': 'PH',
+  'Indonesia': 'ID',
+  'Vietnam': 'VN',
+  'Pakistan': 'PK',
+  'Bangladesh': 'BD',
+  'Sri Lanka': 'LK',
+  'United Arab Emirates': 'AE',
+  'UAE': 'AE',
+  'Saudi Arabia': 'SA',
+  'Qatar': 'QA',
+  'Kuwait': 'KW',
+  'Bahrain': 'BH',
+  'Oman': 'OM',
+  'Israel': 'IL',
+  'Turkey': 'TR',
+  'South Africa': 'ZA',
+  'Egypt': 'EG',
+  'Nigeria': 'NG',
+  'Kenya': 'KE',
+  'Morocco': 'MA',
+  'Brazil': 'BR',
+  'Mexico': 'MX',
+  'Argentina': 'AR',
+  'Chile': 'CL',
+  'Colombia': 'CO',
+  'Peru': 'PE',
+  'Venezuela': 'VE',
+  'Russia': 'RU',
+  'Ukraine': 'UA',
+};
+
+// Country code to dialing code mapping for phone normalization
+const COUNTRY_DIALING_CODES: Record<string, string> = {
+  'US': '1', 'CA': '1',
+  'GB': '44', 'IE': '353',
+  'AU': '61', 'NZ': '64',
+  'DE': '49', 'FR': '33', 'ES': '34', 'IT': '39', 'NL': '31',
+  'BE': '32', 'CH': '41', 'AT': '43', 'SE': '46', 'NO': '47',
+  'DK': '45', 'FI': '358', 'PL': '48', 'PT': '351', 'GR': '30',
+  'CZ': '420', 'HU': '36', 'RO': '40', 'BG': '359', 'HR': '385',
+  'SK': '421', 'SI': '386', 'EE': '372', 'LV': '371', 'LT': '370',
+  'LU': '352', 'MT': '356', 'CY': '357', 'IS': '354',
+  'IN': '91', 'CN': '86', 'JP': '81', 'KR': '82', 'SG': '65',
+  'HK': '852', 'TW': '886', 'MY': '60', 'TH': '66', 'PH': '63',
+  'ID': '62', 'VN': '84', 'PK': '92', 'BD': '880', 'LK': '94',
+  'AE': '971', 'SA': '966', 'QA': '974', 'KW': '965', 'BH': '973',
+  'OM': '968', 'IL': '972', 'TR': '90',
+  'ZA': '27', 'EG': '20', 'NG': '234', 'KE': '254', 'MA': '212',
+  'BR': '55', 'MX': '52', 'AR': '54', 'CL': '56', 'CO': '57',
+  'PE': '51', 'VE': '58', 'RU': '7', 'UA': '380',
+};
+
+// Helper function to get ISO country code from country name or code
+function getCountryCode(country: string | null | undefined): string {
+  if (!country) return 'US'; // Default to US
+  const trimmed = country.trim();
+  // If it's already a 2-letter code, return uppercase
+  if (trimmed.length === 2) return trimmed.toUpperCase();
+  // Look up in mapping
+  return COUNTRY_NAME_TO_CODE[trimmed] || 'US';
+}
 
 // Helper function to validate and normalize phone number to E.164
 function normalizePhoneToE164(phone: string | null, country: string = 'US'): string | null {
   if (!phone) return null;
 
   let cleanedPhone = phone.trim();
+  const countryCode = getCountryCode(country);
+  const dialingCode = COUNTRY_DIALING_CODES[countryCode] || '1';
+
+  console.log('📱 Normalizing phone:', { phone: cleanedPhone, country, countryCode, dialingCode });
+
+  // Remove common formatting characters but keep + and digits
+  cleanedPhone = cleanedPhone.replace(/[\s\-\(\)\.]/g, '');
 
   // CRITICAL FIX: UK numbers with leading 0 after country code (+440...)
   // These calls will NOT connect - the 0 must be removed after +44
-  // Examples: +4401234567890 → +441234567890, +447012345678 → +447012345678
-  if (cleanedPhone.match(/^\+440\d{10,}$/)) {
-    // Remove the 0 after +44
+  if (cleanedPhone.match(/^\+440\d{9,}$/)) {
     cleanedPhone = '+44' + cleanedPhone.substring(4);
     console.log('🔧 Fixed UK number: removed leading 0 after +44:', cleanedPhone);
   }
 
+  // Handle numbers starting with country dialing code but no +
+  // e.g., "441onal234567890" for UK, "12025551234" for US
+  if (!cleanedPhone.startsWith('+')) {
+    // Check if it starts with the country's dialing code
+    if (cleanedPhone.startsWith(dialingCode)) {
+      cleanedPhone = '+' + cleanedPhone;
+      console.log('📞 Added + prefix to number starting with dialing code:', cleanedPhone);
+    }
+    // Handle local formats with leading 0 (common in UK, Germany, etc.)
+    else if (cleanedPhone.startsWith('0')) {
+      // Remove leading 0 and add country code
+      cleanedPhone = '+' + dialingCode + cleanedPhone.substring(1);
+      console.log('📞 Converted local format (0xxx) to international:', cleanedPhone);
+    }
+    // Handle numbers without any prefix - assume they need country code
+    else if (cleanedPhone.match(/^\d{6,}$/)) {
+      // US/CA numbers are typically 10 digits, UK landlines 10-11, mobiles 10
+      if (countryCode === 'US' || countryCode === 'CA') {
+        // US/Canada: 10 digit numbers
+        if (cleanedPhone.length === 10) {
+          cleanedPhone = '+1' + cleanedPhone;
+          console.log('📞 Added US/CA country code:', cleanedPhone);
+        }
+      } else if (countryCode === 'GB') {
+        // UK: typically 10-11 digits after country code
+        cleanedPhone = '+44' + cleanedPhone;
+        console.log('📞 Added UK country code:', cleanedPhone);
+      } else {
+        // Other countries: add the dialing code
+        cleanedPhone = '+' + dialingCode + cleanedPhone;
+        console.log('📞 Added country dialing code:', cleanedPhone);
+      }
+    }
+  }
+
   try {
-    const phoneNumber = parsePhoneNumberFromString(cleanedPhone, country as any);
+    const phoneNumber = parsePhoneNumberFromString(cleanedPhone, countryCode as any);
     if (phoneNumber && phoneNumber.isValid()) {
+      console.log('✅ Valid E.164 number:', phoneNumber.number);
       return phoneNumber.number;
+    } else if (phoneNumber) {
+      console.log('⚠️ Phone parsed but invalid:', phoneNumber.number, 'isPossible:', phoneNumber.isPossible());
+      // If it's possible but not valid, still return it (might work for some edge cases)
+      if (phoneNumber.isPossible()) {
+        return phoneNumber.number;
+      }
     }
   } catch (error) {
     console.error('Phone normalization error:', error);
   }
 
+  // Last resort: if number starts with + and has reasonable length, return as-is
+  if (cleanedPhone.startsWith('+') && cleanedPhone.length >= 10 && cleanedPhone.length <= 16) {
+    console.log('⚠️ Returning unvalidated E.164 format:', cleanedPhone);
+    return cleanedPhone;
+  }
+
+  console.log('❌ Could not normalize phone number');
   return null;
 }
 
@@ -188,98 +371,98 @@ export default function AgentConsolePage() {
     setCurrentContactIndex(0);
   }, [selectedCampaignId]);
 
-  // Server-managed call state (no browser SIP)
-  const [isConnected] = useState(true); // Server is always "connected"
-  const [callDuration, setCallDuration] = useState(0);
-  const [telnyxCallId, setTelnyxCallId] = useState<string | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
+  // Call Control API hook for click-to-call functionality
+  const {
+    isConnected,
+    callState,
+    callDuration,
+    isMuted,
+    callControlId,
+    formatDuration,
+    makeCall: apiMakeCall,
+    hangup: apiHangup,
+    toggleMute,
+    toggleHold,
+    sendDTMF,
+    transferCall,
+  } = useCallControl({
+    onCallStateChange: (newState) => {
+      console.log('[AGENT CONSOLE] Call Control state changed:', newState);
+      // Map Call Control states to our local states
+      if (newState === 'hangup') {
+        setCallStatus('wrap-up');
+      } else if (newState === 'calling_agent' || newState === 'agent_connected' || newState === 'calling_prospect') {
+        setCallStatus('connecting');
+      } else {
+        setCallStatus(newState as CallStatus);
+      }
+    },
+    onCallEnd: () => {
+      console.log('[AGENT CONSOLE] Call Control call ended');
+      setCallStatus('wrap-up');
+    },
+  });
+
+  // Log connection state changes
+  useEffect(() => {
+    console.log('[AGENT CONSOLE] Call Control state:', {
+      isConnected,
+      callState,
+      callControlId,
+    });
+  }, [isConnected, callState, callControlId]);
+
+  // WebRTC DISABLED - SIP credentials failing with "Login Incorrect"
+  // Using Call Control API with callback mode instead (calls your phone for audio)
+  // To re-enable WebRTC: Fix TELNYX_WEBRTC_USERNAME and TELNYX_WEBRTC_PASSWORD in .env.local
+  const webrtcConnected = false;
+
+  // Additional UI state
+  const [isHeld, setIsHeld] = useState(false);
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [transferNumber, setTransferNumber] = useState('');
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Mute toggle (server-managed calls don't have client-side audio control)
-  const toggleMute = async () => {
-    if (!telnyxCallId) return;
-    try {
-      const action = isMuted ? 'unmute' : 'mute';
-      await apiRequest("POST", `/api/calls/${action}`, { callControlId: telnyxCallId });
-      setIsMuted(!isMuted);
-    } catch (error) {
-      console.error('[AGENT CONSOLE] Mute toggle failed:', error);
+  // Transfer call to another number via Call Control API
+  const handleTransfer = async () => {
+    if (!transferNumber) {
       toast({
-        title: "Mute Failed",
-        description: error instanceof Error ? error.message : "Failed to toggle mute",
+        title: "No Transfer Number",
+        description: "Please enter a phone number to transfer to.",
         variant: "destructive",
       });
+      return;
     }
+
+    await transferCall(transferNumber);
+    setShowTransferDialog(false);
+    setTransferNumber('');
   };
 
-  // Send DTMF tones
-  const sendDTMF = async (digit: string) => {
-    if (!telnyxCallId) return;
-    try {
-      await apiRequest("POST", "/api/calls/dtmf", { callControlId: telnyxCallId, digit });
-    } catch (error) {
-      console.error('[AGENT CONSOLE] DTMF send failed:', error);
-      toast({
-        title: "DTMF Failed",
-        description: error instanceof Error ? error.message : "Failed to send DTMF",
-        variant: "destructive",
-      });
-    }
+  // Call Control API-based call initiation
+  // Uses direct mode: calls prospect directly, audio streams via ngrok WebSocket
+  const makeCall = async (phoneNumber: string, options?: { campaignId?: string; contactId?: string; queueItemId?: string }) => {
+    console.log('[AGENT CONSOLE] makeCall invoked:', {
+      phoneNumber,
+      isConnected,
+      options,
+    });
+
+    // Use Call Control API with direct mode (calls prospect directly)
+    console.log('[AGENT CONSOLE] Making Call Control API call (direct mode) to:', phoneNumber);
+    await apiMakeCall(phoneNumber, {
+      campaignId: options?.campaignId || selectedCampaignId,
+      contactId: options?.contactId,
+      queueItemId: options?.queueItemId,
+      mode: 'direct', // Direct mode - calls prospect directly
+    });
   };
 
-  // Format duration as MM:SS
-  const formatDuration = () => {
-    const mins = Math.floor(callDuration / 60);
-    const secs = callDuration % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Server-side call initiation via API
-  const makeCall = async (phoneNumber: string) => {
-    try {
-      setCallStatus('connecting');
-      setCallDuration(0);
-      const response = await apiRequest("POST", "/api/calls/start", {
-        to: phoneNumber,
-        campaignId: selectedCampaignId,
-        contactId: currentQueueItem?.contactId,
-        queueItemId: currentQueueItem?.id,
-      });
-      const data = await response.json();
-      setTelnyxCallId(data.callControlId || data.callId || null);
-      setCallStatus('active');
-      
-      // Start call timer
-      callTimerRef.current = setInterval(() => {
-        setCallDuration(prev => prev + 1);
-      }, 1000);
-    } catch (error) {
-      console.error('[AGENT CONSOLE] Call initiation failed:', error);
-      setCallStatus('idle');
-      toast({
-        title: "Call Failed",
-        description: error instanceof Error ? error.message : "Failed to initiate call",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Server-side hangup
+  // Hangup call via Call Control API
   const hangup = async () => {
-    try {
-      if (telnyxCallId) {
-        await apiRequest("POST", "/api/calls/hangup", { callControlId: telnyxCallId });
-      }
-    } catch (error) {
-      console.error('[AGENT CONSOLE] Hangup failed:', error);
-    } finally {
-      if (callTimerRef.current) {
-        clearInterval(callTimerRef.current);
-        callTimerRef.current = null;
-      }
-      setTelnyxCallId(null);
-      setCallStatus('wrap-up');
-    }
+    console.log('[AGENT CONSOLE] Hanging up call');
+    await apiHangup();
+    setIsHeld(false);
   };
 
   // Fetch agent queue data
@@ -775,7 +958,7 @@ export default function AgentConsolePage() {
       setNotes('');
       setQualificationData({});
       setCallStatus('idle');
-      setCallDuration(0);
+      // Note: callDuration is managed by useSIPWebRTC hook and resets automatically on new calls
       setSwitchedContact(null);
       setActiveCallAttemptId(null);
 
@@ -793,16 +976,16 @@ export default function AgentConsolePage() {
 
   // Create call attempt when call becomes active
   useEffect(() => {
-    if (callStatus === 'active' && telnyxCallId && !activeCallAttemptId && currentQueueItem) {
+    if (callStatus === 'active' && callControlId && !activeCallAttemptId && currentQueueItem) {
       console.log('[CALL-ATTEMPT] Call became active, creating call attempt...');
       createCallAttemptMutation.mutate({
         campaignId: currentQueueItem.campaignId,
         contactId: switchedContact?.id || currentQueueItem.contactId,
-        telnyxCallId: telnyxCallId,
+        callControlId: callControlId,
         dialedNumber: dialedPhoneNumber,
       });
     }
-  }, [callStatus, telnyxCallId, activeCallAttemptId, currentQueueItem, switchedContact]);
+  }, [callStatus, callControlId, activeCallAttemptId, currentQueueItem, switchedContact]);
 
   const handleContactSwitched = (newContact: { id: string; fullName: string }) => {
     setSwitchedContact(newContact);
@@ -813,13 +996,20 @@ export default function AgentConsolePage() {
   };
 
   const handleDial = () => {
-    if (!isConnected) {
+    // Call Control API is always available, WebRTC optional for audio
+    // If WebRTC not connected, will use callback mode
+    if (!isConnected && !webrtcConnected) {
       toast({
         title: "Not ready",
         description: "Calling service is not ready. Please try again.",
         variant: "destructive",
       });
       return;
+    }
+
+    // Show info if WebRTC not connected
+    if (!webrtcConnected) {
+      console.log('[AGENT CONSOLE] WebRTC not connected - will use callback mode');
     }
 
     let phoneNumber: string | null = null;
@@ -854,17 +1044,12 @@ export default function AgentConsolePage() {
       return;
     }
 
-    // Convert country name to ISO code
-    const countryNameToCode: Record<string, string> = {
-      'United Kingdom': 'GB',
-      'UK': 'GB',
-      'United States': 'US',
-      'USA': 'US',
-      'US': 'US',
-    };
-
-    const rawCountry = fullContactDetails?.country || 'GB';
-    const contactCountry = countryNameToCode[rawCountry] || rawCountry;
+    // Get the contact's country for proper phone normalization
+    // Check contact country first, then account country, then default to US
+    const rawCountry = fullContactDetails?.country ||
+                       fullContactDetails?.account?.hqCountry ||
+                       'US';
+    const contactCountry = getCountryCode(rawCountry);
 
     // Debug logging
     console.log('🔍 Phone Validation Debug:', {
@@ -872,35 +1057,23 @@ export default function AgentConsolePage() {
       rawCountry,
       contactCountry,
       phoneType: selectedPhoneType,
-      label: phoneLabel
+      label: phoneLabel,
+      contactName: fullContactDetails?.fullName,
     });
 
-    // Handle phone numbers that already have country code but no +
-    let normalizedPhone = phoneNumber;
-    if (contactCountry === 'GB' && phoneNumber.match(/^44\d{10}$/)) {
-      // UK number starting with 44 (missing +)
-      normalizedPhone = `+${phoneNumber}`;
-      console.log('📞 Added + to UK number:', normalizedPhone);
-    } else if (!phoneNumber.startsWith('+')) {
-      // Add + if missing
-      normalizedPhone = phoneNumber.startsWith('0') 
-        ? `+44${phoneNumber.substring(1)}` // UK landline with leading 0
-        : `+${phoneNumber}`;
-      console.log('📞 Normalized phone:', normalizedPhone);
-    }
-
-    let e164Phone = normalizePhoneToE164(normalizedPhone, contactCountry);
-
-    console.log('✅ E164 Result:', e164Phone);
+    // Use the enhanced normalization function that handles all country formats
+    let e164Phone = normalizePhoneToE164(phoneNumber, contactCountry);
 
     if (!e164Phone) {
       toast({
         title: "Invalid phone number",
-        description: `Cannot validate "${phoneNumber}". Please ensure it's in correct format (UK: +44xxxxxxxxxx or 0xxxxxxxxxx)`,
+        description: `Cannot validate "${phoneNumber}". Please ensure it's in correct format for ${rawCountry}.`,
         variant: "destructive",
       });
       return;
     }
+
+    console.log('✅ E164 Result:', e164Phone);
 
     if (selectedPhoneType === 'manual') {
       const manualDialNote = `[Manual Dial: ${phoneNumber}]`;
@@ -909,8 +1082,13 @@ export default function AgentConsolePage() {
 
     // Store the dialed phone number for later use in disposition
     setDialedPhoneNumber(e164Phone);
-    
-    makeCall(e164Phone);
+
+    // Pass context for Call Control API (campaign, contact, queue item)
+    makeCall(e164Phone, {
+      campaignId: selectedCampaignId,
+      contactId: currentQueueItem?.contactId,
+      queueItemId: currentQueueItem?.id,
+    });
     setCallMadeToContact(true);
   };
 
@@ -948,7 +1126,7 @@ export default function AgentConsolePage() {
       notes,
       qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
       callbackRequested: disposition === 'callback-requested',
-      telnyxCallId: telnyxCallId, // Include Telnyx call ID for recording lookup
+      callControlId: callControlId, // Include Telnyx call ID for recording lookup
       dialedNumber: dialedPhoneNumber, // Include dialed phone number for recording sync
       callAttemptId: activeCallAttemptId, // Include call attempt ID for linking
       // Track contact switch if it happened
@@ -973,12 +1151,13 @@ export default function AgentConsolePage() {
   const isCallActive = ['connecting', 'ringing', 'active', 'held'].includes(callStatus);
 
   const getStatusBadge = () => {
-    if (!isConnected) {
+    if (!isConnected && !webrtcConnected) {
       return <Badge variant="destructive" data-testid="badge-not-connected">Disconnected</Badge>;
     }
 
     switch (callStatus) {
       case 'idle':
+        // Show mode in badge - using direct mode (calls prospect directly)
         return <Badge className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-lg" data-testid="badge-call-idle">Ready</Badge>;
       case 'connecting':
         return <Badge variant="outline" className="bg-white/10 text-white border-white/20" data-testid="badge-call-connecting">Connecting...</Badge>;
@@ -1021,8 +1200,9 @@ export default function AgentConsolePage() {
     );
   }
 
-  // Only show empty state when not loading and queue is actually empty
-  if (!queueLoading && (!queueData || queueData.length === 0)) {
+  // Only show empty state when not loading/fetching and queue is actually empty
+  // Use both queueLoading and queueFetching to prevent flickering during refetch
+  if (!queueLoading && !queueFetching && (!queueData || queueData.length === 0)) {
     return (
       <div className="container mx-auto p-6">
         <div className="mb-6">
@@ -1058,10 +1238,10 @@ export default function AgentConsolePage() {
                   </Select>
                 </div>
               )}
-              {selectedCampaign && selectedCampaignId && dialMode === 'manual' && (
+              {selectedCampaign && selectedCampaignId && (
                 <div className="mt-6">
                   <p className="text-sm text-muted-foreground mb-3">Use the button below to set up your queue:</p>
-                  <QueueControls 
+                  <QueueControls
                     campaignId={selectedCampaignId}
                     compact={false}
                     renderDialogs={true}
@@ -1429,7 +1609,7 @@ export default function AgentConsolePage() {
                 )}
 
                 {/* Row 4: Call Controls */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1445,6 +1625,39 @@ export default function AgentConsolePage() {
                     )}
                   </Button>
 
+                  {/* Hold Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleHold}
+                    disabled={!isCallActive}
+                    className={`h-9 backdrop-blur-sm text-xs ${
+                      isHeld
+                        ? 'bg-amber-500/30 hover:bg-amber-500/40 border-amber-400/50 text-amber-100'
+                        : 'bg-white/20 hover:bg-white/30 border-white/30 text-white'
+                    }`}
+                    data-testid="button-hold"
+                  >
+                    {isHeld ? (
+                      <><Play className="h-3 w-3 mr-1" />Resume</>
+                    ) : (
+                      <><Pause className="h-3 w-3 mr-1" />Hold</>
+                    )}
+                  </Button>
+
+                  {/* Transfer Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowTransferDialog(true)}
+                    disabled={!isCallActive}
+                    className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs"
+                    data-testid="button-transfer"
+                  >
+                    <PhoneForwarded className="h-3 w-3 mr-1" />
+                    Transfer
+                  </Button>
+
                   {callStatus === 'active' && activeCallAttemptId && (
                     <Button
                       variant="outline"
@@ -1458,7 +1671,7 @@ export default function AgentConsolePage() {
                     </Button>
                   )}
 
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-[120px]">
                     {!isCallActive && callStatus !== 'wrap-up' && (
                       <Button
                         size="lg"
@@ -1992,7 +2205,7 @@ export default function AgentConsolePage() {
               notes,
               qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
               callbackRequested: false,
-              telnyxCallId: telnyxCallId,
+              callControlId: callControlId,
               dialedNumber: dialedPhoneNumber,
               callAttemptId: activeCallAttemptId,
               originalContactId: switchedContact ? currentQueueItem.contactId : null,
@@ -2009,6 +2222,46 @@ export default function AgentConsolePage() {
           contactId={switchedContact?.id || currentQueueItem.contactId}
         />
       )}
+
+      {/* Transfer Call Dialog */}
+      <Dialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PhoneForwarded className="h-5 w-5" />
+              Transfer Call
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="transfer-number">Transfer to phone number</Label>
+              <Input
+                id="transfer-number"
+                placeholder="+1 (555) 123-4567"
+                value={transferNumber}
+                onChange={(e) => setTransferNumber(e.target.value)}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter the phone number to transfer this call to. Use E.164 format for best results.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTransferDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleTransfer}
+              disabled={!transferNumber.trim()}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <PhoneForwarded className="h-4 w-4 mr-2" />
+              Transfer Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

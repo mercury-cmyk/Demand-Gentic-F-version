@@ -125,13 +125,13 @@ app.use((req, res, next) => {
   const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");
   const mediaWss = initializeAiMediaStreaming(server);
 
-  // Initialize OpenAI Realtime Dialer for AI calling with disposition detection
+  // Initialize Voice Dialer for AI calling (Gemini + OpenAI) with disposition detection
   // Note: WebSocketServer needs server reference but path-based routing won't work with
   // Express. We manually handle the upgrade event instead.
-  const { initializeOpenAIRealtimeDialer } = await import("./services/openai-realtime-dialer");
-  const realtimeWss = initializeOpenAIRealtimeDialer(server);
-  realtimeWss.on('error', (err) => {
-    console.error('[WebSocket Upgrade] Realtime WSS error:', err);
+  const { initializeVoiceDialer } = await import("./services/voice-dialer");
+  const voiceDialerWss = initializeVoiceDialer(server);
+  voiceDialerWss.on('error', (err) => {
+    console.error('[WebSocket Upgrade] Voice Dialer WSS error:', err);
   });
 
   // Initialize Gemini Live Dialer
@@ -176,13 +176,13 @@ app.use((req, res, next) => {
       console.log(`[WebSocket Upgrade] Socket closed. Had error: ${hadError}`);
     });
 
-    if (pathname === '/openai-realtime-dialer') {
-      console.log('[WebSocket Upgrade] Handling OpenAI Realtime Dialer connection');
+    if (pathname === '/voice-dialer') {
+      console.log('[WebSocket Upgrade] Handling Voice Dialer connection');
       
       try {
-        realtimeWss.handleUpgrade(req, socket as any, head, (ws) => {
-          console.log('[WebSocket Upgrade] ✅ OpenAI Realtime Dialer connection established');
-          realtimeWss.emit('connection', ws, req);
+        voiceDialerWss.handleUpgrade(req, socket as any, head, (ws) => {
+          console.log('[WebSocket Upgrade] ✅ Voice Dialer connection established');
+          voiceDialerWss.emit('connection', ws, req);
         });
       } catch (error) {
         console.error('[WebSocket Upgrade] Exception in handleUpgrade:', error);

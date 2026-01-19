@@ -531,10 +531,10 @@ router.post("/telnyx", async (req, res) => {
 });
 
 // ============================================================================
-// ElevenLabs Integration Removed - Using OpenAI Realtime exclusively
+// ElevenLabs Integration Removed - Using Voice Dialer exclusively
 // ============================================================================
-// All AI agent disposition handling is performed by OpenAI Realtime API
-// See server/services/openai-realtime-dialer.ts for unified disposition handling
+// All AI agent disposition handling is performed by Voice Dialer (Gemini/OpenAI)
+// See server/services/voice-dialer.ts for unified disposition handling
 
 // Signature verification removed - ElevenLabs integration discontinued
 
@@ -543,10 +543,10 @@ router.post("/telnyx", async (req, res) => {
 
 
 // ============================================================================
-// ElevenLabs Endpoints Removed - Using OpenAI Realtime exclusively
+// ElevenLabs Endpoints Removed - Using Voice Dialer exclusively
 // ============================================================================
-// All AI agent disposition handling is performed by OpenAI Realtime API
-// See server/services/openai-realtime-dialer.ts
+// All AI agent disposition handling is performed by Voice Dialer (Gemini/OpenAI)
+// See server/services/voice-dialer.ts
 
 /**
  * Telnyx Recording Sync - Fetch recordings from Telnyx and update call_sessions

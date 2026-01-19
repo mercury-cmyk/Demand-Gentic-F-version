@@ -249,8 +249,8 @@ export default function PreviewStudioPage() {
                   </TabsTrigger>
                   <TabsTrigger value="simulation" className="gap-2 px-4">
                     <PhoneCall className="h-4 w-4" />
-                    Live Testing
-                    <Badge variant="outline" className="ml-1 text-xs">Real Call</Badge>
+                    Voice Testing
+                    <Badge variant="outline" className="ml-1 text-xs">Free/Call</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="call-plan" className="gap-2 px-4">
                     <Phone className="h-4 w-4" />

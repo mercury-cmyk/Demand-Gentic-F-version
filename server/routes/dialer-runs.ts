@@ -28,7 +28,7 @@ import { lockNextContact, releaseLock, getLockStatus, releaseExpiredLocks, count
 import { preflightVoiceVariableContract } from "../services/voice-variable-contract";
 import { processDisposition, isValidCanonicalDisposition } from "../services/disposition-engine";
 import { z } from "zod";
-import { getRealtimeStatus } from "../services/openai-realtime-dialer";
+import { getRealtimeStatus } from "../services/voice-dialer";
 
 const router = Router();
 
@@ -984,14 +984,14 @@ router.get("/dispositions/list", async (req, res) => {
  * Get OpenAI Realtime session status
  * GET /api/dialer-runs/openai-realtime/status
  */
-router.get("/openai-realtime/status", async (req, res) => {
+router.get("/voice-dialer/status", async (req, res) => {
   try {
-    const { getActiveSessionCount } = await import("../services/openai-realtime-dialer");
+    const { getActiveSessionCount } = await import("../services/voice-dialer");
     res.json({
       activeSessions: getActiveSessionCount(),
-      websocketPath: "/openai-realtime-dialer",
-      provider: "openai",
-      model: "gpt-realtime"
+      websocketPath: "/voice-dialer",
+      provider: "google",
+      model: "gemini-2.0-flash-exp"
     });
   } catch (error) {
     console.error("[Dialer Runs] OpenAI Realtime status error:", error);
@@ -1032,7 +1032,7 @@ router.get("/:id/openai-realtime/connect-info", async (req, res) => {
     const protocol = host.includes('localhost') ? 'ws' : 'wss';
     
     res.json({
-      websocketUrl: `${protocol}://${host}/openai-realtime-dialer`,
+      websocketUrl: `${protocol}://${host}/voice-dialer`,
       requiredParameters: {
         call_id: "Unique identifier for this call (e.g., Telnyx call_control_id)",
         run_id: run.id,
@@ -1045,7 +1045,7 @@ router.get("/:id/openai-realtime/connect-info", async (req, res) => {
         "1. Call POST /api/dialer-runs/:id/next-contact to lock a contact and get queue_item_id, call_attempt_id, contact_id",
         "2. Initiate Telnyx outbound call to the contact's phone",
         "3. Configure Telnyx to stream media to this WebSocket URL with all parameters in start.custom_parameters",
-        "4. The OpenAI Realtime session will be created automatically when the call connects",
+        "4. The Voice Dialer session will be created automatically when the call connects",
         "5. Disposition will be submitted automatically via function calling and processed through the Disposition Engine"
       ]
     });
@@ -1056,12 +1056,12 @@ router.get("/:id/openai-realtime/connect-info", async (req, res) => {
 });
 
 /**
- * Terminate an active OpenAI Realtime session
- * POST /api/dialer-runs/openai-realtime/terminate/:callId
+ * Terminate an active Voice Dialer session
+ * POST /api/dialer-runs/voice-dialer/terminate/:callId
  */
-router.post("/openai-realtime/terminate/:callId", async (req, res) => {
+router.post("/voice-dialer/terminate/:callId", async (req, res) => {
   try {
-    const { terminateSession } = await import("../services/openai-realtime-dialer");
+    const { terminateSession } = await import("../services/voice-dialer");
     const terminated = await terminateSession(req.params.callId);
     
     if (terminated) {
