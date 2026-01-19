@@ -3280,20 +3280,6 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             }));
             session.openaiWs.send(JSON.stringify({ type: "response.create" }));
           }
-          
-          // Auto-hangup after any disposition is submitted
-          // VOICEMAIL: Hang up IMMEDIATELY (no delay) - don't waste time on voicemail
-          // DO_NOT_CALL: Hang up quickly (2 seconds) to respect their request
-          // OTHER: Normal 5 second delay for AI to say goodbye
-          const hangupDelay = disposition === 'voicemail' ? 0 : (disposition === 'do_not_call' ? 2000 : 5000);
-          console.log(`${LOG_PREFIX} Scheduling auto-hangup in ${hangupDelay}ms for disposition: ${disposition}`);
-
-          setTimeout(() => {
-            if (session.isActive && !session.isEnding) {
-              console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${disposition}`);
-              endCall(session.callId, disposition === 'voicemail' ? 'voicemail' : 'completed');
-            }
-          }, hangupDelay);
         }
         break;
 
