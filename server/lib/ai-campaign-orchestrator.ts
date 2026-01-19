@@ -588,7 +588,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
 /**
  * Process a single campaign - initiate calls to maintain concurrency
  */
-async function processCampaign(campaignId: string): Promise<{ initiated: number; skipped: number }> {
+async function processCampaign(campaignId: string): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
   const campaign = await storage.getCampaign(campaignId);
   if (!campaign) {
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);

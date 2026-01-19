@@ -45,13 +45,13 @@ try {
 }
 
 // Global cleanup of ngrok
-try {
-    if (process.platform === 'win32') {
-       execSync('taskkill /F /IM ngrok.exe', { stdio: 'ignore' });
-    } else {
-       execSync('pkill ngrok', { stdio: 'ignore' });
-    }
-} catch(e) {} 
+// try {
+//     if (process.platform === 'win32') {
+//        execSync('taskkill /F /IM ngrok.exe', { stdio: 'ignore' });
+//     } else {
+//        execSync('pkill ngrok', { stdio: 'ignore' });
+//     }
+// } catch(e) {} 
 
 
 // Helper to kill port
@@ -80,6 +80,7 @@ console.log(`🚀 Starting ngrok tunnel on port ${PORT}...`);
 
 // Start ngrok
 // FORCE 127.0.0.1 to avoid IPv6 [::1] issues on Windows
+/*
 const ngrokProcess = spawn('ngrok', ['http', `127.0.0.1:${PORT}`, '--log=stdout'], {
   stdio: ['ignore', 'pipe', 'pipe']
 });
@@ -95,6 +96,8 @@ ngrokProcess.stdout.on('data', (data) => {
 ngrokProcess.stderr.on('data', (data) => {
     process.stderr.write(`[ngrok err] ${data.toString()}`);
 });
+*/
+const ngrokProcess = { kill: () => {} };
 
 let tunnelUrl: string | null = null;
 let devProcess: any = null;
@@ -130,7 +133,7 @@ function getTunnels() : Promise<string | null> {
 
 // Poll for tunnel
 let attempts = 0;
-const maxAttempts = 20; // 10 seconds
+const maxAttempts = 120; // 60 seconds (increased from 10s to allow ngrok updates/connect)
 
 const pollInterval = setInterval(async () => {
     attempts++;
