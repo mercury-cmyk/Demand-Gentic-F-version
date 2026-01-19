@@ -1500,22 +1500,23 @@ export default function VirtualAgentsPage() {
     }
   }, [autoPlayVoice]);
 
+  const previewOpeningMessage = useMemo(() => {
+    // Use agent's firstMessage if available, otherwise use default
+    const rawFirstMessage = testCallAgent?.firstMessage?.trim() || DEFAULT_FIRST_MESSAGE;
+    // Defensive check
+    if (!rawFirstMessage) return '';
+    const result = applyPreviewValues(rawFirstMessage, previewValues || {});
+    return result;
+  }, [previewValues, testCallAgent]);
+
   const previewSystemPrompt = useMemo(() => {
     const rawPrompt = previewPromptVariants[activePromptVariant]?.trim() 
       ? previewPromptVariants[activePromptVariant]
       : (testCallAgent?.systemPrompt?.trim() || '');
       
     if (!rawPrompt) return '';
-    return applyPreviewValues(rawPrompt, previewValues);
+    return applyPreviewValues(rawPrompt, previewValues || {});
   }, [previewValues, testCallAgent, previewPromptVariants, activePromptVariant]);
-
-  const previewOpeningMessage = useMemo(() => {
-    // Use agent's firstMessage if available, otherwise use default
-    const rawFirstMessage = testCallAgent?.firstMessage?.trim() || DEFAULT_FIRST_MESSAGE;
-    const result = applyPreviewValues(rawFirstMessage, previewValues);
-    console.log('[Voice Preview] previewOpeningMessage computed:', result, 'from:', testCallAgent?.firstMessage ? 'agent config' : 'DEFAULT_FIRST_MESSAGE');
-    return result;
-  }, [previewValues, testCallAgent]);
 
   useEffect(() => {
     if (!testCallAgent) return;

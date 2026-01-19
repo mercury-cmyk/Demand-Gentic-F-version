@@ -199,11 +199,13 @@ const getBestUkPhone = getBestPriorityPhone;
 
 /**
  * Enabled calling regions/countries
- * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom
+ * Calls are enabled for: Australia, Middle East, North America (US/Canada), United Kingdom, Europe, Asia, LATAM
  */
 const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
-  // Australia
+  // Australia / NZ
   'AU': true, 'AUSTRALIA': true,
+  'NZ': true, 'NEW ZEALAND': true,
+  
   // Middle East (Sun-Thu work week)
   'AE': true, 'UNITED ARAB EMIRATES': true, 'UAE': true, 'DUBAI': true,
   'SA': true, 'SAUDI ARABIA': true,
@@ -212,11 +214,57 @@ const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
   'KW': true, 'KUWAIT': true,
   'BH': true, 'BAHRAIN': true,
   'OM': true, 'OMAN': true,
+  
   // North America
   'US': true, 'USA': true, 'UNITED STATES': true, 'AMERICA': true,
   'CA': true, 'CANADA': true,
-  // United Kingdom
+  'MX': true, 'MEXICO': true,
+  
+  // United Kingdom / Ireland
   'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
+  'IE': true, 'IRELAND': true,
+  
+  // Europe (Major Markets)
+  'DE': true, 'GERMANY': true,
+  'FR': true, 'FRANCE': true,
+  'IT': true, 'ITALY': true,
+  'ES': true, 'SPAIN': true,
+  'NL': true, 'NETHERLANDS': true,
+  'BE': true, 'BELGIUM': true,
+  'CH': true, 'SWITZERLAND': true,
+  'AT': true, 'AUSTRIA': true,
+  'SE': true, 'SWEDEN': true,
+  'NO': true, 'NORWAY': true,
+  'DK': true, 'DENMARK': true,
+  'FI': true, 'FINLAND': true,
+  'PL': true, 'POLAND': true,
+  'PT': true, 'PORTUGAL': true,
+  'CZ': true, 'CZECHIA': true, 'CZECH REPUBLIC': true,
+  'GR': true, 'GREECE': true,
+
+  // Asia / Pacific
+  'SG': true, 'SINGAPORE': true,
+  'HK': true, 'HONG KONG': true,
+  'JP': true, 'JAPAN': true,
+  'KR': true, 'SOUTH KOREA': true,
+  'IN': true, 'INDIA': true,
+  'CN': true, 'CHINA': true,
+  'TW': true, 'TAIWAN': true,
+  'MY': true, 'MALAYSIA': true,
+  'PH': true, 'PHILIPPINES': true,
+  'TH': true, 'THAILAND': true,
+  'VN': true, 'VIETNAM': true,
+  'ID': true, 'INDONESIA': true,
+
+  // South America / LATAM
+  'BR': true, 'BRAZIL': true,
+  'AR': true, 'ARGENTINA': true,
+  'CL': true, 'CHILE': true,
+  'CO': true, 'COLOMBIA': true,
+  'PE': true, 'PERU': true,
+
+  // Africa
+  'ZA': true, 'SOUTH AFRICA': true,
 };
 
 /**
