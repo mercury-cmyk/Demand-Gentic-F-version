@@ -26,7 +26,7 @@ import {
 } from '../utils/business-hours';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 5; // Max 5 concurrent calls
+const DEFAULT_MAX_CONCURRENT_CALLS = 2; // Max 2 concurrent calls (lowered from 20 to avoid Telnyx D2 limits)
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 600000; // 10 minutes - increased to allow long AI conversations without reset

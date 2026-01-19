@@ -900,11 +900,11 @@ export class TelnyxAiBridge extends EventEmitter {
     const duration = Date.now() - call.startTime.getTime();
     const phase = call.agent.getCurrentPhase();
     const gatekeeperAttempts = call.agent.getGatekeeperAttempts();
+    const disposition = this.mapPhaseToDisposition(call.disposition || "completed", phase);
 
     try {
       const queueItem = await storage.getQueueItemById(call.queueItemId);
       if (queueItem) {
-        const disposition = this.mapPhaseToDisposition(call.disposition || "completed", phase);
         
         // Fetch contact info for lead record
         const contact = await storage.getContact(queueItem.contactId);
