@@ -299,7 +299,8 @@ app.use((req, res, next) => {
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
   const { initializeAiCampaignOrchestrator } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
-    initializeAiCampaignOrchestrator();
+    // initializeAiCampaignOrchestrator();
+    console.log("[AI Orchestrator] Temporarily disabled for debugging API stability");
   }
 
   // Initialize Vertex AI Agentic CRM Operator
