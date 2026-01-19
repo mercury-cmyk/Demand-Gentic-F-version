@@ -80,6 +80,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private sttRestartTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastAudioReceivedTime: number = 0; // Track when we last received audio
   private sttIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+  // Anti-loop protection
+  private sttRestartCount: number = 0;
+  private sttLastRestartTime: number = 0;
 
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -398,6 +401,26 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   private async startRecognizeStream(): Promise<void> {
     if (!this.speechClient || !this.sttEnabled || !this.sttActive) return;
 
+    // Anti-loop protection: Check restart frequency
+    const now = Date.now();
+    if (now - this.sttLastRestartTime < 5000) { // Restarted within last 5 seconds
+        this.sttRestartCount++;
+    } else {
+        this.sttRestartCount = 1;
+    }
+    this.sttLastRestartTime = now;
+
+    // If we're looping rapidly (> 5 restarts in short succession), force a cooldown
+    if (this.sttRestartCount > 5) {
+        console.warn(`${LOG_PREFIX} STT detected rapid restart loop (${this.sttRestartCount}). Pausing for 5 seconds.`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Reset counter after pause
+        this.sttRestartCount = 0;
+        
+        // Re-check state after pause
+        if (!this.sttEnabled || !this.sttActive) return;
+    }
+
     // Close existing stream if any
     if (this.recognizeStream) {
       try {
@@ -466,8 +489,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       if (error.code === 4 || error.message?.includes('DEADLINE_EXCEEDED')) {
         if (this.sttActive) {
           console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
-          this.startRecognizeStream().catch(() => {});
+          setTimeout(() => this.startRecognizeStream().catch(() => {}), 100);
         }
+      } else if (error.code === 8 || error.message?.includes('RESOURCE_EXHAUSTED')) {
+         console.error(`${LOG_PREFIX} ❌ STT Quota/Resource Exhausted. Disabling STT for this session to prevent crash loop.`);
+         this.sttActive = false;
+         this.sttEnabled = false; // Hard stop
       } else {
         console.warn(`${LOG_PREFIX} STT stream error:`, error.message || error);
       }
@@ -476,7 +503,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     this.recognizeStream.on('end', () => {
       // Stream ended - only restart if still active and recently received audio
       const timeSinceLastAudio = Date.now() - this.lastAudioReceivedTime;
-      if (this.sttEnabled && this.sttActive && timeSinceLastAudio < 30000) {
+      // Added !this.speechClient check
+      if (this.sttEnabled && this.sttActive && this.speechClient && timeSinceLastAudio < 30000) {
         // Clear safety timeout if exists to prevent leaks
         if (this.sttRestartTimeout) {
             clearTimeout(this.sttRestartTimeout);
@@ -484,11 +512,14 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         }
 
         // Only restart if audio was received within the last 30 seconds
+        // Increase backoff based on restart count
+        const backoffMs = Math.min(1000 * Math.pow(2, this.sttRestartCount), 30000); 
+        
         this.sttRestartTimeout = setTimeout(() => {
           if (this.sttActive) {
             this.startRecognizeStream().catch(() => {});
           }
-        }, 500); // Wait 500ms before restarting
+        }, backoffMs); 
       } else {
         // No recent audio - deactivate STT to prevent restart loop
         this.sttActive = false;
