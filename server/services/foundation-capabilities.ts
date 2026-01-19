@@ -335,9 +335,32 @@ ${points}
     sections.push(`### Campaign-Specific Objections\n${objectionText}`);
   }
 
-  // Success criteria defines what a good outcome looks like
+  // Success criteria defines what a good outcome looks like AND triggers qualified_lead disposition
   if (config.successCriteria) {
-    sections.push(`### Success Criteria\n${config.successCriteria}`);
+    sections.push(`### Success Criteria (CRITICAL for Disposition)
+${config.successCriteria}
+
+**DISPOSITION RULE:** When the above success criteria are met during the conversation, you MUST call \`submit_disposition\` with \`"qualified_lead"\`. This is how qualified leads are captured.
+
+**Qualified Lead Checklist:**
+1. ✅ Identity confirmed (prospect confirmed they are the named contact)
+2. ✅ Success criteria signals detected (see above)
+3. ✅ Meaningful conversation occurred (not just "yes" or "sure")
+
+If ALL three conditions are met → Call \`submit_disposition("qualified_lead", "Met success criteria: [brief reason]")\``);
+  } else {
+    // Add default disposition guidance when no success criteria is defined
+    sections.push(`### Disposition Guidelines (Default)
+**When to use each disposition:**
+
+- **qualified_lead**: Prospect showed genuine interest - asked questions, requested follow-up, demo, or more info
+- **not_interested**: Prospect politely declined or said they're not interested
+- **do_not_call**: Prospect explicitly asked not to be called again
+- **voicemail**: Reached voicemail/answering machine
+- **no_answer**: Call connected but no human response
+- **invalid_data**: Wrong number or person no longer at company
+
+**Remember:** A "qualified_lead" requires BOTH identity confirmation AND genuine interest signals (not just "yes" or "ok").`);
   }
 
   if (sections.length === 0) {

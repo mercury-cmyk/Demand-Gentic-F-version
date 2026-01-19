@@ -139,7 +139,7 @@ async function checkRecentCalls() {
     for (const lead of recentLeads.rows as any[]) {
       const time = new Date(lead.created_at).toLocaleString();
       console.log(`   - ${lead.first_name} ${lead.last_name}`);
-      console.log(`     Status: ${lead.qualification_status}, Score: ${lead.ai_qualification_score || 'N/A'}`);
+      console.log(`     Status: ${lead.qualification_status || 'N/A'}`);
       console.log(`     Campaign: ${lead.campaign_name}`);
       console.log(`     Created: ${time}`);
       console.log();
@@ -181,37 +181,14 @@ async function checkRecentCalls() {
     }
   }
 
-  // 6. Check for errors in recent calls
-  console.log('\n6. RECENT ERRORS');
-  const errors = await db.execute(sql`
-    SELECT
-      error_message,
-      COUNT(*) as count
-    FROM dialer_call_attempts
-    WHERE created_at > NOW() - INTERVAL '24 hours'
-      AND error_message IS NOT NULL
-    GROUP BY error_message
-    ORDER BY count DESC
-    LIMIT 10
-  `);
-
-  if (errors.rows.length === 0) {
-    console.log('   ✅ No errors found');
-  } else {
-    console.log('   Error breakdown:');
-    for (const err of errors.rows as any[]) {
-      console.log(`   - ${err.error_message}: ${err.count} occurrences`);
-    }
-  }
-
-  // 7. Last 7 days summary
-  console.log('\n7. LAST 7 DAYS SUMMARY');
+  // 6. Last 7 days summary
+  console.log('\n6. LAST 7 DAYS SUMMARY');
   const weekSummary = await db.execute(sql`
     SELECT
       COUNT(*) as total_calls,
       COUNT(CASE WHEN disposition = 'voicemail' THEN 1 END) as voicemail_calls,
-      COUNT(CASE WHEN disposition IN ('qualified_lead', 'interested', 'callback_requested') THEN 1 END) as positive_calls,
-      COUNT(CASE WHEN disposition IN ('not_interested', 'do_not_call') THEN 1 END) as negative_calls,
+      COUNT(CASE WHEN disposition = 'not_interested' THEN 1 END) as not_interested_calls,
+      COUNT(CASE WHEN disposition = 'no_answer' THEN 1 END) as no_answer_calls,
       AVG(call_duration_seconds) as avg_duration
     FROM dialer_call_attempts
     WHERE created_at > NOW() - INTERVAL '7 days'
@@ -220,8 +197,8 @@ async function checkRecentCalls() {
   const ws = weekSummary.rows[0] as any;
   console.log(`   Total Calls: ${ws.total_calls}`);
   console.log(`   Voicemail: ${ws.voicemail_calls}`);
-  console.log(`   Positive (qualified/interested/callback): ${ws.positive_calls}`);
-  console.log(`   Negative (not interested/DNC): ${ws.negative_calls}`);
+  console.log(`   Not Interested: ${ws.not_interested_calls}`);
+  console.log(`   No Answer: ${ws.no_answer_calls}`);
   console.log(`   Avg Duration: ${ws.avg_duration ? Math.round(ws.avg_duration) : 0}s`);
 
   console.log('\n' + '='.repeat(70));
