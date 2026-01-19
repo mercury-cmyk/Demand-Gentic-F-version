@@ -1,14 +1,17 @@
 /**
  * Network Diagnostics and Alternative Connection Methods
- * For troubleshooting WebRTC socket connection issues
+ * For troubleshooting WebRTC connection issues
+ *
+ * NOTE: This module uses RTCPeerConnection for connectivity testing.
+ * The Telnyx SDK handles its own signaling transport internally.
  */
 
-export interface NetworkDiagnostics {
+export interface NetworkDiagnosticsResult {
   userAgent: string;
   online: boolean;
   connection?: string;
-  websocketSupport: boolean;
   webrtcSupport: boolean;
+  stunServerReachable: boolean;
   stunServers: string[];
   timestamp: number;
 }
@@ -18,104 +21,149 @@ export interface TelnyxConnectionOptions {
   token?: string;
   username?: string;
   password?: string;
-  
+
   // Network options for corporate/restrictive environments
   host?: string;
   port?: number;
-  wss?: boolean; // Force secure websocket
-  
+  secure?: boolean; // Use secure transport
+
   // WebRTC configuration
   iceServers?: RTCIceServer[];
-  
+
   // Fallback options
   enableFallback?: boolean;
   fallbackHost?: string;
   fallbackPort?: number;
 }
 
+// Telnyx default endpoint configuration
+export const TELNYX_RTC_HOST = 'rtc.telnyx.com';
+export const TELNYX_RTC_PORT = 14938;
+
 export class NetworkDiagnostics {
-  
-  static async diagnose(): Promise<NetworkDiagnostics> {
-    const result: NetworkDiagnostics = {
+
+  /**
+   * Run comprehensive network diagnostics using WebRTC
+   */
+  static async diagnose(): Promise<NetworkDiagnosticsResult> {
+    const result: NetworkDiagnosticsResult = {
       userAgent: navigator.userAgent,
       online: navigator.onLine,
       connection: (navigator as any).connection?.effectiveType || 'unknown',
-      websocketSupport: 'WebSocket' in window,
       webrtcSupport: 'RTCPeerConnection' in window,
+      stunServerReachable: false,
       stunServers: [],
       timestamp: Date.now()
     };
-    
-    // Test STUN servers
+
+    // Test STUN servers using RTCPeerConnection ICE gathering
     try {
+      const stunReachable = await this.testStunConnectivity();
+      result.stunServerReachable = stunReachable;
+      if (stunReachable) {
+        result.stunServers = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'];
+      }
+    } catch (error) {
+      console.warn('[NetworkDiagnostics] STUN server test failed:', error);
+    }
+
+    return result;
+  }
+
+  /**
+   * Test STUN server connectivity using WebRTC ICE candidate gathering
+   * This is the proper way to test network connectivity for WebRTC
+   */
+  static async testStunConnectivity(): Promise<boolean> {
+    return new Promise((resolve) => {
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' }
         ]
       });
-      
-      result.stunServers = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'];
-      pc.close();
-    } catch (error) {
-      console.warn('[NetworkDiagnostics] STUN server test failed:', error);
-    }
-    
-    return result;
-  }
-  
-  static async testWebSocket(url: string): Promise<{ success: boolean; error?: string; latency?: number }> {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-      
-      try {
-        const ws = new WebSocket(url);
-        
-        const timeout = setTimeout(() => {
-          ws.close();
-          resolve({ success: false, error: 'Connection timeout (10s)' });
-        }, 10000);
-        
-        ws.onopen = () => {
+
+      const timeout = setTimeout(() => {
+        pc.close();
+        resolve(false);
+      }, 5000);
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && event.candidate.type === 'srflx') {
+          // Got a server reflexive candidate - STUN is working
           clearTimeout(timeout);
-          const latency = Date.now() - startTime;
-          ws.close();
-          resolve({ success: true, latency });
-        };
-        
-        ws.onerror = (error) => {
+          pc.close();
+          resolve(true);
+        }
+      };
+
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') {
           clearTimeout(timeout);
-          resolve({ success: false, error: 'WebSocket error: ' + error.toString() });
-        };
-        
-        ws.onclose = (event) => {
+          pc.close();
+          // If we completed gathering without srflx, STUN may be blocked
+          resolve(false);
+        }
+      };
+
+      // Create a data channel to trigger ICE gathering
+      pc.createDataChannel('connectivity-test');
+
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .catch(() => {
           clearTimeout(timeout);
-          if (event.wasClean) {
-            resolve({ success: true });
-          } else {
-            resolve({ success: false, error: `WebSocket closed unexpectedly: ${event.code} ${event.reason}` });
-          }
-        };
-        
-      } catch (error) {
-        resolve({ success: false, error: 'Failed to create WebSocket: ' + (error as Error).message });
-      }
+          pc.close();
+          resolve(false);
+        });
     });
   }
-  
+
+  /**
+   * Test WebRTC peer connection capability
+   * Returns latency to establish a local connection
+   */
+  static async testWebRTCCapability(): Promise<{ success: boolean; error?: string; latency?: number }> {
+    const startTime = Date.now();
+
+    try {
+      const pc = new RTCPeerConnection();
+      pc.createDataChannel('test');
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      pc.close();
+
+      return {
+        success: true,
+        latency: Date.now() - startTime
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: 'WebRTC not available: ' + (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Get alternative Telnyx connection configurations
+   * for troubleshooting connectivity issues
+   */
   static getAlternativeConfigs(): TelnyxConnectionOptions[] {
     return [
       // Standard configuration
       {
         enableFallback: false
       },
-      
-      // Force secure WebSocket
+
+      // Force secure transport
       {
-        wss: true,
+        secure: true,
         enableFallback: false
       },
-      
+
       // Alternative STUN/TURN servers for corporate networks
       {
         iceServers: [
@@ -125,12 +173,12 @@ export class NetworkDiagnostics {
         ],
         enableFallback: false
       },
-      
+
       // Telnyx with explicit host/port (if behind corporate proxy)
       {
-        host: 'rtc.telnyx.com',
+        host: TELNYX_RTC_HOST,
         port: 443,
-        wss: true,
+        secure: true,
         enableFallback: false
       }
     ];

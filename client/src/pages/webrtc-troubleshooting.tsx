@@ -1,16 +1,18 @@
 /**
  * Enhanced WebRTC Connection Troubleshooting
- * 
+ *
  * This provides network diagnostics and alternative connection configurations
- * to resolve corporate firewall/VPN issues blocking WebSocket connections.
+ * to resolve corporate firewall/VPN issues blocking WebRTC connections.
+ *
+ * NOTE: Uses WebRTC-native testing methods (RTCPeerConnection) instead of WebSocket.
  */
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { UnifiedSoftphone } from '@/components/softphone/UnifiedSoftphone';
-import { TelnyxWebRTCClient, TelnyxCredentials } from '@/lib/webrtc/telnyx-webrtc-client';
+import { TelnyxCredentials } from '@/lib/webrtc/telnyx-webrtc-client';
 import { testWebRTCConnection, type WebRTCTestResult } from '@/lib/webrtc/webrtc-tester';
-import { NetworkDiagnostics } from '@/lib/webrtc/network-diagnostics';
+import { NetworkDiagnostics, type NetworkDiagnosticsResult } from '@/lib/webrtc/network-diagnostics';
 import { useState, useEffect } from 'react';
 
 type AlternativeTestResult = WebRTCTestResult & { config: number };
@@ -42,38 +44,20 @@ export default function WebRTCTroubleshootingPage() {
     }
   };
 
-  type WebsocketTestResult = {
-    url: string;
-    success: boolean;
-    latency?: number;
-    error?: string;
-  };
-
   const runNetworkDiagnostics = async () => {
     setTestingNetwork(true);
     try {
+      // Run WebRTC-based network diagnostics
       const diagnostics = await NetworkDiagnostics.diagnose();
-      setNetworkDiagnostics(diagnostics);
-      
-      // Test WebSocket connectivity to various endpoints
-      const wsTests = [
-        'wss://rtc.telnyx.com',
-        'wss://echo.websocket.org',
-        'ws://echo.websocket.org'
-      ];
-      
-      const wsResults: WebsocketTestResult[] = [];
-      for (const url of wsTests) {
-        try {
-          const result = await NetworkDiagnostics.testWebSocket(url);
-          wsResults.push({ url, ...result });
-        } catch (error) {
-          wsResults.push({ url, success: false, error: (error as Error).message });
-        }
-      }
-      
-      setNetworkDiagnostics((prev: any) => ({ ...prev, websocketTests: wsResults }));
-      
+
+      // Also test WebRTC capability (local peer connection)
+      const webrtcCapability = await NetworkDiagnostics.testWebRTCCapability();
+
+      setNetworkDiagnostics({
+        ...diagnostics,
+        webrtcCapability
+      });
+
     } catch (error) {
       console.error('Network diagnostics failed:', error);
     } finally {
@@ -200,19 +184,28 @@ export default function WebRTCTroubleshootingPage() {
               <div><strong>Browser:</strong> {networkDiagnostics.userAgent}</div>
               <div><strong>Online:</strong> {networkDiagnostics.online ? '✅ Yes' : '❌ No'}</div>
               <div><strong>Connection Type:</strong> {networkDiagnostics.connection}</div>
-              <div><strong>WebSocket Support:</strong> {networkDiagnostics.websocketSupport ? '✅ Yes' : '❌ No'}</div>
               <div><strong>WebRTC Support:</strong> {networkDiagnostics.webrtcSupport ? '✅ Yes' : '❌ No'}</div>
-              
-              {networkDiagnostics.websocketTests && (
+              <div><strong>STUN Server Reachable:</strong> {networkDiagnostics.stunServerReachable ? '✅ Yes' : '❌ No'}</div>
+
+              {networkDiagnostics.stunServers?.length > 0 && (
                 <div>
-                  <strong>WebSocket Connection Tests:</strong>
+                  <strong>Available STUN Servers:</strong>
                   <ul className="ml-4 mt-1">
-                    {networkDiagnostics.websocketTests.map((test: any, index: number) => (
-                      <li key={index} className="text-xs">
-                        {test.url}: {test.success ? `✅ Success (${test.latency}ms)` : `❌ Failed - ${test.error}`}
-                      </li>
+                    {networkDiagnostics.stunServers.map((server: string, index: number) => (
+                      <li key={index} className="text-xs">{server}</li>
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {networkDiagnostics.webrtcCapability && (
+                <div>
+                  <strong>WebRTC Peer Connection Test:</strong>
+                  <span className="ml-2">
+                    {networkDiagnostics.webrtcCapability.success
+                      ? `✅ Success (${networkDiagnostics.webrtcCapability.latency}ms)`
+                      : `❌ Failed - ${networkDiagnostics.webrtcCapability.error}`}
+                  </span>
                 </div>
               )}
             </div>

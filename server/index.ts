@@ -239,12 +239,14 @@ app.use((req, res, next) => {
   console.log("[AutoDialer] Service DISABLED - not started");
   
   // Start AI-powered QA background jobs
-  const hasRedis = !!process.env.REDIS_URL;
+  // Check if Redis is configured using the centralized config
+  const { isRedisConfigured, getRedisUrl } = await import("./lib/redis-config");
+  const hasRedis = isRedisConfigured() && !!getRedisUrl();
   const { startBackgroundJobs } = await import("./services/background-jobs");
   if (hasRedis) {
     startBackgroundJobs();
   } else {
-    console.log("[BackgroundJobs] Skipped - REDIS_URL not configured");
+    console.log("[BackgroundJobs] Skipped - Redis not configured (set REDIS_URL or REDIS_URL_PROD)");
   }
   
   // Initialize CSV import queue and worker (BullMQ)
@@ -396,7 +398,14 @@ app.use((req, res, next) => {
   console.log(`  TELNYX_CONNECTION_ID: ${telnyxConnId ? '✅ ' + telnyxConnId : '⚠️ NOT SET (optional)'}`);
   console.log(`  PUBLIC_WEBSOCKET_URL: ${publicWsUrl ? '✅ ' + publicWsUrl : '❌ NOT SET'}`);
   console.log(`  TELNYX_FROM_NUMBER: ${telnyxFrom ? '✅ ' + telnyxFrom : '❌ NOT SET'}`);
-  console.log(`  REDIS_URL: ${hasRedis ? '✅ Configured (session persistence enabled)' : '⚠️ NOT SET (in-memory only - may cause call control ID issues in prod)'}`);
+  const redisUrlDisplay = getRedisUrl();
+  if (hasRedis && redisUrlDisplay) {
+    // Mask password if present
+    const maskedRedisUrl = redisUrlDisplay.replace(/:[^@]*@/, ':***@');
+    console.log(`  REDIS_URL: ✅ Configured (${maskedRedisUrl})`);
+  } else {
+    console.log(`  REDIS_URL: ⚠️ NOT SET (background jobs disabled, in-memory only)`);
+  }
   console.log(`  NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
   
   if (!telnyxKey || !telnyxTexmlAppId || !publicWsUrl) {
@@ -405,8 +414,9 @@ app.use((req, res, next) => {
   }
   if (process.env.NODE_ENV === 'production' && !hasRedis) {
     console.log("\n⚠️  WARNING: Production without Redis!");
-    console.log("   Call control IDs may become invalid across server instances.");
-    console.log("   Enable sticky sessions on your load balancer as a workaround.");
+    console.log("   Background jobs (CSV import, enrichment, etc.) will not work.");
+    console.log("   Call session persistence will use in-memory store only.");
+    console.log("   Set REDIS_URL or REDIS_URL_PROD to enable Redis.");
   }
   console.log("=".repeat(70) + "\n");
   

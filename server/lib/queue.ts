@@ -33,7 +33,7 @@ if (!(global as any)[FILTER_KEY]) {
 
 import { Queue, Worker, QueueEvents, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
-import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured } from './redis-config';
+import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured, setRedisAvailable } from './redis-config';
 
 /**
  * Redis connection configuration
@@ -45,25 +45,46 @@ const REDIS_URL = getRedisUrl();
  * In development without Redis, this will return undefined and BullMQ will fall back gracefully
  */
 function createRedisConnection(): IORedis | undefined {
-  if (!isRedisConfigured()) {
-    console.warn('[Queue] No Redis configured - background jobs will not persist across restarts');
+  if (!isRedisConfigured() || !REDIS_URL) {
+    console.log('[Queue] Redis not configured - background jobs disabled');
+    setRedisAvailable(false);
     return undefined;
   }
 
   try {
+    // Mask password in URL for logging
+    const maskedUrl = REDIS_URL.replace(/:[^@]*@/, ':***@');
+    console.log(`[Queue] Attempting Redis connection to ${maskedUrl}`);
+
     const connection = new IORedis(REDIS_URL, getRedisConnectionOptions());
 
     connection.on('error', (err) => {
-      console.error('[Queue] Redis connection error:', err);
+      // Only log connection errors, not every error (rate limited in redis-config)
+      if (err.message?.includes('ETIMEDOUT') || err.message?.includes('ECONNREFUSED')) {
+        setRedisAvailable(false);
+      } else {
+        console.error('[Queue] Redis error:', err.message);
+      }
     });
 
     connection.on('connect', () => {
-      console.log(`[Queue] Redis connected to ${REDIS_URL.replace(/:[^@]*@/, ':***@')}`);
+      console.log(`[Queue] Redis connected to ${maskedUrl}`);
+      setRedisAvailable(true);
+    });
+
+    connection.on('close', () => {
+      console.log('[Queue] Redis connection closed');
+      setRedisAvailable(false);
+    });
+
+    connection.on('reconnecting', () => {
+      console.log('[Queue] Redis reconnecting...');
     });
 
     return connection;
   } catch (error) {
     console.error('[Queue] Failed to create Redis connection:', error);
+    setRedisAvailable(false);
     return undefined;
   }
 }
@@ -156,14 +177,15 @@ export function createWorker<T = any>(
     };
   } = {}
 ): Worker<T> | null {
-  if (!isRedisConfigured()) {
+  const redisUrl = getRedisUrl();
+  if (!isRedisConfigured() || !redisUrl) {
     console.warn(`[Queue] Worker for "${queueName}" not started - no Redis connection`);
     return null;
   }
 
   // Create a DEDICATED connection for this worker to prevent blocking issues
   // BullMQ workers use blocking commands (BRPOP) which lock the connection
-  const connection = new IORedis(getRedisUrl(), {
+  const connection = new IORedis(redisUrl, {
     ...getRedisConnectionOptions(),
     maxRetriesPerRequest: null // Ensure this is set for BullMQ
   });
@@ -218,13 +240,14 @@ export function createWorker<T = any>(
  * Create queue events listener for monitoring
  */
 export function createQueueEvents(queueName: string): QueueEvents | null {
-  if (!isRedisConfigured()) {
+  const redisUrl = getRedisUrl();
+  if (!isRedisConfigured() || !redisUrl) {
     return null;
   }
 
   // QueueEvents require a dedicated connection (Subscriber mode)
   // Reusing a shared connection would break other operations
-  const connection = new IORedis(getRedisUrl(), {
+  const connection = new IORedis(redisUrl, {
     ...getRedisConnectionOptions(),
     maxRetriesPerRequest: null
   });

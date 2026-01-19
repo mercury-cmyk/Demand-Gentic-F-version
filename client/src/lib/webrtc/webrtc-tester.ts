@@ -27,7 +27,11 @@ type WebRTCTestCredentials = {
   token?: string;
 };
 
-const buildHostUrl = (options?: TelnyxConnectionOptions): string | undefined => {
+/**
+ * Build Telnyx SDK host configuration from connection options.
+ * The SDK handles the transport protocol internally.
+ */
+const buildHostConfig = (options?: TelnyxConnectionOptions): { host?: string; port?: number; wss?: boolean } | undefined => {
   if (!options) return undefined;
 
   const selectedHost = options.host ?? (options.enableFallback ? options.fallbackHost : undefined);
@@ -35,19 +39,12 @@ const buildHostUrl = (options?: TelnyxConnectionOptions): string | undefined => 
 
   if (!selectedHost) return undefined;
 
-  const hasScheme = /^wss?:\/\//i.test(selectedHost);
-  const scheme = hasScheme ? '' : options.wss === false ? 'ws://' : 'wss://';
-  const base = `${scheme}${selectedHost}`;
-
-  try {
-    const url = new URL(base);
-    if (selectedPort) {
-      url.port = String(selectedPort);
-    }
-    return url.toString();
-  } catch {
-    return base;
-  }
+  // Return SDK-compatible config object (not a URL string)
+  return {
+    host: selectedHost,
+    port: selectedPort,
+    wss: options.secure !== false // default to secure transport
+  };
 };
 
 const formatCloseDetails = (event?: CloseEvent | null): string => {
@@ -95,11 +92,11 @@ export async function testWebRTCConnection(
       throw new Error('Missing Telnyx credentials');
     }
 
-    const hostUrl = buildHostUrl(connectionOptions);
+    const hostConfig = buildHostConfig(connectionOptions);
 
     // Test 2: Create client
     const clientOptions: Record<string, unknown> = {
-      ...(hostUrl ? { host: hostUrl } : {}),
+      ...(hostConfig || {}),
       ...(connectionOptions?.iceServers ? { iceServers: connectionOptions.iceServers } : {}),
     };
 

@@ -378,6 +378,21 @@ Each variant tracks:
 - Build a library of winning approaches
 - Use historical data to inform new generations
 
+## Prompt Refinement and Deployment
+
+**All final system prompts must be refined and fine-tuned using Vertex AI prior to deployment to voice agents, including those utilizing Gemini voices. These prompts must strictly adhere to all defined guidelines and control layers.**
+
+This process ensures:
+- **Optimal Performance:** Prompts are tuned for the specific model and voice, leading to better-quality responses.
+- **Consistency:** A standardized process for all prompts.
+- **Safety and Compliance:** All prompts are vetted against safety guidelines and control layers before production use.
+
+### Workflow Integration
+1.  **Initial Prompt Generation:** Use the Prompt Variant Management System to generate and test initial prompt ideas.
+2.  **Identify Top Performers:** Use the A/B testing and performance metrics to identify the most effective prompt variants.
+3.  **Vertex AI Refinement:** Before a winning prompt is deployed as the new default for production traffic, it must be taken to the Vertex AI environment for final tuning and validation.
+4.  **Final Deployment:** Once refined and approved in Vertex AI, the prompt can be deployed to the voice agents.
+
 ## Example Workflow
 
 ```

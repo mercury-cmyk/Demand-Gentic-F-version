@@ -125,10 +125,10 @@ export class TelnyxWebRTCClient {
         hasPassword: !!this.config.credentials.password,
       });
 
-      const wsHost = this.config.host || 'rtc.telnyx.com';
-      const wsPort = this.config.port || 14938; // Telnyx documented WebRTC port
-      const wsSecure = this.config.wss !== false; // default to secure
-      const wsUrl = `${wsSecure ? 'wss' : 'ws'}://${wsHost}:${wsPort}`;
+      // Telnyx SDK signaling configuration (SDK handles transport internally)
+      const signalingHost = this.config.host || 'rtc.telnyx.com';
+      const signalingPort = this.config.port || 14938; // Telnyx documented port
+      const useSecure = this.config.wss !== false; // default to secure
 
       const clientOptions: any = {
         // WebRTC-only configuration
@@ -137,11 +137,10 @@ export class TelnyxWebRTCClient {
         // Audio device selection
         ...(this.config.audioInputDeviceId && { micId: this.config.audioInputDeviceId }),
         ...(this.config.audioOutputDeviceId && { speakerId: this.config.audioOutputDeviceId }),
-        // Explicit WebSocket endpoint (avoids default wss://rtc.telnyx.com/ with no port)
-        host: wsHost,
-        port: wsPort,
-        wss: wsSecure,
-        wsServer: wsUrl,
+        // Telnyx SDK signaling endpoint configuration
+        host: signalingHost,
+        port: signalingPort,
+        wss: useSecure,
       };
 
       // Set credentials

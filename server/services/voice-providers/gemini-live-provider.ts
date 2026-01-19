@@ -485,18 +485,33 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     });
 
     this.recognizeStream.on('error', (error: any) => {
+      const errorMsg = error.message || error.toString() || '';
+      const errorCode = error.code;
+
       // DEADLINE_EXCEEDED is expected after ~5 minutes, restart if still active
-      if (error.code === 4 || error.message?.includes('DEADLINE_EXCEEDED')) {
+      if (errorCode === 4 || errorMsg.includes('DEADLINE_EXCEEDED')) {
         if (this.sttActive) {
           console.log(`${LOG_PREFIX} STT stream deadline exceeded, restarting...`);
           setTimeout(() => this.startRecognizeStream().catch(() => {}), 100);
         }
-      } else if (error.code === 8 || error.message?.includes('RESOURCE_EXHAUSTED')) {
-         console.error(`${LOG_PREFIX} ❌ STT Quota/Resource Exhausted. Disabling STT for this session to prevent crash loop.`);
+      } else if (errorCode === 8 || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('Quota exceeded')) {
+         console.error(`${LOG_PREFIX} ❌ STT Quota/Resource Exhausted. Disabling STT for this session to prevent crash loop. Error: ${errorMsg}`);
          this.sttActive = false;
          this.sttEnabled = false; // Hard stop
+         
+         // Ensure we don't restart in on('end')
+         if (this.recognizeStream) {
+             this.recognizeStream.removeAllListeners('end');
+             this.recognizeStream.on('end', () => {}); // No-op
+         }
       } else {
-        console.warn(`${LOG_PREFIX} STT stream error:`, error.message || error);
+        console.warn(`${LOG_PREFIX} STT stream error:`, errorMsg);
+        // Prevent rapid restart loop on other errors too
+        if (this.sttRestartCount > 3) {
+            console.error(`${LOG_PREFIX} Too many STT errors (${this.sttRestartCount}). Disabling STT temporarily.`);
+            this.sttActive = false;
+            // Don't disable sttEnabled permanently for generic errors, but let backoff handle it
+        }
       }
     });
 
