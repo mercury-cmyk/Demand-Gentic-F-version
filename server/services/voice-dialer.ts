@@ -2398,6 +2398,14 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           if (isVoicemail && !session.detectedDisposition) {
             console.log(`${LOG_PREFIX} VOICEMAIL DETECTED via transcript: "${message.transcript.substring(0, 60)}..."`);
             console.log(`${LOG_PREFIX} Immediately ending call ${session.callId} - NO voicemail will be left`);
+            
+            // CAPTURE TRANSCRIPT BEFORE ENDING
+            session.transcripts.push({
+              role: 'user',
+              text: message.transcript,
+              timestamp: new Date()
+            });
+
             session.detectedDisposition = 'voicemail';
             session.callOutcome = 'voicemail';
 
@@ -2435,6 +2443,14 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
               if (session.audioDetection.ivrMenuRepeatCount >= 2 && !session.detectedDisposition) {
                 console.log(`${LOG_PREFIX} VOICEMAIL DETECTED - IVR menu repeating (likely voicemail message options)`);
                 console.log(`${LOG_PREFIX} Immediately ending call ${session.callId}`);
+                
+                // CAPTURE TRANSCRIPT BEFORE ENDING
+                session.transcripts.push({
+                  role: 'user',
+                  text: message.transcript,
+                  timestamp: new Date()
+                });
+
                 session.detectedDisposition = 'voicemail';
                 session.callOutcome = 'voicemail';
 
@@ -3804,7 +3820,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           }));
 
         // Build AI analysis from call summary and conversation state
-        const aiAnalysis = session.callSummary ? {
+        let aiAnalysis = session.callSummary ? {
           summary: session.callSummary.summary,
           sentiment: session.callSummary.sentiment,
           outcome: (session.callSummary as any).outcome || session.detectedDisposition,
@@ -3816,6 +3832,32 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             stateHistory: (session as any).stateHistory || []
           }
         } : null;
+
+        // Fallback: If no AI analysis exists, generate a basic one from available data
+        // This ensures conversation logs always appear in the UI even if the AI didn't submit a summary
+        if (!aiAnalysis) {
+           const isVoicemail = disposition === 'voicemail' || (fullTranscript && isVoicemailTranscript(fullTranscript));
+           const isNoAnswer = disposition === 'no_answer';
+           const hasTranscript = fullTranscript && fullTranscript.length > 0;
+           
+           if (isVoicemail || isNoAnswer || hasTranscript) {
+              aiAnalysis = {
+                summary: isVoicemail ? 'Call reached voicemail.' : 
+                         isNoAnswer ? 'No answer received.' :
+                         'Conversation recorded but no AI detailed summary generated.',
+                sentiment: 'neutral',
+                outcome: disposition || (isVoicemail ? 'voicemail' : 'completed'),
+                keyTopics: isVoicemail ? ['voicemail'] : [],
+                nextSteps: isVoicemail ? ['retry'] : [],
+                conversationState: {
+                   identityConfirmed: session.conversationState?.identityConfirmed || false,
+                   currentState: session.conversationState?.currentState || 'unknown',
+                   stateHistory: session.conversationState?.stateHistory || []
+                }
+              };
+              console.log(`${LOG_PREFIX} generated fallback AI analysis for call ${callId} (isVoicemail=${isVoicemail}, isNoAnswer=${isNoAnswer})`);
+           }
+        }
 
         // Create call session record for comprehensive conversation intelligence
         let callSessionId: string | null = null;

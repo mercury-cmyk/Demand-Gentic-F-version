@@ -395,6 +395,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Project and order management',
       },
+      {
+        id: 'client-management',
+        title: 'Client Management',
+        url: '/client-portal-admin',
+        icon: 'Building2',
+        roles: [USER_ROLES.ADMIN],
+        description: 'Manage clients, client users, and portal access',
+      },
     ],
   },
 

@@ -9094,6 +9094,7 @@ export function registerRoutes(app: Express) {
   // Unified QA Conversations endpoint - fetches ALL interactions (calls, test calls, emails)
   app.get("/api/qa/conversations", requireAuth, async (req, res) => {
     try {
+      console.log(`[QA] GET /api/qa/conversations query:`, req.query);
       const { campaignId, type, status, search, limit = '100', offset = '0' } = req.query;
       const limitNum = Math.min(parseInt(limit as string) || 100, 500);
       const offsetNum = parseInt(offset as string) || 0;
@@ -9134,6 +9135,7 @@ export function registerRoutes(app: Express) {
       }
 
       const callSessionsData = await callSessionsQuery;
+      console.log(`[QA] Found ${callSessionsData.length} call sessions in DB`);
 
       for (const session of callSessionsData) {
         conversations.push({

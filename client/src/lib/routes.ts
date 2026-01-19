@@ -129,7 +129,7 @@ export const ROUTES = {
   // Client Portal Routes
   // ==========================================
   CLIENT_PORTAL: '/client-portal',
-  CLIENT_PORTAL_ADMIN: '/client-portal/admin',
+  CLIENT_PORTAL_ADMIN: '/client-portal-admin',
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
