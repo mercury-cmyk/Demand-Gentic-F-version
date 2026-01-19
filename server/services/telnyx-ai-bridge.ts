@@ -362,7 +362,18 @@ export class TelnyxAiBridge extends EventEmitter {
       const callControlAppId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
       
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
-      const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || this.webhookUrl.replace('https://', '').replace('http://', '');
+      // Extract just the hostname from TELNYX_WEBHOOK_URL (e.g., "demandgentic.ai" from "https://demandgentic.ai/api/webhooks/telnyx")
+      let webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
+      if (!webhookHost && this.webhookUrl) {
+        try {
+          const url = new URL(this.webhookUrl);
+          webhookHost = url.host; // Gets just "demandgentic.ai"
+        } catch {
+          // Fallback: strip protocol and path manually
+          webhookHost = this.webhookUrl.replace('https://', '').replace('http://', '').split('/')[0];
+        }
+      }
+      webhookHost = webhookHost || 'localhost';
       const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
 
       // Build comprehensive client_state for OpenAI Realtime Dialer

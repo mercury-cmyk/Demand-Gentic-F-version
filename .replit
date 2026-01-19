@@ -44,7 +44,7 @@ externalPort = 5000
 [userenv]
 
 [userenv.shared]
-REDIS_URL = "redis://default:ttVaOhNjFsLxPOheFUkbFgyad1DLlhdt@redis-11546.fcrce171.ap-south-1-1.ec2.redns.redis-cloud.com:11546"
+REDIS_URL = "redis://10.181.0.35:6379"
 TELNYX_FROM_NUMBER = "+13023601514"
 TELNYX_WEBHOOK_URL = "https://pivotal-bridge-wh5q8xynmq.replit.app"
 TELNYX_CONNECTION_ID = "${TELNYX_SIP_CONNECTION_ID}"

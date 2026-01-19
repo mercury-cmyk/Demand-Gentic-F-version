@@ -578,14 +578,97 @@ export default function AgentConsolePage() {
 
   // Hangup call - uses WebRTC when active, falls back to Call Control API
   const hangup = async () => {
-    console.log('[AGENT CONSOLE] Hanging up call');
-    if (webrtcConnected && webrtcHangup && webrtcCallStatus !== 'idle') {
+    console.log('[AGENT CONSOLE] Hanging up call', {
+      webrtcConnected,
+      webrtcCallStatus,
+      callControlId,
+      callState,
+    });
+
+    // Check if we have an active Call Control API call
+    const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
+
+    // Use WebRTC hangup only if WebRTC is active AND we don't have a Call Control call
+    if (webrtcConnected && webrtcHangup && webrtcCallStatus !== 'idle' && !hasActiveCallControlCall) {
+      console.log('[AGENT CONSOLE] Using WebRTC hangup');
       webrtcHangup();
+    } else if (hasActiveCallControlCall) {
+      // Use Call Control API hangup when we have an active call control ID
+      console.log('[AGENT CONSOLE] Using Call Control API hangup for:', callControlId);
+      await apiHangup();
     } else {
+      // Fallback - try both just in case
+      console.log('[AGENT CONSOLE] Fallback hangup - trying both methods');
+      if (webrtcHangup && webrtcCallStatus !== 'idle') {
+        webrtcHangup();
+      }
       await apiHangup();
     }
+
+    // Always update local state to ensure UI reflects hangup
+    // This ensures the UI updates even if the hook callbacks don't fire
     setIsHeld(false);
+    setCallStatus('wrap-up');
+    console.log('[AGENT CONSOLE] Call state set to wrap-up');
   };
+
+  // Unified mute handler - uses WebRTC when active, falls back to Call Control API
+  const handleToggleMute = async () => {
+    // Check if we have an active Call Control API call
+    const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
+
+    console.log('[AGENT CONSOLE] Toggling mute', {
+      webrtcConnected,
+      webrtcCallStatus,
+      callControlId,
+      callState,
+      hasActiveCallControlCall,
+    });
+
+    // Use WebRTC mute only if WebRTC is active AND we don't have a Call Control call
+    if (webrtcConnected && webrtcCallStatus === 'active' && !hasActiveCallControlCall) {
+      // Use WebRTC mute/unmute
+      console.log('[AGENT CONSOLE] Using WebRTC mute/unmute');
+      if (webrtcIsMuted) {
+        webrtcUnmute();
+      } else {
+        webrtcMute();
+      }
+    } else if (hasActiveCallControlCall) {
+      // Fall back to API-based mute for Call Control calls
+      console.log('[AGENT CONSOLE] Using Call Control API mute for:', callControlId);
+      await toggleMute();
+    } else {
+      // Fallback - try API mute anyway
+      console.log('[AGENT CONSOLE] Fallback mute - using API');
+      await toggleMute();
+    }
+  };
+
+  // Unified mute state - prefer Call Control state when we have a call control ID, else WebRTC
+  const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
+  const isCurrentlyMuted = hasActiveCallControlCall ? isMuted : (webrtcConnected && webrtcCallStatus === 'active' ? webrtcIsMuted : isMuted);
+
+  // Unified hold handler - uses WebRTC when active, falls back to Call Control API
+  const handleToggleHold = async () => {
+    console.log('[AGENT CONSOLE] Toggling hold, WebRTC connected:', webrtcConnected, 'WebRTC status:', webrtcCallStatus);
+    if (webrtcConnected && (webrtcCallStatus === 'active' || webrtcCallStatus === 'held')) {
+      // Use WebRTC hold/unhold
+      if (isOnHold) {
+        webrtcUnhold();
+        setIsHeld(false);
+      } else {
+        webrtcHold();
+        setIsHeld(true);
+      }
+    } else {
+      // Fall back to API-based hold
+      await toggleHold();
+    }
+  };
+
+  // Unified hold state - prefer WebRTC state when connected
+  const isCurrentlyHeld = webrtcConnected && (webrtcCallStatus === 'active' || webrtcCallStatus === 'held') ? isOnHold : isHeld;
 
   // Fetch agent queue data
   const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching, isPlaceholderData } = useQuery<QueueItem[]>({
@@ -1739,12 +1822,12 @@ export default function AgentConsolePage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={toggleMute}
+                    onClick={handleToggleMute}
                     disabled={!isCallActive}
                     className="h-9 bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-xs"
                     data-testid="button-mute"
                   >
-                    {isMuted ? (
+                    {isCurrentlyMuted ? (
                       <><MicOff className="h-3 w-3 mr-1" />Unmute</>
                     ) : (
                       <><Mic className="h-3 w-3 mr-1" />Mute</>
@@ -1755,16 +1838,16 @@ export default function AgentConsolePage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={toggleHold}
+                    onClick={handleToggleHold}
                     disabled={!isCallActive}
                     className={`h-9 backdrop-blur-sm text-xs ${
-                      isHeld
+                      isCurrentlyHeld
                         ? 'bg-amber-500/30 hover:bg-amber-500/40 border-amber-400/50 text-amber-100'
                         : 'bg-white/20 hover:bg-white/30 border-white/30 text-white'
                     }`}
                     data-testid="button-hold"
                   >
-                    {isHeld ? (
+                    {isCurrentlyHeld ? (
                       <><Play className="h-3 w-3 mr-1" />Resume</>
                     ) : (
                       <><Pause className="h-3 w-3 mr-1" />Hold</>
@@ -1954,12 +2037,12 @@ export default function AgentConsolePage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={toggleMute}
+                    onClick={handleToggleMute}
                     disabled={!isCallActive}
                     className="bg-white/20 hover:bg-white/30 border-white/30 text-white backdrop-blur-sm text-sm"
                     data-testid="button-mute"
                   >
-                    {isMuted ? (
+                    {isCurrentlyMuted ? (
                       <>
                         <MicOff className="h-4 w-4 mr-2" />
                         Unmute

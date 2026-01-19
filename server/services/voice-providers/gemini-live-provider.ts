@@ -82,24 +82,28 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
     // Use Gemini 2.5 Flash Native Audio for the Live API
-    // Note: Model name format differs between Google AI and Vertex AI
+    // IMPORTANT: gemini-live-2.5-flash-native-audio ONLY works with Vertex AI (not Google AI Studio)
+    // For Google AI Studio, use gemini-2.0-flash-live-001
     const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
-    // Check for API key (Google AI Studio) or use ADC (Vertex AI)
-    // Accept multiple env var names for flexibility
+    // ALWAYS use Vertex AI when project ID is available (required for gemini-live-2.5-flash-native-audio)
+    // API keys (Google AI Studio) don't support the native audio models
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
-    const useVertexAI = !apiKey && !!projectId;
+
+    // Prefer Vertex AI when project ID is available (better model support + required for native audio)
+    const useVertexAI = !!projectId;
 
     console.log(`${LOG_PREFIX} Configuration:`, {
       model,
       useVertexAI,
       hasApiKey: !!apiKey,
       hasProjectId: !!projectId,
-      projectId: projectId || 'N/A'
+      projectId: projectId || 'N/A',
+      reason: useVertexAI ? 'Using Vertex AI (project ID available)' : 'Using Google AI Studio (no project ID)'
     });
 
-    if (!apiKey && !projectId) {
-      throw new Error("Google AI API key or Cloud Project ID required");
+    if (!useVertexAI && !apiKey) {
+      throw new Error("Google Cloud Project ID (for Vertex AI) or API key (for Google AI Studio) required");
     }
 
     return new Promise(async (resolve, reject) => {
@@ -266,8 +270,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Use Gemini 2.5 Flash Native Audio for the Live API
     // Note: Model name format differs between Google AI and Vertex AI
     const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
-    const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
-    const useVertexAI = !!projectId && !apiKey;
+    // Prefer Vertex AI when project ID is available (required for native audio models)
+    const useVertexAI = !!projectId;
 
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');

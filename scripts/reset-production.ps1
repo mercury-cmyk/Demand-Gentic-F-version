@@ -97,7 +97,7 @@ Update-Secret "TELNYX_SIP_PASSWORD" "Z0lra,7%r4Wn"
 
 # REDIS - Critical for call session persistence across instances
 Write-Host "Updating Redis secrets..." -ForegroundColor Yellow
-Update-Secret "REDIS_URL" "redis://default:ttVaOhNjFsLxPOheFUkbFgyad1DLlhdt@redis-11546.fcrce171.ap-south-1-1.ec2.redns.redis-cloud.com:11546"
+Update-Secret "REDIS_URL" "redis://10.181.0.35:6379"
 
 # Database
 Write-Host "Updating database secrets..." -ForegroundColor Yellow

@@ -156,12 +156,17 @@ export function createWorker<T = any>(
     };
   } = {}
 ): Worker<T> | null {
-  const connection = getRedisConnection();
-  
-  if (!connection) {
+  if (!isRedisConfigured()) {
     console.warn(`[Queue] Worker for "${queueName}" not started - no Redis connection`);
     return null;
   }
+
+  // Create a DEDICATED connection for this worker to prevent blocking issues
+  // BullMQ workers use blocking commands (BRPOP) which lock the connection
+  const connection = new IORedis(getRedisUrl(), {
+    ...getRedisConnectionOptions(),
+    maxRetriesPerRequest: null // Ensure this is set for BullMQ
+  });
 
   // Build worker options conditionally to avoid passing undefined values to BullMQ
   const workerConfig: any = {
@@ -213,11 +218,16 @@ export function createWorker<T = any>(
  * Create queue events listener for monitoring
  */
 export function createQueueEvents(queueName: string): QueueEvents | null {
-  const connection = getRedisConnection();
-  
-  if (!connection) {
+  if (!isRedisConfigured()) {
     return null;
   }
+
+  // QueueEvents require a dedicated connection (Subscriber mode)
+  // Reusing a shared connection would break other operations
+  const connection = new IORedis(getRedisUrl(), {
+    ...getRedisConnectionOptions(),
+    maxRetriesPerRequest: null
+  });
 
   return new QueueEvents(queueName, {
     connection,

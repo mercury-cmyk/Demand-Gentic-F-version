@@ -4002,7 +4002,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   activeSessions.delete(callId);
 }
 
-  function mapOutcomeToDisposition(outcome: string, session?: VoiceDialerSession): DispositionCode {
+  function mapOutcomeToDisposition(outcome: string, session?: OpenAIRealtimeSession): DispositionCode {
     switch (outcome) {
       case 'voicemail':
         return 'voicemail';
@@ -4012,7 +4012,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // Technical errors (Gemini disconnect, WebSocket issues, etc.) should NOT mark contact as invalid_data
         // Instead, use 'no_answer' to allow retry - the contact's data is fine, it was a system issue
         // Check if there was meaningful conversation before the error
-        if (session && session.transcripts.some(t => t.role === 'user' && t.text.trim().length > 0)) {
+        if (session && session.transcripts.some((t: { role: string; text: string }) => t.role === 'user' && t.text.trim().length > 0)) {
           console.log(`${LOG_PREFIX} Error occurred after user conversation - marking as no_answer for retry (technical issue, not invalid data)`);
         } else {
           console.log(`${LOG_PREFIX} Error before user conversation - marking as no_answer for retry (connection issue)`);
@@ -4026,9 +4026,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with human detected - marking as not_interested (likely user hangup)`);
             return 'not_interested';
           }
-          
+
           // If we have distinct user transcripts, also treat as not_interested
-          if (session.transcripts.some(t => t.role === 'user' && t.text.trim().length > 0)) {
+          if (session.transcripts.some((t: { role: string; text: string }) => t.role === 'user' && t.text.trim().length > 0)) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts - marking as not_interested (likely user hangup)`);
             return 'not_interested';
           }
