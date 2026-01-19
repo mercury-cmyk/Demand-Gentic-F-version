@@ -2384,6 +2384,9 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             'is not available',
             'your call has been forwarded',
             'automatic voice message system',
+            'voice messaging system',
+            'automated voice messaging',
+            'forwarded to an automated',
             // Common voicemail phrases
             'i\'ll get back to you',
             'i will get back to you',
@@ -2395,7 +2398,16 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           ];
 
           const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
-          if (isVoicemail && !session.detectedDisposition) {
+          // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer for voicemail
+          // The transcript evidence should take precedence over AI's disposition
+          const shouldOverrideDisposition = !session.detectedDisposition ||
+            session.detectedDisposition === 'not_interested' ||
+            session.detectedDisposition === 'no_answer';
+
+          if (isVoicemail && shouldOverrideDisposition) {
+            if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {
+              console.log(`${LOG_PREFIX} ⚠️ VOICEMAIL CORRECTION: AI had set disposition to '${session.detectedDisposition}' but transcript indicates voicemail`);
+            }
             console.log(`${LOG_PREFIX} VOICEMAIL DETECTED via transcript: "${message.transcript.substring(0, 60)}..."`);
             console.log(`${LOG_PREFIX} Immediately ending call ${session.callId} - NO voicemail will be left`);
             
