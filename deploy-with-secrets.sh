@@ -1,5 +1,5 @@
 #!/bin/bash
-gcloud run deploy demangent-api \
+gcloud run deploy demandgentic-api \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
