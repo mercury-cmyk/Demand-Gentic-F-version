@@ -182,7 +182,6 @@ export default function ClientPortalDashboard() {
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
-    budgetAmount: '',
     requestedLeads: '',
     landingPageUrl: '',
     projectFileUrl: '',
@@ -310,7 +309,7 @@ export default function ClientPortalDashboard() {
     mutationFn: async (data: { 
       name: string; 
       description?: string; 
-      budgetAmount?: number;
+      requestedLeadCount?: number;
       landingPageUrl?: string;
       projectFileUrl?: string;
     }) => {
@@ -331,7 +330,7 @@ export default function ClientPortalDashboard() {
       setNewProject({ 
         name: '', 
         description: '', 
-        budgetAmount: '', 
+        requestedLeads: '',
         landingPageUrl: '', 
         projectFileUrl: '', 
         fileName: '' 
@@ -424,7 +423,7 @@ export default function ClientPortalDashboard() {
     createProjectMutation.mutate({
       name: newProject.name,
       description: newProject.description || undefined,
-      budgetAmount: newProject.budgetAmount ? parseFloat(newProject.budgetAmount) : undefined,
+      requestedLeadCount: newProject.requestedLeads ? parseInt(newProject.requestedLeads) : undefined,
       landingPageUrl: newProject.landingPageUrl || undefined,
       projectFileUrl: newProject.projectFileUrl || undefined,
     });
@@ -489,7 +488,6 @@ export default function ClientPortalDashboard() {
       : activity.action === 'project_created'
         ? {
             requested_leads: details.requestedLeadCount,
-            budget: details.budgetAmount,
           }
         : undefined;
 
@@ -1174,64 +1172,65 @@ export default function ClientPortalDashboard() {
                     </CardContent>
                  </Card>
                ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {filteredProjects.map((project) => (
-                    <Card key={project.id} className="hover:shadow-md transition-all">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                           <div className="space-y-1">
-                             <CardTitle className="text-base font-semibold">{project.name}</CardTitle>
-                             <CardDescription className="text-xs">
-                               Created {new Date(project.createdAt).toLocaleDateString()}
-                             </CardDescription>
-                           </div>
-                           <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
-                             {project.status}
-                           </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                          {project.description || "No description provided."}
-                        </p>
-                        <div className="mb-4">
-                          <div className="flex justify-between text-[10px] text-muted-foreground">
-                            {projectStatusSteps.map((step, index) => {
-                              const currentStep = getProjectStatusStep(project.status);
-                              const isCompleted = currentStep > index + 1;
-                              const isCurrent = currentStep === index + 1;
-                              return (
-                                <span
-                                  key={step.key}
-                                  className={isCurrent ? 'font-semibold text-foreground' : ''}
-                                >
-                                  {step.label}
-                                </span>
-                              );
-                            })}
-                          </div>
-                          <div className="relative mt-2 h-1 rounded-full bg-slate-200 dark:bg-slate-800">
-                            <div
-                              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
-                              style={{
-                                width: `${Math.min((getProjectStatusStep(project.status) - 1) / (projectStatusSteps.length - 1) * 100, 100)}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-1">
-                            <DollarSign className="h-3 w-3" />
-                            {project.budgetAmount ? `$${project.budgetAmount}` : '-'}
-                          </div>
-                          {project.landingPageUrl && (
-                             <div className="flex items-center gap-1">
-                               <LinkIcon className="h-3 w-3" />
-                               <a href={project.landingPageUrl} target="_blank" rel="noreferrer" className="hover:underline">Link</a>
-                             </div>
-                          )}
-                          {project.status !== 'completed' && project.status !== 'delivered' && (
-                            <div className="ml-auto">
+                <Card>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Campaign Name</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Leads</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead className="w-[50px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredProjects.map((project) => (
+                        <TableRow key={project.id}>
+                          <TableCell>
+                            <div className="font-medium">{project.name}</div>
+                            {project.landingPageUrl && (
+                              <a 
+                                href={project.landingPageUrl} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                              >
+                                <LinkIcon className="h-3 w-3" />
+                                Landing Page
+                              </a>
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[250px]">
+                            <p className="text-sm text-muted-foreground truncate">
+                              {project.description || "No description"}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Users className="h-3 w-3 text-muted-foreground" />
+                              {project.requestedLeadCount || '-'}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge 
+                              variant={project.status === 'active' ? 'default' : 'secondary'}
+                              className={
+                                project.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                project.status === 'active' ? 'bg-blue-100 text-blue-800' :
+                                project.status === 'approved' ? 'bg-purple-100 text-purple-800' :
+                                project.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }
+                            >
+                              {project.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(project.createdAt).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            {project.status !== 'completed' && project.status !== 'delivered' && (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -1245,13 +1244,13 @@ export default function ClientPortalDashboard() {
                                   <Trash2 className="h-3.5 w-3.5" />
                                 )}
                               </Button>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
                )}
             </div>
 
@@ -1779,16 +1778,16 @@ export default function ClientPortalDashboard() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="budget">Budget Amount</Label>
+                <Label htmlFor="requestedLeads">Number of Leads Needed</Label>
                 <div className="relative">
-                  <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Users className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    id="budget"
+                    id="requestedLeads"
                     type="number"
                     className="pl-9"
-                    placeholder="0.00"
-                    value={newProject.budgetAmount}
-                    onChange={(e) => setNewProject(prev => ({ ...prev, budgetAmount: e.target.value }))}
+                    placeholder="e.g. 500"
+                    value={newProject.requestedLeads}
+                    onChange={(e) => setNewProject(prev => ({ ...prev, requestedLeads: e.target.value }))}
                   />
                 </div>
               </div>

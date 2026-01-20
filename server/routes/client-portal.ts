@@ -1358,21 +1358,41 @@ router.get('/admin/orders', requireAuth, requireRole('admin', 'campaign_manager'
   try {
     const { status } = req.query;
 
+    // Return campaign requests (clientProjects) as orders
     const whereConditions = status 
-      ? eq(clientPortalOrders.status, status as any)
+      ? and(eq(clientProjects.status, status as string))
       : undefined;
 
-    const orders = await db
+    const projects = await db
       .select({
-        order: clientPortalOrders,
+        project: clientProjects,
         client: clientAccounts,
-        campaign: verificationCampaigns,
       })
-      .from(clientPortalOrders)
-      .innerJoin(clientAccounts, eq(clientPortalOrders.clientAccountId, clientAccounts.id))
-      .innerJoin(verificationCampaigns, eq(clientPortalOrders.campaignId, verificationCampaigns.id))
+      .from(clientProjects)
+      .innerJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
       .where(whereConditions)
-      .orderBy(desc(clientPortalOrders.createdAt));
+      .orderBy(desc(clientProjects.createdAt));
+
+    // Map to order-like structure for frontend compatibility
+    const orders = projects.map(p => ({
+      order: {
+        id: p.project.id,
+        orderNumber: p.project.projectCode || `CR-${p.project.id.substring(0, 8).toUpperCase()}`,
+        status: p.project.status,
+        requestedQuantity: p.project.requestedLeadCount || 0,
+        deliveredQuantity: 0, // Can be calculated later
+        ratePerLead: p.project.ratePerLead,
+        description: p.project.description,
+        landingPageUrl: p.project.landingPageUrl,
+        projectFileUrl: p.project.projectFileUrl,
+        createdAt: p.project.createdAt,
+      },
+      client: p.client,
+      campaign: {
+        id: null,
+        name: p.project.name,
+      },
+    }));
 
     res.json(orders);
   } catch (error) {

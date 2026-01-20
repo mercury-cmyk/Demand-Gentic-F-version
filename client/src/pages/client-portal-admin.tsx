@@ -304,7 +304,7 @@ export default function ClientPortalAdmin() {
           </TabsTrigger>
           <TabsTrigger value="orders">
             <FileText className="h-4 w-4 mr-2" />
-            Orders
+            Requests
           </TabsTrigger>
           <TabsTrigger value="invoices">
             <CreditCard className="h-4 w-4 mr-2" />
@@ -500,8 +500,8 @@ export default function ClientPortalAdmin() {
         <TabsContent value="orders">
           <Card>
             <CardHeader>
-              <CardTitle>Client Orders</CardTitle>
-              <CardDescription>Pending and recent orders from clients</CardDescription>
+              <CardTitle>Campaign Requests</CardTitle>
+              <CardDescription>Pending and recent campaign requests from clients</CardDescription>
             </CardHeader>
             <CardContent>
               {ordersLoading ? (
@@ -512,12 +512,13 @@ export default function ClientPortalAdmin() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Order #</TableHead>
+                      <TableHead>Request #</TableHead>
                       <TableHead>Client</TableHead>
-                      <TableHead>Campaign</TableHead>
-                      <TableHead>Requested</TableHead>
-                      <TableHead>Delivered</TableHead>
+                      <TableHead>Campaign Name</TableHead>
+                      <TableHead>Requested Leads</TableHead>
+                      <TableHead>CPL</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -528,21 +529,39 @@ export default function ClientPortalAdmin() {
                           {item.order.orderNumber}
                         </TableCell>
                         <TableCell>{item.client.name}</TableCell>
-                        <TableCell>{item.campaign.name}</TableCell>
-                        <TableCell>{item.order.requestedQuantity}</TableCell>
-                        <TableCell>{item.order.deliveredQuantity || 0}</TableCell>
+                        <TableCell>
+                          <div>
+                            <span className="font-medium">{item.campaign.name}</span>
+                            {item.order.description && (
+                              <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                {item.order.description}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{item.order.requestedQuantity || '-'}</TableCell>
+                        <TableCell>
+                          {item.order.ratePerLead ? `$${item.order.ratePerLead}` : <span className="text-muted-foreground">Not set</span>}
+                        </TableCell>
                         <TableCell>
                           <Badge
                             className={
                               item.order.status === 'completed'
                                 ? 'bg-green-100 text-green-800'
+                                : item.order.status === 'active'
+                                ? 'bg-blue-100 text-blue-800'
+                                : item.order.status === 'approved'
+                                ? 'bg-purple-100 text-purple-800'
                                 : item.order.status === 'rejected'
                                 ? 'bg-red-100 text-red-800'
-                                : ''
+                                : 'bg-yellow-100 text-yellow-800'
                             }
                           >
                             {item.order.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(item.order.createdAt).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
                           <Button
@@ -561,7 +580,7 @@ export default function ClientPortalAdmin() {
                   </TableBody>
                 </Table>
               ) : (
-                <p className="text-muted-foreground text-center py-8">No orders yet</p>
+                <p className="text-muted-foreground text-center py-8">No campaign requests yet</p>
               )}
             </CardContent>
           </Card>
