@@ -8,7 +8,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Mic, MicOff, Volume2, Loader2, Send, History } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Mic, MicOff, Volume2, VolumeX, Loader2, Send, History, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface VoiceAssistantProps {
@@ -49,9 +51,14 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
   const [history, setHistory] = useState<CommandHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Voice mode toggles - both default to OFF (text-first experience)
+  const [voiceInputEnabled, setVoiceInputEnabled] = useState(false);
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -162,8 +169,8 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
       const data: VoiceResponse = await res.json();
       setResponse(data);
 
-      // Play audio response
-      if (data.response.audioUrl) {
+      // Play audio response only if voice output is enabled
+      if (data.response.audioUrl && voiceOutputEnabled) {
         playAudio(data.response.audioUrl);
       }
 
@@ -219,70 +226,82 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mic className="h-5 w-5 text-primary" />
-            Voice Assistant
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Demand Assistant
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Main interaction area */}
-          <div className="flex flex-col items-center justify-center py-6">
-            {/* Microphone button */}
-            <button
-              onClick={isListening ? stopListening : startListening}
-              disabled={isProcessing}
-              className={cn(
-                'relative w-24 h-24 rounded-full flex items-center justify-center transition-all',
-                isListening
-                  ? 'bg-red-500 hover:bg-red-600 animate-pulse'
-                  : 'bg-primary hover:bg-primary/90',
-                isProcessing && 'opacity-50 cursor-not-allowed'
-              )}
-            >
-              {isProcessing ? (
-                <Loader2 className="h-10 w-10 text-white animate-spin" />
-              ) : isListening ? (
-                <MicOff className="h-10 w-10 text-white" />
-              ) : (
-                <Mic className="h-10 w-10 text-white" />
-              )}
-
-              {/* Listening animation rings */}
-              {isListening && (
-                <>
-                  <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-25" />
-                  <span className="absolute inset-[-8px] rounded-full border-2 border-red-500/50 animate-pulse" />
-                </>
-              )}
-            </button>
-
-            <p className="mt-4 text-sm text-muted-foreground">
-              {isListening
-                ? 'Listening...'
-                : isProcessing
-                ? 'Processing...'
-                : 'Click to speak'}
-            </p>
+          {/* Voice mode toggles */}
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="voice-input"
+                  checked={voiceInputEnabled}
+                  onCheckedChange={setVoiceInputEnabled}
+                />
+                <Label htmlFor="voice-input" className="text-xs flex items-center gap-1 cursor-pointer">
+                  <Mic className="h-3 w-3" />
+                  Voice Input
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="voice-output"
+                  checked={voiceOutputEnabled}
+                  onCheckedChange={setVoiceOutputEnabled}
+                />
+                <Label htmlFor="voice-output" className="text-xs flex items-center gap-1 cursor-pointer">
+                  <Volume2 className="h-3 w-3" />
+                  Voice Response
+                </Label>
+              </div>
+            </div>
           </div>
 
-          {/* Text input fallback */}
+          {/* Text input (always visible, primary interaction) */}
           <form onSubmit={handleTextSubmit} className="flex gap-2">
             <input
+              ref={inputRef}
               type="text"
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Or type your command..."
+              placeholder="Type your question or command..."
               className="flex-1 px-3 py-2 border rounded-md text-sm bg-background"
               disabled={isProcessing || isListening}
+              autoFocus
             />
+            {voiceInputEnabled && (
+              <Button
+                type="button"
+                size="icon"
+                variant={isListening ? "destructive" : "outline"}
+                onClick={isListening ? stopListening : startListening}
+                disabled={isProcessing}
+              >
+                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </Button>
+            )}
             <Button
               type="submit"
               size="icon"
               disabled={!transcript.trim() || isProcessing || isListening}
             >
-              <Send className="h-4 w-4" />
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </form>
+
+          {/* Listening indicator */}
+          {isListening && (
+            <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+              </span>
+              Listening... speak now
+            </div>
+          )}
 
           {/* Error message */}
           {error && (
@@ -296,16 +315,19 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
             <div className="p-4 bg-muted rounded-lg space-y-2">
               <div className="flex items-center justify-between">
                 {getIntentBadge(response.intent)}
-                {response.response.audioUrl && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => playAudio(response.response.audioUrl!)}
-                  >
-                    <Volume2 className="h-4 w-4 mr-1" />
-                    Replay
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {response.response.audioUrl && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => playAudio(response.response.audioUrl!)}
+                      title="Play audio response"
+                    >
+                      <Volume2 className="h-4 w-4 mr-1" />
+                      Play
+                    </Button>
+                  )}
+                </div>
               </div>
               <p className="text-sm">{response.response.text}</p>
               {response.navigation && (

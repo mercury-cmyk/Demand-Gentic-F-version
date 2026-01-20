@@ -8,7 +8,6 @@ import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/s
 import { desc, gte, sql } from "drizzle-orm";
 import { ZAHID_PROFESSIONAL_CALLING_STRATEGY } from "../services/voice-agent-control-defaults";
 import { TRAINING_RULES_FOR_PROMPT } from "../training/taxonomy";
-import { resolveGeminiBaseUrl } from "./ai-provider-utils";
 
 // ==================== DEFAULT ORGANIZATION INTELLIGENCE ====================
 // This is used when no organization-specific intelligence is configured in the database.
@@ -277,37 +276,49 @@ async function maybeSummarizeWithGemini(
   fallbackInsights: string[]
 ): Promise<string[]> {
   const provider = (process.env.ORG_LEARNING_PROVIDER || "auto").toLowerCase();
-  const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   if (provider === "none" || provider === "disabled") return fallbackInsights;
-  if (!(provider === "auto" || provider === "gemini") || !geminiKey) {
+  if (!(provider === "auto" || provider === "gemini")) {
     return fallbackInsights;
   }
 
+  // Check if we have Vertex AI available (preferred in Cloud Run)
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+  const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+
+  if (!projectId && !geminiKey) {
+    return fallbackInsights;
+  }
+
+  const prompt = [
+    "You are an analytics assistant.",
+    "Generate 3-5 short, actionable learnings based ONLY on the metrics provided.",
+    "Avoid assumptions and do not include PII.",
+    "Return JSON only in the form: {\"insights\":[\"...\"]}.",
+    "",
+    "Metrics:",
+    JSON.stringify(snapshot, null, 2),
+  ].join("\n");
+
   try {
-    const { GoogleGenAI } = await import("@google/genai");
-    const model = process.env.ORG_LEARNING_GEMINI_MODEL || "gemini-2.5-flash";
-    const geminiBaseUrl = resolveGeminiBaseUrl();
-    const genai = new GoogleGenAI({
-      apiKey: geminiKey,
-      ...(geminiBaseUrl ? { httpOptions: { baseUrl: geminiBaseUrl } } : {}),
-    });
+    let raw: string;
 
-    const prompt = [
-      "You are an analytics assistant.",
-      "Generate 3-5 short, actionable learnings based ONLY on the metrics provided.",
-      "Avoid assumptions and do not include PII.",
-      "Return JSON only in the form: {\"insights\":[\"...\"]}.",
-      "",
-      "Metrics:",
-      JSON.stringify(snapshot, null, 2),
-    ].join("\n");
+    if (projectId) {
+      // Use Vertex AI with service account authentication (works in Cloud Run)
+      const { generateText } = await import("../services/vertex-ai/vertex-client");
+      raw = await generateText(prompt, { temperature: 0.3, maxTokens: 1024 });
+    } else {
+      // Fallback to Google AI Studio with API key (for local development)
+      const { GoogleGenAI } = await import("@google/genai");
+      const model = process.env.ORG_LEARNING_GEMINI_MODEL || "gemini-2.0-flash";
+      const genai = new GoogleGenAI({ apiKey: geminiKey });
 
-    const result = await genai.models.generateContent({
-      model,
-      contents: prompt,
-    });
+      const result = await genai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      raw = result.text?.trim() || "";
+    }
 
-    const raw = result.text?.trim() || "";
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return fallbackInsights;
     const parsed = JSON.parse(match[0]);

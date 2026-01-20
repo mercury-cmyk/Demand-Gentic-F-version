@@ -1,5 +1,6 @@
 ﻿import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
+import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
 import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -958,7 +959,19 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             },
           });
           console.log(`${LOG_PREFIX} ✅ Session persisted to store for call: ${sessionId}`);
-          
+
+          // Notify TelnyxAiBridge that call is answered (WebSocket connection proves it)
+          console.log(`${LOG_PREFIX} 🔔 Attempting to notify bridge of answered call...`);
+          try {
+            const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+            const bridge = getTelnyxAiBridge();
+            // Mark by callId (the sessionId like ai-call-xxx)
+            const marked = bridge.markCallAnsweredByCallId(sessionId!);
+            console.log(`${LOG_PREFIX} 📞 Notified bridge call answered by callId: ${sessionId} (marked: ${marked})`);
+          } catch (err) {
+            console.error(`${LOG_PREFIX} ❌ Failed to notify bridge of answered call:`, err);
+          }
+
           const initialStreamId = message.stream_id || message.start?.stream_id;
           if (initialStreamId) {
             session!.streamSid = initialStreamId;
@@ -1279,6 +1292,52 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
       }
     }
+
+    // ==========================================================================
+    // REQUIRED VARIABLE VALIDATION - Block calls without valid contact data
+    // ==========================================================================
+    if (!session.isTestSession) {
+      const validationResult = validateContactForCall(contactInfo, campaignConfig);
+      if (!validationResult.valid) {
+        console.error(`${LOG_PREFIX} ❌ Contact validation failed for call ${session.callId}: ${validationResult.reason}`);
+        console.error(`${LOG_PREFIX} ❌ Missing variables: ${validationResult.missing.join(', ')}`);
+        
+        // Log to activity for tracking
+        try {
+          if (session.contactId) {
+            await db.insert(callSessions).values({
+              id: uuidv4(),
+              callId: session.callId,
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              status: 'blocked',
+              startedAt: new Date(),
+              endedAt: new Date(),
+              metadata: {
+                blockedReason: validationResult.reason,
+                missingVariables: validationResult.missing,
+                dispositionCategory: 'blocked_missing_data',
+              },
+            }).onConflictDoNothing();
+          }
+        } catch (logError) {
+          console.error(`${LOG_PREFIX} Failed to log blocked call:`, logError);
+        }
+        
+        // Send error to Telnyx and terminate
+        if (session.telnyxWs?.readyState === WebSocket.OPEN) {
+          session.telnyxWs.send(JSON.stringify({
+            event: 'error',
+            message: `Call blocked: ${validationResult.reason}`,
+            missing_variables: validationResult.missing,
+          }));
+        }
+        await endCall(session.callId, 'error');
+        return;
+      }
+      console.log(`${LOG_PREFIX} ✅ Contact validation passed for call ${session.callId}`);
+    }
+
     const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
     const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
     const agentSettings = mergeAgentSettings(baseSettings as Partial<VirtualAgentSettings> | undefined);
@@ -4667,6 +4726,78 @@ async function releaseQueueLock(queueItemId: string): Promise<void> {
   }
 }
 
+/**
+ * Validate that a contact has all required variables for a call
+ * Blocks calls that would fail due to missing personalization data
+ */
+function validateContactForCall(
+  contactInfo: any,
+  campaignConfig: any
+): { valid: boolean; reason: string; missing: string[] } {
+  const missing: string[] = [];
+  const reasons: string[] = [];
+
+  // Check required contact fields
+  const firstName = contactInfo?.firstName?.trim();
+  const lastName = contactInfo?.lastName?.trim();
+  const fullName = contactInfo?.fullName?.trim() || `${firstName || ''} ${lastName || ''}`.trim();
+  const email = contactInfo?.email?.trim();
+  const company = contactInfo?.company?.trim() || contactInfo?.companyName?.trim();
+  const jobTitle = contactInfo?.jobTitle?.trim();
+
+  // First name OR full name is required
+  if (!firstName && !fullName) {
+    missing.push('firstName');
+    reasons.push('Contact has no first name');
+  }
+
+  // Company/Account name is required for personalized outreach
+  if (!company) {
+    missing.push('company');
+    reasons.push('Contact has no company/account');
+  }
+
+  // Email is important for follow-up and verification
+  if (!email) {
+    missing.push('email');
+    reasons.push('Contact has no email address');
+  } else if (!isValidEmailFormat(email)) {
+    missing.push('email');
+    reasons.push('Contact has invalid email format');
+  }
+
+  // Job title is required for proper addressing and qualification
+  if (!jobTitle) {
+    missing.push('jobTitle');
+    reasons.push('Contact has no job title');
+  }
+
+  // Campaign must exist
+  if (!campaignConfig) {
+    missing.push('campaign');
+    reasons.push('No campaign configuration found');
+  }
+
+  if (missing.length > 0) {
+    return {
+      valid: false,
+      reason: reasons.join('; '),
+      missing,
+    };
+  }
+
+  return {
+    valid: true,
+    reason: '',
+    missing: [],
+  };
+}
+
+function isValidEmailFormat(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
 async function getCampaignConfig(campaignId: string): Promise<any> {
   if (!campaignId) return null;
 
@@ -4888,7 +5019,7 @@ async function buildSystemPrompt(
   // 1. Campaign doesn't require it (requireAccountIntelligence = false), OR
   // 2. Either ID is missing
   if (!requireIntelligence) {
-    console.log(`${LOG_PREFIX} Campaign does not require account intelligence - using basic company context.`);
+    // Silently use basic company context - this is expected default behavior
 
     // Even without full intelligence, use basic company info (industry, description) for lightweight personalization
     if (accountId) {
@@ -5693,9 +5824,19 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       return;
     }
 
-    // CRITICAL FIX: End call if no human detected after 60 seconds
+    // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 10s (to capture greeting but not leave message)
+    // This is much faster than waiting for MAX_DURATION_WITHOUT_HUMAN
+    const MAX_VOICEMAIL_DURATION_SECONDS = 10;
+    if (session.detectedDisposition === 'voicemail' && elapsedSeconds > MAX_VOICEMAIL_DURATION_SECONDS) {
+      console.warn(`${LOG_PREFIX} VOICEMAIL TIMEOUT - Ending call ${session.callId} after ${elapsedSeconds}s (voicemail detected, max ${MAX_VOICEMAIL_DURATION_SECONDS}s)`);
+      endCall(session.callId, 'voicemail');
+      return;
+    }
+
+    // CRITICAL FIX: End call if no human detected after 30 seconds
     // This prevents AI from talking to voicemail/IVR for extended periods
-    const MAX_DURATION_WITHOUT_HUMAN_SECONDS = 60;
+    // Reduced from 60s to 30s based on analysis showing 700+ calls running 60s+ on voicemail
+    const MAX_DURATION_WITHOUT_HUMAN_SECONDS = 30;
     if (elapsedSeconds > MAX_DURATION_WITHOUT_HUMAN_SECONDS && !session.audioDetection.humanDetected) {
       console.warn(`${LOG_PREFIX} NO HUMAN DETECTED - Ending call ${session.callId} after ${elapsedSeconds}s without human response`);
       console.log(`${LOG_PREFIX} Audio patterns detected: ${session.audioDetection.audioPatterns.map(p => p.type).join(', ')}`);

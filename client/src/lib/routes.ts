@@ -75,7 +75,7 @@ export const ROUTES = {
   // Analytics Routes
   // ==========================================
   ENGAGEMENT_ANALYTICS: '/engagement-analytics',
-  AI_CALL_ANALYTICS: '/ai-call-analytics',
+  AI_CALL_ANALYTICS: '/call-reports?tab=ai',
   REPORTS: '/reports',
   CALL_REPORTS: '/call-reports',
 

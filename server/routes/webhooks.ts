@@ -213,11 +213,21 @@ router.post("/telnyx", async (req, res) => {
     const callbackSource = payload.CallbackSource || payload.callback_source;
 
     if (!eventType && callbackSource === 'call-progress-events') {
-      console.log(`[Telnyx Webhook] call-progress event detected (CallStatus=${payload.CallStatus}) - normalizing to call.hangup`);
-      payload.call_control_id = payload.call_control_id || payload.CallSid || payload.CallSidLegacy || payload.CallSid;
+      payload.call_control_id = payload.call_control_id || payload.CallSid || payload.CallSidLegacy;
       payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
-      payload.status = payload.CallStatus || payload.CallStatus;
-      eventType = 'call.hangup';
+      payload.status = payload.CallStatus;
+
+      // Map CallStatus to appropriate event type
+      if (payload.CallStatus === 'in-progress') {
+        eventType = 'call.answered';
+      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(payload.CallStatus)) {
+        eventType = 'call.hangup';
+      } else {
+        // For ringing, queued, etc. - just log and ignore
+        console.log(`[Telnyx Webhook] call-progress event (CallStatus=${payload.CallStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `call_status_${payload.CallStatus}` });
+      }
+      console.log(`[Telnyx Webhook] call-progress event (CallStatus=${payload.CallStatus}) -> ${eventType}`);
     }
 
     // Handle Cost/Billing events (no event_type)

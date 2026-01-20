@@ -31,6 +31,19 @@ export default function EngagementAnalyticsPage() {
     queryKey: ['/api/campaigns'],
   });
 
+  const filteredCampaigns = selectedCampaign === 'all'
+    ? campaigns
+    : campaigns.filter((campaign: any) => campaign.id === selectedCampaign);
+
+  const formatCampaignTimeline = (campaign: any) => {
+    const start = campaign.startDate ? format(new Date(campaign.startDate), 'MMM dd') : '';
+    const end = campaign.endDate ? format(new Date(campaign.endDate), 'MMM dd') : '';
+
+    if (!start && !end) return '-';
+    if (start && end) return `${start} - ${end}`;
+    return start || end;
+  };
+
   // Fetch comprehensive analytics (you'll need to create this endpoint)
   const { data: analytics, isLoading } = useQuery({
     queryKey: ['/api/analytics/engagement', dateRange, selectedCampaign],
@@ -47,7 +60,7 @@ export default function EngagementAnalyticsPage() {
   });
 
   const overviewStats = [
-    { label: "Total Campaigns", value: campaigns.length, icon: BarChart3, color: "text-blue-500" },
+    { label: "Total Campaigns", value: filteredCampaigns.length, icon: BarChart3, color: "text-blue-500" },
     { label: "Email Sends", value: analytics?.email?.total || 0, icon: Mail, color: "text-green-500" },
     { label: "Calls Made", value: analytics?.calls?.total || 0, icon: Phone, color: "text-purple-500" },
     { label: "Qualified Leads", value: analytics?.leads?.qualified || 0, icon: UserCheck, color: "text-orange-500" },
@@ -367,7 +380,7 @@ export default function EngagementAnalyticsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {campaigns.filter((c: any) => c.targetQualifiedLeads).map((campaign: any) => (
+                {filteredCampaigns.map((campaign: any) => (
                   <div key={campaign.id} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-semibold">{campaign.name}</h4>
@@ -380,13 +393,13 @@ export default function EngagementAnalyticsPage() {
                         <p className="text-muted-foreground">Target Leads</p>
                         <p className="font-medium flex items-center gap-1">
                           <Target className="h-4 w-4" />
-                          {campaign.targetQualifiedLeads}
+                          {campaign.targetQualifiedLeads ?? 0}
                         </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Actual Leads</p>
                         <p className="font-medium">
-                          {analytics?.campaignLeads?.[campaign.id] || 0}
+                          {analytics?.campaignLeads?.[campaign.id] ?? 0}
                         </p>
                       </div>
                       {campaign.costPerLead && (
@@ -401,8 +414,7 @@ export default function EngagementAnalyticsPage() {
                       <div>
                         <p className="text-muted-foreground">Timeline</p>
                         <p className="font-medium text-xs">
-                          {campaign.startDate && format(new Date(campaign.startDate), 'MMM dd')} - 
-                          {campaign.endDate && format(new Date(campaign.endDate), 'MMM dd')}
+                          {formatCampaignTimeline(campaign)}
                         </p>
                       </div>
                     </div>

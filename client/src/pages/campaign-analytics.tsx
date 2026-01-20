@@ -90,7 +90,21 @@ export default function CampaignAnalyticsPage() {
         params.append('campaignId', selectedCampaignForQueue);
       }
       const response = await fetch(`/api/analytics/queue-status?${params}`);
-      return response.json();
+      if (!response.ok) {
+        throw new Error('Failed to fetch queue status');
+      }
+      const data = await response.json();
+      // Ensure all numeric properties have defaults
+      return {
+        campaignId: data.campaignId,
+        campaignName: data.campaignName,
+        total: data.total ?? 0,
+        queued: data.queued ?? 0,
+        inProgress: data.inProgress ?? 0,
+        completed: data.completed ?? 0,
+        skipped: data.skipped ?? 0,
+        removed: data.removed ?? 0,
+      };
     },
   });
 

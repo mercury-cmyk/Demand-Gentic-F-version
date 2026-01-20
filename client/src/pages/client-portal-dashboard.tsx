@@ -1374,11 +1374,7 @@ export default function ClientPortalDashboard() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-sm text-muted-foreground">Cost per Lead</p>
-                      <p className="text-2xl font-bold">$142</p>
-                    </div>
-                    <div className="flex items-center text-red-600 text-sm">
-                      <ArrowDownRight className="h-4 w-4" />
-                      -5%
+                      <p className="text-2xl font-bold">{averageCPL > 0 ? `$${averageCPL.toLocaleString()}` : '-'}</p>
                     </div>
                   </div>
                 </CardContent>

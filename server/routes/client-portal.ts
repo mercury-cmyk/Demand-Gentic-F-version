@@ -34,6 +34,7 @@ import clientPortalVoiceRouter from './client-portal-voice';
 import clientPortalAdminBillingRouter from './client-portal-admin-billing';
 import clientPortalAgentRouter from './client-portal-agent';
 import clientPortalAgenticRouter from './client-portal-agentic';
+import clientPortalSimulationRouter from './client-portal-simulation';
 
 const router = Router();
 
@@ -125,6 +126,7 @@ router.use('/billing', requireClientAuth, clientPortalBillingRouter);
 router.use('/voice', requireClientAuth, clientPortalVoiceRouter);
 router.use('/agent', requireClientAuth, clientPortalAgentRouter);
 router.use('/agentic', requireClientAuth, clientPortalAgenticRouter);
+router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
 
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);

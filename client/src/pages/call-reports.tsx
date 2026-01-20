@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
+  Bot,
   Phone, 
   TrendingUp, 
   Users, 
@@ -37,8 +38,8 @@ import {
 } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
-import { format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
+import { AiCallAnalyticsPanel } from "@/pages/ai-call-analytics";
 
 const COLORS = {
   qualified: 'hsl(var(--chart-2))',
@@ -57,14 +58,50 @@ const QA_COLORS = {
 };
 
 export default function CallReportsPage() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canViewAiAnalytics = user?.role === 'admin' || user?.role === 'campaign_manager';
+
+  const getRequestedTab = (path: string) => {
+    const queryIndex = path.indexOf("?");
+    if (queryIndex === -1) return null;
+    const params = new URLSearchParams(path.slice(queryIndex + 1));
+    return params.get("tab");
+  };
+
+  const setTabParam = (nextTab?: string) => {
+    const [path, search = ""] = location.split("?");
+    const params = new URLSearchParams(search);
+    if (nextTab) {
+      params.set("tab", nextTab);
+    } else {
+      params.delete("tab");
+    }
+    const nextSearch = params.toString();
+    const nextLocation = nextSearch ? `${path}?${nextSearch}` : path;
+    if (nextLocation !== location) {
+      setLocation(nextLocation);
+    }
+  };
   
   const [dateRange, setDateRange] = useState<{ from?: string; to?: string }>({});
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
   const [selectedAgent, setSelectedAgent] = useState<string>(isAdmin ? 'all' : user?.id || '');
-  const [activeTab, setActiveTab] = useState('global');
+  const [activeTab, setActiveTab] = useState(() => {
+    const requestedTab = getRequestedTab(location);
+    if (requestedTab === 'ai' && canViewAiAnalytics) {
+      return 'ai';
+    }
+    return 'global';
+  });
+
+  useEffect(() => {
+    if (getRequestedTab(location) === 'ai' && canViewAiAnalytics) {
+      setActiveTab('ai');
+      setTabParam(undefined);
+    }
+  }, [location, canViewAiAnalytics]);
   
   // Fetch campaigns
   const { data: campaigns = [] } = useQuery({
@@ -219,66 +256,68 @@ export default function CallReportsPage() {
       </div>
       
       {/* Filters */}
-      <Card className="border-0 shadow-smooth-lg">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-primary" />
-            Report Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Date Range</label>
-              <DateRangeFilter
-                label="Date Range"
-                value={dateRange}
-                onChange={setDateRange}
-                testId="filter-date-range"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Campaign</label>
-              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger data-testid="select-campaign">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Campaigns</SelectItem>
-                  {callCampaigns.map((campaign: any) => (
-                    <SelectItem key={campaign.id} value={campaign.id}>
-                      {campaign.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {isAdmin && (
+      {activeTab !== 'ai' && (
+        <Card className="border-0 shadow-smooth-lg">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Report Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Agent</label>
-                <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                  <SelectTrigger data-testid="select-agent">
+                <label className="text-sm font-medium">Date Range</label>
+                <DateRangeFilter
+                  label="Date Range"
+                  value={dateRange}
+                  onChange={setDateRange}
+                  testId="filter-date-range"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Campaign</label>
+                <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+                  <SelectTrigger data-testid="select-campaign">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Agents</SelectItem>
-                    {agents.map((agent: any) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.firstName} {agent.lastName}
+                    <SelectItem value="all">All Campaigns</SelectItem>
+                    {callCampaigns.map((campaign: any) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              
+              {isAdmin && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Agent</label>
+                  <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+                    <SelectTrigger data-testid="select-agent">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Agents</SelectItem>
+                      {agents.map((agent: any) => (
+                        <SelectItem key={agent.id} value={agent.id}>
+                          {agent.firstName} {agent.lastName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       {/* Queue Progress Overview - Shows even when no calls exist */}
-      {queueStats && queueStats.summary?.totalContacts > 0 && (
+      {activeTab !== 'ai' && queueStats && queueStats.summary?.totalContacts > 0 && (
         <Card className="border-primary/20">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -366,6 +405,12 @@ export default function CallReportsPage() {
             <TabsTrigger value="agent" data-testid="tab-agent">
               <Users className="mr-2 h-4 w-4" />
               Agent Performance
+            </TabsTrigger>
+          )}
+          {canViewAiAnalytics && (
+            <TabsTrigger value="ai" data-testid="tab-ai">
+              <Bot className="mr-2 h-4 w-4" />
+              AI Call Analytics
             </TabsTrigger>
           )}
         </TabsList>
@@ -871,6 +916,12 @@ export default function CallReportsPage() {
             </>
           ) : null}
         </TabsContent>
+
+        {canViewAiAnalytics && (
+          <TabsContent value="ai" className="space-y-6">
+            <AiCallAnalyticsPanel embedded />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

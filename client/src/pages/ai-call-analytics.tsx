@@ -3,40 +3,29 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
 import { 
   Bot, 
   Phone, 
   TrendingUp, 
-  Users, 
   CheckCircle,
   XCircle,
-  Clock,
-  ArrowRightLeft,
   Shield,
   MessageSquare,
   PhoneForwarded,
   BarChart3,
-  Activity,
-  PhoneCall
+  Activity
 } from "lucide-react";
 import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
-  Legend,
-  LineChart,
-  Line
+  Legend
 } from "recharts";
 
 interface AiCallStats {
@@ -66,15 +55,19 @@ const COLORS = {
 
 const PIE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#6b7280'];
 
-export default function AiCallAnalyticsPage() {
+export interface AiCallAnalyticsPanelProps {
+  embedded?: boolean;
+}
+
+export function AiCallAnalyticsPanel({ embedded = false }: AiCallAnalyticsPanelProps) {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
-  const { toast } = useToast();
 
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
   });
 
   const aiCampaigns = campaigns.filter((c) => c.dialMode === 'ai_agent');
+  const selectedCampaignDetails = aiCampaigns.find((campaign) => campaign.id === selectedCampaign);
 
   const { data: stats, isLoading } = useQuery<AiCallStats>({
     queryKey: ['/api/ai-calls/campaign', selectedCampaign, 'stats', aiCampaigns.length],
@@ -164,13 +157,25 @@ export default function AiCallAnalyticsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2" data-testid="heading-ai-analytics">
-            <Bot className="h-8 w-8" />
-            AI Call Analytics
-          </h1>
+          {embedded ? (
+            <h2 className="text-2xl md:text-3xl font-bold flex items-center gap-2" data-testid="heading-ai-analytics">
+              <Bot className="h-7 w-7" />
+              AI Call Analytics
+            </h2>
+          ) : (
+            <h1 className="text-3xl font-bold flex items-center gap-2" data-testid="heading-ai-analytics">
+              <Bot className="h-8 w-8" />
+              AI Call Analytics
+            </h1>
+          )}
           <p className="text-muted-foreground mt-1">
             Performance metrics for AI-powered outbound calling campaigns
           </p>
+          {selectedCampaign !== 'all' && selectedCampaignDetails && (
+            <p className="text-sm text-muted-foreground mt-1" data-testid="selected-campaign-name">
+              {selectedCampaignDetails.name}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
@@ -440,4 +445,8 @@ export default function AiCallAnalyticsPage() {
       )}
     </div>
   );
+}
+
+export default function AiCallAnalyticsPage() {
+  return <AiCallAnalyticsPanel />;
 }

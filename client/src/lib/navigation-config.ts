@@ -363,15 +363,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         url: '/call-reports',
         icon: 'FileText',
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Call disposition reports and agent performance',
-      },
-      {
-        id: 'ai-call-analytics',
-        title: 'AI Call Analytics',
-        url: '/ai-call-analytics',
-        icon: 'Bot',
-        roles: MANAGEMENT_ROLES,
-        description: 'AI agent call performance',
+        description: 'Call disposition reports, agent performance, and AI call analytics',
       },
       {
         id: 'reports',

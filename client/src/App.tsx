@@ -56,7 +56,6 @@ import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
 import CampaignAnalyticsPage from "@/pages/campaign-analytics";
-import AiCallAnalyticsPage from "@/pages/ai-call-analytics";
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
@@ -284,7 +283,9 @@ function AuthenticatedApp() {
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
-              <Route path="/ai-call-analytics" component={AiCallAnalyticsPage} />
+              <Route path="/ai-call-analytics">
+                <Redirect to="/call-reports?tab=ai" />
+              </Route>
               <Route path="/agent-reports-dashboard" component={AgentReportsDashboard} />
               
               {/* Agent Console & Virtual Agents */}

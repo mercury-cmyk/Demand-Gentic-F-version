@@ -723,17 +723,22 @@ export class TelnyxAiBridge extends EventEmitter {
 
         const data = await response.json();
         const callData = data.data || data;
-        const isAlive = callData.is_alive;
+        // For TeXML calls, is_alive might not be returned - treat undefined as alive
+        const isAlive = callData.is_alive !== false; // Only false if explicitly false
         const callState = callData.state; // 'ringing', 'answered', 'bridged', etc.
 
         // Also check if webhook marked this call as answered
         const activeCall = this.activeCalls.get(callId);
         const isAnsweredViaWebhook = activeCall?.isAnswered === true;
 
-        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${isAlive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, attempt: ${attempts}`);
+        // Check if WebSocket is connected (definitive proof call is alive for TeXML)
+        const hasMediaConnection = activeCall?.mediaWs !== null;
 
-        if (!isAlive) {
-          console.log(`[TelnyxAiBridge] Call ${callId} ended (is_alive=false)`);
+        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+
+        // Call is alive if: API says so, OR we have a media WebSocket connection
+        if (!isAlive && !hasMediaConnection) {
+          console.log(`[TelnyxAiBridge] Call ${callId} ended (is_alive=false, no media)`);
           // Call handleCallHangup to record disposition (if webhook didn't arrive)
           const endedCall = this.activeCalls.get(callId);
           if (endedCall) {
@@ -1261,6 +1266,18 @@ export class TelnyxAiBridge extends EventEmitter {
       }
     }
     console.log(`[TelnyxAiBridge] Could not find call to mark as answered: ${callControlId}`);
+    return false;
+  }
+
+  // Mark a call as answered using the custom callId (e.g., ai-call-xxx)
+  markCallAnsweredByCallId(callId: string): boolean {
+    const call = this.activeCalls.get(callId);
+    if (call) {
+      call.isAnswered = true;
+      console.log(`[TelnyxAiBridge] Call ${callId} marked as answered via WebSocket connection`);
+      return true;
+    }
+    console.log(`[TelnyxAiBridge] Could not find call to mark as answered by callId: ${callId}`);
     return false;
   }
 
