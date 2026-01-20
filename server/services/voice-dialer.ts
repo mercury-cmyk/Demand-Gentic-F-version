@@ -2398,11 +2398,13 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           ];
 
           const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
-          // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer for voicemail
+          // CRITICAL: Override disposition if AI incorrectly set not_interested/no_answer/qualified_lead for voicemail
           // The transcript evidence should take precedence over AI's disposition
+          // FIX: Include 'qualified_lead' to catch cases where AI mistakenly classifies voicemail as qualified
           const shouldOverrideDisposition = !session.detectedDisposition ||
             session.detectedDisposition === 'not_interested' ||
-            session.detectedDisposition === 'no_answer';
+            session.detectedDisposition === 'no_answer' ||
+            session.detectedDisposition === 'qualified_lead';
 
           if (isVoicemail && shouldOverrideDisposition) {
             if (session.detectedDisposition && session.detectedDisposition !== 'voicemail') {

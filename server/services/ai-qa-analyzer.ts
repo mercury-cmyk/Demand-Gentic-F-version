@@ -1,27 +1,24 @@
-import { GoogleGenAI } from '@google/genai';
-import { workerDb as db, withRetry } from "../db";
+import OpenAI from "openai";
+import { workerDb as db } from "../db";
 import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 
-// Lazy Gemini client – instantiate only when needed and when credentials exist
-let _gemini: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
-  if (!_gemini) {
-    const apiKey = process.env.GEMINI_API_KEY;
+// Lazy DeepSeek client – instantiate only when needed and when credentials exist
+let _deepseekClient: OpenAI | null = null;
+function getDeepSeekClient(): OpenAI {
+  if (!_deepseekClient) {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
-      throw new Error("Gemini API key not configured. Set GEMINI_API_KEY.");
+      throw new Error("DeepSeek API key not configured. Set DEEPSEEK_API_KEY.");
     }
-    _gemini = new GoogleGenAI({
+    _deepseekClient = new OpenAI({
       apiKey,
-      httpOptions: {
-        apiVersion: "",
-        baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
-      },
+      baseURL: "https://api.deepseek.com/v1",
     });
   }
-  return _gemini;
+  return _deepseekClient;
 }
 
 interface QAParameters {
@@ -192,24 +189,24 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       analysisPrompt = buildAnalysisPrompt(lead, contact, account, campaign, qaParams, existingQaData);
     }
 
-    // Call Gemini for analysis using gemini-2.5-flash (cost-effective)
-    const gemini = getGemini();
+    // Call DeepSeek for analysis (cost-effective, reliable over public API)
+    const deepseek = getDeepSeekClient();
     const systemPrompt = await buildAgentSystemPrompt(
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    const fullPrompt = `${systemPrompt}\n\n${analysisPrompt}`;
-
-    const result = await gemini.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: fullPrompt,
-      generationConfig: {
-        temperature: 0.3,
-        responseMimeType: 'application/json',
-      },
+    const result = await deepseek.chat.completions.create({
+      model: process.env.AI_QA_DEEPSEEK_MODEL || "deepseek-chat",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: analysisPrompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
     });
 
-    const analysisText = result.text?.trim();
+    const analysisText = result.choices[0]?.message?.content?.trim();
     if (!analysisText) return null;
 
     let rawAnalysis: any = JSON.parse(analysisText);

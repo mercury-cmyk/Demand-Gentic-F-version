@@ -8,6 +8,7 @@ import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/s
 import { desc, gte, sql } from "drizzle-orm";
 import { ZAHID_PROFESSIONAL_CALLING_STRATEGY } from "../services/voice-agent-control-defaults";
 import { TRAINING_RULES_FOR_PROMPT } from "../training/taxonomy";
+import { resolveGeminiBaseUrl } from "./ai-provider-utils";
 
 // ==================== DEFAULT ORGANIZATION INTELLIGENCE ====================
 // This is used when no organization-specific intelligence is configured in the database.
@@ -285,12 +286,10 @@ async function maybeSummarizeWithGemini(
   try {
     const { GoogleGenAI } = await import("@google/genai");
     const model = process.env.ORG_LEARNING_GEMINI_MODEL || "gemini-2.5-flash";
+    const geminiBaseUrl = resolveGeminiBaseUrl();
     const genai = new GoogleGenAI({
       apiKey: geminiKey,
-      httpOptions: {
-        apiVersion: "",
-        baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
-      },
+      ...(geminiBaseUrl ? { httpOptions: { baseUrl: geminiBaseUrl } } : {}),
     });
 
     const prompt = [

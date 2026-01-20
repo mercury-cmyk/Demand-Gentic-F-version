@@ -182,12 +182,14 @@ const refineSystemPromptSchema = z.object({
 });
 
 import { GoogleGenAI } from '@google/genai';
+import { resolveGeminiBaseUrl } from "../lib/ai-provider-utils";
 
+const geminiBaseUrl = resolveGeminiBaseUrl();
 const genai = new GoogleGenAI({
   apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || '',
   httpOptions: {
     apiVersion: "", // use default
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || '',
+    ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
   },
 });
 

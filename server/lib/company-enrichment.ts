@@ -1,16 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 import type { VerificationContact } from "@shared/schema";
+import { resolveGeminiBaseUrl } from "./ai-provider-utils";
 import { searchWeb, formatSearchResultsForAI } from "./web-search";
 import { formatPhoneWithCountryCode } from "./phone-formatter";
 
 // Referenced from blueprint:javascript_gemini_ai_integrations
 // This is using Replit's AI Integrations service, which provides Gemini-compatible API access without requiring your own API key.
 // Using gemini-2.5-flash for fast, high-volume data extraction tasks
+const geminiBaseUrl = resolveGeminiBaseUrl();
 const ai = new GoogleGenAI({
   apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY!,
   httpOptions: {
     apiVersion: "",
-    baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
+    ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
   },
 });
 

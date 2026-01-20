@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import openai from "../lib/openai";
+import { resolveGeminiBaseUrl } from "../lib/ai-provider-utils";
 import { getOrganizationPromptSettings } from "../lib/org-intelligence-helper";
 
 export type PromptAgentType = "voice" | "text" | "research" | "qa";
@@ -483,11 +484,12 @@ async function reviewWithOpenAI(
 
 async function reviewWithGemini(prompt: string): Promise<{ raw: string; model: string }> {
   const model = process.env.PROMPT_OPTIMIZATION_GEMINI_MODEL || "gemini-2.5-flash";
+  const geminiBaseUrl = resolveGeminiBaseUrl();
   const genai = new GoogleGenAI({
     apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "",
     httpOptions: {
       apiVersion: "",
-      baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
+      ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
     },
   });
 

@@ -2494,7 +2494,8 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Auto-create Lead for qualified dispositions
-      if (call.disposition === 'qualified' && call.contactId) {
+      // CRITICAL FIX: Never create leads for voicemail dispositions
+      if (call.disposition === 'qualified' && call.contactId && call.disposition !== 'voicemail') {
         console.log('[LEAD CREATION] Qualified disposition detected for contact:', call.contactId);
 
         // Get contact info
@@ -3549,6 +3550,25 @@ export class DatabaseStorage implements IStorage {
     const attempt = await this.getCallAttempt(callAttemptId);
     if (!attempt) {
       console.error('[LEAD CREATION] ❌ Call attempt not found:', callAttemptId);
+      return undefined;
+    }
+
+    // CRITICAL FIX: Explicitly reject voicemail calls - they should NEVER become leads
+    if (attempt.voicemailDetected) {
+      console.log('[LEAD CREATION] 🚫 VOICEMAIL DETECTED - Rejecting lead creation for voicemail call:', {
+        callAttemptId,
+        voicemailDetected: attempt.voicemailDetected,
+        disposition: attempt.disposition
+      });
+      return undefined;
+    }
+
+    // Also check disposition for voicemail (belt-and-suspenders approach)
+    if (attempt.disposition === 'voicemail') {
+      console.log('[LEAD CREATION] 🚫 VOICEMAIL DISPOSITION - Rejecting lead creation:', {
+        callAttemptId,
+        disposition: attempt.disposition
+      });
       return undefined;
     }
 
