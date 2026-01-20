@@ -27,7 +27,8 @@ import {
   Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown,
   FileDown, Eye, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
-  ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot
+  ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot,
+  Link as LinkIcon, Upload
 } from 'lucide-react';
 import { ClientAgentButton } from '@/components/client-portal/agent/client-agent-chat';
 
@@ -93,6 +94,41 @@ interface SupportTicket {
   lastReplyAt: string | null;
 }
 
+interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  projectCode: string | null;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  budgetAmount: string | null;
+  landingPageUrl: string | null;
+  projectFileUrl: string | null;
+  createdAt: string;
+  campaignCount: number;
+  totalCost: number;
+}
+
+interface Lead {
+  id: number; // verificationContactId
+  firstName: string | null;
+  lastName: string | null;
+  title: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  linkedinUrl: string | null;
+  location: string | null;
+  employees: string | null;
+  industry: string | null;
+  keywords: string[] | null;
+  campaignName: string | null;
+  orderId: string;
+  orderNumber: string;
+  orderDate: string;
+}
+
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 const statusColors: Record<string, string> = {
@@ -120,6 +156,18 @@ export default function ClientPortalDashboard() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('');
   const [orderQuantity, setOrderQuantity] = useState<string>('');
   const [orderNotes, setOrderNotes] = useState('');
+  
+  // Project Creation State
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [newProject, setNewProject] = useState({
+    name: '',
+    description: '',
+    budgetAmount: '',
+    landingPageUrl: '',
+    projectFileUrl: '',
+    fileName: '', // For display only
+  });
 
   useEffect(() => {
     const storedUser = localStorage.getItem('clientPortalUser');
@@ -177,6 +225,26 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
   });
 
+  const { data: projects = [], isLoading: projectsLoading, refetch: refetchProjects } = useQuery<Project[]>({
+    queryKey: ['client-portal-projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/projects', authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch projects');
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  const { data: leads = [], isLoading: leadsLoading } = useQuery<Lead[]>({
+    queryKey: ['client-portal-leads'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/leads', authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch leads');
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
   // Mutations
   const submitOrderMutation = useMutation({
     mutationFn: async (data: { campaignId: string; requestedQuantity: number; clientNotes: string }) => {
@@ -208,6 +276,103 @@ export default function ClientPortalDashboard() {
       toast({ title: 'Failed to submit order', variant: 'destructive' });
     },
   });
+
+  const createProjectMutation = useMutation({
+    mutationFn: async (data: { 
+      name: string; 
+      description?: string; 
+      budgetAmount?: number;
+      landingPageUrl?: string;
+      projectFileUrl?: string;
+    }) => {
+      const res = await fetch('/api/client-portal/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to create project');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
+      setShowCreateDialog(false);
+      setNewProject({ 
+        name: '', 
+        description: '', 
+        budgetAmount: '', 
+        landingPageUrl: '', 
+        projectFileUrl: '', 
+        fileName: '' 
+      });
+      toast({ title: 'Campaign request created successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to create campaign request', variant: 'destructive' });
+    },
+  });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      // Get presigned URL
+      const res = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}` 
+        },
+        body: JSON.stringify({ 
+          filename: file.name, 
+          contentType: file.type,
+          folder: 'uploads' 
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to get upload URL');
+      const { url, key } = await res.json();
+
+      // Upload to S3
+      const uploadRes = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload file');
+
+      setNewProject(prev => ({ 
+        ...prev, 
+        projectFileUrl: key,
+        fileName: file.name
+      }));
+      toast({ title: 'File uploaded successfully' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Upload failed', variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleCreateProject = () => {
+    if (!newProject.name.trim()) {
+      toast({ title: 'Campaign Name is required', variant: 'destructive' });
+      return;
+    }
+    createProjectMutation.mutate({
+      name: newProject.name,
+      description: newProject.description || undefined,
+      budgetAmount: newProject.budgetAmount ? parseFloat(newProject.budgetAmount) : undefined,
+      landingPageUrl: newProject.landingPageUrl || undefined,
+      projectFileUrl: newProject.projectFileUrl || undefined,
+    });
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('clientPortalToken');
@@ -276,8 +441,8 @@ export default function ClientPortalDashboard() {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'campaigns', label: 'Campaigns', icon: Target },
-    { id: 'leads', label: 'Leads & Delivery', icon: UserCheck },
+    { id: 'campaigns', label: 'Campaigns & Orders', icon: Target },
+    { id: 'leads', label: 'Leads', icon: UserCheck },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
     { id: 'billing', label: 'Billing', icon: CreditCard },
     { id: 'support', label: 'Support', icon: Headphones },
@@ -610,85 +775,142 @@ export default function ClientPortalDashboard() {
 
         {/* ==================== CAMPAIGNS TAB ==================== */}
         {activeTab === 'campaigns' && (
-          <div className="space-y-6">
+          <div className="space-y-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Campaigns</h2>
-                <p className="text-muted-foreground">Manage your verification campaigns and request new ones</p>
+                <h2 className="text-2xl font-bold">Campaigns & Orders</h2>
+                <p className="text-muted-foreground">Manage your campaigns, track progress, and view orders.</p>
               </div>
-              <Button onClick={() => setShowNewCampaign(true)} className="gap-2">
+              <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
                 <Plus className="h-4 w-4" />
-                Request New Campaign
+                Create Campaign
               </Button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {campaigns.map((campaign) => (
-                <Card key={campaign.id} className="hover:shadow-md transition-all cursor-pointer group">
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
-                        <Target className="h-5 w-5 text-white" />
-                      </div>
-                      {getStatusBadge(campaign.status || 'active')}
-                    </div>
-                    <CardTitle className="mt-3 group-hover:text-primary transition-colors">
-                      {campaign.name}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-muted-foreground">Eligible</p>
-                        <p className="font-semibold">{(campaign.eligibleCount || 0).toLocaleString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Delivered</p>
-                        <p className="font-semibold">{(campaign.deliveredCount || 0).toLocaleString()}</p>
-                      </div>
-                    </div>
-                    {campaign.eligibleCount > 0 && (
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-muted-foreground">Delivery Progress</span>
-                          <span>{Math.round(((campaign.deliveredCount || 0) / campaign.eligibleCount) * 100)}%</span>
+            {/* Campaign Requests (Projects) */}
+            <div className="space-y-4">
+               <h3 className="text-lg font-semibold flex items-center gap-2">
+                 <Target className="h-5 w-5 text-primary" />
+                 Campaign Requests
+               </h3>
+               {projectsLoading ? (
+                 <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+               ) : projects.length === 0 ? (
+                 <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
+                    <CardContent className="flex flex-col items-center justify-center py-8">
+                       <p className="text-muted-foreground mb-4">No pending campaign requests.</p>
+                       <Button variant="outline" onClick={() => setShowCreateDialog(true)}>Create One</Button>
+                    </CardContent>
+                 </Card>
+               ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {projects.map((project) => (
+                    <Card key={project.id} className="hover:shadow-md transition-all">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between">
+                           <div className="space-y-1">
+                             <CardTitle className="text-base font-semibold">{project.name}</CardTitle>
+                             <CardDescription className="text-xs">
+                               Created {new Date(project.createdAt).toLocaleDateString()}
+                             </CardDescription>
+                           </div>
+                           <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
+                             {project.status}
+                           </Badge>
                         </div>
-                        <Progress value={((campaign.deliveredCount || 0) / campaign.eligibleCount) * 100} className="h-2" />
-                      </div>
-                    )}
-                  </CardContent>
-                  <CardFooter className="pt-0">
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        setSelectedCampaign(campaign.id);
-                        setShowNewOrder(true);
-                      }}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Order Leads
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ))}
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
+                          {project.description || "No description provided."}
+                        </p>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <DollarSign className="h-3 w-3" />
+                            {project.budgetAmount ? `$${project.budgetAmount}` : '-'}
+                          </div>
+                          {project.landingPageUrl && (
+                             <div className="flex items-center gap-1">
+                               <LinkIcon className="h-3 w-3" />
+                               <a href={project.landingPageUrl} target="_blank" rel="noreferrer" className="hover:underline">Link</a>
+                             </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+               )}
             </div>
 
-            {campaigns.length === 0 && (
-              <Card className="p-12 text-center">
-                <Target className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-semibold mb-2">No Campaigns Yet</h3>
-                <p className="text-muted-foreground mb-4">
-                  Request a new campaign or contact your account manager to get started.
-                </p>
-                <Button onClick={() => setShowNewCampaign(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Request Campaign
-                </Button>
-              </Card>
-            )}
+            <Separator />
+
+            {/* Active Campaigns */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                Active Campaigns
+              </h3>
+              {campaignsLoading ? (
+                 <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+              ) : campaigns.length === 0 ? (
+                 <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
+                    <CardContent className="flex flex-col items-center justify-center py-8">
+                       <p className="text-muted-foreground">No active campaigns yet.</p>
+                       <p className="text-xs text-muted-foreground mt-1">Campaigns become active once approved.</p>
+                    </CardContent>
+                 </Card>
+              ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {campaigns.map((campaign) => (
+                  <Card key={campaign.id} className="hover:shadow-md transition-all cursor-pointer group">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+                          <Target className="h-5 w-5 text-white" />
+                        </div>
+                        {getStatusBadge(campaign.status || 'active')}
+                      </div>
+                      <CardTitle className="mt-3 group-hover:text-primary transition-colors">
+                        {campaign.name}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between items-center text-muted-foreground">
+                          <span>Eligible Contacts</span>
+                          <span className="font-medium text-foreground">{campaign.eligibleCount?.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-muted-foreground">
+                          <span>Verified</span>
+                          <span className="font-medium text-foreground">{campaign.verifiedCount?.toLocaleString() || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-muted-foreground">
+                          <span>Delivered</span>
+                          <span className="font-medium text-foreground">{campaign.deliveredCount?.toLocaleString() || 0}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                    <CardFooter className="pt-2 border-t bg-slate-50/50 dark:bg-slate-900/50">
+                      <Button 
+                        variant="ghost" 
+                        className="w-full justify-between hover:text-primary"
+                        onClick={() => {
+                          setSelectedCampaign(campaign.id);
+                          setShowNewOrder(true);
+                        }}
+                      >
+                        Request Additional Leads
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))}
+              </div>
+              )}
+            </div>
           </div>
         )}
+
 
         {/* ==================== LEADS TAB ==================== */}
         {activeTab === 'leads' && (
@@ -766,10 +988,77 @@ export default function ClientPortalDashboard() {
               </Card>
             </div>
 
+            {/* Approved Leads Table */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                   <CardTitle>Approved Leads</CardTitle>
+                   <CardDescription>
+                     {leads.length} leads delivered and approved
+                   </CardDescription>
+                </div>
+                 <div className="flex gap-2">
+                   <Input placeholder="Search leads..." className="w-64" />
+                   <Button variant="ghost" size="icon"><Filter className="h-4 w-4" /></Button>
+                 </div>
+              </CardHeader>
+              <CardContent>
+                {leadsLoading ? (
+                   <div className="flex justify-center p-12"><Loader2 className="animate-spin" /></div>
+                ) : leads.length === 0 ? (
+                  <div className="text-center py-12">
+                     <UserCheck className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                     <h3 className="font-semibold mb-2">No Leads Yet</h3>
+                     <p className="text-muted-foreground">Approved leads will appear here once delivered.</p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Contact</TableHead>
+                          <TableHead>Campaign</TableHead>
+                          <TableHead>Order Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {leads.map((lead: Lead) => (
+                          <TableRow key={lead.id}>
+                            <TableCell className="font-medium">
+                              {lead.firstName} {lead.lastName}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{lead.title || '-'}</TableCell>
+                            <TableCell>{lead.company || '-'}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-col text-xs">
+                                <span>{lead.email}</span>
+                                <span className="text-muted-foreground">{lead.phone}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{lead.campaignName || '-'}</TableCell>
+                            <TableCell>{new Date(lead.orderDate).toLocaleDateString()}</TableCell>
+                            <TableCell className="text-right">
+                               <Button variant="ghost" size="sm">
+                                 <Eye className="h-4 w-4" />
+                               </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Orders Table */}
             <Card>
               <CardHeader>
-                <CardTitle>Order History</CardTitle>
+                <CardTitle>Delivery History</CardTitle>
               </CardHeader>
               <CardContent>
                 {orders.length === 0 ? (
@@ -1296,75 +1585,95 @@ export default function ClientPortalDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* New Campaign Request Dialog */}
-      <Dialog open={showNewCampaign} onOpenChange={setShowNewCampaign}>
-        <DialogContent className="max-w-lg">
+      {/* Create Project / Campaign Request Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Request New Campaign</DialogTitle>
+            <DialogTitle>Create New Campaign Request</DialogTitle>
             <DialogDescription>
-              Tell us about the campaign you need and we'll set it up for you
+              Set up a new campaign request. You can attach assets and specify budget.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Campaign Name</Label>
-              <Input placeholder="e.g., Q1 2026 IT Decision Makers" />
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Campaign Name *</Label>
+              <Input
+                id="name"
+                placeholder="e.g. Q4 Marketing Outreach"
+                value={newProject.name}
+                onChange={(e) => setNewProject(prev => ({ ...prev, name: e.target.value }))}
+              />
             </div>
-            <div>
-              <Label>Campaign Type</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="event_promotion">Event Promotion</SelectItem>
-                  <SelectItem value="webinar_registration">Webinar Registrations</SelectItem>
-                  <SelectItem value="executive_dinner">Executive Dinner</SelectItem>
-                  <SelectItem value="content_syndication">Content Syndication</SelectItem>
-                  <SelectItem value="lead_qualification">Lead Qualification</SelectItem>
-                  <SelectItem value="mql">Marketing Qualified Leads (MQL)</SelectItem>
-                  <SelectItem value="sql">Sales Qualified Leads (SQL)</SelectItem>
-                  <SelectItem value="appointment_generation">Appointment Generation</SelectItem>
-                  <SelectItem value="data_validation">Data Validation</SelectItem>
-                </SelectContent>
-              </Select>
+            
+            <div className="space-y-2">
+              <Label htmlFor="description">Description (Target Audience, Goals)</Label>
+              <Textarea
+                id="description"
+                placeholder="Describe your ideal customer profile and campaign goals..."
+                value={newProject.description}
+                onChange={(e) => setNewProject(prev => ({ ...prev, description: e.target.value }))}
+                rows={3}
+              />
             </div>
-            <div>
-              <Label>Target Audience</Label>
-              <Textarea placeholder="Describe your ideal customer profile (job titles, industries, company size, geography, etc.)" rows={3} />
-            </div>
+
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Estimated Volume</Label>
-                <Input type="number" placeholder="e.g., 5000" />
+              <div className="space-y-2">
+                <Label htmlFor="budget">Budget Amount</Label>
+                <div className="relative">
+                  <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="budget"
+                    type="number"
+                    className="pl-9"
+                    placeholder="0.00"
+                    value={newProject.budgetAmount}
+                    onChange={(e) => setNewProject(prev => ({ ...prev, budgetAmount: e.target.value }))}
+                  />
+                </div>
               </div>
-              <div>
-                <Label>Timeline</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="asap">ASAP</SelectItem>
-                    <SelectItem value="1week">Within 1 week</SelectItem>
-                    <SelectItem value="2weeks">Within 2 weeks</SelectItem>
-                    <SelectItem value="1month">Within 1 month</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-2">
+                <Label htmlFor="landingPage">Landing Page URL</Label>
+                <div className="relative">
+                   <LinkIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                   <Input 
+                      id="landingPage" 
+                      className="pl-9"
+                      placeholder="https://example.com"
+                      value={newProject.landingPageUrl} 
+                      onChange={(e) => setNewProject(prev => ({ ...prev, landingPageUrl: e.target.value }))}
+                   />
+                </div>
               </div>
             </div>
-            <div>
-              <Label>Additional Requirements</Label>
-              <Textarea placeholder="Any specific data fields, verification requirements, or other notes..." rows={2} />
+
+            <div className="space-y-2">
+              <Label>Project Files (Assets/list/Briefs)</Label>
+               <div className="flex items-center gap-4">
+                  <Button variant="outline" className="relative cursor-pointer" disabled={isUploading}>
+                    {isUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                    {isUploading ? 'Uploading...' : 'Upload File'}
+                    <input 
+                      type="file" 
+                      className="absolute inset-0 opacity-0 cursor-pointer" 
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                    />
+                  </Button>
+                  {newProject.fileName && (
+                    <span className="text-sm text-green-600 flex items-center gap-1">
+                      <FileText className="h-3 w-3" />
+                      {newProject.fileName}
+                    </span>
+                  )}
+               </div>
+               <p className="text-xs text-muted-foreground">Upload any relevant documents (PDF, Excel, Images).</p>
             </div>
+
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewCampaign(false)}>Cancel</Button>
-            <Button onClick={() => {
-              toast({ title: 'Campaign request submitted! Our team will contact you shortly.' });
-              setShowNewCampaign(false);
-            }}>
-              <Send className="h-4 w-4 mr-2" />
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateProject} disabled={createProjectMutation.isPending || isUploading}>
+              {createProjectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Submit Request
             </Button>
           </DialogFooter>

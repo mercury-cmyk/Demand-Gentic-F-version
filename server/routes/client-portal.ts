@@ -404,6 +404,41 @@ router.get('/orders/:id/contacts', requireClientAuth, async (req, res) => {
   }
 });
 
+router.get('/leads', requireClientAuth, async (req, res) => {
+  try {
+    const contacts = await db
+      .select({
+        id: verificationContacts.id,
+        firstName: verificationContacts.firstName,
+        lastName: verificationContacts.lastName,
+        title: verificationContacts.title,
+        company: verificationContacts.company,
+        email: verificationContacts.email,
+        phone: verificationContacts.phone,
+        linkedinUrl: verificationContacts.linkedinUrl,
+        location: verificationContacts.location,
+        employees: verificationContacts.employees,
+        industry: verificationContacts.industry,
+        keywords: verificationContacts.keywords,
+        campaignName: verificationCampaigns.name,
+        orderId: clientPortalOrders.id,
+        orderNumber: clientPortalOrders.orderNumber,
+        orderDate: clientPortalOrders.createdAt,
+      })
+      .from(clientPortalOrderContacts)
+      .innerJoin(verificationContacts, eq(clientPortalOrderContacts.verificationContactId, verificationContacts.id))
+      .innerJoin(clientPortalOrders, eq(clientPortalOrderContacts.orderId, clientPortalOrders.id))
+      .leftJoin(verificationCampaigns, eq(clientPortalOrders.campaignId, verificationCampaigns.id))
+      .where(eq(clientPortalOrders.clientAccountId, req.clientUser!.clientAccountId))
+      .orderBy(desc(clientPortalOrders.createdAt));
+
+    res.json(contacts);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get all leads error:', error);
+    res.status(500).json({ message: "Failed to fetch client leads" });
+  }
+});
+
 // ==================== ADMIN ROUTES ====================
 
 router.get('/admin/clients', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
