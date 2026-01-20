@@ -789,12 +789,24 @@ export class TelnyxAiBridge extends EventEmitter {
       return;
     }
 
+    // Check if call is still active before attempting TTS (prevents "call has already ended" errors)
+    const callState = this.callStateByControlId.get(callControlId);
+    if (!callState) {
+      console.log(`[TelnyxAiBridge] Skipping speakText - call ${callControlId} no longer tracked (likely ended)`);
+      return;
+    }
+
     // 1. Try Google Cloud TTS (Primary - Quality/Reliability + Google-native preference)
     try {
       await this.speakWithGoogle(callControlId, text, voice || "alloy");
       return;
-    } catch (error) {
-       console.warn(`[TelnyxAiBridge] Google TTS failed, attempting OpenAI fallback...`, error);
+    } catch (error: any) {
+      // If call has ended, don't bother with fallbacks
+      if (error?.message?.includes('90018') || error?.message?.includes('already ended')) {
+        console.log(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping fallbacks`);
+        return;
+      }
+      console.warn(`[TelnyxAiBridge] Google TTS failed, attempting OpenAI fallback...`, error);
     }
 
     // 2. Try OpenAI TTS (Secondary - if key exists)
@@ -803,7 +815,12 @@ export class TelnyxAiBridge extends EventEmitter {
       try {
         await this.speakWithOpenAI(callControlId, text, voice || "alloy", openaiApiKey);
         return;
-      } catch (error) {
+      } catch (error: any) {
+        // If call has ended, don't bother with final fallback
+        if (error?.message?.includes('90018') || error?.message?.includes('already ended')) {
+          console.log(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping final fallback`);
+          return;
+        }
         console.error(`[TelnyxAiBridge] OpenAI TTS failed:`, error);
       }
     }

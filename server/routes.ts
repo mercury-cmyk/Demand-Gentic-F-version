@@ -13933,7 +13933,7 @@ export function registerRoutes(app: Express) {
       let nextBestActions = null;
 
       try {
-        const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY;
+        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
         if (!geminiKey) {
           console.warn('[AI Insights] Gemini API key not configured, skipping recommendations');
         } else {
@@ -15254,8 +15254,8 @@ Provide JSON response with:
       const result = await triggerEmailValidation();
 
       res.json({
+        ...result,
         message: "Email validation job triggered successfully",
-        ...result
       });
     } catch (error: any) {
       console.error('[Manual Trigger] Email validation error:', error);
@@ -15283,8 +15283,8 @@ Provide JSON response with:
       const result = await triggerAiEnrichment();
 
       res.json({
+        ...result,
         message: "AI enrichment job triggered successfully",
-        ...result
       });
     } catch (error: any) {
       console.error('[Manual Trigger] AI enrichment error:', error);
@@ -15332,7 +15332,7 @@ Provide JSON response with:
     try {
       const { limit } = req.body;
 
-      console.log(`[Manual Trigger] Telnyx recording sync requested by ${req.user.username}`, {
+      console.log(`[Manual Trigger] Telnyx recording sync requested by ${req.user?.username ?? 'unknown'}`, {
         limit: limit || 50
       });
 
