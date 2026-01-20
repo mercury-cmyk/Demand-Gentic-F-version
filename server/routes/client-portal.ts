@@ -12,6 +12,7 @@ import {
   clientPortalOrderContacts,
   verificationCampaigns,
   verificationContacts,
+  clientPortalActivityLogs,
   insertClientAccountSchema,
   insertClientUserSchema,
   insertClientCampaignAccessSchema,
@@ -35,6 +36,28 @@ import clientPortalAgentRouter from './client-portal-agent';
 import clientPortalAgenticRouter from './client-portal-agentic';
 
 const router = Router();
+
+async function logClientPortalActivity(params: {
+  clientAccountId: string;
+  clientUserId?: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  details?: any;
+}) {
+  try {
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: params.clientAccountId,
+      clientUserId: params.clientUserId || null,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      action: params.action,
+      details: params.details ?? null,
+    });
+  } catch (err) {
+    console.error('[CLIENT PORTAL] Activity log error:', err);
+  }
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "7d";
@@ -305,6 +328,19 @@ router.post('/orders', requireClientAuth, async (req, res) => {
     } catch (err) {
         console.error('[CLIENT PORTAL] Order Notification error:', err);
     }
+
+    await logClientPortalActivity({
+      clientAccountId: req.clientUser!.clientAccountId,
+      clientUserId: req.clientUser!.clientUserId,
+      entityType: 'campaign_order',
+      entityId: order.id,
+      action: 'order_submitted',
+      details: {
+        campaignId,
+        requestedQuantity,
+        clientNotes,
+      },
+    });
 
     res.status(201).json(order);
   } catch (error) {

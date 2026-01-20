@@ -108,6 +108,8 @@ interface Project {
   startDate: string | null;
   endDate: string | null;
   budgetAmount: string | null;
+  budgetCurrency?: string | null;
+  requestedLeadCount?: number | null;
   landingPageUrl: string | null;
   projectFileUrl: string | null;
   createdAt: string;
@@ -155,12 +157,8 @@ export default function ClientPortalDashboard() {
   const { toast } = useToast();
   const [user, setUser] = useState<ClientUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [showNewOrder, setShowNewOrder] = useState(false);
-  const [showNewCampaign, setShowNewCampaign] = useState(false);
   const [showSupportDialog, setShowSupportDialog] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<string>('');
-  const [orderQuantity, setOrderQuantity] = useState<string>('');
-  const [orderNotes, setOrderNotes] = useState('');
   
   // Project Creation State
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -169,6 +167,7 @@ export default function ClientPortalDashboard() {
     name: '',
     description: '',
     budgetAmount: '',
+    requestedLeads: '',
     landingPageUrl: '',
     projectFileUrl: '',
     fileName: '', // For display only
@@ -274,37 +273,6 @@ export default function ClientPortalDashboard() {
   });
 
   // Mutations
-  const submitOrderMutation = useMutation({
-    mutationFn: async (data: { campaignId: string; requestedQuantity: number; clientNotes: string }) => {
-      const now = new Date();
-      const res = await fetch('/api/client-portal/orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          ...data,
-          orderMonth: now.getMonth() + 1,
-          orderYear: now.getFullYear(),
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to submit order');
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: 'Order submitted successfully' });
-      setShowNewOrder(false);
-      setSelectedCampaign('');
-      setOrderQuantity('');
-      setOrderNotes('');
-      refetchOrders();
-    },
-    onError: () => {
-      toast({ title: 'Failed to submit order', variant: 'destructive' });
-    },
-  });
-
   const createProjectMutation = useMutation({
     mutationFn: async (data: { 
       name: string; 
@@ -406,18 +374,6 @@ export default function ClientPortalDashboard() {
     localStorage.removeItem('clientPortalToken');
     localStorage.removeItem('clientPortalUser');
     setLocation('/client-portal/login');
-  };
-
-  const handleSubmitOrder = () => {
-    if (!selectedCampaign || !orderQuantity) {
-      toast({ title: 'Please fill all required fields', variant: 'destructive' });
-      return;
-    }
-    submitOrderMutation.mutate({
-      campaignId: selectedCampaign,
-      requestedQuantity: parseInt(orderQuantity),
-      clientNotes: orderNotes,
-    });
   };
 
   const formatCurrency = (amount: number) => {
@@ -625,9 +581,9 @@ export default function ClientPortalDashboard() {
                   <p className="text-blue-100 mt-1">Here's what's happening with your campaigns today.</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setShowNewOrder(true)} className="gap-2">
+                  <Button variant="secondary" onClick={() => setShowCreateDialog(true)} className="gap-2">
                     <Plus className="h-4 w-4" />
-                    New Order
+                    Create Campaign
                   </Button>
                   <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setActiveTab('support')}>
                     <MessageSquare className="h-4 w-4 mr-2" />
@@ -887,8 +843,8 @@ export default function ClientPortalDashboard() {
                     <div className="text-center py-8 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                       <p>No orders yet</p>
-                      <Button variant="link" onClick={() => setShowNewOrder(true)}>
-                        Create your first order
+                      <Button variant="link" onClick={() => setShowCreateDialog(true)}>
+                        Create your first campaign
                       </Button>
                     </div>
                   ) : (
@@ -942,7 +898,7 @@ export default function ClientPortalDashboard() {
                           className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer"
                           onClick={() => {
                             setSelectedCampaign(campaign.id);
-                            setShowNewOrder(true);
+                            setShowCreateDialog(true);
                           }}
                         >
                           <div className="flex items-center gap-3">
@@ -1159,7 +1115,7 @@ export default function ClientPortalDashboard() {
                         className="w-full justify-between hover:text-primary"
                         onClick={() => {
                           setSelectedCampaign(campaign.id);
-                          setShowNewOrder(true);
+                          setShowCreateDialog(true);
                         }}
                       >
                         Request Additional Leads
@@ -1541,8 +1497,8 @@ export default function ClientPortalDashboard() {
                       <AvatarFallback className="bg-primary/10 text-primary">ZM</AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
-                      <p className="font-semibold">Zahid Mahmood</p>
-                      <p className="text-sm text-muted-foreground">Account Manager</p>
+                      <p className="font-semibold">Zahid Mohammadi</p>
+                      <p className="text-sm text-muted-foreground">CEO</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
                           <a href="mailto:zahid.m@pivotal-b2b.com">
@@ -1560,16 +1516,22 @@ export default function ClientPortalDashboard() {
                   </div>
                   <div className="flex items-center gap-4 p-4 rounded-lg border">
                     <Avatar className="h-12 w-12">
-                      <AvatarFallback className="bg-green-100 text-green-700">TS</AvatarFallback>
+                      <AvatarFallback className="bg-green-100 text-green-700">TH</AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
-                      <p className="font-semibold">Technical Support</p>
-                      <p className="text-sm text-muted-foreground">Data & Integration Help</p>
+                      <p className="font-semibold">Tabasum Hamdard</p>
+                      <p className="text-sm text-muted-foreground">Client Success Director</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
-                          <a href="mailto:tech@pivotal-b2b.com">
+                          <a href="mailto:tabasum.hamdard@pivotal-b2b.com">
                             <Mail className="h-4 w-4" />
                           </a>
+                        </Button>
+                        <Button variant="ghost" size="sm">
+                          <Phone className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm">
+                          <MessageSquare className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
@@ -1610,63 +1572,7 @@ export default function ClientPortalDashboard() {
 
       {/* ==================== DIALOGS ==================== */}
 
-      {/* New Order Dialog */}
-      <Dialog open={showNewOrder} onOpenChange={setShowNewOrder}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Submit New Order</DialogTitle>
-            <DialogDescription>
-              Request verified contacts from your available campaigns
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Campaign</Label>
-              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a campaign" />
-                </SelectTrigger>
-                <SelectContent>
-                  {campaigns.map((campaign) => (
-                    <SelectItem key={campaign.id} value={campaign.id}>
-                      {campaign.name} ({campaign.eligibleCount?.toLocaleString() || 0} eligible)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Quantity</Label>
-              <Input
-                type="number"
-                placeholder="Number of contacts"
-                value={orderQuantity}
-                onChange={(e) => setOrderQuantity(e.target.value)}
-              />
-              {selectedCampaign && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  Available: {campaigns.find(c => c.id === selectedCampaign)?.eligibleCount?.toLocaleString() || 0}
-                </p>
-              )}
-            </div>
-            <div>
-              <Label>Notes (optional)</Label>
-              <Textarea
-                placeholder="Any special requirements or targeting criteria..."
-                value={orderNotes}
-                onChange={(e) => setOrderNotes(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewOrder(false)}>Cancel</Button>
-            <Button onClick={handleSubmitOrder} disabled={submitOrderMutation.isPending}>
-              {submitOrderMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Submit Order
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Campaign creation dialog is handled by showCreateDialog */}
 
       {/* Create Project / Campaign Request Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>

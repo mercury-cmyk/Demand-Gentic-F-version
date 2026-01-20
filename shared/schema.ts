@@ -4776,6 +4776,9 @@ export const clientProjects = pgTable("client_projects", {
   budgetAmount: numeric("budget_amount", { precision: 12, scale: 2 }),
   budgetCurrency: varchar("budget_currency", { length: 3 }).default('USD'),
 
+  // Lead goals
+  requestedLeadCount: integer("requested_lead_count"),
+
   // Billing Settings (override account defaults)
   billingModel: billingModelTypeEnum("billing_model"),
   ratePerLead: numeric("rate_per_lead", { precision: 10, scale: 2 }),
@@ -5103,6 +5106,21 @@ export const clientProjectsRelations = relations(clientProjects, ({ one, many })
   costs: many(clientActivityCosts),
   deliveryLinks: many(clientDeliveryLinks),
 }));
+
+// Client portal activity log (per-client audit trail)
+export const clientPortalActivityLogs = pgTable("client_portal_activity_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+  entityType: text("entity_type").notNull(),
+  entityId: varchar("entity_id").notNull(),
+  action: text("action").notNull(),
+  details: jsonb("details"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type ClientPortalActivityLog = typeof clientPortalActivityLogs.$inferSelect;
+export type InsertClientPortalActivityLog = typeof clientPortalActivityLogs.$inferInsert;
 
 export const clientProjectCampaignsRelations = relations(clientProjectCampaigns, ({ one }) => ({
   project: one(clientProjects, { fields: [clientProjectCampaigns.projectId], references: [clientProjects.id] }),

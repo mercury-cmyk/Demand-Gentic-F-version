@@ -9,9 +9,32 @@ import {
   verificationCampaigns,
   clientCampaignAccess,
   clientAccounts,
+  clientPortalActivityLogs,
 } from '@shared/schema';
 import { z } from 'zod';
 import { notificationService } from '../services/notification-service';
+
+async function logClientActivity(params: {
+  clientAccountId: string;
+  clientUserId?: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  details?: any;
+}) {
+  try {
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: params.clientAccountId,
+      clientUserId: params.clientUserId || null,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      action: params.action,
+      details: params.details ?? null,
+    });
+  } catch (err) {
+    console.error('[CLIENT PORTAL] Activity log error:', err);
+  }
+}
 
 const router = Router();
 
@@ -35,6 +58,7 @@ router.get('/', async (req: Request, res: Response) => {
         endDate: clientProjects.endDate,
         budgetAmount: clientProjects.budgetAmount,
         budgetCurrency: clientProjects.budgetCurrency,
+        requestedLeadCount: clientProjects.requestedLeadCount,
         createdAt: clientProjects.createdAt,
       })
       .from(clientProjects)
@@ -79,6 +103,7 @@ const createProjectSchema = z.object({
   endDate: z.string().optional(),
   budgetAmount: z.number().optional(),
   budgetCurrency: z.string().length(3).optional(),
+  requestedLeadCount: z.number().optional(),
   landingPageUrl: z.string().optional(), // Allow URL or empty string
   projectFileUrl: z.string().optional(),
 });
@@ -99,8 +124,9 @@ router.post('/', async (req: Request, res: Response) => {
         endDate: parsed.endDate,
         budgetAmount: parsed.budgetAmount?.toString(),
         budgetCurrency: parsed.budgetCurrency,
-        landingPageUrl: parsed.landingPageUrl,
-        projectFileUrl: parsed.projectFileUrl,
+        ...(parsed.landingPageUrl !== undefined && { landingPageUrl: parsed.landingPageUrl }),
+        ...(parsed.projectFileUrl !== undefined && { projectFileUrl: parsed.projectFileUrl }),
+        requestedLeadCount: parsed.requestedLeadCount,
         status: 'pending',
       })
       .returning();
@@ -116,6 +142,20 @@ router.post('/', async (req: Request, res: Response) => {
     } catch (err) {
       console.error('[CLIENT PORTAL] Notification error:', err);
     }
+
+    // Log activity
+    await logClientActivity({
+      clientAccountId,
+      clientUserId: req.clientUser?.clientUserId,
+      entityType: 'project',
+      entityId: project.id,
+      action: 'project_created',
+      details: {
+        name: project.name,
+        requestedLeadCount: project.requestedLeadCount,
+        budgetAmount: project.budgetAmount,
+      },
+    });
 
     res.status(201).json(project);
   } catch (error) {
@@ -193,6 +233,9 @@ const updateProjectSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   budgetAmount: z.number().optional(),
+  requestedLeadCount: z.number().optional(),
+  landingPageUrl: z.string().optional(),
+  projectFileUrl: z.string().optional(),
 });
 
 // Update project
@@ -227,10 +270,22 @@ router.put('/:id', async (req: Request, res: Response) => {
         ...(parsed.startDate && { startDate: parsed.startDate }),
         ...(parsed.endDate && { endDate: parsed.endDate }),
         ...(parsed.budgetAmount !== undefined && { budgetAmount: parsed.budgetAmount?.toString() }),
+        ...(parsed.requestedLeadCount !== undefined && { requestedLeadCount: parsed.requestedLeadCount }),
+        ...(parsed.landingPageUrl !== undefined && { landingPageUrl: parsed.landingPageUrl }),
+        ...(parsed.projectFileUrl !== undefined && { projectFileUrl: parsed.projectFileUrl }),
         updatedAt: new Date(),
       })
       .where(eq(clientProjects.id, projectId))
       .returning();
+
+    await logClientActivity({
+      clientAccountId,
+      clientUserId: req.clientUser?.clientUserId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'project_updated',
+      details: parsed,
+    });
 
     res.json(updated);
   } catch (error) {
