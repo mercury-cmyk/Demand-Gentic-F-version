@@ -626,6 +626,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             if (parsedState) {
               customParams = parsedState.params;
               console.log(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
+              console.log(`${LOG_PREFIX} 🔍 client_state campaign_id value:`, customParams.campaign_id, `(type: ${typeof customParams.campaign_id})`);
 
               // Try to fetch additional params from call session store (system_prompt, openai_config, etc.)
               if (customParams.call_id || customParams.test_call_id) {
@@ -650,6 +651,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                     if (!customParams.provider && storedParams.provider) {
                       customParams.provider = storedParams.provider;
                       console.log(`${LOG_PREFIX} Retrieved provider from session store for ${callId}: ${storedParams.provider}`);
+                    }
+                    if (!customParams.test_contact && storedParams.test_contact) {
+                      customParams.test_contact = storedParams.test_contact;
+                      console.log(`${LOG_PREFIX} Retrieved test_contact from session store for ${callId}:`, storedParams.test_contact);
                     }
                   }
                 } catch (storeErr) {
@@ -676,6 +681,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           const callAttemptId = customParams.call_attempt_id || urlParams.call_attempt_id;
           const contactId = customParams.contact_id || urlParams.contact_id;
 
+          console.log(`${LOG_PREFIX} 🔍 Raw customParams keys:`, Object.keys(customParams));
+          console.log(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
           console.log(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
 
           let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
@@ -851,6 +858,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               queueItemId: queueItemId || '',
               callAttemptId: callAttemptId || '',
               contactId: contactId || '',
+              calledNumber: (customParams as any).called_number || (urlParams as any).called_number || null,
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || '',
               isTestSession,
@@ -1743,6 +1751,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // PARALLEL INITIALIZATION: Run Gemini connection AND database calls concurrently
     // This significantly reduces initialization time (from ~10-20s serial to ~3-5s parallel)
     console.log(`${LOG_PREFIX} Starting parallel initialization (Gemini + DB)...`);
+    console.log(`${LOG_PREFIX} 🔍 [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
 
     const [geminiConnected, campaignConfig, contactInfoResult, agentConfig] = await Promise.all([
       // Gemini connection
@@ -1942,6 +1951,17 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
   const LOG_PREFIX = '[Voice-Dialer]';
   switch (name) {
     case 'submit_disposition': {
+      // CRITICAL: Prevent repeated disposition submissions (AI spam loop protection)
+      if (session.detectedDisposition) {
+        console.log(`${LOG_PREFIX} [Gemini] Disposition already set to ${session.detectedDisposition}, ignoring duplicate submit_disposition call`);
+        // If voicemail already set, force end the call to prevent infinite loop
+        if (session.detectedDisposition === 'voicemail' && session.isActive && !session.isEnding) {
+          console.log(`${LOG_PREFIX} [Gemini] ⚠️ Voicemail already submitted but call still active - forcing end_call`);
+          setImmediate(() => endCall(session.callId, 'voicemail'));
+        }
+        return { success: true, message: 'Disposition already recorded' };
+      }
+
       let disposition = args.disposition as DispositionCode;
       const reason = args.reason || '';
       const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
@@ -1984,11 +2004,50 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
 
       session.detectedDisposition = disposition;
       console.log(`${LOG_PREFIX} [Gemini] Disposition: ${args.disposition}${disposition !== args.disposition ? ` → ${disposition} (auto-corrected)` : ''} (duration: ${callDurationSeconds}s, reason: ${reason})`);
+      
+      // CRITICAL: Auto-terminate voicemail calls immediately after disposition
+      // The AI should hang up on voicemail, but if it doesn't, we force it
+      if (disposition === 'voicemail') {
+        console.log(`${LOG_PREFIX} [Gemini] 📞 Voicemail detected - auto-triggering end_call to prevent infinite loop`);
+        setImmediate(() => endCall(session.callId, 'voicemail'));
+      }
+      
       return { success: true };
     }
     case 'submit_call_summary': session.callSummary = normalizeCallSummary(args); return { success: true };
     case 'schedule_callback': return { success: true, scheduled: args.callback_datetime };
     case 'transfer_to_human': session.detectedDisposition = 'qualified_lead'; return { success: true };
+    case 'end_call': {
+      const reason = (args.reason || 'Call ended by AI').toLowerCase();
+      console.log(`${LOG_PREFIX} [Gemini] AI requested end_call: ${args.reason || 'Call ended by AI'}`);
+      
+      // Infer disposition from end_call reason if not already set
+      if (!session.detectedDisposition) {
+        const hasUserTranscripts = session.transcripts.some(
+          (t: { role: string; text: string }) => t.role === 'user' && t.text.trim().length > 0
+        );
+        
+        // If prospect hung up after speaking, they're not interested (not "no answer")
+        if (reason.includes('hung up') && hasUserTranscripts) {
+          session.detectedDisposition = 'not_interested';
+          console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: not_interested (prospect hung up after speaking)`);
+        }
+        // If no answer detected
+        else if (reason.includes('no answer') || reason.includes('didn\'t answer')) {
+          session.detectedDisposition = 'no_answer';
+          console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: no_answer (from reason)`);
+        }
+        // If voicemail mentioned
+        else if (reason.includes('voicemail')) {
+          session.detectedDisposition = 'voicemail';
+          console.log(`${LOG_PREFIX} [Gemini] Inferred disposition: voicemail (from reason)`);
+        }
+      }
+      
+      const outcome = session.detectedDisposition === 'voicemail' ? 'voicemail' : 'completed';
+      await endCall(session.callId, outcome);
+      return { success: true };
+    }
     default: return { success: false, error: 'Unknown function' };
   }
 }
@@ -4138,15 +4197,67 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             return 'no_answer';
           }
 
-          // If human was explicitly detected (via audio patterns), treat user hangup as not_interested
-          if (session.audioDetection?.humanDetected) {
-            console.log(`${LOG_PREFIX} Outcome '${outcome}' with human detected - marking as not_interested (likely user hangup)`);
+          // Check if we actually confirmed identity with the target prospect
+          const identityConfirmed = session.conversationState?.identityConfirmed === true;
+          
+          // If identity was never confirmed, this might be a gatekeeper interaction
+          // or early hangup - use no_answer to allow retry
+          if (!identityConfirmed) {
+            // Check if this looks like a gatekeeper screening
+            const userTexts = session.transcripts
+              .filter((t) => t.role === 'user')
+              .map((t) => t.text.toLowerCase());
+            
+            const gatekeeperIndicators = [
+              'who is calling',
+              'who is this',
+              'what is this regarding',
+              'what is this about',
+              'may i ask what this is about',
+              'before i connect',
+              'before i transfer',
+              'can you tell me',
+              'regarding what',
+              'what company',
+              'one moment',
+              'please hold',
+              'let me transfer',
+              'i\'ll transfer you',
+              'i\'ll connect you',
+            ];
+            
+            const isGatekeeperInteraction = userTexts.some(text => 
+              gatekeeperIndicators.some(indicator => text.includes(indicator))
+            );
+            
+            if (isGatekeeperInteraction) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with gatekeeper interaction (identity not confirmed) - marking as no_answer for retry`);
+              return 'no_answer';
+            }
+            
+            // Short call without identity confirmation - could be quick hangup
+            const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+            if (callDurationSeconds < 30) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' - short call (${callDurationSeconds}s) without identity confirmation - marking as no_answer`);
+              return 'no_answer';
+            }
+          }
+
+          // If human was explicitly detected (via audio patterns) AND identity was confirmed, treat user hangup as not_interested
+          if (session.audioDetection?.humanDetected && identityConfirmed) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with human detected and identity confirmed - marking as not_interested (likely user hangup)`);
             return 'not_interested';
           }
 
-          // If we have distinct user transcripts, also treat as not_interested
-          if (hasUserTranscripts) {
-            console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts - marking as not_interested (likely user hangup)`);
+          // If we have distinct user transcripts with identity confirmed, treat as not_interested
+          if (hasUserTranscripts && identityConfirmed) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts and identity confirmed - marking as not_interested (likely user hangup)`);
+            return 'not_interested';
+          }
+          
+          // If we have transcripts but no identity confirmation, check for explicit decline
+          if (hasUserTranscripts && hasExplicitDecline(session.transcripts)) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with explicit decline - marking as not_interested`);
             return 'not_interested';
           }
         }

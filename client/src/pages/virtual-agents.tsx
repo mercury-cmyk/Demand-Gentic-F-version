@@ -2801,9 +2801,10 @@ export default function VirtualAgentsPage() {
       void handlePlayPreviewVoice(previewOpeningMessage);
     } else if (speechSupported) {
       // No audio to play, start listening immediately
-      startListening();
+      // Use ref to avoid circular dependency (startListening defined later in file)
+      startListeningRef.current();
     }
-  }, [previewOpeningMessage, previewScenario, autoPlayVoice, previewVoice, toast, handlePlayPreviewVoice, speechSupported, startListening]);
+  }, [previewOpeningMessage, previewScenario, autoPlayVoice, previewVoice, toast, handlePlayPreviewVoice, speechSupported]);
 
   const handleResetPreview = () => {
     setSimulationStarted(false);

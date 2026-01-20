@@ -506,8 +506,11 @@ async function generateAccountMessagingBriefPayload(params: {
   campaignFingerprint: string;
   campaignIntent: CampaignIntent | null;
 }): Promise<AccountMessagingBriefPayload> {
+  // Prefer Gemini (Google AI) over OpenAI to avoid quota issues
+  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  
+  if (!geminiKey && !openaiKey) {
     return buildFallbackMessagingBrief(params);
   }
 
@@ -526,37 +529,66 @@ Return JSON only in this format:
   "confidence": 0.0
 }`);
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_ENGAGE_MODEL || "gpt-4o",
-      temperature: 0.2,
-      max_tokens: 700,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Account Intelligence:
+  const userPrompt = `Account Intelligence:
 ${JSON.stringify(params.intelligence, null, 2)}
 
 Campaign intent:
 ${JSON.stringify(params.campaignIntent || {}, null, 2)}
 
-Generate the Account Messaging Brief JSON now.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+Generate the Account Messaging Brief JSON now.`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    return normalizeMessagingBriefPayload(parsed, params);
-  } catch (error) {
-    console.error("[AccountMessagingBrief] AI generation failed:", error);
-    return buildFallbackMessagingBrief(params);
+  // Try Gemini first (preferred for cost and quota reasons)
+  if (geminiKey) {
+    try {
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ 
+        model: process.env.GEMINI_FLASH_MODEL || "gemini-2.0-flash",
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 700,
+          responseMimeType: "application/json",
+        },
+      });
+
+      const result = await model.generateContent([
+        { role: "user", parts: [{ text: systemPrompt + "\n\n" + userPrompt }] },
+      ].map(m => m.parts[0].text).join("\n"));
+
+      const content = result.response.text() || "{}";
+      const parsed = JSON.parse(content);
+      return normalizeMessagingBriefPayload(parsed, params);
+    } catch (geminiError) {
+      console.warn("[AccountMessagingBrief] Gemini generation failed, trying OpenAI:", geminiError);
+    }
   }
+
+  // Fallback to OpenAI
+  if (openaiKey) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: openaiKey });
+
+      const response = await openai.chat.completions.create({
+        model: process.env.DEMAND_ENGAGE_MODEL || "gpt-4o",
+        temperature: 0.2,
+        max_tokens: 700,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const content = response.choices[0]?.message?.content || "{}";
+      const parsed = JSON.parse(content);
+      return normalizeMessagingBriefPayload(parsed, params);
+    } catch (openaiError) {
+      console.error("[AccountMessagingBrief] OpenAI generation failed:", openaiError);
+    }
+  }
+
+  return buildFallbackMessagingBrief(params);
 }
 
 function normalizeAccountIntelligencePayload(
