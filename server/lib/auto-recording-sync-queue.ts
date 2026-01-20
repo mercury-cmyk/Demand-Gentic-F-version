@@ -1,11 +1,5 @@
+import { createQueue } from './queue';
 import { Queue } from 'bullmq';
-import Redis from 'ioredis';
-import { getRedisUrl, getRedisConnectionOptions } from './redis-config';
-
-const connection = new Redis(getRedisUrl(), {
-  ...getRedisConnectionOptions(),
-  maxRetriesPerRequest: null,
-});
 
 export interface AutoRecordingSyncJobData {
   leadId?: string;
@@ -17,22 +11,21 @@ export interface AutoRecordingSyncJobData {
   campaignId: string | null;
 }
 
-export const autoRecordingSyncQueue = new Queue<AutoRecordingSyncJobData>('auto-recording-sync', {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 5000,
-    },
-    removeOnComplete: {
-      age: 3600, // Keep completed jobs for 1 hour
-      count: 1000,
-    },
-    removeOnFail: {
-      age: 86400, // Keep failed jobs for 24 hours
-      count: 500,
-    },
+// Create queue using shared connection logic
+// This returns null if Redis is unavailable
+export const autoRecordingSyncQueue = createQueue<AutoRecordingSyncJobData>('auto-recording-sync', {
+  attempts: 3,
+  backoff: {
+    type: 'exponential',
+    delay: 5000,
+  },
+  removeOnComplete: {
+    age: 3600, // Keep completed jobs for 1 hour
+    count: 1000,
+  },
+  removeOnFail: {
+    age: 86400, // Keep failed jobs for 24 hours
+    count: 500,
   },
 });
 
@@ -43,6 +36,11 @@ export async function scheduleAutoRecordingSync(data: AutoRecordingSyncJobData):
   try {
     if (!data.leadId && !data.callAttemptId) {
       throw new Error("scheduleAutoRecordingSync requires leadId or callAttemptId");
+    }
+
+    if (!autoRecordingSyncQueue) {
+      console.warn('[AutoRecordingSync] Redis unavailable - skipping auto-recording sync schedule');
+      return;
     }
 
     const jobId = data.leadId
@@ -64,7 +62,8 @@ export async function scheduleAutoRecordingSync(data: AutoRecordingSyncJobData):
   } catch (error) {
     const target = data.leadId ? `lead ${data.leadId}` : `call attempt ${data.callAttemptId}`;
     console.error(`[AutoRecordingSync] Error scheduling job for ${target}:`, error);
-    throw error;
+    // Don't throw to prevent disrupting the call flow for a background task
+    // throw error; 
   }
 }
 
@@ -73,6 +72,8 @@ export async function scheduleAutoRecordingSync(data: AutoRecordingSyncJobData):
  */
 export async function cancelAutoRecordingSync(leadId: string): Promise<void> {
   try {
+    if (!autoRecordingSyncQueue) return;
+    
     const jobId = `auto-sync-${leadId}`;
     const job = await autoRecordingSyncQueue.getJob(jobId);
     if (job) {

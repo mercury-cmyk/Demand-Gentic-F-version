@@ -37,7 +37,7 @@ const defaultConfig: VertexAIConfig = {
   projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || "pivotalb2b-2026",
   location: process.env.VERTEX_AI_LOCATION || "us-central1",
   models: {
-    chat: process.env.VERTEX_CHAT_MODEL || "gemini-3-flash-preview",
+    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
     reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.0-flash-thinking-exp-01-21",
     embedding: process.env.VERTEX_EMBEDDING_MODEL || "text-embedding-004",
     multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.0-flash-001",

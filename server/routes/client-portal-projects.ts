@@ -8,8 +8,10 @@ import {
   clientDeliveryLinks,
   verificationCampaigns,
   clientCampaignAccess,
+  clientAccounts,
 } from '@shared/schema';
 import { z } from 'zod';
+import { notificationService } from '../services/notification-service';
 
 const router = Router();
 
@@ -77,6 +79,8 @@ const createProjectSchema = z.object({
   endDate: z.string().optional(),
   budgetAmount: z.number().optional(),
   budgetCurrency: z.string().length(3).optional(),
+  landingPageUrl: z.string().optional(), // Allow URL or empty string
+  projectFileUrl: z.string().optional(),
 });
 
 // Create new project
@@ -95,9 +99,23 @@ router.post('/', async (req: Request, res: Response) => {
         endDate: parsed.endDate,
         budgetAmount: parsed.budgetAmount?.toString(),
         budgetCurrency: parsed.budgetCurrency,
-        status: 'draft',
+        landingPageUrl: parsed.landingPageUrl,
+        projectFileUrl: parsed.projectFileUrl,
+        status: 'pending',
       })
       .returning();
+
+    // Trigger Notification
+    try {
+      const [account] = await db
+        .select({ name: clientAccounts.name })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, clientAccountId));
+        
+      await notificationService.notifyAdminOfNewProject(project, account?.name || 'Unknown Client');
+    } catch (err) {
+      console.error('[CLIENT PORTAL] Notification error:', err);
+    }
 
     res.status(201).json(project);
   } catch (error) {
@@ -171,7 +189,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 const updateProjectSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  status: z.enum(['draft', 'active', 'paused', 'completed', 'archived']).optional(),
+  status: z.enum(['draft', 'pending', 'active', 'paused', 'completed', 'archived']).optional(),
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   budgetAmount: z.number().optional(),

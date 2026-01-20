@@ -4697,6 +4697,7 @@ export const clientPortalOrderContactsRelations = relations(clientPortalOrderCon
 // Enums for enhanced client portal
 export const clientProjectStatusEnum = pgEnum('client_project_status', [
   'draft',
+  'pending',
   'active',
   'paused',
   'completed',
@@ -4777,6 +4778,8 @@ export const clientProjects = pgTable("client_projects", {
   monthlyRetainer: numeric("monthly_retainer", { precision: 10, scale: 2 }),
 
   // Metadata
+  landingPageUrl: text("landing_page_url"), // Optional landing page URL
+  projectFileUrl: text("project_file_url"), // Optional uploaded file URL
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

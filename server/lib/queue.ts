@@ -40,11 +40,14 @@ import { getRedisUrl, getRedisConnectionOptions, isRedisConfigured, setRedisAvai
  */
 const REDIS_URL = getRedisUrl();
 
+// Global connection state
+let redisConnection: IORedis | undefined;
+
 /**
- * Create Redis connection for BullMQ
- * In development without Redis, this will return undefined and BullMQ will fall back gracefully
+ * Initialize Redis connection asynchronously
+ * This ensures we know if Redis is available before successful startup
  */
-function createRedisConnection(): IORedis | undefined {
+async function initializeRedisConnection(): Promise<IORedis | undefined> {
   if (!isRedisConfigured() || !REDIS_URL) {
     console.log('[Queue] Redis not configured - background jobs disabled');
     setRedisAvailable(false);
@@ -56,10 +59,22 @@ function createRedisConnection(): IORedis | undefined {
     const maskedUrl = REDIS_URL.replace(/:[^@]*@/, ':***@');
     console.log(`[Queue] Attempting Redis connection to ${maskedUrl}`);
 
-    const connection = new IORedis(REDIS_URL, getRedisConnectionOptions());
+    const options = getRedisConnectionOptions();
+    // Force lazy connect to handle initial connection errors ourselves
+    options.lazyConnect = true;
+    // Fast fail in dev if cannot connect immediately
+    if (process.env.NODE_ENV !== 'production') {
+      options.connectTimeout = 3000;
+      options.retryStrategy = (times) => {
+        if (times > 2) return null; // Give up fast
+        return 500;
+      };
+    }
 
+    const connection = new IORedis(REDIS_URL, options);
+
+    // Set up error handlers BEFORE connecting
     connection.on('error', (err) => {
-      // Only log connection errors, not every error (rate limited in redis-config)
       if (err.message?.includes('ETIMEDOUT') || err.message?.includes('ECONNREFUSED')) {
         setRedisAvailable(false);
       } else {
@@ -81,12 +96,31 @@ function createRedisConnection(): IORedis | undefined {
       console.log('[Queue] Redis reconnecting...');
     });
 
-    return connection;
+    // Attempt initial connection
+    await connection.connect();
+    
+    // Check status
+    if (connection.status === 'ready' || connection.status === 'connect') {
+      return connection;
+    } else {
+      console.warn(`[Queue] Redis connection status: ${connection.status}, treating as unavailable`);
+      return undefined;
+    }
+
   } catch (error) {
-    console.error('[Queue] Failed to create Redis connection:', error);
+    console.warn(`[Queue] Failed to establish initial Redis connection: ${(error as Error).message}`);
+    console.warn('[Queue] Running without Redis (background jobs disabled)');
     setRedisAvailable(false);
     return undefined;
   }
+}
+
+// Perform top-level await for connection
+try {
+  redisConnection = await initializeRedisConnection();
+} catch (err) {
+  console.error('[Queue] Top-level Redis initialization failed:', err);
+  redisConnection = undefined;
 }
 
 /**
@@ -99,14 +133,13 @@ export function getQueueConnectionOptions(): { connection: IORedis; skipVersionC
 }
 
 /**
- * Shared Redis connection instance
- */
-const redisConnection = createRedisConnection();
-
-/**
  * Get Redis connection for BullMQ
  */
 export function getRedisConnection(): IORedis | undefined {
+  // If connection is closed or ended, don't return it
+  if (redisConnection && (redisConnection.status === 'end' || redisConnection.status === 'closed')) {
+    return undefined;
+  }
   return redisConnection;
 }
 

@@ -9,7 +9,7 @@
 
 import { db } from "./server/db";
 import { dialerCallAttempts, contacts, accounts, campaigns } from "./shared/schema";
-import { eq, and, desc, sql, or, gt, isNotNull } from "drizzle-orm";
+import { eq, and, desc, or, gt, isNotNull } from "drizzle-orm";
 
 async function findMisclassifiedCalls() {
   console.log("=== FINDING POTENTIALLY MISCLASSIFIED CALLS ===");
@@ -17,19 +17,9 @@ async function findMisclassifiedCalls() {
   console.log("");
 
   // Find calls that have no_answer disposition but show signs of engagement
+  // Use a raw query approach to avoid Drizzle ORM issues
   const suspiciousCalls = await db
-    .select({
-      id: dialerCallAttempts.id,
-      campaignId: dialerCallAttempts.campaignId,
-      contactId: dialerCallAttempts.contactId,
-      disposition: dialerCallAttempts.disposition,
-      connected: dialerCallAttempts.connected,
-      callDuration: dialerCallAttempts.callDurationSeconds,
-      recordingUrl: dialerCallAttempts.recordingUrl,
-      telnyxCallId: dialerCallAttempts.telnyxCallId,
-      createdAt: dialerCallAttempts.createdAt,
-      voicemailDetected: dialerCallAttempts.voicemailDetected,
-    })
+    .select()
     .from(dialerCallAttempts)
     .where(
       and(
@@ -46,6 +36,11 @@ async function findMisclassifiedCalls() {
 
   console.log("Found", suspiciousCalls.length, "potentially misclassified calls:");
   console.log("");
+
+  if (suspiciousCalls.length === 0) {
+    console.log("No potentially misclassified calls found.");
+    return [];
+  }
 
   // Group by campaign
   const byCampaign: Record<string, typeof suspiciousCalls> = {};
@@ -68,53 +63,54 @@ async function findMisclassifiedCalls() {
     likelihood: string;
   }> = [];
 
-  for (const [campaignId, calls] of Object.entries(byCampaign)) {
+  for (const campaignId of Object.keys(byCampaign)) {
+    const calls = byCampaign[campaignId];
+
     // Get campaign name
-    const [campaign] = await db
-      .select({ name: campaigns.name })
+    const campaignResult = await db
+      .select()
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);
+
+    const campaign = campaignResult[0];
 
     console.log("--- Campaign:", campaign?.name || campaignId, "---");
     console.log("Suspicious calls:", calls.length);
 
     for (const call of calls) {
       // Get contact info
-      const [contact] = await db
-        .select({
-          firstName: contacts.firstName,
-          lastName: contacts.lastName,
-          phone: contacts.phone,
-          accountId: contacts.accountId,
-        })
+      const contactResult = await db
+        .select()
         .from(contacts)
         .where(eq(contacts.id, call.contactId))
         .limit(1);
 
+      const contact = contactResult[0];
+
       let accountName = "";
       if (contact?.accountId) {
-        const [account] = await db
-          .select({ name: accounts.name })
+        const accountResult = await db
+          .select()
           .from(accounts)
           .where(eq(accounts.id, contact.accountId))
           .limit(1);
-        accountName = account?.name || "";
+        accountName = accountResult[0]?.name || "";
       }
 
       // Flag likelihood of being misclassified
       let likelihood = "LOW";
-      if (call.callDuration && call.callDuration > 60) likelihood = "HIGH";
-      else if (call.callDuration && call.callDuration > 30) likelihood = "MEDIUM";
+      if (call.callDurationSeconds && call.callDurationSeconds > 60) likelihood = "HIGH";
+      else if (call.callDurationSeconds && call.callDurationSeconds > 30) likelihood = "MEDIUM";
       else if (call.connected) likelihood = "MEDIUM";
 
       console.log("");
       console.log("  Call ID:", call.id.substring(0, 8));
       console.log("  Contact:", contact?.firstName, contact?.lastName);
       console.log("  Company:", accountName);
-      console.log("  Phone:", contact?.phone);
+      console.log("  Phone:", contact?.directPhone || contact?.mobilePhone);
       console.log("  Date:", call.createdAt);
-      console.log("  Duration:", call.callDuration, "seconds");
+      console.log("  Duration:", call.callDurationSeconds, "seconds");
       console.log("  Connected:", call.connected);
       console.log("  Has Recording:", !!call.recordingUrl);
       console.log("  Voicemail:", call.voicemailDetected);
@@ -126,9 +122,9 @@ async function findMisclassifiedCalls() {
         campaignName: campaign?.name || campaignId,
         contactName: `${contact?.firstName || ""} ${contact?.lastName || ""}`.trim(),
         company: accountName,
-        phone: contact?.phone || "",
+        phone: contact?.directPhone || contact?.mobilePhone || "",
         date: call.createdAt,
-        duration: call.callDuration,
+        duration: call.callDurationSeconds,
         connected: call.connected,
         hasRecording: !!call.recordingUrl,
         telnyxId: call.telnyxCallId,

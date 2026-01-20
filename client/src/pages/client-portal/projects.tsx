@@ -24,6 +24,9 @@ import {
   Calendar,
   ChevronRight,
   Loader2,
+  Upload,
+  Link as LinkIcon,
+  FileText
 } from 'lucide-react';
 
 interface Project {
@@ -36,6 +39,8 @@ interface Project {
   endDate: string | null;
   budgetAmount: string | null;
   budgetCurrency: string | null;
+  landingPageUrl: string | null;
+  projectFileUrl: string | null;
   createdAt: string;
   campaignCount: number;
   totalCost: number;
@@ -55,10 +60,14 @@ export default function ClientPortalProjects() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
     budgetAmount: '',
+    landingPageUrl: '',
+    projectFileUrl: '',
+    fileName: '', // For display only
   });
 
   const { data: projects, isLoading } = useQuery<Project[]>({
@@ -73,7 +82,13 @@ export default function ClientPortalProjects() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: { name: string; description?: string; budgetAmount?: number }) => {
+    mutationFn: async (data: { 
+      name: string; 
+      description?: string; 
+      budgetAmount?: number;
+      landingPageUrl?: string;
+      projectFileUrl?: string;
+    }) => {
       const res = await fetch('/api/client-portal/projects', {
         method: 'POST',
         headers: {
@@ -88,13 +103,66 @@ export default function ClientPortalProjects() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
       setShowCreateDialog(false);
-      setNewProject({ name: '', description: '', budgetAmount: '' });
+      setNewProject({ 
+        name: '', 
+        description: '', 
+        budgetAmount: '', 
+        landingPageUrl: '', 
+        projectFileUrl: '',
+        fileName: '' 
+      });
       toast({ title: 'Project created successfully' });
     },
     onError: () => {
       toast({ title: 'Failed to create project', variant: 'destructive' });
     },
   });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      // Get presigned URL
+      const res = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}` 
+        },
+        body: JSON.stringify({ 
+          filename: file.name, 
+          contentType: file.type,
+          folder: 'uploads' 
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to get upload URL');
+      const { url, key } = await res.json();
+
+      // Upload to S3
+      const uploadRes = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload file');
+
+      setNewProject(prev => ({ 
+        ...prev, 
+        projectFileUrl: key,
+        fileName: file.name
+      }));
+      toast({ title: 'File uploaded successfully' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Upload failed', variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleCreate = () => {
     if (!newProject.name.trim()) {
@@ -105,6 +173,8 @@ export default function ClientPortalProjects() {
       name: newProject.name,
       description: newProject.description || undefined,
       budgetAmount: newProject.budgetAmount ? parseFloat(newProject.budgetAmount) : undefined,
+      landingPageUrl: newProject.landingPageUrl || undefined,
+      projectFileUrl: newProject.projectFileUrl || undefined,
     });
   };
 
@@ -257,12 +327,63 @@ export default function ClientPortalProjects() {
                 placeholder="e.g., 50000"
               />
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="landingPage">Landing Page URL (Optional)</Label>
+              <div className="relative">
+                <LinkIcon className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="landingPage"
+                  value={newProject.landingPageUrl}
+                  onChange={(e) =>
+                    setNewProject({ ...newProject, landingPageUrl: e.target.value })
+                  }
+                  className="pl-9"
+                  placeholder="https://example.com/landing-page"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="projectFile">Project File</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-muted-foreground"
+                  onClick={() => document.getElementById('file-upload')?.click()}
+                  disabled={isUploading}
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4 mr-2" />
+                  )}
+                  {newProject.fileName || 'Upload separation file or target list...'}
+                </Button>
+                <Input
+                  id="file-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  accept=".csv,.xlsx,.xls,.pdf,.txt,.doc,.docx"
+                />
+              </div>
+              {newProject.fileName && (
+                <p className="text-xs text-green-600 flex items-center mt-1">
+                  <FileText className="h-3 w-3 mr-1" />
+                  File uploaded ready to submit
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Upload target accounts list, separation file, or other requirements.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
+            <Button onClick={handleCreate} disabled={createMutation.isPending || isUploading}>
               {createMutation.isPending && (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               )}

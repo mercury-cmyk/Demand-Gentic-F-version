@@ -21,6 +21,7 @@ import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./v
 import { db } from "../db";
 import { dialerCallAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 
 /**
  * Normalize phone number to E.164 format required by Telnyx
@@ -783,13 +784,21 @@ export class TelnyxAiBridge extends EventEmitter {
   }
 
   private async speakText(callControlId: string, text: string, voice?: string): Promise<void> {
-    // Prefer OpenAI TTS, fall back to Telnyx basic TTS
     if (!text || !text.trim()) {
       console.warn(`[TelnyxAiBridge] Skipping speakText because payload is empty for ${callControlId}`);
       return;
     }
+
+    // 1. Try Google Cloud TTS (Primary - Quality/Reliability + Google-native preference)
+    try {
+      await this.speakWithGoogle(callControlId, text, voice || "alloy");
+      return;
+    } catch (error) {
+       console.warn(`[TelnyxAiBridge] Google TTS failed, attempting OpenAI fallback...`, error);
+    }
+
+    // 2. Try OpenAI TTS (Secondary - if key exists)
     const openaiApiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    
     if (openaiApiKey) {
       try {
         await this.speakWithOpenAI(callControlId, text, voice || "alloy", openaiApiKey);
@@ -799,9 +808,67 @@ export class TelnyxAiBridge extends EventEmitter {
       }
     }
     
-    // Fallback to Telnyx basic TTS
-    console.log(`[TelnyxAiBridge] Using Telnyx basic TTS (no OpenAI key)`);
+    // 3. Fallback to Telnyx basic TTS (Last Resort)
+    console.log(`[TelnyxAiBridge] Using Telnyx basic TTS (fallback)`);
     await this.speakWithTelnyxTTS(callControlId, text, voice);
+  }
+
+  private async speakWithGoogle(callControlId: string, text: string, voice: string): Promise<void> {
+    const ttsClient = new TextToSpeechClient();
+    
+    // Map OpenAI/Gemini voice names to Google Cloud Journey/Studio voices
+    // alloy/shimmer/nova/aoede/kore -> Female Journey (F)
+    // echo/fable/onyx/puck/charon -> Male Journey (D)
+    const voiceLower = voice.toLowerCase();
+    
+    let googleVoice = "en-US-Journey-F"; // Default Female
+    // Male indicators found in OpenAI/Gemini voice names
+    if (["echo", "fable", "onyx", "ash", "charon", "fenrir", "puck"].some(v => voiceLower.includes(v))) {
+        googleVoice = "en-US-Journey-D"; // Male
+    }
+
+    console.log(`[TelnyxAiBridge] Generating natural speech with Google TTS (voice: ${googleVoice} from ${voice})`);
+    
+    const request = {
+      input: { text },
+      voice: { languageCode: "en-US", name: googleVoice },
+      audioConfig: { audioEncoding: "MP3" as const },
+    };
+
+    const [response] = await ttsClient.synthesizeSpeech(request);
+    
+    if (!response.audioContent) {
+        throw new Error("Google TTS produced no audio content");
+    }
+
+    // Google Cloud returns a Buffer or Uint8Array
+    const audioBuffer = Buffer.from(response.audioContent);
+    const audioId = `google-audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.mp3`;
+    const s3Key = `ai-call-audio/${audioId}`;
+    
+    await uploadToS3(s3Key, audioBuffer, "audio/mpeg");
+    
+    // valid for 5 mins
+    const audioUrl = await getPresignedDownloadUrl(s3Key, 300);
+    // Log simpler URL for cleanliness
+    console.log(`[TelnyxAiBridge] Playing Google TTS audio from S3: ${audioUrl.split("?")[0]}... (${audioBuffer.byteLength} bytes)`);
+
+    // Telnyx Playback
+    const telnyxResponse = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.telnyxApiKey}`,
+      },
+      body: JSON.stringify({
+        audio_url: audioUrl,
+      }),
+    });
+
+    if (!telnyxResponse.ok) {
+      const errorText = await telnyxResponse.text();
+      throw new Error(`Telnyx playback_start failed: ${telnyxResponse.status} - ${errorText}`);
+    }
   }
 
   private async speakWithOpenAI(callControlId: string, text: string, voice: string, apiKey: string): Promise<void> {

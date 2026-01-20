@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import {
   clientAccounts,
   clientUsers,
+  clientProjects,
   clientCampaignAccess,
   clientPortalOrders,
   clientPortalOrderContacts,
@@ -18,6 +19,7 @@ import {
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
+import { notificationService } from '../services/notification-service';
 
 // Import enhanced client portal route modules
 import clientPortalProjectsRouter from './client-portal-projects';
@@ -287,6 +289,18 @@ router.post('/orders', requireClientAuth, async (req, res) => {
       })
       .returning();
 
+    // Trigger Notification
+    try {
+        const [account] = await db
+          .select({ name: clientAccounts.name })
+          .from(clientAccounts)
+          .where(eq(clientAccounts.id, req.clientUser!.clientAccountId));
+          
+        await notificationService.notifyAdminOfNewOrder(order, account?.name || 'Unknown Client');
+    } catch (err) {
+        console.error('[CLIENT PORTAL] Order Notification error:', err);
+    }
+
     res.status(201).json(order);
   } catch (error) {
     console.error('[CLIENT PORTAL] Create order error:', error);
@@ -451,14 +465,64 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .innerJoin(verificationCampaigns, eq(clientCampaignAccess.campaignId, verificationCampaigns.id))
       .where(eq(clientCampaignAccess.clientAccountId, client.id));
 
+    const projects = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.clientAccountId, client.id))
+      .orderBy(desc(clientProjects.createdAt));
+
     res.json({
       ...client,
       users,
+      projects,
       campaigns: access.map(a => ({ ...a.access, campaign: a.campaign })),
     });
   } catch (error) {
     console.error('[CLIENT PORTAL] Get client error:', error);
     res.status(500).json({ message: "Failed to get client" });
+  }
+});
+
+router.patch('/admin/projects/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const { status, ratePerLead } = req.body;
+
+    // Validate Status
+    if (status && !['draft', 'pending', 'active', 'paused', 'completed', 'archived'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+    }
+
+    const [updated] = await db
+      .update(clientProjects)
+      .set({
+        status,
+        ratePerLead: ratePerLead ? ratePerLead.toString() : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, req.params.id))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    // Trigger Notification on Approval (Active)
+    if (status === 'active') {
+       try {
+         // Get contact email from account (projects stick to accounts, not specific users usually)
+         const email = await notificationService.getClientAccountPrimaryEmail(updated.clientAccountId);
+         if (email) {
+           await notificationService.notifyClientOfProjectApproval(updated, email);
+         }
+       } catch (err) {
+         console.error('[CLIENT PORTAL] Project Approval Notification error:', err);
+       }
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Update project error:', error);
+    res.status(500).json({ message: "Failed to update project" });
   }
 });
 
@@ -497,6 +561,17 @@ router.post('/admin/clients/:clientId/users', requireAuth, requireRole('admin', 
 
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password required" });
+    }
+
+    // Check for existing user with same email to avoid DB constraint error logging
+    const [existingUser] = await db
+      .select()
+      .from(clientUsers)
+      .where(eq(clientUsers.email, email.toLowerCase()))
+      .limit(1);
+
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -708,6 +783,13 @@ router.patch('/admin/orders/:id/approve', requireAuth, requireRole('admin', 'cam
       .where(eq(clientPortalOrders.id, req.params.id))
       .returning();
 
+    // Notify client of approval
+    try {
+      await notificationService.notifyClientOfOrderApproval(updated);
+    } catch (error) {
+      console.error('Failed to send order approval notification:', error);
+    }
+
     res.json(updated);
   } catch (error) {
     console.error('[CLIENT PORTAL] Approve order error:', error);
@@ -809,6 +891,13 @@ router.post('/admin/orders/:id/fulfill', requireAuth, requireRole('admin', 'camp
       })
       .where(eq(clientPortalOrders.id, order.id))
       .returning();
+
+    // Notify client of delivery
+    try {
+      await notificationService.notifyClientOfOrderDelivery(updated);
+    } catch (error) {
+      console.error('Failed to send order delivery notification:', error);
+    }
 
     res.json({
       order: updated,
