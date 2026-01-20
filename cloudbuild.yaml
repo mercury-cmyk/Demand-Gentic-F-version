@@ -44,6 +44,7 @@ steps:
       - '--vpc-egress'
       - 'private-ranges-only'
       - '--session-affinity'
+      - '--clear-env-vars'
       - '--set-env-vars'
       - 'NODE_ENV=production,OPENAI_SIP_MODEL=gpt-realtime,OPENAI_SIP_VOICE=marin,OPENAI_SIP_INSTRUCTIONS=You are a professional voice assistant.,OPENAI_SIP_SIDEBAND=true,OPENAI_SIP_SIDEBAND_UPDATE=true,OPENAI_SIP_LOG_EVENTS=false,TELNYX_FROM_NUMBER=+15593366940,TELNYX_TEXML_APP_ID=2870970047591876264,GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio,GOOGLE_CLOUD_PROJECT=pivotalb2b-2026'
       - '--set-secrets'
