@@ -1,35 +1,27 @@
-# DemandGentic.ai
+# DemandEarn-AI Project
 
-Full-stack application with Cloud Run deployment support.
+This project contains various scripts for managing AI campaigns and leads.
 
-## How to Run Locally in VS Code
+## How to run scripts
 
-### Backend (Cloud Run style)
-1. Open **Run and Debug** (Ctrl+Shift+D)
-2. Select **"Cloud Run: Run Locally"** and press F5
-3. Backend logs (console.log/console.error) appear in the **Output** panel → "Cloud Code - Cloud Run"
-4. Access the service at `http://localhost:8080`
-5. Test logging: `curl http://localhost:8080/api/health` — check VS Code Output for log line
+To run the TypeScript scripts in this project, you need to have Node.js and npm installed. The required dependencies are listed in `package.json`.
 
-### Alternative: Node Debug
-Select **"Node: Debug Server"** to run with full Node.js debugging (breakpoints, step-through).
-
-### Frontend Chrome Debugging (Optional)
-1. Start the backend first (Cloud Run or Node Debug)
-2. Select **"Chrome: Local Frontend (Console in VS Code)"**
-3. Browser `console.log` calls appear in VS Code **Debug Console**
-
-## Development
-
+First, install the dependencies:
 ```bash
-npm install       # Install dependencies
-npm run dev       # Run dev server (port 8080)
-npm run build     # Build for production
-npm run start     # Start production build
+npm install
 ```
 
-## Deployment
-
+Then, you can run a specific script using `npx tsx`:
 ```bash
-gcloud run deploy demandgentic-api --source . --region us-central1 --allow-unauthenticated
+npx tsx <script-name>.ts
+```
+
+For example, to find and create missed qualified leads, run:
+```bash
+npx tsx find-missed-qualified-leads.ts
+```
+
+To check for potentially qualified calls, run:
+```bash
+npx tsx check-qualified-calls.ts
 ```

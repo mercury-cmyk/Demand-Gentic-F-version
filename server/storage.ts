@@ -3553,7 +3553,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Only create leads for qualified dispositions
-    if (attempt.disposition !== 'qualified') {
+    if (attempt.disposition !== 'qualified' && attempt.disposition !== 'qualified_lead') {
       console.log('[LEAD CREATION] ⏭️ Skipping - disposition is not qualified:', attempt.disposition);
       return undefined;
     }

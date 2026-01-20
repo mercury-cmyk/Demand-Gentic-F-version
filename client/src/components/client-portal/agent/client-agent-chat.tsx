@@ -118,6 +118,12 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
       if (data.navigateTo && onNavigate) {
         onNavigate(data.navigateTo);
       }
+      
+      // Auto-speak if the response is from a voice interaction or generally if enabled
+      // For now, we'll speak it if it's less than 200 chars to avoid reading long reports
+      if (data.response && data.response.length < 300) {
+         speak(data.response);
+      }
 
       // Show toast for completed actions
       if (data.actions?.length > 0) {
@@ -222,9 +228,24 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
       list_invoices: 'Listed Invoices',
       get_analytics_summary: 'Analytics',
       request_campaign: 'Campaign Requested',
+      request_new_campaign: 'New Campaign Requested',
+      generate_email_template: 'Template Generated',
+      run_campaign_simulation: 'Simulation Run',
       submit_support_ticket: 'Ticket Created',
     };
     return actionLabels[action] || action;
+  };
+
+  // Text-to-Speech
+  const speak = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    // Try to select a good voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha'));
+    if (preferredVoice) utterance.voice = preferredVoice;
+    window.speechSynthesis.speak(utterance);
   };
 
   return (

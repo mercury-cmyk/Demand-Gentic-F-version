@@ -2,7 +2,7 @@ import type { Express } from "express";
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
-import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc } from "drizzle-orm";
+import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc } from "drizzle-orm";
 import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
@@ -57,6 +57,7 @@ import openaiWebrtcRouter from './routes/openai-webrtc';
 import telnyxWebrtcRouter from './routes/telnyx-webrtc';
 import virtualAgentsRouter from './routes/virtual-agents';
 import voiceProviderRouter from './routes/voice-provider-routes';
+import voiceInsightsRouter from './routes/voice-insights';
 import agentDefaultsRouter from './routes/agent-defaults';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
@@ -98,7 +99,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/s3";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, type InsertMailboxAccount } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -151,6 +152,7 @@ import { encryptJson, decryptJson } from "./lib/encryption";
 import type { FilterValues } from "@shared/filterConfig";
 import type { FilterGroup, FilterCondition } from "@shared/filter-types";
 import { getOAuthStateStore, hasRedisConfigured as hasRedisForOAuth } from "./lib/oauth-state-store";
+import type { Request as ExpressRequest, Response, NextFunction } from "express";
 
 // Configure multer for memory storage (file uploads)
 const upload = multer({
@@ -1375,7 +1377,11 @@ export function registerRoutes(app: Express) {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = base64URLEncode(crypto.createHash("sha256").update(codeVerifier).digest());
 
-    await oauthStateStore.set(state, { codeVerifier, userId });
+    const store = getOAuthStateStore();
+    if (!store) {
+      return res.status(503).json({ message: "OAuth state store not configured" });
+    }
+    await store.set(state, { codeVerifier, userId });
 
     // Redis TTL automatically handles cleanup of stale entries
 
@@ -2215,7 +2221,11 @@ export function registerRoutes(app: Express) {
       const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
       // Store state and code_verifier in Redis (persists across server restarts)
-      await oauthStateStore.set(state, { codeVerifier, userId: req.user!.userId });
+      const store1 = getOAuthStateStore();
+      if (!store1) {
+        return res.status(503).json({ message: "OAuth state store not configured" });
+      }
+      await store1.set(state, { codeVerifier, userId: req.user!.userId });
 
       // Redis TTL automatically handles cleanup of stale entries
 
@@ -2257,7 +2267,11 @@ export function registerRoutes(app: Express) {
       }
 
       // Verify state and retrieve code_verifier from Redis
-      const pending = await oauthStateStore.get(state);
+      const store2 = getOAuthStateStore();
+      if (!store2) {
+        return res.status(503).json({ message: "OAuth state store not configured" });
+      }
+      const pending = await store2.get(state);
       if (!pending) {
         console.error('[M365 OAuth] Invalid or expired state:', state);
         return res.send(`
@@ -2282,7 +2296,10 @@ export function registerRoutes(app: Express) {
       }
 
       // Clean up the pending authorization from Redis
-      await oauthStateStore.delete(state);
+      const store3 = getOAuthStateStore();
+      if (store3) {
+        await store3.delete(state);
+      }
 
       const { codeVerifier, userId } = pending;
 
@@ -2483,7 +2500,11 @@ export function registerRoutes(app: Express) {
       const codeVerifier = generateCodeVerifier();
       const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
-      await oauthStateStore.set(state, { codeVerifier, userId: req.user!.userId });
+      const store4 = getOAuthStateStore();
+      if (!store4) {
+        return res.status(503).json({ message: "OAuth state store not configured" });
+      }
+      await store4.set(state, { codeVerifier, userId: req.user!.userId });
 
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
@@ -2518,7 +2539,11 @@ export function registerRoutes(app: Express) {
         return res.redirect("/?error=missing_code_or_state");
       }
 
-      const pending = await oauthStateStore.get(state);
+      const store5 = getOAuthStateStore();
+      if (!store5) {
+        return res.status(503).json({ message: "OAuth state store not configured" });
+      }
+      const pending = await store5.get(state);
       if (!pending) {
         console.error("[Google OAuth] Invalid or expired state:", state);
         return res.send(`
@@ -2542,7 +2567,10 @@ export function registerRoutes(app: Express) {
         `);
       }
 
-      await oauthStateStore.delete(state);
+      const store6 = getOAuthStateStore();
+      if (store6) {
+        await store6.delete(state);
+      }
 
       const { codeVerifier, userId } = pending;
       const tokenData = await exchangeGoogleAuthorizationCodeForTokens(code, codeVerifier);
@@ -3282,7 +3310,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Check email suppression
-      if (await storage.isEmailSuppressed(validatedContact.email)) {
+      if (validatedContact.email && await storage.isEmailSuppressed(validatedContact.email)) {
         return res.status(400).json({ message: "Email is on suppression list" });
       }
 
@@ -3584,6 +3612,7 @@ export function registerRoutes(app: Express) {
       for (const contact of unlinkedContacts) {
         try {
           // Extract domain from email
+          if (!contact.email) continue;
           const emailDomain = contact.email.split('@')[1]?.toLowerCase();
           if (!emailDomain) continue;
 
@@ -4809,8 +4838,8 @@ export function registerRoutes(app: Express) {
       
       // Get all email events for this campaign
       const events = await db.select()
-        .from(schema.emailEvents)
-        .where(eq(schema.emailEvents.campaignId, campaignId));
+        .from(emailEvents)
+        .where(eq(emailEvents.campaignId, campaignId));
 
       // Calculate metrics by grouping events
       const metrics = {
@@ -4903,37 +4932,37 @@ export function registerRoutes(app: Express) {
       const offset = (pageNum - 1) * limitNum;
 
       let query = db.select({
-        id: schema.emailEvents.id,
-        recipient: schema.emailEvents.recipient,
-        type: schema.emailEvents.type,
-        bounceType: schema.emailEvents.bounceType,
-        createdAt: schema.emailEvents.createdAt,
-        contactId: schema.emailEvents.contactId,
-        messageId: schema.emailEvents.messageId,
+        id: emailEvents.id,
+        recipient: emailEvents.recipient,
+        type: emailEvents.type,
+        bounceType: emailEvents.bounceType,
+        createdAt: emailEvents.createdAt,
+        contactId: emailEvents.contactId,
+        messageId: emailEvents.messageId,
       })
-      .from(schema.emailEvents)
-      .where(eq(schema.emailEvents.campaignId, campaignId))
-      .orderBy(desc(schema.emailEvents.createdAt))
+      .from(emailEvents)
+      .where(eq(emailEvents.campaignId, campaignId))
+      .orderBy(desc(emailEvents.createdAt))
       .limit(limitNum)
       .offset(offset);
 
       // Optional filter by event type
       if (eventType && typeof eventType === 'string') {
         query = db.select({
-          id: schema.emailEvents.id,
-          recipient: schema.emailEvents.recipient,
-          type: schema.emailEvents.type,
-          bounceType: schema.emailEvents.bounceType,
-          createdAt: schema.emailEvents.createdAt,
-          contactId: schema.emailEvents.contactId,
-          messageId: schema.emailEvents.messageId,
+          id: emailEvents.id,
+          recipient: emailEvents.recipient,
+          type: emailEvents.type,
+          bounceType: emailEvents.bounceType,
+          createdAt: emailEvents.createdAt,
+          contactId: emailEvents.contactId,
+          messageId: emailEvents.messageId,
         })
-        .from(schema.emailEvents)
+        .from(emailEvents)
         .where(and(
-          eq(schema.emailEvents.campaignId, campaignId),
-          eq(schema.emailEvents.type, eventType)
+          eq(emailEvents.campaignId, campaignId),
+          eq(emailEvents.type, eventType)
         ))
-        .orderBy(desc(schema.emailEvents.createdAt))
+        .orderBy(desc(emailEvents.createdAt))
         .limit(limitNum)
         .offset(offset);
       }
@@ -4942,8 +4971,8 @@ export function registerRoutes(app: Express) {
 
       // Get total count
       const countResult = await db.select({ count: sql<number>`count(*)::int` })
-        .from(schema.emailEvents)
-        .where(eq(schema.emailEvents.campaignId, campaignId));
+        .from(emailEvents)
+        .where(eq(emailEvents.campaignId, campaignId));
       
       const totalCount = countResult[0]?.count || 0;
 
@@ -5230,8 +5259,6 @@ export function registerRoutes(app: Express) {
           audienceRefs: originalCampaign.audienceRefs,
           emailSubject: originalCampaign.emailSubject,
           emailHtmlContent: originalCampaign.emailHtmlContent,
-          emailPreheader: originalCampaign.emailPreheader,
-          senderProfileId: originalCampaign.senderProfileId,
 
           // Call Scripts & Qualification
           callScript: originalCampaign.callScript,
@@ -5285,7 +5312,6 @@ export function registerRoutes(app: Express) {
           // Owner
           ownerId: originalCampaign.ownerId,
           brandId: originalCampaign.brandId,
-          mode: originalCampaign.mode,
           throttlingConfig: originalCampaign.throttlingConfig,
           assignedTeams: originalCampaign.assignedTeams,
         })
@@ -8619,13 +8645,13 @@ export function registerRoutes(app: Express) {
       console.log(`[Mailgun Webhook] ${eventType} - ${recipient} - Campaign: ${campaignIdHeader}`);
 
       // Find contact by email
-      const contact = await db.select().from(schema.contacts)
-        .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
+      const contact = await db.select().from(contactsTable)
+        .where(eq(contactsTable.emailNormalized, recipient.toLowerCase()))
         .limit(1);
       const contactId = contact[0]?.id;
 
       // Store event in email_events table
-      await db.insert(schema.emailEvents).values({
+      await db.insert(emailEvents).values({
         messageId,
         campaignId: campaignIdHeader || null,
         contactId: contactId || null,
@@ -8649,19 +8675,16 @@ export function registerRoutes(app: Express) {
           eventType === 'complained' ? 'spam_complaint' : 'manual';
 
         // Check if already suppressed
-        const existing = await db.select().from(schema.emailSuppressionList)
-          .where(eq(schema.emailSuppressionList.emailNormalized, recipient.toLowerCase()))
+        const existing = await db.select().from(suppressionEmails)
+          .where(eq(suppressionEmails.email, recipient.toLowerCase()))
           .limit(1);
 
         if (existing.length === 0) {
           // Add to suppression list
-          await db.insert(schema.emailSuppressionList).values({
-            email: recipient,
-            emailNormalized: recipient.toLowerCase(),
+          await db.insert(suppressionEmails).values({
+            email: recipient.toLowerCase(),
             reason: suppressionReason,
-            campaignId: campaignIdHeader || null,
-            contactId: contactId || null,
-            metadata: { event: eventType, timestamp },
+            source: 'mailgun_webhook',
           });
 
           console.log(`[Mailgun Webhook] Added ${recipient} to suppression list (${suppressionReason})`);
@@ -8683,9 +8706,9 @@ export function registerRoutes(app: Express) {
               updateData.invalidatedAt = new Date();
             }
 
-            await db.update(schema.contacts)
+            await db.update(contactsTable)
               .set(updateData)
-              .where(eq(schema.contacts.id, contactId));
+              .where(eq(contactsTable.id, contactId));
           }
         }
       }
@@ -9594,7 +9617,7 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      await storage.deleteLead(req.params.id, req.user!.id);
+      await storage.deleteLead(req.params.id, req.user!.userId);
       res.json({ message: "Lead deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete lead" });
@@ -10369,12 +10392,12 @@ export function registerRoutes(app: Express) {
       // Create new contact
       const [newContact] = await db.insert(contacts)
         .values({
+          fullName: `${newContactFirstName} ${newContactLastName}`,
           firstName: newContactFirstName,
           lastName: newContactLastName,
-          fullName: `${newContactFirstName} ${newContactLastName}`,
           jobTitle: newContactJobTitle || null,
           email: newContactEmail,
-          phone: newContactPhone || null,
+          directPhone: newContactPhone || null,
           linkedinUrl: linkedinUrl || null,
           accountId: accountId,
         })
@@ -10509,7 +10532,7 @@ export function registerRoutes(app: Express) {
           'Lead ID': lead.id,
           'Contact Name': lead.contactName || '',
           'Contact Email': lead.contactEmail || '',
-          'Job Title': lead.contactTitle || '',
+          'Job Title': '',
           'Company': lead.accountName || '',
           'Industry': lead.accountIndustry || '',
           'Phone': lead.dialedNumber || '',
@@ -10700,7 +10723,7 @@ export function registerRoutes(app: Express) {
       let deletedCount = 0;
       for (const leadId of leadIds) {
         try {
-          await storage.deleteLead(leadId, req.user!.id);
+          await storage.deleteLead(leadId, req.user!.userId);
           deletedCount++;
         } catch (err) {
           console.error(`Failed to delete lead ${leadId}:`, err);
@@ -10709,11 +10732,11 @@ export function registerRoutes(app: Express) {
 
       // Log the bulk delete action
       await storage.createActivityLog({
-        userId: req.user!.userId,
-        action: 'bulk_delete_leads',
-        resource: 'leads',
-        resourceId: null,
-        details: {
+        entityType: 'lead',
+        entityId: leadIds[0],
+        eventType: 'bulk_delete',
+        createdBy: req.user!.userId,
+        payload: {
           leadIds,
           deletedCount,
         },
@@ -10778,11 +10801,11 @@ export function registerRoutes(app: Express) {
 
       // Log the bulk update action
       await storage.createActivityLog({
-        userId: req.user!.userId,
-        action: 'bulk_update_leads',
-        resource: 'leads',
-        resourceId: null,
-        details: {
+        entityType: 'lead',
+        entityId: leadIds[0],
+        eventType: 'bulk_update',
+        createdBy: req.user!.userId,
+        payload: {
           leadIds,
           updates,
           updatedCount,
@@ -11089,7 +11112,7 @@ export function registerRoutes(app: Express) {
         db.select({ id: campaigns.id, type: campaigns.type, status: campaigns.status }).from(campaigns),
         db.select({ count: sql<number>`count(*)::int` })
           .from(leads)
-          .where(sql`${leads.createdAt} >= ${thisMonth}`)
+          .where(and(sql`${leads.createdAt} >= ${thisMonth}`, isNull(leads.deletedAt)))
       ]);
 
       const activeCampaigns = allCampaigns.filter(c => c.status === 'active');
@@ -12577,6 +12600,43 @@ export function registerRoutes(app: Express) {
             callControlId: payload?.call_control_id,
             state: payload?.state,
           });
+
+          // Start transcription when call is answered
+          if (payload?.call_control_id) {
+            try {
+              const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+              if (TELNYX_API_KEY) {
+                const transcriptionResponse = await fetch(
+                  `https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/transcription_start`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${TELNYX_API_KEY}`,
+                    },
+                    body: JSON.stringify({
+                      transcription_engine: "A", // Google (supports interim_results and speaker diarization)
+                      language: "en",
+                      interim_results: true, // Send partial transcripts in real-time
+                      transcription_tracks: "both", // Transcribe both inbound and outbound
+                      enable_speaker_diarization: true, // Identify different speakers
+                    }),
+                  }
+                );
+
+                if (transcriptionResponse.ok) {
+                  console.log(`[Telnyx Webhook] Transcription started for call ${payload.call_control_id}`);
+                } else {
+                  const errorText = await transcriptionResponse.text();
+                  console.warn(
+                    `[Telnyx Webhook] Failed to start transcription: ${transcriptionResponse.status} - ${errorText}`
+                  );
+                }
+              }
+            } catch (error) {
+              console.warn(`[Telnyx Webhook] Error starting transcription:`, error);
+            }
+          }
           break;
 
         case 'call.hangup':
@@ -12784,7 +12844,7 @@ export function registerRoutes(app: Express) {
                 // Direct mode - prospect answered the call
                 console.log(`[Human-Call Webhook] *** DIRECT MODE: PROSPECT ANSWERED ***`);
                 if (callSession) {
-                  callSession.status = 'active';
+                  callSession.status = 'calling_prospect';
                   console.log(`[Human-Call Webhook] Direct call now active with prospect`);
                 }
               } else if (clientState.type === 'human_agent_prospect_leg' && clientState.agentCallId) {
@@ -12831,7 +12891,7 @@ export function registerRoutes(app: Express) {
           } else if (callSession && callSession.status === 'calling_prospect') {
             // Direct mode: prospect answered
             console.log(`[Human-Call Webhook] *** PROSPECT ANSWERED (Direct mode) ***`);
-            callSession.status = 'active';
+            callSession.status = 'bridged';
             console.log(`[Human-Call Webhook] Direct call now active with prospect`);
           } else {
             console.log(`[Human-Call Webhook] call.answered but no session or client_state - might be a different call type`);
@@ -13708,7 +13768,8 @@ export function registerRoutes(app: Express) {
   // Get account brief (from customFields)
   app.get("/api/accounts/:id/brief", requireAuth, async (req, res) => {
     try {
-      const account = await storage.getAccountById(req.params.id);
+      const accounts = await storage.getAccountsByIds([req.params.id]);
+      const account = accounts[0];
 
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
@@ -13755,7 +13816,8 @@ export function registerRoutes(app: Express) {
   app.get("/api/accounts/:id/insights", requireAuth, async (req, res) => {
     try {
       const accountId = req.params.id;
-      const account = await storage.getAccountById(accountId);
+      const accounts = await storage.getAccountsByIds([accountId]);
+      const account = accounts[0];
 
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
@@ -13765,8 +13827,8 @@ export function registerRoutes(app: Express) {
       const customFields = (account.customFields as any) || {};
       const accountBrief = customFields.aiAccountBrief || null;
 
-      // Calculate engagement score based on activities and opportunities
-      const { m365Activities, opportunities: opportunitiesTable } = await import('@shared/schema');
+      // Calculate engagement score based on activities
+      const { m365Activities } = await import('@shared/schema');
 
       // Get M365 email activities
       const emailActivities = await db
@@ -13803,14 +13865,21 @@ export function registerRoutes(app: Express) {
         engagementScore >= 40 ? 'medium' :
         'low';
 
-      // Generate AI recommendations if OpenAI is available
+      // Generate AI recommendations using Gemini
       let recommendations = null;
       let nextBestActions = null;
 
       try {
-        const openai = await import('./lib/' + 'openai').then(m => m.default);
+        const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY;
+        if (!geminiKey) {
+          console.warn('[AI Insights] Gemini API key not configured, skipping recommendations');
+        } else {
+          const { GoogleGenerativeAI } = await import("@google/generative-ai");
+          const genai = new GoogleGenerativeAI(geminiKey);
 
-        const recommendationPrompt = `Analyze this B2B account and provide strategic recommendations:
+          const recommendationPrompt = `You are a B2B sales strategist providing actionable recommendations based on account data and engagement patterns.
+
+Analyze this B2B account and provide strategic recommendations:
 
 Account: ${account.name}
 Industry: ${account.industryStandardized || 'Unknown'}
@@ -13831,26 +13900,19 @@ Provide JSON response with:
   "opportunities": ["..."]
 }`;
 
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a B2B sales strategist providing actionable recommendations based on account data and engagement patterns.'
-            },
-            {
-              role: 'user',
-              content: recommendationPrompt
+          const model = genai.getGenerativeModel({
+            model: "gemini-2.0-flash-exp",
+            generationConfig: {
+              temperature: 0.7,
+              responseMimeType: "application/json",
             }
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.7,
-        });
+          });
 
-        const aiResponse = JSON.parse(completion.choices[0]?.message?.content || '{}');
-        recommendations = aiResponse.recommendations || [];
-        nextBestActions = aiResponse.nextBestActions || [];
-
+          const result = await model.generateContent(recommendationPrompt);
+          const aiResponse = JSON.parse(result.response?.text() || '{}');
+          recommendations = aiResponse.recommendations || [];
+          nextBestActions = aiResponse.nextBestActions || [];
+        }
       } catch (aiError) {
         console.error('[AI Insights] Error generating recommendations:', aiError);
         // Continue without AI recommendations
@@ -13973,7 +14035,7 @@ Provide JSON response with:
   // ==================== ACTIVITY LOGS ====================
 
   // Get activity logs for an entity
-  app.get("/api/activity-log/:entityType/:entityId", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/activity-log/:entityType/:entityId", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const { entityType, entityId } = req.params;
       const limitParam = req.query.limit as string | undefined;
@@ -14007,7 +14069,7 @@ Provide JSON response with:
   });
 
   // Create activity log (for manual logging)
-  app.post("/api/activity-log", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/activity-log", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const validatedData = insertActivityLogSchema.omit({ createdBy: true }).parse(req.body);
 
@@ -14058,6 +14120,11 @@ Provide JSON response with:
   // ==================== VOICE PROVIDERS (Dynamic Voice Discovery + Preview) ====================
 
   app.use("/api/voice-providers", voiceProviderRouter);
+
+  // ==================== VOICE INSIGHTS (Campaign Call Analytics & Quality) ====================
+  // Centralized API for all voice call insights, dispositions, quality tracking
+  // Gemini Live exclusive - no OpenAI Realtime fallback
+  app.use("/api/voice-insights", voiceInsightsRouter);
 
   // ==================== AGENT DEFAULTS (Global Agent Configuration) ====================
 
@@ -14407,7 +14474,7 @@ Provide JSON response with:
   // ==================== ADMIN DATA MANAGEMENT ====================
 
   // Delete verification campaigns
-  app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(verificationCampaigns);
 
@@ -14415,7 +14482,7 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'campaign',
         entityId: req.user!.userId,
-        eventType: 'campaign_deleted',
+        eventType: 'disposition_saved',
         payload: { action: 'admin_delete_verification_campaigns', description: 'Admin deleted all verification campaigns' },
         createdBy: req.user!.userId,
       });
@@ -14428,14 +14495,14 @@ Provide JSON response with:
   });
 
   // Delete verification contacts
-  app.delete("/api/admin/data/verification_contacts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/verification_contacts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(verificationContacts);
 
       await storage.createActivityLog({
         entityType: 'contact',
         entityId: req.user!.userId,
-        eventType: 'contact_deleted',
+        eventType: 'disposition_saved',
         payload: { action: 'admin_delete_verification_contacts', description: 'Admin deleted all verification contacts' },
         createdBy: req.user!.userId,
       });
@@ -14448,14 +14515,14 @@ Provide JSON response with:
   });
 
   // Delete regular campaigns
-  app.delete("/api/admin/data/campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/campaigns", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(campaigns);
 
       await storage.createActivityLog({
         entityType: 'campaign',
         entityId: req.user!.userId,
-        eventType: 'campaign_deleted',
+        eventType: 'disposition_saved',
         payload: { action: 'admin_delete_campaigns', description: 'Admin deleted all regular campaigns' },
         createdBy: req.user!.userId,
       });
@@ -14468,15 +14535,15 @@ Provide JSON response with:
   });
 
   // Delete contacts
-  app.delete("/api/admin/data/contacts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/contacts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(contacts);
 
       await storage.createActivityLog({
         entityType: 'contact',
         entityId: req.user!.userId,
-        action: 'admin_delete_contacts',
-        description: `Admin deleted all contacts`,
+        eventType: 'disposition_saved',
+        payload: { action: 'admin_delete_contacts', description: 'Admin deleted all contacts' },
         createdBy: req.user!.userId,
       });
 

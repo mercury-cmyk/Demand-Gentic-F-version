@@ -78,31 +78,11 @@ try {
 
 console.log(`🚀 Starting ngrok tunnel on port ${PORT}...`);
 
-// Start ngrok
-// FORCE 127.0.0.1 to avoid IPv6 [::1] issues on Windows
-/*
-const ngrokProcess = spawn('ngrok', ['http', `127.0.0.1:${PORT}`, '--log=stdout'], {
-  stdio: ['ignore', 'pipe', 'pipe']
-});
-
-// Stream ngrok output to console for debugging
-ngrokProcess.stdout.on('data', (data) => {
-    // Filter out some noise, but keep connection errors
-    const msg = data.toString();
-    if (msg.includes('lvl=eror') || msg.includes('lvl=warn') || msg.includes('502 Bad Gateway') || msg.includes('503 Service Unavailable')) {
-        process.stderr.write(`[ngrok] ${msg}`);
-    }
-});
-ngrokProcess.stderr.on('data', (data) => {
-    process.stderr.write(`[ngrok err] ${data.toString()}`);
-});
-*/
-const ngrokProcess = { kill: () => {} };
-
 let tunnelUrl: string | null = null;
 let devProcess: any = null;
+let ngrokProcess: any = { kill: () => {} };
 
-// Helper to fetch tunnel URL
+// Helper to fetch tunnel URL from ngrok local API
 function getTunnels() : Promise<string | null> {
     return new Promise((resolve) => {
         const req = http.get('http://127.0.0.1:4040/api/tunnels', { timeout: 1000 }, (res) => {
@@ -122,7 +102,7 @@ function getTunnels() : Promise<string | null> {
                 }
             });
         });
-        
+
         req.on('error', () => resolve(null));
         req.on('timeout', () => {
             req.destroy();
@@ -130,6 +110,40 @@ function getTunnels() : Promise<string | null> {
         });
     });
 }
+
+// Check if ngrok is already running
+const checkExistingNgrok = async (): Promise<boolean> => {
+  try {
+    const url = await getTunnels();
+    return url !== null;
+  } catch {
+    return false;
+  }
+};
+
+// Start ngrok if not already running
+(async () => {
+  const existingTunnel = await checkExistingNgrok();
+  if (!existingTunnel) {
+    console.log('📡 Starting ngrok tunnel...');
+    ngrokProcess = spawn('ngrok', ['http', `127.0.0.1:${PORT}`, '--log=stdout'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    // Stream ngrok output to console for debugging
+    ngrokProcess.stdout?.on('data', (data: Buffer) => {
+      const msg = data.toString();
+      if (msg.includes('lvl=eror') || msg.includes('lvl=warn') || msg.includes('502 Bad Gateway') || msg.includes('503 Service Unavailable')) {
+        process.stderr.write(`[ngrok] ${msg}`);
+      }
+    });
+    ngrokProcess.stderr?.on('data', (data: Buffer) => {
+      process.stderr.write(`[ngrok err] ${data.toString()}`);
+    });
+  } else {
+    console.log('✅ Using existing ngrok tunnel');
+  }
+})();
 
 // Poll for tunnel
 let attempts = 0;

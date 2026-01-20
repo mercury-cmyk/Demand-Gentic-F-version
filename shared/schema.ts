@@ -4522,6 +4522,7 @@ export const clientPortalOrderStatusEnum = pgEnum('client_portal_order_status', 
 ]);
 
 // Client Accounts - Organization-level entity for clients
+// Client Accounts - For external clients to access their portal
 export const clientAccounts = pgTable("client_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -4530,6 +4531,20 @@ export const clientAccounts = pgTable("client_accounts", {
   companyName: text("company_name"),
   notes: text("notes"),
   isActive: boolean("is_active").default(true).notNull(),
+  // Visibility settings for the client dashboard
+  visibilitySettings: jsonb("visibility_settings").$type<{
+    showBilling: boolean;
+    showLeads: boolean;
+    showRecordings: boolean;
+    showProjectDetails: boolean;
+    allowedCampaignTypes: string[]; // Event, Webinar, etc.
+  }>().default({
+    showBilling: true,
+    showLeads: true,
+    showRecordings: false,
+    showProjectDetails: true,
+    allowedCampaignTypes: []
+  }),
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -6126,8 +6141,11 @@ export const aiConfidenceLevelEnum = pgEnum('ai_confidence_level', [
 ]);
 
 // Projects table - Groups multiple campaigns together
+// Projects table
 export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Link project to a specific client account
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
   name: text("name").notNull(),
   description: text("description"),
   clientName: text("client_name"),

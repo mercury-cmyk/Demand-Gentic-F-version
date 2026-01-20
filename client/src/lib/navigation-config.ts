@@ -240,6 +240,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: MANAGEMENT_ROLES,
           },
           {
+            id: 'clients',
+            title: 'Clients',
+            url: '/client-portal-admin',
+            roles: MANAGEMENT_ROLES,
+            description: 'Manage client accounts and portal access',
+          },
+          {
             id: 'email-sequences',
             title: 'Email Sequences',
             url: '/email-sequences',

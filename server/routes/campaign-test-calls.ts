@@ -13,7 +13,6 @@ import {
   type CampaignTestCall,
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
-import openai from "../lib/openai";
 import { env } from "../env";
 
 
@@ -516,14 +515,15 @@ router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireR
       }
     }
 
-    const hasOpenAI = !!(env.AI_INTEGRATIONS_OPENAI_API_KEY || env.OPENAI_API_KEY);
-    if (!hasOpenAI) {
+    // Use Gemini for analysis (fallback from OpenAI to avoid quota issues)
+    const geminiKey = env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY;
+    if (!geminiKey) {
       return res.status(503).json({
-        message: "OpenAI is not configured. Cannot perform transcript analysis."
+        message: "Gemini API key is not configured. Cannot perform transcript analysis."
       });
     }
 
-    const analysisPrompt = `Analyze this B2B cold call transcript and provide actionable feedback for improving the AI agent's performance.
+    const analysisPrompt = `You are an expert B2B sales call analyst. Analyze this B2B cold call transcript and provide actionable feedback for improving the AI agent's performance.
 
 AGENT SYSTEM PROMPT (for context):
 ${agentPrompt}
@@ -566,24 +566,58 @@ Analyze the call and return a JSON object with:
     }
   ],
   "summary": "<2-3 sentence summary of the analysis>"
-}`;
+}
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are an expert B2B sales call analyst. Provide specific, actionable feedback." },
-        { role: "user", content: analysisPrompt }
-      ],
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-    });
+Return ONLY valid JSON, no other text.`;
 
-    const analysisContent = response.choices[0]?.message?.content;
-    if (!analysisContent) {
-      throw new Error("No analysis response from AI");
+    // Use Gemini for analysis
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genai = new GoogleGenerativeAI(geminiKey);
+
+    // Try multiple Gemini models in order of preference
+    const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    let analysisContent: string | null = null;
+    let lastError: Error | null = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        console.log(`[Campaign Test Calls] Trying Gemini ${modelName} for analysis...`);
+        const model = genai.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            temperature: 0.3,
+            responseMimeType: "application/json",
+          }
+        });
+        const result = await model.generateContent(analysisPrompt);
+        analysisContent = result.response?.text() || null;
+        if (analysisContent) {
+          console.log(`[Campaign Test Calls] Gemini ${modelName} succeeded`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.log(`[Campaign Test Calls] Gemini ${modelName} failed: ${err.message}`);
+        continue;
+      }
     }
 
-    const analysis = JSON.parse(analysisContent);
+    if (!analysisContent) {
+      throw lastError || new Error("All Gemini models failed to analyze the call");
+    }
+
+    // Parse JSON - handle potential markdown code blocks
+    let jsonStr = analysisContent.trim();
+    if (jsonStr.startsWith("```json")) {
+      jsonStr = jsonStr.slice(7);
+    } else if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.slice(3);
+    }
+    if (jsonStr.endsWith("```")) {
+      jsonStr = jsonStr.slice(0, -3);
+    }
+
+    const analysis = JSON.parse(jsonStr.trim());
 
     // Update the test call record with analysis results
     await db.update(campaignTestCalls)

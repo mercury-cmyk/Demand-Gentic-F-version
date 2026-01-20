@@ -835,8 +835,8 @@ export class PowerDialerEngine {
         disposition: disposition as any, // Cast to enum type
       });
 
-      // Auto-create Lead for qualified dispositions
-      if (disposition === 'qualified') {
+      // Auto-create Lead for qualified dispositions (accept legacy + canonical)
+      if (disposition === 'qualified' || disposition === 'qualified_lead') {
         console.log(`[AutoDialer] Creating lead for qualified disposition: ${callAttemptId}`);
         const lead = await storage.createLeadFromCallAttempt(callAttemptId);
         if (lead) {

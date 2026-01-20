@@ -32,6 +32,8 @@ import {
   calculateNextEligibleDate,
   getSuppressionReason
 } from "../lib/contact-suppression";
+import { transcribeLeadCall } from "./telnyx-transcription";
+import { analyzeCall } from "./call-quality-analyzer";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -259,6 +261,7 @@ async function processQualifiedLead(
     .values({
       campaignId: callAttempt.campaignId,
       contactId: callAttempt.contactId,
+      callAttemptId: callAttempt.id, // CRITICAL: Link lead to call attempt for traceability
       contactName: contactName,
       contactEmail: contact?.email || undefined,
       companyName: contact?.companyName || undefined,
@@ -315,6 +318,26 @@ async function processQualifiedLead(
     priority: qcPriority
   });
   result.actions.push(`Added to QC queue${isShortDurationCall ? ' (high priority - short duration)' : ''}`);
+
+  // AUTO-TRIGGER: Transcription and Quality Analysis
+  // Run in background (non-blocking) to not delay disposition processing
+  if (result.leadId && callAttempt.recordingUrl) {
+    setImmediate(async () => {
+      try {
+        console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${result.leadId}`);
+        const transcribed = await transcribeLeadCall(result.leadId!);
+
+        if (transcribed) {
+          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${result.leadId}`);
+          await analyzeCall(result.leadId!);
+          console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${result.leadId}`);
+        }
+      } catch (err) {
+        console.error(`[DispositionEngine] Failed to auto-transcribe/analyze lead ${result.leadId}:`, err);
+      }
+    });
+    result.actions.push('Queued automatic transcription and quality analysis');
+  }
 
   result.queueState = 'qualified';
 }

@@ -1311,6 +1311,25 @@ export default function ClientPortalDashboard() {
               <Input placeholder="e.g., Q1 2026 IT Decision Makers" />
             </div>
             <div>
+              <Label>Campaign Type</Label>
+              <Select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="event_promotion">Event Promotion</SelectItem>
+                  <SelectItem value="webinar_registration">Webinar Registrations</SelectItem>
+                  <SelectItem value="executive_dinner">Executive Dinner</SelectItem>
+                  <SelectItem value="content_syndication">Content Syndication</SelectItem>
+                  <SelectItem value="lead_qualification">Lead Qualification</SelectItem>
+                  <SelectItem value="mql">Marketing Qualified Leads (MQL)</SelectItem>
+                  <SelectItem value="sql">Sales Qualified Leads (SQL)</SelectItem>
+                  <SelectItem value="appointment_generation">Appointment Generation</SelectItem>
+                  <SelectItem value="data_validation">Data Validation</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Target Audience</Label>
               <Textarea placeholder="Describe your ideal customer profile (job titles, industries, company size, geography, etc.)" rows={3} />
             </div>

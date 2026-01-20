@@ -1,3 +1,17 @@
+/**
+ * Telnyx AI Bridge - PSTN to Gemini Live Integration
+ *
+ * Routes all AI voice calls through Google Gemini Live exclusively.
+ * OpenAI Realtime is completely disabled.
+ *
+ * Architecture:
+ * - Telnyx handles PSTN connectivity (inbound/outbound calls)
+ * - Gemini Live handles AI conversation (voice understanding + generation)
+ * - Telnyx handles transcription via their direct API
+ *
+ * All calls flow: PSTN -> Telnyx -> Gemini Live -> Telnyx -> PSTN
+ */
+
 import { EventEmitter } from "events";
 import WebSocket from "ws";
 import { AiVoiceAgent, AiAgentSettings, CallContext, createAiVoiceAgent } from "./ai-voice-agent";
@@ -9,7 +23,7 @@ import { dialerCallAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 /**
- * Normalize phone number to E.164 format required by Telnyx/OpenAI
+ * Normalize phone number to E.164 format required by Telnyx
  * Examples:
  *   07542679573 -> +447542679573 (UK mobile)
  *   020 7123 4567 -> +442071234567 (UK landline)
@@ -299,13 +313,17 @@ export class TelnyxAiBridge extends EventEmitter {
     fromNumber: string,
     settings: AiAgentSettings,
     context: CallContext,
-    provider: string = 'openai_realtime'
+    _provider: string = 'gemini_live' // ENFORCED: All calls use Gemini Live
   ): Promise<{ callId: string; callControlId: string }> {
+    // ENFORCED: All AI voice calls route through Gemini Live
+    // OpenAI Realtime is completely disabled
+    const provider = 'gemini_live';
+
     // Format phone numbers to E.164 format (required by Telnyx)
     phoneNumber = this.formatToE164(phoneNumber);
     fromNumber = this.formatToE164(fromNumber);
-    
-    console.log(`[TelnyxAiBridge] Using Telnyx direct call with provider: ${provider}`);
+
+    console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
     
     const contactFullName = [context.contactFirstName, context.contactLastName]
       .filter(Boolean)
@@ -376,8 +394,9 @@ export class TelnyxAiBridge extends EventEmitter {
       webhookHost = webhookHost || 'localhost';
       const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
 
-      // Build comprehensive client_state for OpenAI Realtime Dialer
+      // Build comprehensive client_state for Gemini Live Dialer
       // This data will be passed through TeXML -> WebSocket connection
+      // NOTE: All calls use Gemini Live exclusively - no OpenAI Realtime
       // Use actual IDs from context if available, otherwise generate placeholders for test calls
       const callAttemptIdFromContext = (context as any).callAttemptId;
       const metadata = {
@@ -426,7 +445,7 @@ export class TelnyxAiBridge extends EventEmitter {
         virtual_agent_id: metadata.virtualAgentId || '',
         provider: provider,
         // Include agent configuration for WebSocket session
-        // system_prompt is built by OpenAI Realtime Dialer from agent_settings
+        // system_prompt is built by Gemini Live Dialer from agent_settings
         first_message: settings.scripts?.opening || '',
         voice: settings.persona?.voice || 'nova',
         agent_name: settings.persona?.name || '',
@@ -473,6 +492,10 @@ export class TelnyxAiBridge extends EventEmitter {
             StatusCallback: `https://${webhookHost}/api/webhooks/telnyx`,
             // Include client_state so AMD webhook receives call context
             ClientState: clientStateB64,
+            // Enable call recording (all calls recorded for transcription and QA)
+            Record: "true",
+            RecordingChannels: "dual",
+            RecordingFileFormat: "wav",
           }),
         });
         
@@ -507,6 +530,10 @@ export class TelnyxAiBridge extends EventEmitter {
             from: fromNumber,
             client_state: clientStateB64,
             webhook_url: `https://${webhookHost}/api/webhooks/telnyx`,
+            // Enable call recording (all calls recorded for transcription and QA)
+            record_type: "all",
+            recording_channels: "dual",
+            record_file_format: "wav",
             // Enable AMD (Answering Machine Detection)
             answering_machine_detection: "detect_words",
             answering_machine_detection_config: {
@@ -990,38 +1017,89 @@ export class TelnyxAiBridge extends EventEmitter {
   }
 
   private mapPhaseToDisposition(disposition: string, phase: string): string {
+    // Handle explicit AI agent dispositions first
+    if (disposition === "qualified_lead" || disposition === "qualified" || disposition === "handoff") {
+      return "qualified";
+    }
     if (disposition === "voicemail") return "voicemail";
-    if (disposition === "handoff") return "qualified";
-    if (phase === "pitch" || phase === "closing") return "connected";
+    if (disposition === "not_interested") return "not_interested";
+    if (disposition === "do_not_call" || disposition === "dnc_request") return "do_not_call";
+    if (disposition === "invalid_data" || disposition === "wrong_number") return "invalid_data";
+    if (disposition === "no_answer") return "no-answer";
+    // Handle callback requests as qualified (they showed interest!)
+    if (disposition === "callback_requested" || disposition === "callback") return "qualified";
+
+    // Fall back to phase-based inference
+    // BUG FIX: "closing" phase means prospect engaged through the full pitch - likely qualified
+    if (phase === "closing") return "qualified";
+    // BUG FIX: "pitch" phase means we connected and started pitching - don't mark as not_interested
+    // These should be retried or reviewed, not dismissed
+    if (phase === "pitch") return "needs_review";
     if (phase === "gatekeeper") return "no-answer";
-    if (phase === "objection_handling") return "not_interested";
-    return "connected";
+    // BUG FIX: "objection_handling" means prospect engaged enough to object - still potentially interested
+    // Don't auto-mark as not_interested; flag for review instead
+    if (phase === "objection_handling") return "needs_review";
+    // Default for unknown phases - flag for review rather than dismissing
+    return "needs_review";
   }
 
   // Map internal disposition to canonical disposition enum values
   // Canonical values: 'qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data'
   private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' {
     const d = disposition.toLowerCase();
-    if (d === "qualified" || d === "handoff" || d === "meeting_booked" || d === "callback_requested") {
+
+    // Qualified outcomes - create lead
+    if (d === "qualified" || d === "handoff" || d === "meeting_booked" || d === "callback_requested" || d === "callback") {
+      console.log(`[TelnyxAiBridge] ✅ Mapping "${disposition}" to qualified_lead`);
       return "qualified_lead";
     }
+
+    // Voicemail - schedule retry
     if (d === "voicemail" || d === "machine") {
       return "voicemail";
     }
+
+    // No answer scenarios - schedule retry
     if (d === "no-answer" || d === "no_answer" || d === "busy" || d === "failed") {
       return "no_answer";
     }
-    if (d === "not_interested" || d === "not interested" || d === "hung_up") {
+
+    // Explicit not interested - remove from campaign
+    if (d === "not_interested" || d === "not interested") {
       return "not_interested";
     }
+
+    // Do not call - add to global DNC
     if (d === "dnc" || d === "dnc_request" || d === "do_not_call") {
       return "do_not_call";
     }
+
+    // Invalid data - mark phone as invalid
     if (d === "wrong_number" || d === "invalid" || d === "invalid_data") {
       return "invalid_data";
     }
-    // Default: If connected but no clear outcome, treat as not_interested (most common AI call outcome)
-    return "not_interested";
+
+    // BUG FIX: "needs_review", "connected", "completed" - these are ambiguous outcomes
+    // where we connected but don't know the true disposition.
+    // IMPORTANT: Don't dismiss these as "not_interested"!
+    // Instead, treat as "no_answer" so they get scheduled for retry.
+    // This gives prospects another chance rather than permanently removing them.
+    if (d === "needs_review" || d === "connected" || d === "completed" || d === "pitch") {
+      console.log(`[TelnyxAiBridge] ⚠️ Ambiguous disposition "${disposition}" - treating as no_answer for retry`);
+      return "no_answer";
+    }
+
+    // BUG FIX: "hung_up" could mean they weren't interested OR the call dropped
+    // Treat as no_answer for retry rather than permanently dismissing
+    if (d === "hung_up") {
+      console.log(`[TelnyxAiBridge] ⚠️ Hung up disposition - treating as no_answer for retry`);
+      return "no_answer";
+    }
+
+    // Default: Unknown disposition - schedule retry rather than dismissing
+    // This is a CRITICAL change from the previous "not_interested" default
+    console.log(`[TelnyxAiBridge] ⚠️ Unknown disposition "${disposition}" - defaulting to no_answer for retry`);
+    return "no_answer";
   }
 
   private async handleHandoff(callId: string, reason: string, transferNumber: string): Promise<void> {

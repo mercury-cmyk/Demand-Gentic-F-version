@@ -33,6 +33,7 @@ export interface ApplyDispositionParams {
   contactId: string;
   accountId?: string;
   queueItemId?: string;
+  callAttemptId?: string; // Link to dialer_call_attempts for traceability
   transcript?: string;
   analysis?: any;
   dialedNumber?: string;
@@ -49,6 +50,7 @@ export async function applyDisposition(params: ApplyDispositionParams): Promise<
     contactId,
     accountId,
     queueItemId,
+    callAttemptId,
     transcript,
     analysis,
     dialedNumber
@@ -97,6 +99,7 @@ export async function applyDisposition(params: ApplyDispositionParams): Promise<
           campaignId,
           contactId,
           callSessionId,
+          callAttemptId,
           dispositionLabel,
           transcript,
           analysis,
@@ -160,45 +163,60 @@ export async function applyDisposition(params: ApplyDispositionParams): Promise<
 
 function inferSystemAction(dispositionLabel: string): string {
   const label = dispositionLabel.toLowerCase().replace(/\s+/g, '_');
-  
+
   // Qualified dispositions - create lead and send to QA
-  if (['meeting_booked', 'callback_requested', 'qualified', 'lead', 'qualified_lead', 'positive_intent', 'expressed_interest'].includes(label)) {
+  // BUG FIX: Added 'callback' to qualified list
+  if (['meeting_booked', 'callback_requested', 'callback', 'qualified', 'lead', 'qualified_lead', 'positive_intent', 'expressed_interest'].includes(label)) {
+    console.log(`[UnifiedDisposition] ✅ Qualified disposition detected: ${label}`);
     return 'converted_qualified';
   }
+
   // DNC - add to global suppression
   if (['dnc_request', 'dnc', 'do_not_call'].includes(label)) {
     return 'add_to_global_dnc';
   }
-  // Negative outcomes - remove from queue
-  if (['not_interested', 'completed', 'failed', 'gatekeeper_block', 'wrong_number', 'invalid_data', 'hung_up'].includes(label)) {
+
+  // Negative outcomes - remove from queue (ONLY explicit rejections)
+  // BUG FIX: Removed 'completed', 'hung_up' from this list - they're ambiguous
+  if (['not_interested', 'gatekeeper_block', 'wrong_number', 'invalid_data'].includes(label)) {
     return 'remove_from_campaign_queue';
   }
-  // Retry scenarios
-  if (['voicemail', 'no_answer', 'busy', 'no-answer'].includes(label)) {
+
+  // Retry scenarios - schedule for retry
+  // BUG FIX: Added 'needs_review', 'connected', 'completed', 'hung_up' to retry list
+  // These are ambiguous outcomes that deserve another attempt
+  if (['voicemail', 'no_answer', 'busy', 'no-answer', 'needs_review', 'connected', 'completed', 'hung_up', 'failed'].includes(label)) {
     return 'retry_after_delay';
   }
-  
-  return 'no_action';
+
+  // Default: schedule retry rather than doing nothing
+  console.log(`[UnifiedDisposition] ⚠️ Unknown disposition "${label}" - defaulting to retry`);
+  return 'retry_after_delay';
 }
 
 function getDefaultRetryDelay(dispositionLabel: string): number {
   const label = dispositionLabel.toLowerCase();
-  if (label.includes('voicemail')) return 7 * 24 * 60;
-  if (label.includes('no_answer') || label.includes('no-answer')) return 3 * 24 * 60;
-  if (label.includes('busy')) return 3 * 24 * 60;
-  return 24 * 60;
+  if (label.includes('voicemail')) return 7 * 24 * 60; // 7 days
+  if (label.includes('no_answer') || label.includes('no-answer')) return 3 * 24 * 60; // 3 days
+  if (label.includes('busy')) return 3 * 24 * 60; // 3 days
+  // BUG FIX: Add retry delays for ambiguous dispositions - retry sooner (1 day)
+  if (label.includes('needs_review') || label.includes('connected') || label.includes('hung_up')) return 24 * 60; // 1 day
+  return 24 * 60; // Default: 1 day
 }
 
 function getRetryPriority(dispositionLabel: string): number {
   const label = dispositionLabel.toLowerCase();
-  if (label.includes('voicemail')) return 0;
-  return 50;
+  if (label.includes('voicemail')) return 0; // Low priority
+  // BUG FIX: Higher priority for ambiguous dispositions - they had engagement!
+  if (label.includes('needs_review') || label.includes('connected') || label.includes('hung_up')) return 75; // High priority
+  return 50; // Normal priority
 }
 
 async function createQualifiedLead(params: {
   campaignId: string;
   contactId: string;
   callSessionId: string;
+  callAttemptId?: string;
   dispositionLabel: string;
   transcript?: string;
   analysis?: any;
@@ -245,6 +263,7 @@ async function createQualifiedLead(params: {
     await db.insert(leads).values({
       id: leadId,
       contactId: params.contactId,
+      callAttemptId: params.callAttemptId || undefined, // CRITICAL: Link to call attempt for traceability
       contactName,
       contactEmail: contact.email || '',
       campaignId: params.campaignId,
