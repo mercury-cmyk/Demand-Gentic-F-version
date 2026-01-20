@@ -3,17 +3,20 @@
  * 
  * Purpose:
  * - Query all calls from Jan 15 onward with specific statuses
- * - For each voicemail call that was marked as a lead, reanalyze using Gemini
+ * - For each voicemail call that was marked as a lead, reanalyze using DeepSeek
  * - Correct dispositions and update database
  * - Generate report of corrections made
  * 
  * Usage: npx ts-node batch-reanalyze-voicemail-calls.ts
  */
 
-import { db } from './server/db';
-import { dialerCallAttempts, leads } from './shared/schema';
+import { config } from 'dotenv';
+import { db } from './server/db.ts';
+import { dialerCallAttempts, leads } from './shared/schema.ts';
 import { eq, gte, and, inArray } from 'drizzle-orm';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
+
+config({ path: '.env' });
 
 interface VoicemailAnalysisResult {
   callAttemptId: string;
@@ -35,12 +38,15 @@ const JAN_15_2025 = new Date('2025-01-15T00:00:00Z');
 const BATCH_SIZE = 50;
 const ANALYSIS_RESULTS: VoicemailAnalysisResult[] = [];
 
-async function initializeGemini() {
-  const apiKey = process.env.GEMINI_API_KEY;
+async function initializeDeepSeek() {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY not configured');
+    throw new Error('DEEPSEEK_API_KEY not configured');
   }
-  return new GoogleGenerativeAI(apiKey);
+  return new OpenAI({
+    apiKey,
+    baseURL: 'https://api.deepseek.com/v1',
+  });
 }
 
 /**
@@ -87,10 +93,10 @@ async function checkForExistingLead(callAttemptId: string): Promise<string | nul
 }
 
 /**
- * Analyze call using Gemini to determine if it's actually a voicemail
+ * Analyze call using DeepSeek to determine if it's actually a voicemail
  */
-async function analyzeCallWithGemini(
-  gemini: GoogleGenerativeAI,
+async function analyzeCallWithDeepSeek(
+  deepseek: OpenAI,
   transcription: string | null,
   callDurationSeconds: number | null
 ): Promise<{ isVoicemail: boolean; confidence: number; reasoning: string }> {
@@ -123,23 +129,21 @@ Return a JSON response with:
 }`;
 
   try {
-    const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: `Analyze this call transcript and determine if it's a voicemail or qualified lead:\n\n${transcription}`
-        }]
-      }],
-      systemInstruction: systemPrompt,
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 200,
-        responseMimeType: 'application/json'
-      }
+    const result = await deepseek.chat.completions.create({
+      model: process.env.VOICEMAIL_REANALYSIS_DEEPSEEK_MODEL || 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: `Analyze this call transcript and determine if it's a voicemail or qualified lead:\n\n${transcription}`
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 200,
+      response_format: { type: 'json_object' },
     });
 
-    const responseText = result.response.text();
+    const responseText = result.choices[0]?.message?.content || '';
     const parsed = JSON.parse(responseText);
     
     return {
@@ -148,7 +152,7 @@ Return a JSON response with:
       reasoning: parsed.reasoning
     };
   } catch (error) {
-    console.error('❌ Gemini analysis failed:', error);
+    console.error('❌ DeepSeek analysis failed:', error);
     // Fallback: check transcription for voicemail keywords
     const lowerTranscript = transcription.toLowerCase();
     const voicemailKeywords = [
@@ -181,7 +185,7 @@ type CallQueryResult = {
 };
 
 async function processBatch(
-  gemini: GoogleGenerativeAI,
+  deepseek: OpenAI,
   calls: CallQueryResult[],
   batchNumber: number
 ) {
@@ -196,9 +200,9 @@ async function processBatch(
       // Check if a lead was already created for this call
       const leadId = await checkForExistingLead(call.id);
 
-      // Analyze call with Gemini (no transcription available in schema)
-      const analysis = await analyzeCallWithGemini(
-        gemini,
+      // Analyze call with DeepSeek (no transcription available in schema)
+      const analysis = await analyzeCallWithDeepSeek(
+        deepseek,
         null, // Transcription not stored in dialerCallAttempts
         call.callDurationSeconds
       );
@@ -371,7 +375,7 @@ async function main() {
   try {
     console.log('🚀 Starting batch reanalysis of voicemail calls...\n');
     
-    const gemini = await initializeGemini();
+    const deepseek = await initializeDeepSeek();
     const calls = await queryHistoricalCalls();
     
     if (calls.length === 0) {
@@ -383,7 +387,7 @@ async function main() {
     console.log(`📦 Will process in ${totalBatches} batch(es) of ${BATCH_SIZE} calls each\n`);
 
     for (let i = 1; i <= totalBatches; i++) {
-      await processBatch(gemini, calls, i);
+      await processBatch(deepseek, calls, i);
       
       // Add delay between batches
       if (i < totalBatches) {

@@ -3,8 +3,7 @@ import { z } from 'zod';
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load environment variables from .env.local, .env, etc.
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+// Load environment variables from .env (shared for local and production)
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const envSchema = z.object({
