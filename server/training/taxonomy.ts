@@ -190,6 +190,19 @@ export const VOICEMAIL_DETECTION_RULES = {
     "answering machine",
   ],
 
+  // AI Call Screening detection (Google Call Assist, etc.) - treat as voicemail
+  aiCallScreeningPhrases: [
+    "call assist by google",
+    "google call screen",
+    "i'm screening calls",
+    "screening calls for",
+    "recording this call for the person",
+    "before i try to connect you",
+    "can i ask what you're calling about",
+    "the person you're calling cannot take your call",
+    "cannot take your call right now",
+  ],
+
   // Mailbox full signals
   mailboxFullPhrases: ["mailbox is full", "cannot accept messages"],
 
@@ -201,6 +214,7 @@ export const VOICEMAIL_DETECTION_RULES = {
     ifVoicemailPersonal: "ENTER_VOICEMAIL_MODE",
     ifVoicemailGeneric: "HANDLE_GENERIC_VOICEMAIL",
     ifMailboxFull: "MARK_MAILBOX_FULL_END_CALL",
+    ifAiCallScreening: "ENTER_VOICEMAIL_MODE", // AI screening = no human answered
   },
 };
 

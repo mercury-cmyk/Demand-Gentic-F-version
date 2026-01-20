@@ -400,7 +400,7 @@ const DISPOSITION_FUNCTION_TOOLS: RealtimeToolDefinition[] = ([
         disposition: {
           type: "string",
           enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data"],
-          description: "The disposition code for this call. qualified_lead: STRICT CRITERIA - prospect must have (1) confirmed identity, (2) engaged in meaningful conversation for at least 30+ seconds, (3) expressed clear interest by asking questions about the offer/product OR explicitly requesting follow-up/materials. A simple 'yes' or 'sure' is NOT sufficient. not_interested: prospect declined, showed no engagement, or had a conversation but wasn't interested - USE THIS for any completed conversation where they didn't express interest. do_not_call: prospect explicitly asked to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: ONLY use when the phone number is CONFIRMED wrong (someone says 'wrong number', 'no one by that name here') or the line is disconnected/out of service - NEVER use for completed conversations where you spoke with someone."
+          description: "The disposition code for this call. qualified_lead: STRICT CRITERIA - prospect must have (1) confirmed identity, (2) engaged in meaningful conversation for at least 30+ seconds, (3) expressed clear interest by asking questions about the offer/product OR explicitly requesting follow-up/materials. A simple 'yes' or 'sure' is NOT sufficient. not_interested: prospect explicitly declined or engaged but showed no interest. If the only human response is a brief greeting or clarity check (e.g., 'hello', 'who's calling') with no engagement, use no_answer. do_not_call: prospect explicitly asked to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no meaningful human interaction (silence, repeated greetings, or short clarity-only responses). invalid_data: ONLY use when the phone number is CONFIRMED wrong (someone says 'wrong number', 'no one by that name here') or the line is disconnected/out of service - NEVER use for completed conversations where you spoke with someone."
         },
         confidence: {
           type: "number",
@@ -1977,6 +1977,11 @@ async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: st
         disposition = 'not_interested';
       }
 
+      if (disposition === 'not_interested' && isMinimalHumanInteraction(session.transcripts)) {
+        console.warn(`${LOG_PREFIX} ?? [Gemini] DISPOSITION CORRECTION: Minimal human interaction detected. Auto-correcting to no_answer.`);
+        disposition = 'no_answer';
+      }
+
       session.detectedDisposition = disposition;
       console.log(`${LOG_PREFIX} [Gemini] Disposition: ${args.disposition}${disposition !== args.disposition ? ` → ${disposition} (auto-corrected)` : ''} (duration: ${callDurationSeconds}s, reason: ${reason})`);
       return { success: true };
@@ -3264,6 +3269,11 @@ async function handleFunctionCall(session: OpenAIRealtimeSession, message: any):
             }
           }
 
+          if (finalDisposition === 'not_interested' && isMinimalHumanInteraction(session.transcripts)) {
+            console.warn(`${LOG_PREFIX} ?? Minimal human interaction detected. Auto-correcting to no_answer.`);
+            finalDisposition = 'no_answer';
+          }
+
           session.detectedDisposition = finalDisposition;
           if (finalDisposition !== disposition) {
             console.log(`${LOG_PREFIX} Disposition: ${disposition} → ${finalDisposition} (auto-corrected, confidence: ${confidence}, duration: ${callDurationSeconds}s)`);
@@ -4044,6 +4054,62 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   activeSessions.delete(callId);
 }
 
+  function hasExplicitDecline(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
+    const declinePatterns = [
+      /not interested/i,
+      /no thanks/i,
+      /no thank you/i,
+      /not now/i,
+      /not a good time/i,
+      /stop calling/i,
+      /do not call/i,
+      /don't call/i,
+      /remove me/i,
+      /take me off/i,
+      /no longer interested/i,
+    ];
+
+    return transcripts
+      .filter((t) => t.role === "user")
+      .some((t) => declinePatterns.some((pattern) => pattern.test(t.text)));
+  }
+
+  function isMinimalHumanInteraction(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
+    const userTexts = transcripts
+      .filter((t) => t.role === "user")
+      .map((t) => t.text.trim())
+      .filter(Boolean);
+
+    if (userTexts.length === 0) return true;
+    if (hasExplicitDecline(transcripts)) return false;
+
+    const minimalPatterns = [
+      /^hi\b/i,
+      /^hello\b/i,
+      /^hey\b/i,
+      /^yes\b/i,
+      /^yeah\b/i,
+      /^speaking\b/i,
+      /who('?s| is) calling\b/i,
+      /who('?s| is) this\b/i,
+      /who are you\b/i,
+      /who am i speaking with\b/i,
+    ];
+
+    const totalWords = userTexts.reduce((count, text) => {
+      const words = text.split(/\s+/).filter(Boolean);
+      return count + words.length;
+    }, 0);
+
+    const allMinimal = userTexts.every((text) =>
+      minimalPatterns.some((pattern) => pattern.test(text))
+    );
+
+    const allShort = userTexts.every((text) => text.split(/\s+/).filter(Boolean).length <= 3);
+
+    return (allMinimal && totalWords <= 8) || (allShort && totalWords <= 6 && userTexts.length <= 2);
+  }
+
   function mapOutcomeToDisposition(outcome: string, session?: OpenAIRealtimeSession): DispositionCode {
     switch (outcome) {
       case 'voicemail':
@@ -4063,6 +4129,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       default:
         // Handle "completed" and other outcomes where AI didn't set a disposition
         if (session) {
+          const hasUserTranscripts = session.transcripts.some(
+            (t: { role: string; text: string }) => t.role === "user" && t.text.trim().length > 0
+          );
+
+          if ((session.audioDetection?.humanDetected || hasUserTranscripts) && isMinimalHumanInteraction(session.transcripts)) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with minimal human interaction - marking as no_answer`);
+            return 'no_answer';
+          }
+
           // If human was explicitly detected (via audio patterns), treat user hangup as not_interested
           if (session.audioDetection?.humanDetected) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with human detected - marking as not_interested (likely user hangup)`);
@@ -4070,7 +4145,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           }
 
           // If we have distinct user transcripts, also treat as not_interested
-          if (session.transcripts.some((t: { role: string; text: string }) => t.role === 'user' && t.text.trim().length > 0)) {
+          if (hasUserTranscripts) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts - marking as not_interested (likely user hangup)`);
             return 'not_interested';
           }
@@ -5212,15 +5287,16 @@ Call this when you determine the call outcome. REQUIRED at end of every call.
 
 **Disposition codes:**
 - qualified_lead: All 3 criteria above met. Prospect engaged and interested.
-- not_interested: Prospect politely declined or showed no engagement. USE THIS for any completed conversation where they didn't express clear interest.
+- not_interested: Prospect explicitly declined or engaged but showed no interest. If only brief greetings or clarity questions with no engagement, use no_answer.
 - do_not_call: Prospect explicitly asked not to be called again
 - voicemail: Reached voicemail or answering machine
-- no_answer: Call connected but no meaningful human interaction
+- no_answer: Call connected but no meaningful human interaction (silence, repeated greetings, or short clarity-only responses)
 - callback_requested: Prospect asked to be called back
 - invalid_data: ONLY use when phone number is CONFIRMED wrong ("wrong number", "no one by that name") or line is disconnected/out of service. NEVER use for completed conversations.
 
 **CRITICAL: invalid_data vs not_interested**
-- If you had ANY conversation with a human (even brief), use not_interested or qualified_lead - NOT invalid_data
+- If you had a meaningful conversation with a human, use not_interested or qualified_lead - NOT invalid_data
+- If the only response was a brief greeting or "who is this?" with no engagement, use no_answer
 - invalid_data means the phone number itself is bad - not that the call didn't go well
 - When in doubt between invalid_data and not_interested, choose not_interested
 

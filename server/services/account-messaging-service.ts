@@ -399,8 +399,10 @@ function extractCampaignFingerprint(payload: any): string | null {
 async function generateAccountIntelligencePayload(
   signals: AccountSignalContext
 ): Promise<AccountIntelligencePayload> {
-  const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  // Use DeepSeek for account intelligence (cost-effective, no quota issues)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  if (!deepseekKey) {
+    console.warn("[AccountIntelligence] DeepSeek API key not configured, using fallback");
     return buildFallbackAccountIntelligence(signals);
   }
 
@@ -440,10 +442,13 @@ Return JSON only in this strict format:
 
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
+    const deepseek = new OpenAI({ 
+      apiKey: deepseekKey,
+      baseURL: 'https://api.deepseek.com/v1',
+    });
 
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_INTEL_MODEL || "gpt-4o",
+    const response = await deepseek.chat.completions.create({
+      model: "deepseek-chat",
       temperature: 0.2,
       max_tokens: 800,
       messages: [
@@ -489,7 +494,7 @@ Return the Account Intelligence JSON now.`,
     const parsed = JSON.parse(content);
     return normalizeAccountIntelligencePayload(parsed, signals.account.id);
   } catch (error) {
-    console.error("[AccountIntelligence] AI generation failed:", error);
+    console.error("[AccountIntelligence] DeepSeek generation failed:", error);
     return buildFallbackAccountIntelligence(signals);
   }
 }

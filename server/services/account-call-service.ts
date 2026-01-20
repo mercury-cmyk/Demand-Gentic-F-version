@@ -383,8 +383,10 @@ export async function generatePostCallFollowupEmail(params: {
   });
   const accountBrief = messagingBrief.payloadJson as AccountMessagingBriefPayload;
 
-  const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  // Use DeepSeek for post-call email generation (cost-effective, no quota issues)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  if (!deepseekKey) {
+    console.warn("[CallFollowupEmail] DeepSeek API key not configured, using fallback");
     return buildFallbackFollowupEmail(params, accountBrief);
   }
 
@@ -397,10 +399,13 @@ Return JSON only with: subject, preheader, html, text.
 
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
+    const deepseek = new OpenAI({ 
+      apiKey: deepseekKey,
+      baseURL: 'https://api.deepseek.com/v1',
+    });
 
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_ENGAGE_MODEL || "gpt-4o",
+    const response = await deepseek.chat.completions.create({
+      model: "deepseek-chat",
       temperature: 0.3,
       max_tokens: 1200,
       messages: [
@@ -431,7 +436,7 @@ Return JSON:
 
     return normalizeFollowupEmail(parsed, params, accountBrief);
   } catch (error) {
-    console.error("[CallFollowupEmail] AI generation failed:", error);
+    console.error("[CallFollowupEmail] DeepSeek generation failed:", error);
     return buildFallbackFollowupEmail(params, accountBrief);
   }
 }

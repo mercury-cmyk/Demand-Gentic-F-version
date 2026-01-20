@@ -1099,15 +1099,16 @@ export class TelnyxAiBridge extends EventEmitter {
     // Fall back to phase-based inference
     // BUG FIX: "closing" phase means prospect engaged through the full pitch - likely qualified
     if (phase === "closing") return "qualified";
-    // BUG FIX: "pitch" phase means we connected and started pitching - don't mark as not_interested
-    // These should be retried or reviewed, not dismissed
-    if (phase === "pitch") return "needs_review";
+    // FIX: "pitch" phase means we connected and pitched - if no disposition, likely not interested
+    // Previously returned "needs_review" which caused retry loops
+    if (phase === "pitch") return "not_interested";
     if (phase === "gatekeeper") return "no-answer";
-    // BUG FIX: "objection_handling" means prospect engaged enough to object - still potentially interested
-    // Don't auto-mark as not_interested; flag for review instead
-    if (phase === "objection_handling") return "needs_review";
-    // Default for unknown phases - flag for review rather than dismissing
-    return "needs_review";
+    // FIX: "objection_handling" means prospect objected - they're not interested
+    // Previously returned "needs_review" causing wasted retries
+    if (phase === "objection_handling") return "not_interested";
+    // Default for unknown phases with human contact - likely not interested
+    // This prevents wasted retry cycles on prospects who already declined
+    return "not_interested";
   }
 
   // Map internal disposition to canonical disposition enum values

@@ -492,8 +492,10 @@ async function processVoicemailOrNoAnswer(
   }
 
   // Calculate next attempt time (random within 3-7 day window)
-  const minDays = rules.retryWindowDaysMin;
-  const maxDays = rules.retryWindowDaysMax;
+  const baseMinDays = rules.retryWindowDaysMin;
+  const baseMaxDays = rules.retryWindowDaysMax;
+  const minDays = type === 'no_answer' ? Math.max(baseMinDays, 1) : baseMinDays;
+  const maxDays = Math.max(baseMaxDays, minDays);
   const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
   const nextAttemptAt = new Date();
   nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);

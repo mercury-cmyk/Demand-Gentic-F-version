@@ -128,7 +128,14 @@ export async function applyDisposition(params: ApplyDispositionParams): Promise<
         break;
 
       case 'retry_after_delay':
-        const delayMinutes = retryParams?.retry_delay_minutes || getDefaultRetryDelay(dispositionLabel);
+        let delayMinutes = retryParams?.retry_delay_minutes || getDefaultRetryDelay(dispositionLabel);
+        const normalizedLabel = dispositionLabel.toLowerCase();
+        if (
+          (normalizedLabel.includes('no_answer') || normalizedLabel.includes('no-answer')) &&
+          delayMinutes < 24 * 60
+        ) {
+          delayMinutes = 24 * 60;
+        }
         const priority = getRetryPriority(dispositionLabel);
         await scheduleRetry(queueItemId, campaignId, contactId, dispositionLabel, delayMinutes, priority);
         result.queueUpdated = true;
