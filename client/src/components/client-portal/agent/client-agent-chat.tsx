@@ -257,7 +257,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
           </div>
           <div>
             <CardTitle className="text-sm font-semibold">AI Assistant</CardTitle>
-            <p className="text-xs text-muted-foreground">Powered by GPT-4</p>
+            <p className="text-xs text-muted-foreground">Powered by Vertex AI</p>
           </div>
         </div>
         <div className="flex items-center gap-1">

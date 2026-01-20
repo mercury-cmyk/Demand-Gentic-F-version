@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, or, like, isNotNull, asc, inArray } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import {
@@ -16,6 +16,11 @@ import {
   insertClientUserSchema,
   insertClientCampaignAccessSchema,
   insertClientPortalOrderSchema,
+  // QA-approved leads system
+  leads,
+  campaigns,
+  contacts,
+  accounts,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -436,6 +441,440 @@ router.get('/leads', requireClientAuth, async (req, res) => {
   } catch (error) {
     console.error('[CLIENT PORTAL] Get all leads error:', error);
     res.status(500).json({ message: "Failed to fetch client leads" });
+  }
+});
+
+// ==================== QA-APPROVED LEADS (FROM CALL CAMPAIGNS) ====================
+
+// Get list of QA-approved leads from call campaigns the client has access to
+router.get('/qualified-leads', requireClientAuth, async (req, res) => {
+  try {
+    const {
+      campaignId,
+      page = '1',
+      pageSize = '50',
+      sortBy = 'approvedAt',
+      sortOrder = 'desc',
+      search
+    } = req.query;
+
+    const pageNum = parseInt(page as string);
+    const pageSizeNum = Math.min(parseInt(pageSize as string), 100); // Max 100 per page
+    const offset = (pageNum - 1) * pageSizeNum;
+
+    // Get campaigns the client has access to (regular campaigns with QA leads)
+    const accessList = await db
+      .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId)
+        )
+      );
+
+    const accessibleCampaignIds = accessList
+      .map(a => a.regularCampaignId)
+      .filter((id): id is string => id !== null);
+
+    if (accessibleCampaignIds.length === 0) {
+      return res.json({ leads: [], total: 0, page: pageNum, pageSize: pageSizeNum });
+    }
+
+    // Build where conditions
+    const whereConditions = [
+      inArray(leads.campaignId, accessibleCampaignIds),
+      eq(leads.qaStatus, 'approved')
+    ];
+
+    // Filter by specific campaign if provided
+    if (campaignId && typeof campaignId === 'string') {
+      whereConditions.push(eq(leads.campaignId, campaignId));
+    }
+
+    // Search filter (search contact name, email, or account name)
+    if (search && typeof search === 'string' && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereConditions.push(
+        or(
+          like(leads.contactName, searchTerm),
+          like(leads.contactEmail, searchTerm),
+          like(leads.accountName, searchTerm)
+        )!
+      );
+    }
+
+    // Get total count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(and(...whereConditions));
+
+    const total = countResult?.count || 0;
+
+    // Get leads with campaign info
+    const sortColumn = sortBy === 'approvedAt' ? leads.approvedAt :
+                      sortBy === 'aiScore' ? leads.aiScore :
+                      sortBy === 'callDuration' ? leads.callDuration :
+                      sortBy === 'accountName' ? leads.accountName :
+                      leads.approvedAt;
+
+    const orderDirection = sortOrder === 'asc' ? asc : desc;
+
+    const leadsData = await db
+      .select({
+        id: leads.id,
+        contactName: leads.contactName,
+        contactEmail: leads.contactEmail,
+        accountName: leads.accountName,
+        accountIndustry: leads.accountIndustry,
+        campaignId: leads.campaignId,
+        campaignName: campaigns.name,
+        aiScore: leads.aiScore,
+        callDuration: leads.callDuration,
+        hasRecording: sql<boolean>`${leads.recordingUrl} IS NOT NULL OR ${leads.recordingS3Key} IS NOT NULL`,
+        hasTranscript: sql<boolean>`${leads.transcript} IS NOT NULL AND ${leads.transcript} != ''`,
+        qaStatus: leads.qaStatus,
+        createdAt: leads.createdAt,
+        approvedAt: leads.approvedAt,
+      })
+      .from(leads)
+      .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(and(...whereConditions))
+      .orderBy(orderDirection(sortColumn))
+      .limit(pageSizeNum)
+      .offset(offset);
+
+    res.json({
+      leads: leadsData,
+      total,
+      page: pageNum,
+      pageSize: pageSizeNum,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get qualified leads error:', error);
+    res.status(500).json({ message: "Failed to fetch qualified leads" });
+  }
+});
+
+// Export leads as CSV - MUST be before :id route to avoid conflicts
+router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
+  try {
+    const { campaignId, includeTranscripts = 'false' } = req.query;
+
+    // Get campaigns the client has access to
+    const accessList = await db
+      .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId)
+        )
+      );
+
+    const accessibleCampaignIds = accessList
+      .map(a => a.regularCampaignId)
+      .filter((id): id is string => id !== null);
+
+    if (accessibleCampaignIds.length === 0) {
+      return res.status(404).json({ message: "No campaigns found" });
+    }
+
+    // Build where conditions
+    const whereConditions = [
+      inArray(leads.campaignId, accessibleCampaignIds),
+      eq(leads.qaStatus, 'approved')
+    ];
+
+    if (campaignId && typeof campaignId === 'string') {
+      whereConditions.push(eq(leads.campaignId, campaignId));
+    }
+
+    // Get all approved leads
+    const leadsData = await db
+      .select({
+        id: leads.id,
+        contactName: leads.contactName,
+        contactEmail: leads.contactEmail,
+        accountName: leads.accountName,
+        accountIndustry: leads.accountIndustry,
+        campaignName: campaigns.name,
+        aiScore: leads.aiScore,
+        callDuration: leads.callDuration,
+        dialedNumber: leads.dialedNumber,
+        transcript: leads.transcript,
+        approvedAt: leads.approvedAt,
+        createdAt: leads.createdAt,
+      })
+      .from(leads)
+      .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(and(...whereConditions))
+      .orderBy(desc(leads.approvedAt));
+
+    // Generate CSV
+    const includeTranscriptsFlag = includeTranscripts === 'true';
+
+    const headers = [
+      'Lead ID',
+      'Contact Name',
+      'Email',
+      'Account Name',
+      'Industry',
+      'Campaign',
+      'AI Score',
+      'Call Duration (seconds)',
+      'Phone Dialed',
+      'Approved Date',
+      'Created Date',
+    ];
+
+    if (includeTranscriptsFlag) {
+      headers.push('Transcript');
+    }
+
+    const rows = leadsData.map(lead => {
+      const row = [
+        lead.id,
+        lead.contactName || '',
+        lead.contactEmail || '',
+        lead.accountName || '',
+        lead.accountIndustry || '',
+        lead.campaignName || '',
+        lead.aiScore ? parseFloat(lead.aiScore).toFixed(1) : '',
+        lead.callDuration?.toString() || '',
+        lead.dialedNumber || '',
+        lead.approvedAt ? new Date(lead.approvedAt).toISOString() : '',
+        lead.createdAt ? new Date(lead.createdAt).toISOString() : '',
+      ];
+
+      if (includeTranscriptsFlag) {
+        // Escape transcript for CSV (replace newlines and quotes)
+        const transcript = (lead.transcript || '').replace(/"/g, '""').replace(/\n/g, ' ');
+        row.push(`"${transcript}"`);
+      }
+
+      return row;
+    });
+
+    // Build CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape cells that contain commas or quotes
+        const str = String(cell);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(','))
+    ].join('\n');
+
+    // Set response headers for CSV download
+    const filename = `qualified-leads-${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Export leads error:', error);
+    res.status(500).json({ message: "Failed to export leads" });
+  }
+});
+
+// Get campaigns with QA-approved leads (for filtering) - MUST be before :id route
+router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => {
+  try {
+    // Get regular campaigns the client has access to
+    const accessList = await db
+      .select({
+        campaignId: clientCampaignAccess.regularCampaignId,
+        campaign: campaigns,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId)
+        )
+      );
+
+    // Get lead counts per campaign
+    const campaignData = await Promise.all(
+      accessList.map(async ({ campaign }) => {
+        const [count] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(leads)
+          .where(
+            and(
+              eq(leads.campaignId, campaign.id),
+              eq(leads.qaStatus, 'approved')
+            )
+          );
+
+        return {
+          id: campaign.id,
+          name: campaign.name,
+          type: campaign.type,
+          status: campaign.status,
+          approvedLeadsCount: count?.count || 0,
+        };
+      })
+    );
+
+    res.json(campaignData);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get lead campaigns error:', error);
+    res.status(500).json({ message: "Failed to fetch campaigns" });
+  }
+});
+
+// Get single lead details (with transcript and recording if visibility allowed)
+router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get client account settings to check visibility
+    const [clientAccount] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.clientUser!.clientAccountId))
+      .limit(1);
+
+    const visibilitySettings = (clientAccount?.visibilitySettings || {}) as {
+      showRecordings?: boolean;
+      showLeads?: boolean;
+    };
+
+    // Check if leads visibility is enabled
+    if (visibilitySettings.showLeads === false) {
+      return res.status(403).json({ message: "Lead access not enabled for your account" });
+    }
+
+    // Get the lead with full details
+    const [lead] = await db
+      .select({
+        id: leads.id,
+        // Contact info
+        contactName: leads.contactName,
+        contactEmail: leads.contactEmail,
+        contactId: leads.contactId,
+        // Account info
+        accountName: leads.accountName,
+        accountIndustry: leads.accountIndustry,
+        // Campaign info
+        campaignId: leads.campaignId,
+        campaignName: campaigns.name,
+        // QA info
+        qaStatus: leads.qaStatus,
+        aiScore: leads.aiScore,
+        aiAnalysis: leads.aiAnalysis,
+        aiQualificationStatus: leads.aiQualificationStatus,
+        qaData: leads.qaData,
+        // Call details
+        callDuration: leads.callDuration,
+        dialedNumber: leads.dialedNumber,
+        recordingUrl: leads.recordingUrl,
+        recordingS3Key: leads.recordingS3Key,
+        transcript: leads.transcript,
+        structuredTranscript: leads.structuredTranscript,
+        // Timestamps
+        createdAt: leads.createdAt,
+        approvedAt: leads.approvedAt,
+        notes: leads.notes,
+      })
+      .from(leads)
+      .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(eq(leads.id, id))
+      .limit(1);
+
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Verify client has access to this lead's campaign
+    const [access] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
+          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!)
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ message: "You don't have access to this lead" });
+    }
+
+    // Get additional contact info if available
+    let contactInfo = null;
+    if (lead.contactId) {
+      const [contact] = await db
+        .select({
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          title: contacts.title,
+          email: contacts.email,
+          directPhone: contacts.directPhone,
+          mobilePhone: contacts.mobilePhone,
+          linkedinUrl: contacts.linkedinUrl,
+        })
+        .from(contacts)
+        .where(eq(contacts.id, lead.contactId))
+        .limit(1);
+      contactInfo = contact || null;
+    }
+
+    // Build response based on visibility settings
+    const response: Record<string, unknown> = {
+      id: lead.id,
+      // Contact info
+      contactName: lead.contactName || (contactInfo ? `${contactInfo.firstName} ${contactInfo.lastName}`.trim() : null),
+      contactEmail: lead.contactEmail || contactInfo?.email,
+      contactPhone: contactInfo?.directPhone || contactInfo?.mobilePhone,
+      contactTitle: contactInfo?.title,
+      linkedinUrl: contactInfo?.linkedinUrl,
+      // Account info
+      accountName: lead.accountName,
+      accountIndustry: lead.accountIndustry,
+      // Campaign info
+      campaignId: lead.campaignId,
+      campaignName: lead.campaignName,
+      // QA info
+      qaStatus: lead.qaStatus,
+      aiScore: lead.aiScore ? parseFloat(lead.aiScore) : null,
+      aiAnalysis: lead.aiAnalysis,
+      aiQualificationStatus: lead.aiQualificationStatus,
+      qaData: lead.qaData,
+      // Call details
+      callDuration: lead.callDuration,
+      dialedNumber: lead.dialedNumber,
+      // Timestamps
+      createdAt: lead.createdAt,
+      approvedAt: lead.approvedAt,
+      notes: lead.notes,
+    };
+
+    // Include recording URL only if visibility is enabled
+    if (visibilitySettings.showRecordings !== false) {
+      // Prefer S3 key (permanent storage) over Telnyx URL (may expire)
+      if (lead.recordingS3Key) {
+        // TODO: Generate signed S3 URL here
+        response.recordingUrl = lead.recordingUrl; // Fallback for now
+      } else {
+        response.recordingUrl = lead.recordingUrl;
+      }
+      response.transcript = lead.transcript;
+      response.structuredTranscript = lead.structuredTranscript;
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get lead detail error:', error);
+    res.status(500).json({ message: "Failed to fetch lead details" });
   }
 });
 

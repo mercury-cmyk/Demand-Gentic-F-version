@@ -27,10 +27,15 @@ import {
   Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown,
   FileDown, Eye, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
-  ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot,
+  ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
   Link as LinkIcon, Upload
 } from 'lucide-react';
 import { ClientAgentButton } from '@/components/client-portal/agent/client-agent-chat';
+import {
+  QualifiedLeadsTable,
+  LeadDetailModal,
+  ExportLeadsDialog,
+} from '@/components/client-portal/leads';
 
 interface ClientUser {
   id: string;
@@ -168,6 +173,29 @@ export default function ClientPortalDashboard() {
     projectFileUrl: '',
     fileName: '', // For display only
   });
+
+  // Lead drawer state
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [showLeadDrawer, setShowLeadDrawer] = useState(false);
+  
+  // Campaign filters
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState<string>('all');
+  const [campaignSearchQuery, setCampaignSearchQuery] = useState<string>('');
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<string>('all');
+  
+  // Lead filters
+  const [leadSearchQuery, setLeadSearchQuery] = useState<string>('');
+  const [leadStatusFilter, setLeadStatusFilter] = useState<string>('all');
+  
+  // Report view toggle
+  const [reportViewType, setReportViewType] = useState<'executive' | 'detailed'>('executive');
+  
+  // Sidebar state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Qualified Leads state
+  const [selectedQualifiedLeadId, setSelectedQualifiedLeadId] = useState<string | null>(null);
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('clientPortalUser');
@@ -414,6 +442,38 @@ export default function ClientPortalDashboard() {
   const pendingOrders = orders.filter(o => o.status === 'submitted' || o.status === 'approved').length;
   const totalSpent = costSummary?.totalCost || 0;
   const unpaidInvoices = invoices.filter(i => i.status !== 'paid').reduce((sum, i) => sum + i.totalAmount - i.amountPaid, 0);
+  
+  // MTD Metrics (Mock - would calculate from actual data)
+  const leadsDeliveredMTD = Math.floor(totalLeadsDelivered * 0.3); // Mock: 30% delivered this month
+  const acceptanceRate = totalLeadsDelivered > 0 ? Math.round((totalLeadsDelivered / totalEligible) * 100) : 0;
+  const averageCPL = totalLeadsDelivered > 0 ? Math.round(totalSpent / totalLeadsDelivered) : 0;
+  
+  // Next invoice date (Mock - first day of next month)
+  const nextInvoiceDate = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
+  
+  // Filter campaigns
+  // Filter campaigns
+  const filteredCampaigns = campaigns.filter(campaign => {
+    const matchesStatus = campaignStatusFilter === 'all' || campaign.status === campaignStatusFilter;
+    const matchesSearch = !campaignSearchQuery || 
+      campaign.name.toLowerCase().includes(campaignSearchQuery.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
+  
+  // Filter projects (campaign requests)
+  const filteredProjects = projects.filter(project => {
+    const matchesSearch = !campaignSearchQuery || 
+      project.name.toLowerCase().includes(campaignSearchQuery.toLowerCase()) ||
+      project.description?.toLowerCase().includes(campaignSearchQuery.toLowerCase());
+    return matchesSearch;
+  });
+  
+  // Filter leads
+  const filteredLeads = leads.filter(lead => {
+    const matchesSearch = !leadSearchQuery || 
+      `${lead.firstName} ${lead.lastName} ${lead.company} ${lead.email}`.toLowerCase().includes(leadSearchQuery.toLowerCase());
+    return matchesSearch;
+  });
 
   // Mock data for charts (will be replaced with real data)
   const deliveryTrendData = [
@@ -440,91 +500,120 @@ export default function ClientPortalDashboard() {
   }
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'campaigns', label: 'Campaigns & Orders', icon: Target },
-    { id: 'leads', label: 'Leads', icon: UserCheck },
-    { id: 'reports', label: 'Reports', icon: BarChart3 },
-    { id: 'billing', label: 'Billing', icon: CreditCard },
-    { id: 'support', label: 'Support', icon: Headphones },
+    { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
+    { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
+    { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
+    { id: 'reports', label: 'Reports', icon: BarChart3, color: 'from-orange-500 to-amber-500' },
+    { id: 'billing', label: 'Invoices', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
+    { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
-      {/* Header */}
-      <header className="bg-white dark:bg-slate-900 border-b sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="h-16 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center">
-                  <Zap className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <h1 className="font-bold text-lg leading-none">Client Portal</h1>
-                  <p className="text-xs text-muted-foreground">{user.clientAccountName}</p>
-                </div>
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-900">
+      {/* Enterprise Sidebar */}
+      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300 ease-in-out fixed h-full z-50`}>
+        {/* Workspace Header */}
+        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+          <div className="flex items-center justify-between">
+            <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg">
+                <Zap className="h-5 w-5 text-white" />
               </div>
+              {!sidebarCollapsed && (
+                <div className="flex-1 min-w-0">
+                  <h1 className="font-bold text-sm leading-none truncate">Client Portal</h1>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{user.clientAccountName}</p>
+                </div>
+              )}
             </div>
-
-            <nav className="hidden md:flex items-center gap-1">
-              {navItems.map((item) => (
-                <Button
-                  key={item.id}
-                  variant={activeTab === item.id ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setActiveTab(item.id)}
-                  className="gap-2"
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </Button>
-              ))}
-            </nav>
-
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full" />
+            {!sidebarCollapsed && (
+              <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(true)} className="h-8 w-8">
+                <ChevronDown className="h-4 w-4 rotate-90" />
               </Button>
-              <Separator orientation="vertical" className="h-6" />
-              <div className="flex items-center gap-2">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                    {user.firstName?.[0]}{user.lastName?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="hidden sm:block">
-                  <p className="text-sm font-medium leading-none">{user.firstName} {user.lastName}</p>
-                  <p className="text-xs text-muted-foreground">{user.email}</p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={handleLogout}>
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            )}
           </div>
+          {sidebarCollapsed && (
+            <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(false)} className="w-full mt-2 h-8">
+              <ChevronDown className="h-4 w-4 -rotate-90" />
+            </Button>
+          )}
         </div>
 
-        {/* Mobile Nav */}
-        <div className="md:hidden border-t overflow-x-auto">
-          <div className="flex px-4 py-2 gap-1">
-            {navItems.map((item) => (
-              <Button
-                key={item.id}
-                variant={activeTab === item.id ? 'secondary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveTab(item.id)}
-                className="gap-1 shrink-0"
-              >
-                <item.icon className="h-4 w-4" />
-                <span className="text-xs">{item.label}</span>
-              </Button>
-            ))}
-          </div>
-        </div>
-      </header>
+        {/* Navigation */}
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative ${
+                activeTab === item.id
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+              }`}
+            >
+              {activeTab === item.id && (
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 rounded-r-full" />
+              )}
+              <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                activeTab === item.id ? `bg-gradient-to-br ${item.color}` : 'bg-slate-100 dark:bg-slate-700'
+              }`}>
+                <item.icon className={`h-4 w-4 ${activeTab === item.id ? 'text-white' : 'text-slate-600 dark:text-slate-400'}`} />
+              </div>
+              {!sidebarCollapsed && (
+                <span className="text-sm font-medium truncate">{item.label}</span>
+              )}
+            </button>
+          ))}
+        </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Pinned CTA - Talk to Agent */}
+        <div className="p-3 border-t border-slate-200 dark:border-slate-700">
+          <Button 
+            className={`w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white shadow-lg ${
+              sidebarCollapsed ? 'px-0' : 'gap-2'
+            }`}
+            onClick={() => {/* Open agent dialog */}}
+          >
+            <Bot className="h-4 w-4" />
+            {!sidebarCollapsed && <span>Talk to Agent</span>}
+          </Button>
+          {!sidebarCollapsed && (
+            <p className="text-xs text-center text-muted-foreground mt-2">Powered by Vertex AI</p>
+          )}
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className={`flex-1 flex flex-col ${sidebarCollapsed ? 'ml-20' : 'ml-64'} transition-all duration-300`}>
+        {/* Top Header Bar */}
+        <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 h-16 flex items-center px-6 sticky top-0 z-40">
+          <div className="flex-1 flex items-center gap-4">
+            <h2 className="text-lg font-semibold">{navItems.find(i => i.id === activeTab)?.label}</h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="h-5 w-5" />
+              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full" />
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                  {user.firstName?.[0]}{user.lastName?.[0]}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-medium leading-none">{user.firstName} {user.lastName}</p>
+                <p className="text-xs text-muted-foreground">{user.email}</p>
+              </div>
+              <Button variant="ghost" size="icon" onClick={handleLogout}>
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-6">
         {/* ==================== DASHBOARD TAB ==================== */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
@@ -548,79 +637,184 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="hover:shadow-md transition-shadow">
+            {/* Enterprise KPI Tiles */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Leads Delivered MTD */}
+              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-green-500">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Active Campaigns</p>
-                      <p className="text-3xl font-bold mt-1">{activeCampaigns}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {campaigns.length} total campaigns
-                      </p>
-                    </div>
-                    <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <Target className="h-5 w-5 text-blue-600" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="hover:shadow-md transition-shadow">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Leads Delivered</p>
-                      <p className="text-3xl font-bold mt-1">{totalLeadsDelivered.toLocaleString()}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <ArrowUpRight className="h-3 w-3 text-green-500" />
-                        <span className="text-xs text-green-600">+12% this month</span>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <UserCheck className="h-4 w-4 text-green-600" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Leads MTD</p>
+                      </div>
+                      <p className="text-3xl font-bold text-foreground">{leadsDeliveredMTD.toLocaleString()}</p>
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30">
+                          <ArrowUpRight className="h-3 w-3 text-green-600" />
+                          <span className="text-xs font-semibold text-green-700 dark:text-green-500">+{Math.round((leadsDeliveredMTD / Math.max(totalLeadsDelivered - leadsDeliveredMTD, 1)) * 100)}%</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">vs last month</span>
                       </div>
                     </div>
-                    <div className="h-10 w-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                      <UserCheck className="h-5 w-5 text-green-600" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Acceptance Rate */}
+              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-blue-500">
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Target className="h-4 w-4 text-blue-600" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Accept Rate</p>
+                      </div>
+                      <p className="text-3xl font-bold text-foreground">{acceptanceRate}%</p>
+                      <div className="mt-2">
+                        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-500"
+                            style={{ width: `${acceptanceRate}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">Industry avg: 78%</p>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="hover:shadow-md transition-shadow">
+              {/* CPL */}
+              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-purple-500">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending Orders</p>
-                      <p className="text-3xl font-bold mt-1">{pendingOrders}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {orders.length} total orders
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <DollarSign className="h-4 w-4 text-purple-600" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Avg CPL</p>
+                      </div>
+                      <p className="text-3xl font-bold text-foreground">{formatCurrency(averageCPL)}</p>
+                      <div className="flex items-center gap-1 mt-2">
+                        <span className="text-xs text-muted-foreground">vs</span>
+                        <span className="text-xs font-semibold text-muted-foreground line-through">$65.00</span>
+                        <span className="text-xs text-green-600 font-semibold">23% lower</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Active Campaigns */}
+              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-indigo-500">
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Package className="h-4 w-4 text-indigo-600" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active</p>
+                      </div>
+                      <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {campaigns.length} total • {pendingOrders} pending
                       </p>
                     </div>
-                    <div className="h-10 w-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <Package className="h-5 w-5 text-amber-600" />
-                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="hover:shadow-md transition-shadow">
+              {/* Next Invoice */}
+              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-amber-500">
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Spent</p>
-                      <p className="text-3xl font-bold mt-1">{formatCurrency(totalSpent)}</p>
-                      {unpaidInvoices > 0 && (
-                        <p className="text-xs text-amber-600 mt-1">
-                          {formatCurrency(unpaidInvoices)} pending
-                        </p>
-                      )}
-                    </div>
-                    <div className="h-10 w-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <DollarSign className="h-5 w-5 text-purple-600" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Calendar className="h-4 w-4 text-amber-600" />
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Invoice</p>
+                      </div>
+                      <p className="text-lg font-bold text-foreground">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {unpaidInvoices > 0 ? `${formatCurrency(unpaidInvoices)} pending` : 'No pending invoices'}
+                      </p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Agentic Quick Actions */}
+            <Card className="border-2 border-dashed border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-4">
+                  <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground">Agentic Quick Actions</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">Ask our AI agent to help with common tasks</p>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
+                        onClick={() => setActiveTab('support')}
+                      >
+                        View All
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
+                        onClick={() => {
+                          setActiveTab('support');
+                          // Context will auto-populate in agent chat
+                        }}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Create Campaign
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
+                        onClick={() => {
+                          setActiveTab('support');
+                        }}
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Explain This Report
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
+                        onClick={() => {
+                          setActiveTab('support');
+                        }}
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        Generate Email Examples
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
+                        onClick={() => {
+                          setActiveTab('support');
+                        }}
+                      >
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        Analyze Performance
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Charts Row */}
             <div className="grid lg:grid-cols-2 gap-6">
@@ -781,30 +975,92 @@ export default function ClientPortalDashboard() {
                 <h2 className="text-2xl font-bold">Campaigns & Orders</h2>
                 <p className="text-muted-foreground">Manage your campaigns, track progress, and view orders.</p>
               </div>
-              <Button onClick={() => setShowCreateDialog(true)} className="gap-2">
+              <Button onClick={() => setShowCreateDialog(true)} className="gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
                 <Plus className="h-4 w-4" />
                 Create Campaign
               </Button>
             </div>
+
+            {/* Campaign Filters */}
+            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20">
+              <CardContent className="p-4">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                      placeholder="Search campaigns..." 
+                      className="pl-9 bg-white dark:bg-gray-950"
+                      value={campaignSearchQuery}
+                      onChange={(e) => setCampaignSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  <Select value={campaignStatusFilter} onValueChange={(val) => setCampaignStatusFilter(val)}>
+                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
+                      <div className="flex items-center gap-2">
+                        <Filter className="h-4 w-4" />
+                        <SelectValue placeholder="Status" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="paused">Paused</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={campaignTypeFilter} onValueChange={(val) => setCampaignTypeFilter(val)}>
+                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="voice">Voice Campaigns</SelectItem>
+                      <SelectItem value="data">Data Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
+                    <Button 
+                      variant="outline" 
+                      size="icon"
+                      onClick={() => {
+                        setCampaignSearchQuery('');
+                        setCampaignStatusFilter('all');
+                        setCampaignTypeFilter('all');
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Campaign Requests (Projects) */}
             <div className="space-y-4">
                <h3 className="text-lg font-semibold flex items-center gap-2">
                  <Target className="h-5 w-5 text-primary" />
                  Campaign Requests
+                 {filteredProjects.length > 0 && (
+                   <Badge variant="secondary" className="ml-2">{filteredProjects.length}</Badge>
+                 )}
                </h3>
                {projectsLoading ? (
                  <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
-               ) : projects.length === 0 ? (
+               ) : filteredProjects.length === 0 ? (
                  <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
                     <CardContent className="flex flex-col items-center justify-center py-8">
-                       <p className="text-muted-foreground mb-4">No pending campaign requests.</p>
-                       <Button variant="outline" onClick={() => setShowCreateDialog(true)}>Create One</Button>
+                       <p className="text-muted-foreground mb-4">
+                         {projects.length === 0 ? 'No pending campaign requests.' : 'No campaigns match your filters.'}
+                       </p>
+                       {projects.length === 0 && (
+                         <Button variant="outline" onClick={() => setShowCreateDialog(true)}>Create One</Button>
+                       )}
                     </CardContent>
                  </Card>
                ) : (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {projects.map((project) => (
+                  {filteredProjects.map((project) => (
                     <Card key={project.id} className="hover:shadow-md transition-all">
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
@@ -849,19 +1105,26 @@ export default function ClientPortalDashboard() {
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <CheckCircle className="h-5 w-5 text-green-600" />
                 Active Campaigns
+                {filteredCampaigns.length > 0 && (
+                  <Badge variant="secondary" className="ml-2">{filteredCampaigns.length}</Badge>
+                )}
               </h3>
               {campaignsLoading ? (
                  <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
-              ) : campaigns.length === 0 ? (
+              ) : filteredCampaigns.length === 0 ? (
                  <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
                     <CardContent className="flex flex-col items-center justify-center py-8">
-                       <p className="text-muted-foreground">No active campaigns yet.</p>
-                       <p className="text-xs text-muted-foreground mt-1">Campaigns become active once approved.</p>
+                       <p className="text-muted-foreground">
+                         {campaigns.length === 0 ? 'No active campaigns yet.' : 'No campaigns match your filters.'}
+                       </p>
+                       {campaigns.length === 0 && (
+                         <p className="text-xs text-muted-foreground mt-1">Campaigns become active once approved.</p>
+                       )}
                     </CardContent>
                  </Card>
               ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {campaigns.map((campaign) => (
+                {filteredCampaigns.map((campaign) => (
                   <Card key={campaign.id} className="hover:shadow-md transition-all cursor-pointer group">
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
@@ -917,198 +1180,16 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Leads & Delivery</h2>
-                <p className="text-muted-foreground">View and download your delivered contacts</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => refetchOrders()}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh
-                </Button>
-                <Button onClick={() => setShowNewOrder(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Order
-                </Button>
+                <h2 className="text-2xl font-bold">Qualified Leads</h2>
+                <p className="text-muted-foreground">QA-approved leads from your campaigns with recordings and transcripts</p>
               </div>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                      <Package className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{orders.length}</p>
-                      <p className="text-xs text-muted-foreground">Total Orders</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-amber-100 flex items-center justify-center">
-                      <Clock className="h-5 w-5 text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{pendingOrders}</p>
-                      <p className="text-xs text-muted-foreground">Pending</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center">
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{orders.filter(o => o.status === 'completed').length}</p>
-                      <p className="text-xs text-muted-foreground">Completed</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                      <UserCheck className="h-5 w-5 text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{orders.reduce((sum, o) => sum + o.deliveredQuantity, 0).toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">Leads Delivered</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Approved Leads Table */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                   <CardTitle>Approved Leads</CardTitle>
-                   <CardDescription>
-                     {leads.length} leads delivered and approved
-                   </CardDescription>
-                </div>
-                 <div className="flex gap-2">
-                   <Input placeholder="Search leads..." className="w-64" />
-                   <Button variant="ghost" size="icon"><Filter className="h-4 w-4" /></Button>
-                 </div>
-              </CardHeader>
-              <CardContent>
-                {leadsLoading ? (
-                   <div className="flex justify-center p-12"><Loader2 className="animate-spin" /></div>
-                ) : leads.length === 0 ? (
-                  <div className="text-center py-12">
-                     <UserCheck className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                     <h3 className="font-semibold mb-2">No Leads Yet</h3>
-                     <p className="text-muted-foreground">Approved leads will appear here once delivered.</p>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Title</TableHead>
-                          <TableHead>Company</TableHead>
-                          <TableHead>Contact</TableHead>
-                          <TableHead>Campaign</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {leads.map((lead: Lead) => (
-                          <TableRow key={lead.id}>
-                            <TableCell className="font-medium">
-                              {lead.firstName} {lead.lastName}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{lead.title || '-'}</TableCell>
-                            <TableCell>{lead.company || '-'}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-col text-xs">
-                                <span>{lead.email}</span>
-                                <span className="text-muted-foreground">{lead.phone}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>{lead.campaignName || '-'}</TableCell>
-                            <TableCell>{new Date(lead.orderDate).toLocaleDateString()}</TableCell>
-                            <TableCell className="text-right">
-                               <Button variant="ghost" size="sm">
-                                 <Eye className="h-4 w-4" />
-                               </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Orders Table */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Delivery History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {orders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="font-semibold mb-2">No Orders Yet</h3>
-                    <p className="text-muted-foreground mb-4">Start by creating your first order</p>
-                    <Button onClick={() => setShowNewOrder(true)}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Order
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Order #</TableHead>
-                          <TableHead>Campaign</TableHead>
-                          <TableHead>Period</TableHead>
-                          <TableHead className="text-right">Requested</TableHead>
-                          <TableHead className="text-right">Delivered</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map((order) => (
-                          <TableRow key={order.id}>
-                            <TableCell className="font-mono text-sm">{order.orderNumber}</TableCell>
-                            <TableCell>{order.campaignName}</TableCell>
-                            <TableCell>{order.orderMonth}/{order.orderYear}</TableCell>
-                            <TableCell className="text-right">{order.requestedQuantity.toLocaleString()}</TableCell>
-                            <TableCell className="text-right">{order.deliveredQuantity.toLocaleString()}</TableCell>
-                            <TableCell>{getStatusBadge(order.status)}</TableCell>
-                            <TableCell className="text-right">
-                              {order.status === 'completed' && order.deliveredQuantity > 0 && (
-                                <Button variant="ghost" size="sm">
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {/* QA-Approved Leads Table */}
+            <QualifiedLeadsTable
+              onViewDetails={(leadId) => setSelectedQualifiedLeadId(leadId)}
+              onExport={() => setShowExportDialog(true)}
+            />
           </div>
         )}
 
@@ -1524,6 +1605,8 @@ export default function ClientPortalDashboard() {
           </div>
         )}
       </main>
+      </div>
+      {/* End Main Content Area */}
 
       {/* ==================== DIALOGS ==================== */}
 
@@ -1726,6 +1809,131 @@ export default function ClientPortalDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Lead Detail Drawer */}
+      <Dialog open={showLeadDrawer} onOpenChange={setShowLeadDrawer}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Lead Details</DialogTitle>
+            <DialogDescription>
+              Comprehensive information for this delivered lead
+            </DialogDescription>
+          </DialogHeader>
+          {selectedLead && (
+            <div className="space-y-6">
+              {/* Contact Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Contact Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Full Name</Label>
+                    <p className="font-medium">{selectedLead.firstName} {selectedLead.lastName}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Title</Label>
+                    <p className="font-medium">{selectedLead.title || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Company</Label>
+                    <p className="font-medium">{selectedLead.company || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Email</Label>
+                    <p className="font-medium text-blue-600">{selectedLead.email}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Phone</Label>
+                    <p className="font-medium">{selectedLead.phone || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">LinkedIn</Label>
+                    {selectedLead.linkedin ? (
+                      <a href={selectedLead.linkedin} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline">
+                        View Profile
+                      </a>
+                    ) : (
+                      <p className="font-medium">N/A</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Campaign Information */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Campaign & Delivery</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Campaign Name</Label>
+                    <p className="font-medium">{selectedLead.campaignName || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Order Date</Label>
+                    <p className="font-medium">{new Date(selectedLead.orderDate).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Contact Status</Label>
+                    <Badge variant="default" className="mt-1">Approved</Badge>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Verification</Label>
+                    <div className="flex items-center gap-1 mt-1">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-600">Verified</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Additional Notes */}
+              {selectedLead.notes && (
+                <>
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Notes</h3>
+                    <p className="text-sm text-muted-foreground">{selectedLead.notes}</p>
+                  </div>
+                  <Separator />
+                </>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2">
+                <Button className="flex-1" variant="outline">
+                  <Mail className="h-4 w-4 mr-2" />
+                  Send Email
+                </Button>
+                <Button className="flex-1" variant="outline">
+                  <Phone className="h-4 w-4 mr-2" />
+                  Call Contact
+                </Button>
+                <Button variant="outline">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open in CRM
+                </Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLeadDrawer(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Qualified Lead Detail Modal */}
+      <LeadDetailModal
+        leadId={selectedQualifiedLeadId}
+        open={!!selectedQualifiedLeadId}
+        onClose={() => setSelectedQualifiedLeadId(null)}
+      />
+
+      {/* Export Leads Dialog */}
+      <ExportLeadsDialog
+        open={showExportDialog}
+        onClose={() => setShowExportDialog(false)}
+      />
 
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />

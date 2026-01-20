@@ -4572,17 +4572,22 @@ export const clientUsers = pgTable("client_users", {
   activeIdx: index("client_users_active_idx").on(table.isActive),
 }));
 
-// Client Campaign Access - Links clients to verification campaigns they can access
+// Client Campaign Access - Links clients to campaigns they can access
+// Supports both verification campaigns (contact enrichment) and regular campaigns (call/email with QA-approved leads)
 export const clientCampaignAccess = pgTable("client_campaign_access", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }).notNull(),
-  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }).notNull(),
+  // Verification campaign access (for contact enrichment workflows)
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }),
+  // Regular campaign access (call/email campaigns with QA-approved leads)
+  regularCampaignId: varchar("regular_campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
   grantedBy: varchar("granted_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({
   clientCampaignIdx: uniqueIndex("client_campaign_access_unique_idx").on(table.clientAccountId, table.campaignId),
   clientAccountIdx: index("client_campaign_access_client_idx").on(table.clientAccountId),
   campaignIdx: index("client_campaign_access_campaign_idx").on(table.campaignId),
+  regularCampaignIdx: index("client_campaign_access_regular_campaign_idx").on(table.clientAccountId, table.regularCampaignId),
 }));
 
 // Client Portal Orders - Monthly contact requests from clients
@@ -4674,6 +4679,7 @@ export const clientUsersRelations = relations(clientUsers, ({ one, many }) => ({
 export const clientCampaignAccessRelations = relations(clientCampaignAccess, ({ one }) => ({
   clientAccount: one(clientAccounts, { fields: [clientCampaignAccess.clientAccountId], references: [clientAccounts.id] }),
   campaign: one(verificationCampaigns, { fields: [clientCampaignAccess.campaignId], references: [verificationCampaigns.id] }),
+  regularCampaign: one(campaigns, { fields: [clientCampaignAccess.regularCampaignId], references: [campaigns.id] }),
   grantedBy: one(users, { fields: [clientCampaignAccess.grantedBy], references: [users.id] }),
 }));
 
