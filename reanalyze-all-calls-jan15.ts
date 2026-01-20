@@ -3,9 +3,8 @@
  * Uses DeepSeek to evaluate transcripts and assign correct dispositions
  */
 
-import { db } from "./server/db";
-import { leads, callAttempts } from "./server/db/schema";
-import { sql, gte, isNotNull, and } from "drizzle-orm";
+import { db } from "./server/db.ts";
+import { sql } from "drizzle-orm";
 import OpenAI from "openai";
 
 const deepseek = new OpenAI({
@@ -43,13 +42,13 @@ DISPOSITION RULES:
    - No human response at all
    - Only silence after greeting
    - Call connected but no voice detected
+   - Only brief greetings or clarity questions (e.g., "hello", "who's calling") with no engagement
 
 3. **not_interested** - Use when:
-   - Prospect says "no thanks", "not interested", "I'm not the right person"
+   - Prospect says "no thanks", "not interested", or similar explicit decline
    - Prospect declines to continue conversation
    - Prospect hangs up during/after pitch without interest
-   - Short conversation with no positive signals
-   - ANY human contact that doesn't meet qualified_lead criteria
+   - Conversation occurred but there were no positive signals
 
 4. **do_not_call** - Use when:
    - Prospect says "don't call me again", "remove me from your list", "stop calling"
@@ -176,20 +175,21 @@ async function main() {
       }
 
       // Determine new QA status
+      // Valid qa_status values: new, under_review, approved, rejected, returned, published
       let newQaStatus: string;
       let newQualificationStatus: string;
 
       if (analysis.disposition === 'qualified_lead' && analysis.humanContactMade && !analysis.isAiCallScreening) {
-        newQaStatus = 'pending_review'; // Real qualified leads should be reviewed
+        newQaStatus = 'under_review'; // Real qualified leads should be reviewed
         newQualificationStatus = 'qualified';
       } else if (analysis.isAiCallScreening || analysis.disposition === 'voicemail') {
-        newQaStatus = 'qa_rejected';
+        newQaStatus = 'rejected';
         newQualificationStatus = 'not_qualified';
       } else if (analysis.disposition === 'not_interested' || analysis.disposition === 'no_answer') {
-        newQaStatus = 'qa_rejected';
+        newQaStatus = 'rejected';
         newQualificationStatus = 'not_qualified';
       } else {
-        newQaStatus = 'qa_rejected';
+        newQaStatus = 'rejected';
         newQualificationStatus = 'not_qualified';
       }
 
