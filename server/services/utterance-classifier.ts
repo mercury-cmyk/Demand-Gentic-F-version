@@ -178,6 +178,23 @@ function checkForVoicemail(transcript: string): ClassificationResult | null {
     };
   }
 
+  // Check for AI call screening (Google Call Assist, etc.) - treat as voicemail
+  const isAiCallScreening = VOICEMAIL_DETECTION_RULES.aiCallScreeningPhrases?.some((phrase) =>
+    lower.includes(phrase)
+  );
+  if (isAiCallScreening) {
+    return {
+      labels: { entry: CallEntryLabel.VOICEMAIL_GENERIC },
+      action: {
+        type: SystemAction.STATE_ENTER_VOICEMAIL_MODE,
+        next: "END_CALL_POLITE",
+        note: "ai_call_screening",
+      },
+      confidence: 0.95,
+      reasoning: `AI call screening detected: "${transcript}"`,
+    };
+  }
+
   // Check for personal voicemail greeting
   const isVoicemailPhrase = VOICEMAIL_DETECTION_RULES.voicemailPhrases.some((phrase) =>
     lower.includes(phrase)
