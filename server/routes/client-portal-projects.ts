@@ -576,4 +576,76 @@ router.get('/:id/deliveries', async (req: Request, res: Response) => {
   }
 });
 
+// Delete project (owner only)
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const projectId = req.params.id;
+
+    // Verify project ownership
+    const [project] = await db
+      .select({ id: clientProjects.id, name: clientProjects.name, status: clientProjects.status })
+      .from(clientProjects)
+      .where(
+        and(
+          eq(clientProjects.id, projectId),
+          eq(clientProjects.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Cannot delete completed projects
+    if (project.status === 'completed' || project.status === 'delivered') {
+      return res.status(400).json({ message: 'Cannot delete completed or delivered campaigns' });
+    }
+
+    // Delete related data first (foreign key constraints)
+    await db
+      .delete(clientProjectCampaigns)
+      .where(eq(clientProjectCampaigns.projectId, projectId));
+
+    await db
+      .delete(clientActivityCosts)
+      .where(eq(clientActivityCosts.projectId, projectId));
+
+    await db
+      .delete(clientDeliveryLinks)
+      .where(eq(clientDeliveryLinks.projectId, projectId));
+
+    // Delete activity logs for this project
+    await db
+      .delete(clientPortalActivityLogs)
+      .where(
+        and(
+          eq(clientPortalActivityLogs.entityType, 'project'),
+          eq(clientPortalActivityLogs.entityId, projectId)
+        )
+      );
+
+    // Delete the project
+    await db
+      .delete(clientProjects)
+      .where(eq(clientProjects.id, projectId));
+
+    // Log the deletion
+    await logClientActivity({
+      clientAccountId,
+      clientUserId: req.clientUser?.clientUserId,
+      entityType: 'project',
+      entityId: projectId,
+      action: 'project_deleted',
+      details: { name: project.name },
+    });
+
+    res.json({ message: 'Project deleted successfully' });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Delete project error:', error);
+    res.status(500).json({ message: 'Failed to delete project' });
+  }
+});
+
 export default router;

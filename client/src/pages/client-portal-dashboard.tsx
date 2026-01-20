@@ -28,7 +28,7 @@ import {
   FileDown, Eye, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
   ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
-  Link as LinkIcon, Upload
+  Link as LinkIcon, Upload, Trash2
 } from 'lucide-react';
 import { ClientAgentButton } from '@/components/client-portal/agent/client-agent-chat';
 import {
@@ -342,6 +342,33 @@ export default function ClientPortalDashboard() {
       toast({ title: 'Failed to create campaign request', variant: 'destructive' });
     },
   });
+
+  // Delete project mutation
+  const deleteProjectMutation = useMutation({
+    mutationFn: async (projectId: string) => {
+      const res = await fetch(`/api/client-portal/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to delete project');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
+      toast({ title: 'Campaign request deleted successfully' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to delete campaign request', variant: 'destructive' });
+    },
+  });
+
+  const handleDeleteProject = (projectId: string, projectName: string) => {
+    if (window.confirm(`Are you sure you want to delete "${projectName}"? This action cannot be undone.`)) {
+      deleteProjectMutation.mutate(projectId);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1203,6 +1230,23 @@ export default function ClientPortalDashboard() {
                                <a href={project.landingPageUrl} target="_blank" rel="noreferrer" className="hover:underline">Link</a>
                              </div>
                           )}
+                          {project.status !== 'completed' && project.status !== 'delivered' && (
+                            <div className="ml-auto">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleDeleteProject(project.id, project.name)}
+                                disabled={deleteProjectMutation.isPending}
+                              >
+                                {deleteProjectMutation.isPending ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -1777,10 +1821,20 @@ export default function ClientPortalDashboard() {
                     />
                   </Button>
                   {newProject.fileName && (
-                    <span className="text-sm text-green-600 flex items-center gap-1">
-                      <FileText className="h-3 w-3" />
-                      {newProject.fileName}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-green-600 flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        {newProject.fileName}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => setNewProject(prev => ({ ...prev, projectFileUrl: '', fileName: '' }))}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   )}
                </div>
                <p className="text-xs text-muted-foreground">Upload any relevant documents (PDF, Excel, Images).</p>
