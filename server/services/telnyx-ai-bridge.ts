@@ -1245,8 +1245,11 @@ export class TelnyxAiBridge extends EventEmitter {
 
       case 'hangup':
         if (call && callId) {
-          console.log(`[TelnyxAiBridge] Call hangup via webhook: ${callId}`);
-          call.disposition = 'completed';
+          console.log(`[TelnyxAiBridge] Call hangup via webhook: ${callId}, current disposition: ${call.disposition || 'none'}`);
+          // Preserve AI-determined disposition; only default to 'completed' if none set
+          if (!call.disposition) {
+            call.disposition = 'completed';
+          }
           await this.handleCallHangup(callId, call);
           this.activeCalls.delete(callId);
         }

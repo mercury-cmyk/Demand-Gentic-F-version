@@ -18,32 +18,19 @@ export interface LinkedInVerificationJob {
 }
 
 // Create BullMQ queue for LinkedIn verification
-const redisConnection = getRedisConnection();
+// DISABLED: LinkedIn verification feature is no longer active
+const redisConnection = null; // Permanently disabled
 
-if (!redisConnection) {
-  console.warn('[LINKEDIN-QUEUE] No Redis connection - LinkedIn verification will not work');
-}
+console.log('[LINKEDIN-QUEUE] LinkedIn verification is disabled');
 
-export const linkedinVerificationQueue = redisConnection ? new Queue<LinkedInVerificationJob>(
-  'linkedin-verification',
-  {
-    connection: redisConnection,
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000,
-      },
-      removeOnComplete: 100, // Keep last 100 completed jobs
-      removeOnFail: 500, // Keep last 500 failed jobs for debugging
-    },
-  }
-) : null;
+export const linkedinVerificationQueue = null;
 
 // Worker to process LinkedIn verification jobs
-export const linkedinVerificationWorker = (redisConnection ? new Worker<LinkedInVerificationJob>(
-  'linkedin-verification',
-  async (job) => {
+// DISABLED: LinkedIn verification feature is no longer active
+export const linkedinVerificationWorker = null;
+
+// Disabled worker function (preserved for reference)
+const _disabledWorkerFunction = async (job: any) => {
     const { leadId, imageUrl, contactName, companyName } = job.data;
 
     console.log('[LINKEDIN-WORKER] Processing verification for lead:', leadId);
@@ -133,21 +120,7 @@ export const linkedinVerificationWorker = (redisConnection ? new Worker<LinkedIn
   }
 ) : null);
 
-// Worker event handlers
-if (linkedinVerificationWorker) {
-  linkedinVerificationWorker.on('completed', (job) => {
-    console.log(`[LINKEDIN-WORKER] Job ${job.id} completed for lead:`, job.data.leadId);
-  });
+};
 
-  linkedinVerificationWorker.on('failed', (job, err) => {
-    console.error(`[LINKEDIN-WORKER] Job ${job?.id} failed:`, err.message);
-  });
-
-  linkedinVerificationWorker.on('error', (err) => {
-    console.error('[LINKEDIN-WORKER] Worker error:', err);
-  });
-
-  console.log('[LINKEDIN-QUEUE] LinkedIn verification queue and worker initialized');
-} else {
-  console.warn('[LINKEDIN-QUEUE] LinkedIn verification worker not initialized - Redis not available');
-}
+// Worker event handlers - DISABLED
+// LinkedIn verification feature is no longer active

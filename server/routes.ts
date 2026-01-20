@@ -33,7 +33,8 @@ import verificationExportRouter from './routes/verification-export';
 import exportTemplatesRouter from './routes/export-templates';
 import csvMappingTemplatesRouter from './routes/csv-mapping-templates';
 import aiCsvMappingRouter from './routes/ai-csv-mapping';
-import linkedinVerificationRouter from './routes/linkedin-verification';
+// DISABLED: LinkedIn verification feature is no longer active
+// import linkedinVerificationRouter from './routes/linkedin-verification';
 import agentReportsRouter from './routes/agent-reports';
 import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
@@ -98,8 +99,8 @@ import {
 import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
-import { uploadToS3 } from "./lib/s3";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, type InsertMailboxAccount } from "@shared/schema";
+import { uploadToS3, getPublicUrl } from "./lib/s3";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, pipelineOpportunities, filterFieldCategoryEnum, type FilterField, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -1598,9 +1599,9 @@ export function registerRoutes(app: Express) {
               const account = await storage.createAccount({
                 name: row.companyName,
                 nameNormalized: normalizedCompanyName,
-                industry: row.industry || null,
+                industryStandardized: row.industry || null,
                 description: row.companyDescription || null,
-                hqLocation: row.hqLocation || null,
+                companyLocation: row.hqLocation || null,
               });
               accountId = account.id;
               results.accountsCreated++;
@@ -2097,7 +2098,7 @@ export function registerRoutes(app: Express) {
       const toAddresses = Array.isArray(to) ? to.join(", ") : to;
       const ccAddresses = cc && Array.isArray(cc) ? cc.join(", ") : cc;
 
-      let externalMessageId = crypto.randomUUID();
+      let externalMessageId: string = crypto.randomUUID();
 
       if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
         const { gmailSyncService } = await import('./services/gmail-sync-service');
@@ -2923,7 +2924,7 @@ export function registerRoutes(app: Express) {
 
       if (req.query.filterValues) {
         const filterValues = JSON.parse(req.query.filterValues as string);
-        filterGroup = convertFilterValuesToFilterGroup(filterValues, 'contacts');
+        filterGroup = convertFilterValuesToFilterGroup(filterValues);
       }
 
       const queryBuilder = db
@@ -2931,9 +2932,11 @@ export function registerRoutes(app: Express) {
         .from(contactsTable)
         .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id));
 
-      if (filterGroup) {
-        const filterCondition = buildFilterQuery(filterGroup, 'contacts');
-        if (filterCondition) queryBuilder.where(filterCondition);
+      const contactFilterCondition = filterGroup
+        ? buildFilterQuery(filterGroup, contactsTable)
+        : undefined;
+      if (contactFilterCondition) {
+        queryBuilder.where(contactFilterCondition);
       }
 
       const [contactResults, countResult] = await Promise.all([
@@ -2941,7 +2944,7 @@ export function registerRoutes(app: Express) {
         db
           .select({ count: sql<number>`count(*)` })
           .from(contactsTable)
-          .where(filterGroup ? buildFilterQuery(filterGroup, 'contacts') : undefined),
+          .where(contactFilterCondition),
       ]);
 
       const { toUnifiedContactRecord } = await import('@shared/unified-records');
@@ -2971,7 +2974,7 @@ export function registerRoutes(app: Express) {
 
       if (req.query.filterValues) {
         const filterValues = JSON.parse(req.query.filterValues as string);
-        filterGroup = convertFilterValuesToFilterGroup(filterValues, 'accounts');
+        filterGroup = convertFilterValuesToFilterGroup(filterValues);
       }
 
       const queryBuilder = db
@@ -2983,9 +2986,11 @@ export function registerRoutes(app: Express) {
         .leftJoin(contactsTable, eq(accountsTable.id, contactsTable.accountId))
         .groupBy(accountsTable.id);
 
-      if (filterGroup) {
-        const filterCondition = buildFilterQuery(filterGroup, 'accounts');
-        if (filterCondition) queryBuilder.where(filterCondition);
+      const accountFilterCondition = filterGroup
+        ? buildFilterQuery(filterGroup, accountsTable)
+        : undefined;
+      if (accountFilterCondition) {
+        queryBuilder.where(accountFilterCondition);
       }
 
       const [accountResults, countResult] = await Promise.all([
@@ -2993,7 +2998,7 @@ export function registerRoutes(app: Express) {
         db
           .select({ count: sql<number>`count(*)` })
           .from(accountsTable)
-          .where(filterGroup ? buildFilterQuery(filterGroup, 'accounts') : undefined),
+          .where(accountFilterCondition),
       ]);
 
       const { toUnifiedAccountRecord } = await import('@shared/unified-records');
@@ -3562,19 +3567,21 @@ export function registerRoutes(app: Express) {
       // Create definitions for new fields
       const created = [];
       for (const fieldKey of newFields) {
+        const label = fieldKey
+          .replace(/_/g, ' ')
+          .replace(/\b\w/g, (char: string) => char.toUpperCase());
         const [field] = await db.insert(customFieldDefinitions)
           .values({
             entityType: entityType as 'account' | 'contact',
             fieldKey,
-            displayLabel: fieldKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
+            displayLabel: label, // Convert snake_case to Title Case
             fieldType: 'text', // Default to text, can be changed later
-            description: `Auto-discovered custom field from CSV upload`,
-            placeholder: null,
+            helpText: 'Auto-discovered custom field from CSV upload',
             displayOrder: 999 + created.length, // Put new fields at the end
             active: true,
             createdBy: req.user?.userId || null,
           })
-          .returning();
+          .returning() as (typeof customFieldDefinitions.$inferSelect)[];
 
         created.push(field);
       }
@@ -6408,7 +6415,7 @@ export function registerRoutes(app: Express) {
 
           console.log(`[AGENT QUEUE] Manual queue returned ${processedQueue.length} items`);
           return res.json(processedQueue);
-        } else if (campaign?.dialMode === 'hybrid' || campaign?.dialMode === 'ai_agent') {
+        } else if (campaign?.dialMode === 'hybrid' || campaign?.dialMode === 'power') {
           // HYBRID MODE (humans + AI share queue) or AI_AGENT MODE: query campaign_queue (auto-assigned queue)
           const sharedQueue = await db
             .select({
@@ -8207,7 +8214,10 @@ export function registerRoutes(app: Express) {
   app.get("/api/agent-statuses/available", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const campaignId = req.query.campaignId as string | undefined;
-      const agents = await storage.getAvailableAgents(campaignId);
+      const allAgents = await storage.getAvailableAgents();
+      const agents = campaignId
+        ? allAgents.filter((agent) => agent.campaignId === campaignId)
+        : allAgents;
       res.json(agents);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch available agents" });
@@ -10240,7 +10250,8 @@ export function registerRoutes(app: Express) {
 
       // Upload screenshot to S3
       const s3Key = `lead-verifications/${leadId}/${Date.now()}-${file.originalname}`;
-      const s3Result = await uploadToS3(s3Key, file.buffer, file.mimetype);
+      await uploadToS3(s3Key, file.buffer, file.mimetype);
+      const screenshotUrl = await getPublicUrl(s3Key);
 
       console.log('[Lead Verification] Screenshot uploaded to S3:', s3Key);
 
@@ -10251,7 +10262,7 @@ export function registerRoutes(app: Express) {
           verificationType: 'linkedin_verified',
           verificationStatus: 'pending_ai',
           agentId: req.user!.userId,
-          screenshotUrl: s3Result.url,
+          screenshotUrl,
           screenshotS3Key: s3Key,
           metadata: {
             originalFilename: file.originalname,
@@ -10264,14 +10275,24 @@ export function registerRoutes(app: Express) {
       console.log('[Lead Verification] Created verification record:', verification.id);
 
       // Trigger AI validation
-      const { validateLinkedInScreenshot } = await import('./services/linkedin-screenshot-validator');
-      const aiResult = await validateLinkedInScreenshot(
-        s3Result.url,
-        lead,
-        contactName,
-        companyName,
-        jobTitle
-      );
+      const { verifyLinkedInData } = await import('./services/linkedin-vision');
+      const aiRawResult = await verifyLinkedInData(screenshotUrl, {
+        fullName: contactName,
+        companyName
+      });
+      const validationConfidence = typeof aiRawResult.matchScore === 'number' ? aiRawResult.matchScore : 0;
+      const aiStatus = aiRawResult.verified
+        ? 'AI Verified'
+        : validationConfidence >= 70
+          ? 'Flagged for QA Review'
+          : 'Rejected';
+      const aiResult = {
+        status: aiStatus,
+        validation_confidence: validationConfidence,
+        extracted_data: aiRawResult.extracted ?? {},
+        comments: (aiRawResult.suggestions || []).join('; '),
+        raw: aiRawResult
+      };
 
       // Map AI status to DB status
       let dbStatus: 'ai_verified' | 'flagged_review' | 'rejected';
@@ -10734,9 +10755,10 @@ export function registerRoutes(app: Express) {
       await storage.createActivityLog({
         entityType: 'lead',
         entityId: leadIds[0],
-        eventType: 'bulk_delete',
+        eventType: 'note_added',
         createdBy: req.user!.userId,
         payload: {
+          action: 'bulk_delete',
           leadIds,
           deletedCount,
         },
@@ -10803,9 +10825,10 @@ export function registerRoutes(app: Express) {
       await storage.createActivityLog({
         entityType: 'lead',
         entityId: leadIds[0],
-        eventType: 'bulk_update',
+        eventType: 'note_added',
         createdBy: req.user!.userId,
         payload: {
+          action: 'bulk_update',
           leadIds,
           updates,
           updatedCount,
@@ -11333,7 +11356,11 @@ export function registerRoutes(app: Express) {
   // Filter field metadata is public (no auth required) - only exposes schema/configuration
   app.get("/api/filters/fields", async (req, res) => {
     try {
-      const category = req.query.category as string | undefined;
+      const rawCategory = req.query.category;
+      const category =
+        typeof rawCategory === 'string' && filterFieldCategoryEnum.enumValues.includes(rawCategory as any)
+          ? (rawCategory as FilterField['category'])
+          : undefined;
       const fields = await storage.getFilterFields(category);
 
       // Group by category for easier UI consumption
@@ -11491,21 +11518,38 @@ export function registerRoutes(app: Express) {
             if (segmentIds && segmentIds.length > 0) {
               if (!audienceContactIds) audienceContactIds = new Set<string>();
               for (const segmentId of segmentIds) {
-                const segmentContacts = await storage.getContactsBySegmentId(segmentId);
-                segmentContacts.forEach(c => audienceContactIds!.add(c.id));
+                const segment = await storage.getSegment(segmentId);
+                if (segment?.entityType !== 'contact') {
+                  continue;
+                }
+                const segmentMembers = await storage.getSegmentMembers(segmentId);
+                segmentMembers.forEach((member) => audienceContactIds!.add(member.id));
               }
             }
             
             if (campaignId) {
-              // Get campaign audience
               const campaign = await storage.getCampaign(campaignId);
-              if (campaign?.audienceListIds?.length) {
+              const audienceRefs = campaign?.audienceRefs as any;
+              const listIds = audienceRefs?.lists || audienceRefs?.selectedLists || [];
+              const campaignSegmentIds = audienceRefs?.segments || audienceRefs?.selectedSegments || [];
+              if (listIds.length > 0) {
                 if (!audienceContactIds) audienceContactIds = new Set<string>();
-                for (const listId of campaign.audienceListIds) {
+                for (const listId of listIds) {
                   const list = await storage.getList(listId);
                   if (list?.recordIds) {
-                    list.recordIds.forEach(id => audienceContactIds!.add(id));
+                    list.recordIds.forEach((id: string) => audienceContactIds!.add(id));
                   }
+                }
+              }
+              if (campaignSegmentIds.length > 0) {
+                if (!audienceContactIds) audienceContactIds = new Set<string>();
+                for (const segmentId of campaignSegmentIds) {
+                  const segment = await storage.getSegment(segmentId);
+                  if (segment?.entityType !== 'contact') {
+                    continue;
+                  }
+                  const segmentMembers = await storage.getSegmentMembers(segmentId);
+                  segmentMembers.forEach((member) => audienceContactIds!.add(member.id));
                 }
               }
             }
@@ -11650,7 +11694,7 @@ export function registerRoutes(app: Express) {
       await storage.deleteExpiredSelectionContexts().catch(() => { });
 
       // Validate client payload (omit server-managed fields)
-      const clientSchema = insertSelectionContextSchema.omit({ userId: true, expiresAt: true });
+      const clientSchema = insertSelectionContextSchema.omit({ userId: true });
       const validated = clientSchema.parse(req.body);
 
       // Set expiration to 15 minutes from now
@@ -11660,7 +11704,7 @@ export function registerRoutes(app: Express) {
         ...validated,
         userId,
         expiresAt
-      });
+      } as any);
 
       res.status(201).json(context);
     } catch (error) {
@@ -11747,7 +11791,7 @@ export function registerRoutes(app: Express) {
         Object.entries(validated).filter(([_, v]) => v !== undefined)
       );
 
-      const asset = await storage.createContentAsset({ ...cleanData, ownerId: userId });
+      const asset = await storage.createContentAsset({ ...cleanData, ownerId: userId } as any);
       console.log("Asset created:", asset.id);
       res.status(201).json(asset);
     } catch (error) {
@@ -11828,7 +11872,7 @@ export function registerRoutes(app: Express) {
       if (result.success) {
         // Update push record with success
         await storage.updateContentPush(pushRecord.id, {
-          status: 'success',
+          status: 'completed',
           externalId: result.externalId,
           responsePayload: result.responsePayload,
         });
@@ -11908,7 +11952,7 @@ export function registerRoutes(app: Express) {
 
       // Update attempt count and status atomically
       await storage.updateContentPush(id, {
-        status: 'retrying',
+        status: 'in_progress',
         attemptCount: newAttemptCount
       });
 
@@ -11918,7 +11962,7 @@ export function registerRoutes(app: Express) {
 
       if (result.success) {
         await storage.updateContentPush(id, {
-          status: 'success',
+          status: 'completed',
           externalId: result.externalId,
           responsePayload: result.responsePayload,
         });
@@ -12031,7 +12075,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertEventSchema.parse(req.body);
-      const event = await storage.createEvent({ ...validated, createdBy: userId });
+      const event = await storage.createEvent({ ...validated, ownerId: userId } as any);
       res.status(201).json(event);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -12096,7 +12140,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertResourceSchema.parse(req.body);
-      const resource = await storage.createResource({ ...validated, createdBy: userId });
+      const resource = await storage.createResource({ ...validated, ownerId: userId } as any);
       res.status(201).json(resource);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -12161,7 +12205,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertNewsSchema.parse(req.body);
-      const newsItem = await storage.createNews({ ...validated, createdBy: userId });
+      const newsItem = await storage.createNews({ ...validated, ownerId: userId } as any);
       res.status(201).json(newsItem);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -13187,7 +13231,7 @@ export function registerRoutes(app: Express) {
           { name: 'Other', value: 0 },
         ],
         dispositions: [],
-        campaignLeads: {},
+        campaignLeads: {} as Record<string, number>,
       };
 
       // Aggregate email stats
@@ -13586,14 +13630,33 @@ export function registerRoutes(app: Express) {
           reviewCount: 0,
           errors: [] as string[]
         };
+        const baseLeadFilter: FilterGroup = {
+          logic: 'AND',
+          conditions: [
+            {
+              id: 'campaignId',
+              field: 'campaignId',
+              operator: 'equals',
+              values: [campaignId]
+            }
+          ]
+        };
         
         console.log(`[ConsolidatedProcessing] Campaign ${campaignId}: Starting all validation steps in correct order`);
         
         // Step 1: Sync recordings and trigger transcription (MUST BE FIRST)
         try {
-          const leads = await storage.getLeads({ 
-            campaignId, 
-            qaStatus: 'new' 
+          const leads = await storage.getLeads({
+            ...baseLeadFilter,
+            conditions: [
+              ...baseLeadFilter.conditions,
+              {
+                id: 'qaStatus',
+                field: 'qaStatus',
+                operator: 'equals',
+                values: ['new']
+              }
+            ]
           });
           
           console.log(`[ConsolidatedProcessing] Step 1/4: Syncing ${leads.length} call recordings`);
@@ -13621,7 +13684,7 @@ export function registerRoutes(app: Express) {
           console.log(`[ConsolidatedProcessing] Step 2/4: Validating contact emails`);
           
           // Get all contacts for this campaign
-          const leads = await storage.getLeads({ campaignId });
+          const leads = await storage.getLeads(baseLeadFilter);
           const contactIds = leads
             .map(l => l.contactId)
             .filter((id): id is string => id != null);
@@ -13659,7 +13722,7 @@ export function registerRoutes(app: Express) {
           await reEvaluateCampaignLeads(campaignId);
           
           // Count final statuses (AI analyzer now sets qaStatus automatically)
-          const finalLeads = await storage.getLeads({ campaignId });
+          const finalLeads = await storage.getLeads(baseLeadFilter);
           results.approvedCount = finalLeads.filter(l => l.qaStatus === 'approved').length;
           results.rejectedCount = finalLeads.filter(l => l.qaStatus === 'rejected').length;
           results.reviewCount = finalLeads.filter(l => l.qaStatus === 'under_review').length;
@@ -13840,12 +13903,12 @@ export function registerRoutes(app: Express) {
       // Get opportunities for this account
       const opportunities = await db
         .select()
-        .from(opportunitiesTable)
-        .where(eq(opportunitiesTable.accountId, accountId));
+        .from(pipelineOpportunities)
+        .where(eq(pipelineOpportunities.accountId, accountId));
 
       // Calculate engagement metrics
       const recentEmails = emailActivities.filter(a => {
-        const activityDate = new Date(a.receivedAt);
+        const activityDate = new Date(a.receivedDateTime || a.sentDateTime || a.createdAt);
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         return activityDate >= thirtyDaysAgo;
@@ -14437,7 +14500,8 @@ Provide JSON response with:
   app.use(aiCsvMappingRouter);
   
   // ==================== LINKEDIN VERIFICATION ====================
-  app.use('/api/linkedin-verification', linkedinVerificationRouter);
+  // DISABLED: LinkedIn verification feature is no longer active
+  // app.use('/api/linkedin-verification', linkedinVerificationRouter);
 
   // ==================== AGENT PERFORMANCE & REPORTING ====================
   app.use('/api', agentReportsRouter);
@@ -14555,15 +14619,18 @@ Provide JSON response with:
   });
 
   // Delete accounts
-  app.delete("/api/admin/data/accounts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/accounts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(accounts);
 
       await storage.createActivityLog({
         entityType: 'account',
         entityId: req.user!.userId,
-        action: 'admin_delete_accounts',
-        description: `Admin deleted all accounts`,
+        eventType: 'note_added',
+        payload: {
+          action: 'admin_delete_accounts',
+          description: 'Admin deleted all accounts'
+        },
         createdBy: req.user!.userId,
       });
 
@@ -14575,15 +14642,18 @@ Provide JSON response with:
   });
 
   // Delete leads
-  app.delete("/api/admin/data/leads", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/leads", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       const result = await db.delete(leads);
 
       await storage.createActivityLog({
         entityType: 'lead',
         entityId: req.user!.userId,
-        action: 'admin_delete_leads',
-        description: `Admin deleted all leads`,
+        eventType: 'note_added',
+        payload: {
+          action: 'admin_delete_leads',
+          description: 'Admin deleted all leads'
+        },
         createdBy: req.user!.userId,
       });
 
@@ -14595,7 +14665,7 @@ Provide JSON response with:
   });
 
   // Delete ALL business data
-  app.delete("/api/admin/data/all", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  app.delete("/api/admin/data/all", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
     try {
       // Delete in order to respect foreign key constraints
       await db.delete(leads);
@@ -14612,8 +14682,11 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'user',
         entityId: req.user!.userId,
-        action: 'admin_delete_all_data',
-        description: `Admin deleted ALL business data`,
+        eventType: 'note_added',
+        payload: {
+          action: 'admin_delete_all_data',
+          description: 'Admin deleted ALL business data'
+        },
         createdBy: req.user!.userId,
       });
 
@@ -14627,7 +14700,7 @@ Provide JSON response with:
   // ==================== PHONE BULK EDITOR ROUTES ====================
 
   // Search for contacts and accounts with phone pattern matching
-  app.post("/api/phone-bulk/search", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/phone-bulk/search", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const { searchType, phonePattern, contactFilters: contactFilterConditions, accountFilters: accountFilterConditions, listId } = req.body;
 
@@ -14649,7 +14722,7 @@ Provide JSON response with:
       if (searchType === 'contacts' || searchType === 'both') {
         // Build filter for contacts
         const contactFilters: FilterGroup | undefined = contactFilterConditions ? {
-          operator: 'and',
+          logic: 'AND',
           conditions: contactFilterConditions
         } : undefined;
 
@@ -14657,16 +14730,15 @@ Provide JSON response with:
 
         // If list filtering is specified, filter by list membership
         if (listId) {
-          const listContacts = await storage.getListContacts(listId);
-          const listContactIds = new Set(listContacts.map(lc => lc.contactId));
-          allContacts = allContacts.filter(c => listContactIds.has(c.id));
+          const listMembers = await storage.getListMembers(listId);
+          const listContactIds = new Set(listMembers.map((member) => member.id));
+          allContacts = allContacts.filter((contact) => listContactIds.has(contact.id));
         }
 
         // Filter by phone pattern
         const matchingContacts = allContacts.filter(contact =>
-          matchesPattern(contact.phone, phonePattern) ||
-          matchesPattern(contact.mobile, phonePattern) ||
-          matchesPattern(contact.tel, phonePattern)
+          matchesPattern(contact.directPhone, phonePattern) ||
+          matchesPattern(contact.mobilePhone, phonePattern)
         );
 
         // Map to result format
@@ -14675,25 +14747,25 @@ Provide JSON response with:
           type: 'contact',
           name: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           email: contact.email,
-          phone: contact.phone,
-          mobile: contact.mobile,
-          tel: contact.tel,
-          company: contact.companyName,
+          phone: contact.directPhone,
+          mobile: contact.mobilePhone,
+          tel: contact.phoneExtension,
+          company: (contact as any).accountName || null,
           accountId: contact.accountId,
-          title: contact.title,
+          title: contact.jobTitle,
           department: contact.department,
           city: contact.city,
           state: contact.state,
           country: contact.country,
           seniorityLevel: contact.seniorityLevel,
-          jobFunction: contact.jobFunction
+          jobFunction: contact.department
         })));
       }
 
       if (searchType === 'accounts' || searchType === 'both') {
         // Build filter for accounts
         const accountFilters: FilterGroup | undefined = accountFilterConditions ? {
-          operator: 'and',
+          logic: 'AND',
           conditions: accountFilterConditions
         } : undefined;
 
@@ -14701,31 +14773,31 @@ Provide JSON response with:
 
         // If list filtering is specified, filter by list membership
         if (listId) {
-          const listAccounts = await storage.getListAccounts(listId);
-          const listAccountIds = new Set(listAccounts.map(la => la.accountId));
-          allAccounts = allAccounts.filter(a => listAccountIds.has(a.id));
+          const listMembers = await storage.getListMembers(listId);
+          const listAccountIds = new Set(listMembers.map((member) => member.id));
+          allAccounts = allAccounts.filter((account) => listAccountIds.has(account.id));
         }
 
         // Filter by phone pattern
         const matchingAccounts = allAccounts.filter(account =>
-          matchesPattern(account.hqPhone, phonePattern)
+          matchesPattern(account.mainPhone, phonePattern)
         );
 
         // Map to result format
         results.push(...matchingAccounts.map(account => ({
           id: account.id,
           type: 'account',
-          name: account.companyName,
+          name: account.name,
           email: null,
-          phone: account.hqPhone,
+          phone: account.mainPhone,
           mobile: null,
           tel: null,
-          company: account.companyName,
+          company: account.name,
           accountId: account.id,
-          website: account.website,
-          industry: account.industry,
-          companySize: account.companySize,
-          revenue: account.revenue,
+          website: account.domain,
+          industry: account.industryStandardized,
+          companySize: account.employeesSizeRange,
+          revenue: account.annualRevenue,
           hqCity: account.hqCity,
           hqState: account.hqState,
           hqCountry: account.hqCountry,
@@ -14747,7 +14819,7 @@ Provide JSON response with:
   });
 
   // Bulk update phone numbers
-  app.post("/api/phone-bulk/update", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/phone-bulk/update", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const { updates } = req.body;
 
@@ -14768,9 +14840,9 @@ Provide JSON response with:
         if (type === 'contact') {
           // Update contact phone fields
           const updateData: any = {};
-          if (fieldUpdates.phone !== undefined) updateData.phone = fieldUpdates.phone;
-          if (fieldUpdates.mobile !== undefined) updateData.mobile = fieldUpdates.mobile;
-          if (fieldUpdates.tel !== undefined) updateData.tel = fieldUpdates.tel;
+          if (fieldUpdates.phone !== undefined) updateData.directPhone = fieldUpdates.phone;
+          if (fieldUpdates.mobile !== undefined) updateData.mobilePhone = fieldUpdates.mobile;
+          if (fieldUpdates.tel !== undefined) updateData.phoneExtension = fieldUpdates.tel;
 
           if (Object.keys(updateData).length > 0) {
             await db.update(contacts)
@@ -14781,7 +14853,7 @@ Provide JSON response with:
         } else if (type === 'account') {
           // Update account phone fields
           const updateData: any = {};
-          if (fieldUpdates.phone !== undefined) updateData.hqPhone = fieldUpdates.phone;
+          if (fieldUpdates.phone !== undefined) updateData.mainPhone = fieldUpdates.phone;
 
           if (Object.keys(updateData).length > 0) {
             await db.update(accounts)
@@ -14796,8 +14868,11 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'user',
         entityId: req.user!.userId,
-        action: 'phone_bulk_update',
-        description: `Bulk updated ${contactsUpdated} contacts and ${accountsUpdated} accounts`,
+        eventType: 'note_added',
+        payload: {
+          action: 'phone_bulk_update',
+          description: `Bulk updated ${contactsUpdated} contacts and ${accountsUpdated} accounts`
+        },
         createdBy: req.user!.userId,
       });
 
@@ -14819,7 +14894,7 @@ Provide JSON response with:
   // =============================================================================
 
   // Manually trigger email validation job
-  app.post("/api/jobs/trigger/email-validation", requireAuth, requireRole(['admin']), async (req, res) => {
+  app.post("/api/jobs/trigger/email-validation", requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const { triggerEmailValidation } = await import('./jobs/email-validation-job');
       const result = await triggerEmailValidation();
@@ -14836,7 +14911,7 @@ Provide JSON response with:
   });
 
   // Manually trigger AI enrichment job
-  app.post("/api/jobs/trigger/ai-enrichment", requireAuth, requireRole(['admin']), async (req, res) => {
+  app.post("/api/jobs/trigger/ai-enrichment", requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const { triggerAiEnrichment } = await import('./jobs/ai-enrichment-job');
       const result = await triggerAiEnrichment();
@@ -14870,7 +14945,7 @@ Provide JSON response with:
   });
 
   // Get background job status
-  app.get("/api/jobs/status", requireAuth, requireRole(['admin']), async (req, res) => {
+  app.get("/api/jobs/status", requireAuth, requireRole('admin'), async (req, res) => {
     try {
       const ENABLE_EMAIL_VALIDATION = process.env.ENABLE_EMAIL_VALIDATION !== 'false';
       const ENABLE_AI_ENRICHMENT = process.env.ENABLE_AI_ENRICHMENT !== 'false';
@@ -14895,7 +14970,7 @@ Provide JSON response with:
 
   // Get comprehensive call analytics (overall, per-campaign, per-agent)
   // UNIFIED: Combines legacy callAttempts and new dialerCallAttempts for accurate stats
-  app.get("/api/analytics/call-stats", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/analytics/call-stats", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const { callAttempts, dispositions, campaigns: campaignsTable, users, dialerCallAttempts, virtualAgents } = await import('@shared/schema');
 
@@ -15112,7 +15187,7 @@ Provide JSON response with:
   });
 
   // Get queue status analytics (total, queued, in progress, completed, skipped, removed)
-  app.get("/api/analytics/queue-status", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/analytics/queue-status", requireAuth, async (req: ExpressRequest, res: Response) => {
     try {
       const { agentQueue, campaigns: campaignsTable } = await import('@shared/schema');
       const campaignId = req.query.campaignId as string | undefined;
@@ -15172,11 +15247,11 @@ Provide JSON response with:
     try {
       const { campaignId, limit } = req.body;
 
-      console.log(`[Manual Trigger] Email validation requested by ${req.user.username}`, { campaignId, limit });
+      console.log(`[Manual Trigger] Email validation requested by ${req.user?.username ?? 'unknown'}`, { campaignId, limit });
 
       // Import and run email validation job
-      const { processEmailValidation } = await import('./jobs/email-validation-job');
-      const result = await processEmailValidation({ campaignId, limit });
+      const { triggerEmailValidation } = await import('./jobs/email-validation-job');
+      const result = await triggerEmailValidation();
 
       res.json({
         message: "Email validation job triggered successfully",
@@ -15197,15 +15272,15 @@ Provide JSON response with:
     try {
       const { accountIds, contactIds, campaignId } = req.body;
 
-      console.log(`[Manual Trigger] AI enrichment requested by ${req.user.username}`, {
+      console.log(`[Manual Trigger] AI enrichment requested by ${req.user?.username ?? 'unknown'}`, {
         accountIds: accountIds?.length,
         contactIds: contactIds?.length,
         campaignId
       });
 
       // Import and run AI enrichment job
-      const { processAiEnrichment } = await import('./jobs/ai-enrichment-job');
-      const result = await processAiEnrichment({ accountIds, contactIds, campaignId });
+      const { triggerAiEnrichment } = await import('./jobs/ai-enrichment-job');
+      const result = await triggerAiEnrichment();
 
       res.json({
         message: "AI enrichment job triggered successfully",
@@ -15226,13 +15301,16 @@ Provide JSON response with:
     try {
       const { mailboxIds } = req.body;
 
-      console.log(`[Manual Trigger] M365 email sync requested by ${req.user.username}`, {
+      console.log(`[Manual Trigger] M365 email sync requested by ${req.user?.username ?? 'unknown'}`, {
         mailboxIds: mailboxIds?.length || 'all active'
       });
 
       // Import and run M365 sync job
-      const { syncM365Emails } = await import('./jobs/m365-sync-job');
-      const result = await syncM365Emails({ mailboxIds });
+      const { m365SyncService } = await import('./services/m365-sync-service');
+      if (mailboxIds?.length) {
+        console.warn('[Manual Trigger] M365 sync ignores mailboxIds (syncs all active mailboxes).');
+      }
+      const result = await m365SyncService.syncAllMailboxes();
 
       res.json({
         message: "M365 email sync job triggered successfully",
@@ -15418,7 +15496,7 @@ Provide JSON response with:
   // and static serving handles it in production mode
 
   // Global error handler
-  app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+  app.use((error: Error, req: ExpressRequest, res: Response, next: NextFunction) => {
     console.error("Global error handler:", error.stack);
 
     // Zod validation errors

@@ -226,6 +226,10 @@ export function createWorker<T = any>(
   });
 
   worker.on('error', (err) => {
+    // Suppress Redis connection errors - they're expected when Redis is unavailable
+    if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
+      return; // Silent - Redis is optional
+    }
     console.error(`[Queue:${queueName}] Worker error:`, err);
   });
 

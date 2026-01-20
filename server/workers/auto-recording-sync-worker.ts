@@ -1,11 +1,11 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { db } from '../db';
-import { leads, dialerCallAttempts } from '@shared/schema';
+import { leads, dialerCallAttempts, campaignTestCalls } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
-import { submitTranscription } from '../services/assemblyai-transcription';
+import { submitTranscription, submitStructuredTranscription } from '../services/assemblyai-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 
 const connection = new Redis(getRedisUrl(), {
@@ -105,30 +105,42 @@ async function fetchRecordingFromTelnyx(
 async function transcribeWithSpeakers(
   recordingUrl: string,
   contactFirstName: string | null
-): Promise<{ transcript: string; structuredTranscript: any } | null> {
+): Promise<{ transcript: string; structuredTranscript: any; transcriptTurns: any[] } | null> {
   try {
     console.log('[AutoRecordingSyncWorker] 🎤 Starting Google Cloud Speech-to-Text transcription...');
     
-    // Use Google Cloud Speech-to-Text service
-    const plainTranscript = await submitTranscription(recordingUrl);
+    // Use Google Cloud Speech-to-Text service with structured output
+    const result = await submitStructuredTranscription(recordingUrl);
     
-    if (!plainTranscript) {
+    if (!result) {
       console.error('[AutoRecordingSyncWorker] Transcription returned empty result');
       return null;
     }
 
-    // Build structured transcript (Google Speech-to-Text with speaker diarization)
+    const { text: plainTranscript, utterances } = result;
+
+    // Heuristic: First speaker is Agent
+    const uniqueSpeakers = Array.from(new Set(utterances.map(u => u.speaker)));
+    const agentSpeaker = uniqueSpeakers[0] || 'Speaker 1'; 
+    
+    const transcriptTurns = utterances.map(u => ({
+      role: u.speaker === agentSpeaker ? 'agent' : 'contact',
+      text: u.text,
+      timeOffset: u.start, // Store offset instead of fake Date
+      speaker: u.speaker
+    }));
+
+    // Build structured transcript (legacy format compatibility)
     const structuredTranscript = {
       fullTranscript: plainTranscript,
-      conversation: [
-        {
-          speaker: 'Mixed',
-          text: plainTranscript,
-          timestamp: 0,
-        }
-      ],
+      conversation: utterances.map(u => ({
+        speaker: u.speaker === agentSpeaker ? 'Agent' : 'Prospect',
+        text: u.text,
+        timestamp: u.start,
+      })),
       speakerMapping: {
-        Mixed: 'Agent & Prospect',
+        [agentSpeaker]: 'Agent',
+        [uniqueSpeakers.find(s => s !== agentSpeaker) || 'Speaker 2']: 'Prospect',
       },
     };
 
@@ -136,6 +148,7 @@ async function transcribeWithSpeakers(
     return {
       transcript: plainTranscript,
       structuredTranscript,
+      transcriptTurns,
     };
   } catch (error: any) {
     console.error('[AutoRecordingSyncWorker] Error transcribing:', error);
@@ -187,9 +200,16 @@ export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
 
       // Update call attempt with recording URL
       if (callAttemptId) {
-        await db.update(dialerCallAttempts)
-          .set({ recordingUrl, updatedAt: new Date() })
-          .where(eq(dialerCallAttempts.id, callAttemptId));
+        if (callAttemptId.startsWith('test-attempt-')) {
+          const testCallId = callAttemptId.replace('test-attempt-', '');
+          await db.update(campaignTestCalls)
+            .set({ recordingUrl, updatedAt: new Date() })
+            .where(eq(campaignTestCalls.id, testCallId));
+        } else {
+          await db.update(dialerCallAttempts)
+            .set({ recordingUrl, updatedAt: new Date() })
+            .where(eq(dialerCallAttempts.id, callAttemptId));
+        }
       }
 
       console.log(`[AutoRecordingSyncWorker] Recording URL saved for ${targetLabel}`);
@@ -230,27 +250,39 @@ export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
 
       if (callAttemptId && transcriptionResult.transcript?.trim()) {
         const transcriptText = transcriptionResult.transcript.trim();
-        const transcriptMarker = "[Call Transcript]";
-        const [attempt] = await db
-          .select({ notes: dialerCallAttempts.notes })
-          .from(dialerCallAttempts)
-          .where(eq(dialerCallAttempts.id, callAttemptId))
-          .limit(1);
-        const existingNotes = attempt?.notes || "";
-        const hasTranscript = existingNotes.includes(transcriptMarker);
-        const transcriptBlock = `${transcriptMarker}\n${transcriptText}`;
-        const nextNotes = hasTranscript
-          ? existingNotes
-          : existingNotes
-            ? `${existingNotes}\n\n${transcriptBlock}`
-            : transcriptBlock;
+        
+        if (callAttemptId.startsWith('test-attempt-')) {
+          const testCallId = callAttemptId.replace('test-attempt-', '');
+          await db.update(campaignTestCalls)
+            .set({ 
+              fullTranscript: transcriptText,
+              transcriptTurns: transcriptionResult.transcriptTurns,
+              updatedAt: new Date() 
+            })
+            .where(eq(campaignTestCalls.id, testCallId));
+        } else {
+          const transcriptMarker = "[Call Transcript]";
+          const [attempt] = await db
+            .select({ notes: dialerCallAttempts.notes })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, callAttemptId))
+            .limit(1);
+          const existingNotes = attempt?.notes || "";
+          const hasTranscript = existingNotes.includes(transcriptMarker);
+          const transcriptBlock = `${transcriptMarker}\n${transcriptText}`;
+          const nextNotes = hasTranscript
+            ? existingNotes
+            : existingNotes
+              ? `${existingNotes}\n\n${transcriptBlock}`
+              : transcriptBlock;
 
-        await db.update(dialerCallAttempts)
-          .set({
-            notes: nextNotes,
-            updatedAt: new Date()
-          })
-          .where(eq(dialerCallAttempts.id, callAttemptId));
+          await db.update(dialerCallAttempts)
+            .set({
+              notes: nextNotes,
+              updatedAt: new Date()
+            })
+            .where(eq(dialerCallAttempts.id, callAttemptId));
+        }
       }
 
       console.log(`[AutoRecordingSyncWorker] Completed processing for ${targetLabel}`);
@@ -272,5 +304,13 @@ export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
     concurrency: 5, // Process up to 5 jobs concurrently
   }
 );
+
+autoRecordingSyncWorker.on('error', (err) => {
+  // Suppress Redis connection errors - they're expected when Redis is unavailable
+  if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
+    return; // Silent - Redis is optional
+  }
+  console.error('[AutoRecordingSyncWorker] Worker error:', err);
+});
 
 console.log('[AutoRecordingSyncWorker] Worker started successfully');

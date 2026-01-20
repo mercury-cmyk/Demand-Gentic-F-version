@@ -379,3 +379,130 @@ export async function processPendingTranscriptions(): Promise<void> {
     console.error('[Transcription] Error processing pending transcriptions:', error);
   }
 }
+
+export interface StructuredTranscript {
+  text: string;
+  utterances: Array<{
+    speaker: string;
+    text: string;
+    start: number;
+    end: number;
+  }>;
+}
+
+/**
+ * Submit audio to Google Speech-to-Text and return structured transcript with speaker diarization
+ */
+export async function submitStructuredTranscription(audioUrl: string): Promise<StructuredTranscript | null> {
+  try {
+    const client = getSpeechClient();
+
+    // Download audio file
+    const audioData = await downloadAudio(audioUrl);
+    if (!audioData) {
+      return null;
+    }
+
+    console.log(`[Transcription] 🎤 Starting structured transcription | Audio type: ${audioData.mimeType}`);
+
+    const config: RecognitionConfig = {
+      model: 'telephony',
+      languageCode: 'en-US',
+      alternativeLanguageCodes: ['en-GB'],
+      encoding: getEncodingFromMimeType(audioData.mimeType),
+      sampleRateHertz: audioData.mimeType === 'audio/wav' ? 8000 : undefined,
+      enableAutomaticPunctuation: true,
+      enableWordConfidence: true,
+      diarizationConfig: {
+        enableSpeakerDiarization: true,
+        minSpeakerCount: 2,
+        maxSpeakerCount: 2,
+      },
+      useEnhanced: true,
+    };
+
+    const audio: RecognitionAudio = {
+      content: audioData.base64,
+    };
+
+    const audioSizeBytes = Buffer.from(audioData.base64, 'base64').length;
+    const estimatedDurationSeconds = audioSizeBytes / (8000 * 2);
+
+    let results: protos.google.cloud.speech.v1.ISpeechRecognitionResult[] = [];
+
+    if (estimatedDurationSeconds > 60) {
+      console.log(`[Transcription] Using long-running recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
+      const [operation] = await client.longRunningRecognize({ config, audio });
+      const [response] = await operation.promise();
+      results = response.results || [];
+    } else {
+      console.log(`[Transcription] Using synchronous recognition (estimated ${Math.round(estimatedDurationSeconds)}s)`);
+      const [response] = await client.recognize({ config, audio });
+      results = response.results || [];
+    }
+
+    if (results.length === 0) {
+      console.error('[Transcription] No results from Google Speech-to-Text');
+      return null;
+    }
+
+    // Process results for full text
+    const fullTranscript = results
+      .map(result => result.alternatives?.[0]?.transcript || '')
+      .join(' ')
+      .trim();
+
+    // Flatten all words from all results
+    const words = results.flatMap(result => result.alternatives?.[0]?.words || []);
+    
+    const utterances: StructuredTranscript['utterances'] = [];
+    let currentSpeakerMs = -1;
+    let currentUtteranceWords: protos.google.cloud.speech.v1.IWordInfo[] = [];
+
+    const getSeconds = (time: any): number => {
+      if (!time) return 0;
+      if (typeof time === 'number') return time;
+      const s = parseInt((time.seconds || 0).toString());
+      const n = parseInt((time.nanos || 0).toString());
+      return s + n / 1e9;
+    };
+
+    for (const word of words) {
+      const spk = word.speakerTag || 1; // Default to 1 if missing
+      
+      if (spk !== currentSpeakerMs && currentSpeakerMs !== -1) {
+        if (currentUtteranceWords.length > 0) {
+          utterances.push({
+            speaker: `Speaker ${currentSpeakerMs}`,
+            text: currentUtteranceWords.map(w => w.word).join(' '),
+            start: getSeconds(currentUtteranceWords[0].startTime),
+            end: getSeconds(currentUtteranceWords[currentUtteranceWords.length - 1].endTime)
+          });
+        }
+        currentUtteranceWords = [];
+      }
+      currentSpeakerMs = spk;
+      currentUtteranceWords.push(word);
+    }
+    
+    // Push last one
+    if (currentUtteranceWords.length > 0) {
+      utterances.push({
+        speaker: `Speaker ${currentSpeakerMs}`,
+        text: currentUtteranceWords.map(w => w.word).join(' '),
+        start: getSeconds(currentUtteranceWords[0].startTime),
+        end: getSeconds(currentUtteranceWords[currentUtteranceWords.length - 1].endTime)
+      });
+    }
+
+    console.log(`[Transcription] ✅ Structured transcription completed | ${utterances.length} utterances`);
+    return {
+      text: fullTranscript,
+      utterances
+    };
+
+  } catch (error) {
+    console.error('[Transcription] Error with structured transcription:', error);
+    return null;
+  }
+}

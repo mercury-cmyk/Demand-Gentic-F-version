@@ -148,13 +148,21 @@ export function initializeEmailQueue(): Queue<EmailJobData> {
   });
 
   // Process jobs with concurrency of 5
-  new Worker('email-send', async (job: Job<EmailJobData>) => {
+  const emailWorker = new Worker('email-send', async (job: Job<EmailJobData>) => {
     return processEmailJob(job.data);
   }, {
     connection: {
       url: redisUrl,
     },
     concurrency: 5,
+  });
+
+  emailWorker.on('error', (err) => {
+    // Suppress Redis connection errors - they're expected when Redis is unavailable
+    if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
+      return; // Silent - Redis is optional
+    }
+    console.error('[email-send] Worker error:', err);
   });
 
   return emailQueue;
