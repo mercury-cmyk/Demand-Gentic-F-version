@@ -181,8 +181,10 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
     }, 100);
   };
 
-  // Voice input (Web Speech API)
-  const toggleVoiceInput = () => {
+  // Voice input (Web Speech API) - push-to-talk
+  const recognitionRef = useRef<any>(null);
+
+  const startVoiceInput = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: 'Voice not supported',
@@ -192,10 +194,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
       return;
     }
 
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
+    if (isListening) return;
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -205,15 +204,34 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
     recognition.lang = 'en-US';
 
     recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
 
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       setInput(transcript);
     };
 
+    recognitionRef.current = recognition;
     recognition.start();
+  };
+
+  const stopVoiceInput = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        // ignore
+      }
+      recognitionRef.current = null;
+      setIsListening(false);
+    }
   };
 
   const formatActionBadge = (action: string) => {
@@ -257,7 +275,6 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
           </div>
           <div>
             <CardTitle className="text-sm font-semibold">AI Assistant</CardTitle>
-            <p className="text-xs text-muted-foreground">Powered by Vertex AI</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -403,7 +420,12 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
             variant="ghost"
             size="icon"
             className={cn('shrink-0', isListening && 'bg-red-100 text-red-600')}
-            onClick={toggleVoiceInput}
+            onMouseDown={startVoiceInput}
+            onMouseUp={stopVoiceInput}
+            onMouseLeave={stopVoiceInput}
+            onTouchStart={startVoiceInput}
+            onTouchEnd={stopVoiceInput}
+            aria-label="Hold to talk"
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </Button>

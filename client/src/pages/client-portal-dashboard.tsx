@@ -36,6 +36,11 @@ import {
   LeadDetailModal,
   ExportLeadsDialog,
 } from '@/components/client-portal/leads';
+import {
+  CampaignCard,
+  RequestLeadsDialog,
+} from '@/components/client-portal/campaigns';
+import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 
 interface ClientUser {
   id: string;
@@ -99,6 +104,15 @@ interface SupportTicket {
   lastReplyAt: string | null;
 }
 
+interface ClientActivityLog {
+  id: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  details: Record<string, any> | null;
+  createdAt: string;
+}
+
 interface Project {
   id: string;
   name: string;
@@ -141,10 +155,13 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
   pending: 'bg-yellow-100 text-yellow-800',
+  pending_review: 'bg-yellow-100 text-yellow-800',
   submitted: 'bg-yellow-100 text-yellow-800',
   approved: 'bg-blue-100 text-blue-800',
   sent: 'bg-blue-100 text-blue-800',
   active: 'bg-green-100 text-green-800',
+  delivering: 'bg-purple-100 text-purple-800',
+  delivered: 'bg-purple-100 text-purple-800',
   completed: 'bg-green-100 text-green-800',
   paid: 'bg-green-100 text-green-800',
   overdue: 'bg-red-100 text-red-800',
@@ -158,7 +175,6 @@ export default function ClientPortalDashboard() {
   const [user, setUser] = useState<ClientUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
-  const [selectedCampaign, setSelectedCampaign] = useState<string>('');
   
   // Project Creation State
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -195,6 +211,10 @@ export default function ClientPortalDashboard() {
   // Qualified Leads state
   const [selectedQualifiedLeadId, setSelectedQualifiedLeadId] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+
+  // Request leads dialog state
+  const [showRequestLeadsDialog, setShowRequestLeadsDialog] = useState(false);
+  const [selectedCampaignForRequest, setSelectedCampaignForRequest] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('clientPortalUser');
@@ -267,6 +287,19 @@ export default function ClientPortalDashboard() {
     queryFn: async () => {
       const res = await fetch('/api/client-portal/leads', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch leads');
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  const { data: activityData, isLoading: activityLoading } = useQuery<{
+    activities: ClientActivityLog[];
+    total: number;
+  }>({
+    queryKey: ['client-portal-activity'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/activity', authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch activity log');
       return res.json();
     },
     enabled: !!user,
@@ -389,6 +422,73 @@ export default function ClientPortalDashboard() {
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </Badge>
     );
+  };
+
+  const openRequestLeadsDialog = (campaignId?: string) => {
+    setSelectedCampaignForRequest(campaignId);
+    setShowRequestLeadsDialog(true);
+  };
+
+  const closeRequestLeadsDialog = () => {
+    setShowRequestLeadsDialog(false);
+    setSelectedCampaignForRequest(undefined);
+  };
+
+  const activityConfig: Record<string, { title: string; type: ActivityItem['type']; status?: ActivityItem['status'] }> = {
+    project_created: { title: 'Campaign Request Submitted', type: 'campaign', status: 'info' },
+    requested_additional_leads: { title: 'Additional Leads Requested', type: 'campaign', status: 'info' },
+  };
+
+  const activityItems: ActivityItem[] = (activityData?.activities || []).map((activity) => {
+    const details = activity.details || {};
+    const config = activityConfig[activity.action] || {
+      title: activity.action.replace(/_/g, ' '),
+      type: 'custom' as ActivityItem['type'],
+    };
+    const title = config.title;
+    const description =
+      activity.action === 'requested_additional_leads'
+        ? `Requested ${details.requestedQuantity?.toLocaleString?.() || details.requestedQuantity || 'additional'} leads for ${details.campaignName || 'a campaign'}.`
+        : activity.action === 'project_created'
+          ? `Campaign request created for ${details.name || 'a new campaign'}.`
+          : undefined;
+
+    const metadata = activity.action === 'requested_additional_leads'
+      ? {
+          campaign: details.campaignName,
+          quantity: details.requestedQuantity,
+          priority: details.priority,
+        }
+      : activity.action === 'project_created'
+        ? {
+            requested_leads: details.requestedLeadCount,
+            budget: details.budgetAmount,
+          }
+        : undefined;
+
+    return {
+      id: activity.id,
+      type: config.type,
+      title,
+      description,
+      timestamp: activity.createdAt,
+      status: config.status,
+      metadata,
+    };
+  });
+
+  const projectStatusSteps = [
+    { key: 'pending', label: 'Pending' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'active', label: 'In Progress' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'completed', label: 'Completed' },
+  ];
+
+  const getProjectStatusStep = (status?: string) => {
+    const normalized = (status || 'pending').toLowerCase();
+    const index = projectStatusSteps.findIndex((step) => step.key === normalized);
+    return index === -1 ? 1 : index + 1;
   };
 
   // Calculate metrics
@@ -533,9 +633,6 @@ export default function ClientPortalDashboard() {
             <Bot className="h-4 w-4" />
             {!sidebarCollapsed && <span>Talk to Agent</span>}
           </Button>
-          {!sidebarCollapsed && (
-            <p className="text-xs text-center text-muted-foreground mt-2">Powered by Vertex AI</p>
-          )}
         </div>
       </aside>
 
@@ -897,8 +994,7 @@ export default function ClientPortalDashboard() {
                           key={campaign.id}
                           className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer"
                           onClick={() => {
-                            setSelectedCampaign(campaign.id);
-                            setShowCreateDialog(true);
+                            openRequestLeadsDialog(campaign.id);
                           }}
                         >
                           <div className="flex items-center gap-3">
@@ -907,15 +1003,48 @@ export default function ClientPortalDashboard() {
                             </div>
                             <div>
                               <p className="font-medium text-sm">{campaign.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {campaign.eligibleCount?.toLocaleString() || 0} eligible
-                              </p>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>{campaign.eligibleCount?.toLocaleString() || 0} eligible</span>
+                                <span>•</span>
+                                <span>{campaign.deliveredCount?.toLocaleString() || 0} delivered</span>
+                              </div>
                             </div>
                           </div>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <div className="flex items-center gap-2">
+                            {getStatusBadge(campaign.status || 'active')}
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          </div>
                         </div>
                       ))}
                     </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Separator />
+
+            {/* Activity & Requests */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Clock className="h-5 w-5 text-indigo-600" />
+                Activity & Requests
+                {(activityData?.activities?.length || 0) > 0 && (
+                  <Badge variant="secondary" className="ml-2">{activityData?.activities?.length}</Badge>
+                )}
+              </h3>
+              <Card className="border-indigo-200 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/20">
+                <CardContent className="p-6">
+                  {activityLoading ? (
+                    <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+                  ) : (
+                    <ScrollArea className="h-[320px] pr-3">
+                      <ActivityTimeline
+                        items={activityItems}
+                        showAvatar={false}
+                        compact
+                      />
+                    </ScrollArea>
                   )}
                 </CardContent>
               </Card>
@@ -933,7 +1062,7 @@ export default function ClientPortalDashboard() {
               </div>
               <Button onClick={() => setShowCreateDialog(true)} className="gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
                 <Plus className="h-4 w-4" />
-                Create Campaign
+                Request Campaign
               </Button>
             </div>
 
@@ -959,7 +1088,10 @@ export default function ClientPortalDashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
                       <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="delivering">Delivering</SelectItem>
+                      <SelectItem value="delivered">Delivered</SelectItem>
                       <SelectItem value="paused">Paused</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
                       <SelectItem value="pending">Pending</SelectItem>
@@ -1035,6 +1167,31 @@ export default function ClientPortalDashboard() {
                         <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
                           {project.description || "No description provided."}
                         </p>
+                        <div className="mb-4">
+                          <div className="flex justify-between text-[10px] text-muted-foreground">
+                            {projectStatusSteps.map((step, index) => {
+                              const currentStep = getProjectStatusStep(project.status);
+                              const isCompleted = currentStep > index + 1;
+                              const isCurrent = currentStep === index + 1;
+                              return (
+                                <span
+                                  key={step.key}
+                                  className={isCurrent ? 'font-semibold text-foreground' : ''}
+                                >
+                                  {step.label}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <div className="relative mt-2 h-1 rounded-full bg-slate-200 dark:bg-slate-800">
+                            <div
+                              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
+                              style={{
+                                width: `${Math.min((getProjectStatusStep(project.status) - 1) / (projectStatusSteps.length - 1) * 100, 100)}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <DollarSign className="h-3 w-3" />
@@ -1056,11 +1213,11 @@ export default function ClientPortalDashboard() {
 
             <Separator />
 
-            {/* Active Campaigns */}
+            {/* Campaigns */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-green-600" />
-                Active Campaigns
+                <Target className="h-5 w-5 text-blue-600" />
+                Campaigns
                 {filteredCampaigns.length > 0 && (
                   <Badge variant="secondary" className="ml-2">{filteredCampaigns.length}</Badge>
                 )}
@@ -1081,48 +1238,11 @@ export default function ClientPortalDashboard() {
               ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredCampaigns.map((campaign) => (
-                  <Card key={campaign.id} className="hover:shadow-md transition-all cursor-pointer group">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
-                          <Target className="h-5 w-5 text-white" />
-                        </div>
-                        {getStatusBadge(campaign.status || 'active')}
-                      </div>
-                      <CardTitle className="mt-3 group-hover:text-primary transition-colors">
-                        {campaign.name}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Eligible Contacts</span>
-                          <span className="font-medium text-foreground">{campaign.eligibleCount?.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Verified</span>
-                          <span className="font-medium text-foreground">{campaign.verifiedCount?.toLocaleString() || 0}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Delivered</span>
-                          <span className="font-medium text-foreground">{campaign.deliveredCount?.toLocaleString() || 0}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                    <CardFooter className="pt-2 border-t bg-slate-50/50 dark:bg-slate-900/50">
-                      <Button 
-                        variant="ghost" 
-                        className="w-full justify-between hover:text-primary"
-                        onClick={() => {
-                          setSelectedCampaign(campaign.id);
-                          setShowCreateDialog(true);
-                        }}
-                      >
-                        Request Additional Leads
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </CardFooter>
-                  </Card>
+                  <CampaignCard
+                    key={campaign.id}
+                    campaign={campaign}
+                    onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
+                  />
                 ))}
               </div>
               )}
@@ -1573,6 +1693,14 @@ export default function ClientPortalDashboard() {
       {/* ==================== DIALOGS ==================== */}
 
       {/* Campaign creation dialog is handled by showCreateDialog */}
+
+      {/* Request Additional Leads Dialog */}
+      <RequestLeadsDialog
+        open={showRequestLeadsDialog}
+        onClose={closeRequestLeadsDialog}
+        campaigns={campaigns}
+        preselectedCampaignId={selectedCampaignForRequest}
+      />
 
       {/* Create Project / Campaign Request Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>

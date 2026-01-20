@@ -445,22 +445,178 @@ router.get('/orders/:id/contacts', requireClientAuth, async (req, res) => {
   }
 });
 
+// ==================== REQUEST ADDITIONAL LEADS ====================
+
+// Request additional leads for an existing campaign
+router.post('/campaigns/request-additional-leads', requireClientAuth, async (req, res) => {
+  try {
+    const { campaignId, requestedQuantity, notes, priority } = req.body;
+
+    if (!campaignId || !requestedQuantity) {
+      return res.status(400).json({ message: "Campaign ID and requested quantity are required" });
+    }
+
+    if (typeof requestedQuantity !== 'number' || requestedQuantity < 1) {
+      return res.status(400).json({ message: "Requested quantity must be a positive number" });
+    }
+
+    // Verify client has access to this campaign
+    const [access] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
+          or(
+            eq(clientCampaignAccess.campaignId, campaignId),
+            eq(clientCampaignAccess.regularCampaignId, campaignId)
+          )
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ message: "You don't have access to this campaign" });
+    }
+
+    // Get campaign name for logging
+    let campaignName = 'Unknown Campaign';
+    const [verificationCamp] = await db
+      .select({ name: verificationCampaigns.name })
+      .from(verificationCampaigns)
+      .where(eq(verificationCampaigns.id, campaignId))
+      .limit(1);
+
+    if (verificationCamp) {
+      campaignName = verificationCamp.name;
+    } else {
+      const [regularCamp] = await db
+        .select({ name: campaigns.name })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+      if (regularCamp) {
+        campaignName = regularCamp.name;
+      }
+    }
+
+    // Log the activity
+    const activityId = await logClientPortalActivity({
+      clientAccountId: req.clientUser!.clientAccountId,
+      clientUserId: req.clientUser!.clientUserId,
+      entityType: 'additional_leads_request',
+      entityId: campaignId,
+      action: 'requested_additional_leads',
+      details: {
+        campaignId,
+        campaignName,
+        requestedQuantity,
+        notes: notes || null,
+        priority: priority || 'normal',
+        requestedAt: new Date().toISOString(),
+        requestedBy: {
+          userId: req.clientUser!.clientUserId,
+          email: req.clientUser!.email,
+          name: `${req.clientUser!.firstName || ''} ${req.clientUser!.lastName || ''}`.trim()
+        }
+      },
+    });
+
+    // Get client account for notification
+    const [account] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, req.clientUser!.clientAccountId));
+
+    // Send notification to admin
+    try {
+      await notificationService.sendInternalNotification({
+        title: `${priority === 'urgent' ? '🔴 URGENT: ' : ''}Additional Leads Request`,
+        message: `${account?.name || 'A client'} has requested ${requestedQuantity.toLocaleString()} additional leads for campaign "${campaignName}"${notes ? `. Notes: ${notes}` : ''}`,
+        type: priority === 'urgent' ? 'urgent' : 'info',
+        metadata: {
+          campaignId,
+          campaignName,
+          requestedQuantity,
+          clientAccountId: req.clientUser!.clientAccountId,
+          clientName: account?.name,
+          priority
+        }
+      });
+    } catch (notifyErr) {
+      console.error('[CLIENT PORTAL] Notification error:', notifyErr);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Your request has been submitted successfully',
+      data: {
+        campaignId,
+        campaignName,
+        requestedQuantity,
+        priority: priority || 'normal',
+        status: 'pending_review'
+      }
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Request additional leads error:', error);
+    res.status(500).json({ message: "Failed to submit request" });
+  }
+});
+
+// Get activity log for the client
+router.get('/activity', requireClientAuth, async (req, res) => {
+  try {
+    const { page = '1', pageSize = '50', entityType } = req.query;
+    const pageNum = parseInt(page as string);
+    const pageSizeNum = Math.min(parseInt(pageSize as string), 100);
+    const offset = (pageNum - 1) * pageSizeNum;
+
+    let query = db
+      .select()
+      .from(clientPortalActivityLogs)
+      .where(eq(clientPortalActivityLogs.clientAccountId, req.clientUser!.clientAccountId))
+      .orderBy(desc(clientPortalActivityLogs.createdAt))
+      .limit(pageSizeNum)
+      .offset(offset);
+
+    const activities = await query;
+
+    // Get total count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(clientPortalActivityLogs)
+      .where(eq(clientPortalActivityLogs.clientAccountId, req.clientUser!.clientAccountId));
+
+    res.json({
+      activities,
+      total: countResult?.count || 0,
+      page: pageNum,
+      pageSize: pageSizeNum
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get activity error:', error);
+    res.status(500).json({ message: "Failed to fetch activity log" });
+  }
+});
+
 router.get('/leads', requireClientAuth, async (req, res) => {
   try {
-    const contacts = await db
+    const contactsData = await db
       .select({
         id: verificationContacts.id,
         firstName: verificationContacts.firstName,
         lastName: verificationContacts.lastName,
+        fullName: verificationContacts.fullName,
         title: verificationContacts.title,
-        company: verificationContacts.company,
         email: verificationContacts.email,
         phone: verificationContacts.phone,
         linkedinUrl: verificationContacts.linkedinUrl,
-        location: verificationContacts.location,
-        employees: verificationContacts.employees,
-        industry: verificationContacts.industry,
-        keywords: verificationContacts.keywords,
+        // Get company info from linked account
+        company: accounts.name,
+        location: accounts.companyLocation,
+        employees: accounts.staffCount,
+        industry: accounts.industryStandardized,
         campaignName: verificationCampaigns.name,
         orderId: clientPortalOrders.id,
         orderNumber: clientPortalOrders.orderNumber,
@@ -470,10 +626,11 @@ router.get('/leads', requireClientAuth, async (req, res) => {
       .innerJoin(verificationContacts, eq(clientPortalOrderContacts.verificationContactId, verificationContacts.id))
       .innerJoin(clientPortalOrders, eq(clientPortalOrderContacts.orderId, clientPortalOrders.id))
       .leftJoin(verificationCampaigns, eq(clientPortalOrders.campaignId, verificationCampaigns.id))
+      .leftJoin(accounts, eq(verificationContacts.accountId, accounts.id))
       .where(eq(clientPortalOrders.clientAccountId, req.clientUser!.clientAccountId))
       .orderBy(desc(clientPortalOrders.createdAt));
 
-    res.json(contacts);
+    res.json(contactsData);
   } catch (error) {
     console.error('[CLIENT PORTAL] Get all leads error:', error);
     res.status(500).json({ message: "Failed to fetch client leads" });

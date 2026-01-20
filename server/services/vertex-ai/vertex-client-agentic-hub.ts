@@ -35,7 +35,7 @@ import {
   clientCampaignAccess,
   virtualAgents,
 } from "@shared/schema";
-import { eq, and, desc, sql, gte, lte, count, sum } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, count, sum, innerJoin } from "drizzle-orm";
 
 // ==================== TYPES ====================
 
@@ -214,6 +214,26 @@ export class VertexClientAgenticHub extends EventEmitter {
     this.context = context;
   }
 
+  private async assertCampaignAccess(campaignId: string) {
+    const [record] = await db
+      .select({ campaign: campaigns })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, this.context.clientAccountId),
+          eq(clientCampaignAccess.campaignId, campaignId)
+        )
+      )
+      .limit(1);
+
+    if (!record) {
+      throw new Error("Campaign not found or access denied");
+    }
+
+    return record.campaign;
+  }
+
   // ==================== CAMPAIGN ORDER AGENT ====================
 
   /**
@@ -338,17 +358,22 @@ Return JSON:
     this.emit("agent:action", "voice_simulation", "Starting voice simulation...");
 
     try {
-      // Fetch campaign details if provided
+      // Fetch campaign details if provided (and accessible)
       let campaignContext = "";
       if (request.campaignId) {
-        const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, request.campaignId)).limit(1);
-        if (campaign) {
+        try {
+          const campaign = await this.assertCampaignAccess(request.campaignId);
           campaignContext = `
 CAMPAIGN CONTEXT:
 - Name: ${campaign.name}
 - Type: ${campaign.type}
 - Description: ${campaign.description || "N/A"}
 `;
+        } catch (err: any) {
+          return {
+            success: false,
+            message: err.message,
+          };
         }
       }
 
@@ -484,6 +509,17 @@ Return JSON:
     this.emit("agent:action", "live_voice_simulation", "Configuring Gemini Live voice simulation...");
 
     try {
+      if (request.campaignId) {
+        try {
+          await this.assertCampaignAccess(request.campaignId);
+        } catch (err: any) {
+          return {
+            success: false,
+            message: err.message,
+          };
+        }
+      }
+
       // Generate the AI persona prompt for Gemini Live
       const personaPrompt = `Create a detailed AI persona for a live voice simulation.
 
@@ -572,6 +608,17 @@ Return JSON:
     try {
       const variantCount = request.generateVariants || 1;
 
+      if (request.campaignId) {
+        try {
+          await this.assertCampaignAccess(request.campaignId);
+        } catch (err: any) {
+          return {
+            success: false,
+            message: err.message,
+          };
+        }
+      }
+
       const emailPrompt = `You are an expert B2B email copywriter. Generate ${variantCount} high-converting ${request.emailType} email(s).
 
 TARGET PERSONA:
@@ -653,11 +700,16 @@ Return JSON:
     this.emit("agent:action", "email_sequence_generation", "Generating email sequence...");
 
     try {
-      // Fetch campaign details
+      // Fetch campaign details with access control
       let campaignContext = "";
-      const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
-      if (campaign) {
+      try {
+        const campaign = await this.assertCampaignAccess(campaignId);
         campaignContext = `Campaign: ${campaign.name}\nType: ${campaign.type}`;
+      } catch (err: any) {
+        return {
+          success: false,
+          message: err.message,
+        };
       }
 
       const sequencePrompt = `You are an email sequence architect. Create a ${sequenceLength}-email ${sequenceType} outreach sequence.
@@ -828,7 +880,24 @@ Return JSON:
       const campaignData: any[] = [];
 
       if (request.campaignIds && request.campaignIds.length > 0) {
+        const allowedCampaignIds: string[] = [];
         for (const campaignId of request.campaignIds) {
+          try {
+            await this.assertCampaignAccess(campaignId);
+            allowedCampaignIds.push(campaignId);
+          } catch (err) {
+            // Silently skip unauthorized campaigns to avoid leaking existence
+          }
+        }
+
+        if (allowedCampaignIds.length === 0) {
+          return {
+            success: false,
+            message: "No accessible campaigns found for this account",
+          };
+        }
+
+        for (const campaignId of allowedCampaignIds) {
           const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
 
           if (campaign) {
