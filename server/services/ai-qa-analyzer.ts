@@ -1,24 +1,27 @@
-import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 import { workerDb as db, withRetry } from "../db";
 import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 
-// Lazy OpenAI client – instantiate only when needed and when credentials exist
-let _openai: OpenAI | null = null;
-function getOpenAI(): OpenAI {
-  if (!_openai) {
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+// Lazy Gemini client – instantiate only when needed and when credentials exist
+let _gemini: GoogleGenAI | null = null;
+function getGemini(): GoogleGenAI {
+  if (!_gemini) {
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error("OpenAI API key not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY.");
+      throw new Error("Gemini API key not configured. Set GEMINI_API_KEY.");
     }
-    _openai = new OpenAI({
+    _gemini = new GoogleGenAI({
       apiKey,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      httpOptions: {
+        apiVersion: "",
+        baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL || "",
+      },
     });
   }
-  return _openai;
+  return _gemini;
 }
 
 interface QAParameters {
@@ -189,29 +192,24 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       analysisPrompt = buildAnalysisPrompt(lead, contact, account, campaign, qaParams, existingQaData);
     }
 
-    // Call OpenAI for analysis using GPT-4.1-mini (cost-effective)
-    const openai = getOpenAI();
+    // Call Gemini for analysis using gemini-2.5-flash (cost-effective)
+    const gemini = getGemini();
     const systemPrompt = await buildAgentSystemPrompt(
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: analysisPrompt
-        }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
+    const fullPrompt = `${systemPrompt}\n\n${analysisPrompt}`;
+
+    const result = await gemini.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: fullPrompt,
+      generationConfig: {
+        temperature: 0.3,
+        responseMimeType: 'application/json',
+      },
     });
 
-    const analysisText = completion.choices[0]?.message?.content;
+    const analysisText = result.text?.trim();
     if (!analysisText) return null;
 
     let rawAnalysis: any = JSON.parse(analysisText);

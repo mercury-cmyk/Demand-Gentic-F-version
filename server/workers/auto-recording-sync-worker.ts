@@ -12,6 +12,7 @@ const connection = new Redis(getRedisUrl(), {
   ...getRedisConnectionOptions(),
   maxRetriesPerRequest: null,
 });
+connection.on('error', () => {});
 
 /**
  * Fetch recording from Telnyx

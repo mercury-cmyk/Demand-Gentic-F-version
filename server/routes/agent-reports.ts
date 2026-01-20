@@ -25,8 +25,8 @@ try {
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 2000)),
     });
-    redisClient.on('error', (err) => {
-      console.warn('Redis connection error for agent reports:', err);
+    redisClient.on('error', () => {
+      // Suppress Redis connection errors
       redisClient = null;
     });
   }

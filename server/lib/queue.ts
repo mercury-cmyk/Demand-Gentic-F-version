@@ -75,7 +75,8 @@ async function initializeRedisConnection(): Promise<IORedis | undefined> {
 
     // Set up error handlers BEFORE connecting
     connection.on('error', (err) => {
-      if (err.message?.includes('ETIMEDOUT') || err.message?.includes('ECONNREFUSED')) {
+      if (err.message?.includes('ETIMEDOUT') || err.message?.includes('ECONNREFUSED') || err.code === 'ECONNREFUSED') {
+        // Suppress spam for expected connection failures in dev
         setRedisAvailable(false);
       } else {
         console.error('[Queue] Redis error:', err.message);
@@ -88,8 +89,11 @@ async function initializeRedisConnection(): Promise<IORedis | undefined> {
     });
 
     connection.on('close', () => {
-      console.log('[Queue] Redis connection closed');
-      setRedisAvailable(false);
+      // Only log once when initially closing
+      if (redisConnection) {
+        console.log('[Queue] Redis connection closed');
+        setRedisAvailable(false);
+      }
     });
 
     connection.on('reconnecting', () => {

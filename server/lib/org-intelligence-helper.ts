@@ -320,7 +320,13 @@ async function maybeSummarizeWithGemini(
 
     return cleaned.length > 0 ? cleaned.slice(0, 5) : fallbackInsights;
   } catch (error) {
-    console.warn("[OrgIntelligence] Gemini learning summary failed:", error);
+    // Network errors, API errors - fail silently and use fallback
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (errorMsg.includes('fetch failed') || errorMsg.includes('ENOTFOUND')) {
+      console.warn("[OrgIntelligence] Gemini network error - using fallback insights");
+    } else {
+      console.warn("[OrgIntelligence] Gemini learning summary failed:", error);
+    }
     return fallbackInsights;
   }
 }

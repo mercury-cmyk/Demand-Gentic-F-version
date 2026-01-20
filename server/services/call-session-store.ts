@@ -96,6 +96,7 @@ export async function initializeCallSessionStore(): Promise<boolean> {
       enableReadyCheck: true,
       lazyConnect: true,
     });
+    redisClient.on('error', () => {});
 
     await redisClient.connect();
     

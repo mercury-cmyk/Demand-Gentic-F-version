@@ -9,6 +9,7 @@ const redisConnection = new IORedis(getRedisUrl(), {
   ...getRedisConnectionOptions(),
   maxRetriesPerRequest: null,
 });
+redisConnection.on('error', () => {});
 
 interface ScheduledEmailJob {
   scheduledEmailId: string;

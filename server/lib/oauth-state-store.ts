@@ -20,6 +20,7 @@ export class OAuthStateStore {
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 2000)),
     });
+    this.redis.on('error', () => {});
     this.prefix = options.prefix || 'oauth:m365:';
     this.ttlSeconds = options.ttlSeconds || 15 * 60; // 15 minutes default
   }
