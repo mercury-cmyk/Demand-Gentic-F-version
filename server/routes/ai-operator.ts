@@ -2,6 +2,7 @@
  * AI CRM Operator API Routes
  * 
  * Provides an AGENTIC AI interface for CRM operations with autonomous task execution
+ * Supports both OpenAI and Google Vertex AI (Gemini) backends
  */
 
 import { Router, Request, Response } from "express";
@@ -12,6 +13,7 @@ import { accounts, contacts, campaigns, leads, segments } from "@shared/schema";
 import { count, eq, ilike, and, or, desc, gte, lte, inArray, asc, type SQL } from "drizzle-orm";
 import { buildFilterQuery } from "../filter-builder";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { VertexAI, FunctionDeclarationSchemaType, Part } from '@google-cloud/vertexai';
 
 const router = Router();
 
@@ -124,6 +126,21 @@ const TOOL_SCHEMAS = {
     groupBy: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
     filter: z.union([FILTER_GROUP_SCHEMA, z.string()]).optional(),
+  }),
+  create_campaign: z.object({
+    name: z.string().min(1),
+    type: z.enum(["email", "call", "combo", "content_syndication", "live_webinar", "on_demand_webinar", "high_quality_leads", "executive_dinner", "leadership_forum", "conference", "sql", "appointment_generation", "lead_qualification", "data_validation", "bant_leads"]),
+    status: z.enum(["draft", "scheduled", "active", "paused"]).optional(),
+    description: z.string().optional(),
+    segmentId: z.string().optional(),
+    emailSubject: z.string().optional(),
+    callScript: z.string().optional(),
+    campaignObjective: z.string().optional(),
+    targetAudienceDescription: z.string().optional(),
+    productServiceInfo: z.string().optional(),
+    talkingPoints: z.array(z.string()).optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
   }),
   task_complete: z.object({
     summary: z.string().min(1),
@@ -358,6 +375,70 @@ const AVAILABLE_TOOLS = [
   {
     type: "function",
     function: {
+      name: "create_campaign",
+      description: "Create a new marketing campaign (email, call, or combo). Creates the campaign as a draft by default.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Campaign name (required)"
+          },
+          type: {
+            type: "string",
+            enum: ["email", "call", "combo", "content_syndication", "live_webinar", "on_demand_webinar", "high_quality_leads", "appointment_generation", "lead_qualification", "bant_leads"],
+            description: "Type of campaign (required)"
+          },
+          status: {
+            type: "string",
+            enum: ["draft", "scheduled", "paused"],
+            description: "Campaign status (default: draft)"
+          },
+          segmentId: {
+            type: "string",
+            description: "ID of the contact segment to target"
+          },
+          emailSubject: {
+            type: "string",
+            description: "Email subject line (for email campaigns)"
+          },
+          callScript: {
+            type: "string",
+            description: "Call script (for call campaigns)"
+          },
+          campaignObjective: {
+            type: "string",
+            description: "Primary campaign objective (e.g., 'Generate qualified leads')"
+          },
+          targetAudienceDescription: {
+            type: "string",
+            description: "Description of the target audience"
+          },
+          productServiceInfo: {
+            type: "string",
+            description: "Product or service information to convey"
+          },
+          talkingPoints: {
+            type: "array",
+            items: { type: "string" },
+            description: "Key talking points for the campaign"
+          },
+          startDate: {
+            type: "string",
+            description: "Campaign start date (YYYY-MM-DD format)"
+          },
+          endDate: {
+            type: "string",
+            description: "Campaign end date (YYYY-MM-DD format)"
+          }
+        },
+        required: ["name", "type"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "task_complete",
       description: "Signal that the current task is complete and no more actions are needed",
       parameters: {
@@ -374,18 +455,70 @@ const AVAILABLE_TOOLS = [
   }
 ];
 
+// Convert OpenAI tool format to Gemini function declarations
+function convertToGeminiFunctionDeclarations() {
+  return AVAILABLE_TOOLS.map(tool => {
+    const fn = tool.function;
+    const properties: Record<string, any> = {};
+    
+    if (fn.parameters.properties) {
+      for (const [key, prop] of Object.entries(fn.parameters.properties as Record<string, any>)) {
+        let schemaType = FunctionDeclarationSchemaType.STRING;
+        if (prop.type === 'number') schemaType = FunctionDeclarationSchemaType.NUMBER;
+        else if (prop.type === 'boolean') schemaType = FunctionDeclarationSchemaType.BOOLEAN;
+        else if (prop.type === 'object') schemaType = FunctionDeclarationSchemaType.OBJECT;
+        else if (prop.type === 'array') schemaType = FunctionDeclarationSchemaType.ARRAY;
+        
+        properties[key] = {
+          type: schemaType,
+          description: prop.description || '',
+          ...(prop.enum ? { enum: prop.enum } : {}),
+        };
+      }
+    }
+    
+    return {
+      name: fn.name,
+      description: fn.description,
+      parameters: {
+        type: FunctionDeclarationSchemaType.OBJECT,
+        properties,
+        required: fn.parameters.required || [],
+      },
+    };
+  });
+}
+
+// Initialize Vertex AI client (lazy loaded)
+let vertexAIClient: VertexAI | null = null;
+function getVertexAI(): VertexAI {
+  if (!vertexAIClient) {
+    vertexAIClient = new VertexAI({
+      project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'pivotalb2b-2026',
+      location: process.env.VERTEX_AI_LOCATION || 'us-central1',
+    });
+  }
+  return vertexAIClient;
+}
+
+// Check if Vertex AI should be used
+function useVertexAI(): boolean {
+  return process.env.USE_VERTEX_AI === 'true';
+}
+
 // System prompt for the AGENTIC CRM Operator
 const BASE_PROMPT = `You are an AUTONOMOUS Agentic CRM Operator for Pivotal Marketing Platform. You work continuously to complete user tasks.
 
 ## YOUR CAPABILITIES
-You have access to tools that let you query and analyze CRM data:
+You have access to tools that let you query, analyze, and create CRM data:
 - count_records: Count entities (accounts, contacts, leads, campaigns)
 - search_records: Search for specific records
 - get_record_by_id: Fetch a record by ID
 - get_campaign_analytics: Get campaign performance metrics
 - get_pipeline_summary: Get sales pipeline overview
 - list_recent_activity: See recent CRM activity
-- create_segment: Create contact segments
+- create_segment: Create contact segments for targeting
+- create_campaign: Create marketing campaigns (email, call, combo) as drafts
 - analyze_data: Perform custom data analysis
 - task_complete: Signal when you've finished the task
 
@@ -395,6 +528,7 @@ You have access to tools that let you query and analyze CRM data:
 3. **Think step by step** - break down complex requests into smaller actions
 4. **Continue working** until the task is fully complete
 5. When you have gathered all needed information and answered the user's question, call task_complete
+6. **When asked to create a campaign**, use create_campaign tool - don't just create segments
 
 ## RESPONSE FORMAT
 When presenting results, use this structure:
@@ -413,6 +547,12 @@ User: "Give me a full CRM overview"
 → Synthesize all data into comprehensive report
 → Call task_complete
 
+User: "Create an email campaign for marketing directors"
+→ Call create_segment to create a targeting segment
+→ Call create_campaign with the segment ID to create the campaign as draft
+→ Report the created campaign details
+→ Call task_complete
+
 User: "Find accounts in healthcare and analyze them"
 → Call search_records for healthcare accounts
 → Call analyze_data to understand distribution
@@ -423,7 +563,8 @@ User: "Find accounts in healthcare and analyze them"
 - You MUST call tools to get real data - the tools return live CRM data
 - After each tool call, analyze the results and decide what to do next
 - Keep working until task_complete is called
-- Be proactive - if user asks for analysis, gather relevant data automatically`;
+- Be proactive - if user asks for analysis, gather relevant data automatically
+- When creating campaigns, ALWAYS use create_campaign tool - it creates real campaigns in the system`;
 
 interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
@@ -992,6 +1133,51 @@ async function executeTool(toolName: string, args: any, context: ToolExecutionCo
         };
       }
 
+      case 'create_campaign': {
+        const parsedArgs = normalized as z.infer<typeof TOOL_SCHEMAS.create_campaign>;
+        
+        // Build campaign data
+        const campaignData: any = {
+          name: parsedArgs.name,
+          type: parsedArgs.type,
+          status: parsedArgs.status || 'draft',
+          ownerId: context.user?.userId,
+        };
+
+        // Optional fields
+        if (parsedArgs.emailSubject) campaignData.emailSubject = parsedArgs.emailSubject;
+        if (parsedArgs.callScript) campaignData.callScript = parsedArgs.callScript;
+        if (parsedArgs.campaignObjective) campaignData.campaignObjective = parsedArgs.campaignObjective;
+        if (parsedArgs.targetAudienceDescription) campaignData.targetAudienceDescription = parsedArgs.targetAudienceDescription;
+        if (parsedArgs.productServiceInfo) campaignData.productServiceInfo = parsedArgs.productServiceInfo;
+        if (parsedArgs.talkingPoints) campaignData.talkingPoints = parsedArgs.talkingPoints;
+        if (parsedArgs.startDate) campaignData.startDate = parsedArgs.startDate;
+        if (parsedArgs.endDate) campaignData.endDate = parsedArgs.endDate;
+        
+        // Link to segment if provided
+        if (parsedArgs.segmentId) {
+          campaignData.audienceRefs = { segmentId: parsedArgs.segmentId };
+        }
+
+        const [campaign] = await db.insert(campaigns)
+          .values(campaignData)
+          .returning({ 
+            id: campaigns.id, 
+            name: campaigns.name, 
+            type: campaigns.type, 
+            status: campaigns.status 
+          });
+
+        return {
+          success: true,
+          message: `Campaign "${parsedArgs.name}" created as ${campaignData.status}.`,
+          campaignId: campaign?.id || null,
+          campaignName: campaign?.name || null,
+          campaignType: campaign?.type || null,
+          campaignStatus: campaign?.status || null,
+        };
+      }
+
       case 'task_complete': {
         const parsedArgs = normalized as z.infer<typeof TOOL_SCHEMAS.task_complete>;
         return { 
@@ -1010,8 +1196,116 @@ async function executeTool(toolName: string, args: any, context: ToolExecutionCo
 }
 
 /**
+ * Execute agentic loop with Vertex AI (Gemini)
+ */
+async function executeWithVertexAI(
+  systemPrompt: string,
+  userMessages: Array<{ role: string; content: string }>,
+  toolContext: ToolExecutionContext
+): Promise<{ finalResponse: string; isComplete: boolean; iterations: number; toolsExecuted: any[]; model: string }> {
+  const vertexAI = getVertexAI();
+  const model = process.env.AI_OPERATOR_GEMINI_MODEL || 'gemini-2.0-flash';
+  
+  const generativeModel = vertexAI.getGenerativeModel({
+    model,
+    tools: [{ functionDeclarations: convertToGeminiFunctionDeclarations() }],
+    systemInstruction: systemPrompt,
+  });
+
+  const chat = generativeModel.startChat();
+  
+  // Build initial prompt from user messages
+  const userPrompt = userMessages
+    .filter(m => m.role === 'user')
+    .map(m => m.content)
+    .join('\n\n');
+
+  let isComplete = false;
+  let iterations = 0;
+  const maxIterations = 10;
+  const toolsExecuted: any[] = [];
+  let finalResponse = '';
+
+  console.log(`[AI-Operator] Starting Vertex AI agentic loop with model: ${model}`);
+
+  // Send initial message
+  let result = await chat.sendMessage(userPrompt);
+
+  while (!isComplete && iterations < maxIterations) {
+    iterations++;
+    console.log(`[AI-Operator] Gemini iteration ${iterations}`);
+
+    const response = result.response;
+    const candidate = response.candidates?.[0];
+    
+    if (!candidate?.content?.parts) {
+      finalResponse = 'No response generated.';
+      isComplete = true;
+      break;
+    }
+
+    // Check for function calls
+    const functionCalls = candidate.content.parts.filter((p: any) => p.functionCall);
+    const textParts = candidate.content.parts.filter((p: any) => p.text);
+
+    // Collect any text response
+    for (const part of textParts) {
+      finalResponse += (part as any).text || '';
+    }
+
+    if (functionCalls.length > 0) {
+      console.log(`[AI-Operator] Gemini wants to call ${functionCalls.length} function(s)`);
+      
+      const functionResponses: Part[] = [];
+
+      for (const part of functionCalls) {
+        const funcCall = (part as any).functionCall;
+        const toolName = funcCall.name;
+        const toolArgs = funcCall.args || {};
+
+        // Check for task_complete
+        if (toolName === 'task_complete') {
+          isComplete = true;
+          toolsExecuted.push({ tool: toolName, args: toolArgs, result: { completed: true } });
+          if (!finalResponse && toolArgs.summary) {
+            finalResponse = toolArgs.summary;
+          }
+          break;
+        }
+
+        // Execute the tool
+        const toolResult = await executeTool(toolName, toolArgs, toolContext);
+        toolsExecuted.push({ tool: toolName, args: toolArgs, result: toolResult });
+
+        functionResponses.push({
+          functionResponse: {
+            name: toolName,
+            response: toolResult,
+          },
+        });
+      }
+
+      if (!isComplete && functionResponses.length > 0) {
+        // Send function responses back to Gemini
+        result = await chat.sendMessage(functionResponses);
+      }
+    } else {
+      // No function calls - model has finished
+      isComplete = true;
+    }
+  }
+
+  if (iterations >= maxIterations && !isComplete) {
+    finalResponse += '\n\n⚠️ Reached maximum iterations. Task may be incomplete.';
+  }
+
+  return { finalResponse, isComplete, iterations, toolsExecuted, model };
+}
+
+/**
  * POST /api/ai-operator/chat
  * Main agentic chat endpoint - runs in a loop until task_complete
+ * Supports both OpenAI and Vertex AI (Gemini) backends
  */
 router.post("/chat", requireAuth, requireRole('admin', 'campaign_manager'), async (req: Request, res: Response) => {
   try {
@@ -1025,27 +1319,6 @@ router.post("/chat", requireAuth, requireRole('admin', 'campaign_manager'), asyn
     if (!lastMessage || lastMessage.role !== 'user') {
       return res.status(400).json({ error: "Last message must be from user" });
     }
-
-    // Check for OpenAI API key
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return res.json({
-        message: {
-          role: "assistant",
-          content: "I'm the Agentic CRM Operator, but I need an OpenAI API key to function. Please set `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY` in your environment.",
-        },
-        isComplete: true,
-        toolsExecuted: [],
-      });
-    }
-
-    // Initialize OpenAI
-    const OpenAI = (await import('openai')).default;
-    const openai = new OpenAI({
-      apiKey,
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-    });
-    const model = process.env.AI_OPERATOR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     const userRoles = req.user?.roles || (req.user?.role ? [req.user.role] : []);
     const isAdmin = userRoles.includes('admin');
@@ -1078,7 +1351,63 @@ router.post("/chat", requireAuth, requireRole('admin', 'campaign_manager'), asyn
 
     const systemPrompt = await buildAgentSystemPrompt(basePrompt);
 
-    // Build initial messages
+    const toolContext: ToolExecutionContext = {
+      user: req.user,
+      isAdmin,
+      allowedCampaignIds,
+    };
+
+    // Use Vertex AI (Gemini) if configured, otherwise fall back to OpenAI
+    if (useVertexAI()) {
+      console.log('[AI-Operator] Using Vertex AI (Gemini) backend');
+      
+      try {
+        const result = await executeWithVertexAI(
+          systemPrompt,
+          messages.slice(-10),
+          toolContext
+        );
+
+        return res.json({
+          message: {
+            role: "assistant",
+            content: result.finalResponse,
+          },
+          isComplete: result.isComplete,
+          iterations: result.iterations,
+          toolsExecuted: result.toolsExecuted,
+          model: result.model,
+          provider: 'vertex-ai',
+        });
+      } catch (vertexError: any) {
+        console.error('[AI-Operator] Vertex AI error, falling back to OpenAI:', vertexError.message);
+        // Fall through to OpenAI
+      }
+    }
+
+    // OpenAI path (original implementation)
+    // Check for OpenAI API key
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.json({
+        message: {
+          role: "assistant",
+          content: "I'm the Agentic CRM Operator, but I need an OpenAI API key to function. Please set `AI_INTEGRATIONS_OPENAI_API_KEY` or `OPENAI_API_KEY` in your environment.",
+        },
+        isComplete: true,
+        toolsExecuted: [],
+      });
+    }
+
+    // Initialize OpenAI
+    const OpenAI = (await import('openai')).default;
+    const openai = new OpenAI({
+      apiKey,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+    const model = process.env.AI_OPERATOR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+    // Build initial messages for OpenAI
     const openaiMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       ...messages.slice(-10).map((m: any) => ({
@@ -1086,12 +1415,6 @@ router.post("/chat", requireAuth, requireRole('admin', 'campaign_manager'), asyn
         content: m.content,
       })),
     ];
-
-    const toolContext: ToolExecutionContext = {
-      user: req.user,
-      isAdmin,
-      allowedCampaignIds,
-    };
 
     let isComplete = false;
     let iterations = 0;

@@ -48,12 +48,12 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     
     // Account/Organization placeholders
     '{{account.name}}': context.accountName,
-    '{{org.name}}': context.organizationName || 'DemandGentic AI',
-    '{{organization.name}}': context.organizationName || 'DemandGentic AI',
+    '{{org.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
+    '{{organization.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
     
-    // Agent identity - ALWAYS use DemandGentic AI
-    '{{agent.name}}': 'DemandGentic AI',
-    '{{agent.fullName}}': 'DemandGentic AI',
+    // Agent identity - ALWAYS use DemandGentic.ai By Pivotal B2B
+    '{{agent.name}}': 'DemandGentic.ai By Pivotal B2B',
+    '{{agent.fullName}}': 'DemandGentic.ai By Pivotal B2B',
     '{{agent.firstName}}': 'DemandGentic',
     
     // Campaign placeholders
@@ -79,18 +79,18 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     result = result.replace(/\[Organization\]/g, context.organizationName);
     result = result.replace(/\[Company\]/g, context.organizationName);
   } else {
-    result = result.replace(/\[Organization\]/g, 'DemandGentic AI');
-    result = result.replace(/\[Company\]/g, 'DemandGentic AI');
+    result = result.replace(/\[Organization\]/g, 'DemandGentic.ai By Pivotal B2B');
+    result = result.replace(/\[Company\]/g, 'DemandGentic.ai By Pivotal B2B');
   }
   
   return result;
 }
 
 /**
- * Build DemandGentic AI identity preamble for the system prompt
+ * Build DemandGentic.ai By Pivotal B2B identity preamble for the system prompt
  */
 function buildDemandGenticIdentityPreamble(context: CallContext): string {
-  const orgRef = context.organizationName || 'DemandGentic AI';
+  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
     
   return `## YOUR IDENTITY (CRITICAL)
 
@@ -110,8 +110,26 @@ ${context.contactName ? `
 **Opening (after phone is answered):**
 "Hello, may I please speak with ${context.contactName || '[the contact]'}${context.contactJobTitle ? `, the ${context.contactJobTitle}` : ''}${context.accountName ? ` at ${context.accountName}` : ''}?"
 
-**After identity is confirmed:**
-"Great, thanks for confirming. I'm calling from ${orgRef}."
+## CRITICAL: IDENTITY CONFIRMATION RESPONSE (MUST FOLLOW WITHOUT PAUSE)
+
+When the contact confirms their identity with ANY of these phrases:
+- "Yes", "Yeah", "That's me", "Speaking", "This is [name]", "I'm [name]", "Yes I am", "I am", "Go ahead"
+
+You MUST IMMEDIATELY respond WITHOUT ANY PAUSE. Never wait silently. The very next words out of your mouth should be:
+
+1. First: Thank them - "Great, thanks for confirming!"
+2. Then: Introduce yourself - "I'm calling from ${orgRef}."
+3. Then: Set expectations - "This isn't a sales call."
+4. Then: State purpose - Briefly explain why you're calling (market research, feedback, industry insights).
+5. Then: Ask an open-ended question to start the conversation.
+
+**NEVER GO SILENT after identity confirmation.** If you're not sure what to say, default to:
+"Thanks for confirming! I'm calling from ${orgRef}. I'm reaching out because we're doing some market research in your industry and I'd love to get your perspective on a few things. Would that be okay?"
+
+**If the contact asks a question BEFORE you can deliver your introduction:**
+- Acknowledge briefly: "Great question!"
+- Bridge back: "Let me quickly introduce myself and then I'll be happy to cover that."
+- Continue with your introduction flow.
 
 `;};
 
@@ -198,7 +216,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
               systemPrompt = identityPreamble + basePrompt;
               
               console.log(`[Gemini Live] Call ${config.call_id} started. Voice: ${voiceName}`);
-              console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Org: ${callContext.organizationName || 'DemandGentic AI'}`);
+              console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Org: ${callContext.organizationName || 'DemandGentic.ai By Pivotal B2B'}`);
             } catch (e) {
               console.error('[Gemini Live] Failed to parse client_state', e);
             }

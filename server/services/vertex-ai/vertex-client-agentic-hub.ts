@@ -1312,7 +1312,7 @@ Return JSON:
       },
     ];
 
-    const systemPrompt = `You are the DemandGentic AI assistant, helping clients with B2B demand generation campaigns.
+    const systemPrompt = `You are the DemandGentic.ai By Pivotal B2B assistant, helping clients with B2B demand generation campaigns.
 
 You can help clients:
 1. Create campaign orders for leads

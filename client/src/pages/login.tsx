@@ -141,12 +141,12 @@ export default function LoginPage() {
           <div className="flex justify-center mb-4">
             <img
               src="/demangent-logo.png"
-              alt="DemandGentic.ai"
+              alt="DemandGentic.ai By Pivotal B2B"
               className="h-12 w-auto"
             />
           </div>
           <CardTitle className="text-3xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-            DemandGentic.ai
+            DemandGentic.ai By Pivotal B2B
           </CardTitle>
           <CardDescription className="text-base">
             Intelligent B2B demand generation platform

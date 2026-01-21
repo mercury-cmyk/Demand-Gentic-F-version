@@ -15,6 +15,7 @@ import { DeprecatedRedirect } from "@/components/deprecated-redirect";
 import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
+import LandingPage from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
@@ -416,6 +417,7 @@ function AuthenticatedApp() {
 function Router() {
   return (
     <Switch>
+      <Route path="/welcome" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/client-portal/login" component={ClientPortalLogin} />

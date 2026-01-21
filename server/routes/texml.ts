@@ -67,7 +67,7 @@ router.post("/incoming", (req, res) => {
   // Connect directly to stream without AMD delays
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Connecting you to the DemandGentic AI assistant.</Say>
+    <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>
         <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" />
     </Connect>

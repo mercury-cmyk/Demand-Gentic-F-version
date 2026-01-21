@@ -90,7 +90,7 @@ Body:
   "baseGoal": "Qualify leads and schedule meetings",
   "tone": "professional and friendly",
   "targetAudience": "VP of Sales",
-  "organizationName": "DemandEarn",
+  "organizationName": "DemandGentic.ai By Pivotal B2B",
   "industry": "SaaS",
   "talkingPoints": [
     "Improve lead qualification",

@@ -1,5 +1,5 @@
 /**
- * EmailBuilderPro - Production-Ready Email Builder for DemandGent.ai
+ * EmailBuilderPro - Production-Ready Email Builder for DemandGentic.ai By Pivotal B2B
  * 
  * Design Philosophy:
  * - Text-first, deliverability-focused

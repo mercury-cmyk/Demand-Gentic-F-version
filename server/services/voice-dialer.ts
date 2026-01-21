@@ -1102,9 +1102,12 @@ function buildTurnDetection(
   if (turnDetectionType === 'semantic') {
     // Semantic turn detection - context-aware, understands speech patterns
     // Low eagerness ensures the model waits for clear confirmation before proceeding
+    // CRITICAL: create_response and interrupt_response must be true for automatic turn-taking
     return {
       type: "semantic_vad",
       eagerness: eagernessValue,
+      create_response: true,    // Auto-create response when user stops speaking
+      interrupt_response: true, // Allow user to interrupt the agent
     };
   }
 
@@ -1113,6 +1116,7 @@ function buildTurnDetection(
   // - 800ms provides good balance between responsiveness and not interrupting
   // - Allows natural pauses without excessive waiting
   // - Faster turn-taking improves conversation flow
+  // CRITICAL: create_response and interrupt_response must be true for automatic turn-taking
   const silenceDurationMs = settings.silenceDurationMs || 800;
   console.log(`[Turn Detection] Using server_vad with silence_duration_ms: ${silenceDurationMs}`);
 
@@ -1121,6 +1125,8 @@ function buildTurnDetection(
     threshold: 0.5,
     prefix_padding_ms: 300,
     silence_duration_ms: silenceDurationMs, // Optimized from 2500ms -> 800ms for natural conversation flow
+    create_response: true,    // Auto-create response when user stops speaking
+    interrupt_response: true, // Allow user to interrupt the agent
   };
 }
 
@@ -3188,7 +3194,8 @@ function shouldSendGreeting(session: OpenAIRealtimeSession): boolean {
 
 /**
  * Inject a system-level reminder into the conversation to prevent identity re-verification.
- * Uses conversation.item.create to add a system message that reinforces the identity lock.
+ * Uses conversation.item.create to add a system message that reinforces the identity lock,
+ * then IMMEDIATELY triggers a response to ensure the agent speaks without pause.
  */
 async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promise<void> {
   if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
@@ -3220,7 +3227,28 @@ Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and exp
       }
     }));
 
-    console.log(`${LOG_PREFIX} Injected identity lock reminder for call: ${session.callId}`);
+    // CRITICAL: Immediately trigger a response so the agent speaks without pause
+    // This ensures the agent doesn't wait for additional user speech after identity confirmation
+    session.openaiWs.send(JSON.stringify({
+      type: "response.create",
+      response: {
+        modalities: ["text", "audio"],
+        instructions: `The contact just confirmed their identity. You MUST speak immediately - do not wait for them to say anything else.
+        
+Proceed directly to acknowledge their time and explain the purpose of your call. Be warm, professional, and get straight to the point.
+
+Example: "Thank you for taking my call. I'll keep this brief - I'm reaching out because..."
+
+Do NOT:
+- Ask who you're speaking with (already confirmed)
+- Wait for them to speak first
+- Pause or hesitate
+
+Speak NOW and deliver your introduction.`
+      }
+    }));
+
+    console.log(`${LOG_PREFIX} Injected identity lock reminder AND triggered response for call: ${session.callId}`);
   } catch (error) {
     console.error(`${LOG_PREFIX} Error injecting identity lock reminder for call ${session.callId}:`, error);
   }

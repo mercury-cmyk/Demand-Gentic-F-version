@@ -9,7 +9,7 @@ REGION="${GCP_REGION:-us-central1}"
 SERVICE_NAME="demandgentic-api"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
-echo "🚀 Deploying DemandGentic.ai to Google Cloud Run"
+echo "🚀 Deploying DemandGentic.ai By Pivotal B2B to Google Cloud Run"
 echo "Project: ${PROJECT_ID}"
 echo "Region: ${REGION}"
 echo "Service: ${SERVICE_NAME}"

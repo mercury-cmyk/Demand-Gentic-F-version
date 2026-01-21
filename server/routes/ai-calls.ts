@@ -1245,7 +1245,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       voice, // Dynamic voice selection for automatic synchronization
       agent_settings: settingsOverride,
       provider: 'gemini_live',
-      // Contact context for DemandGentic AI identity
+      // Contact context for DemandGentic.ai By Pivotal B2B identity
       contact_name: contactName,
       contact_first_name: contactFirstName,
       contact_job_title: contactJobTitle,

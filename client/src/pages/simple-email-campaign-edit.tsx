@@ -57,7 +57,7 @@ export default function SimpleEmailCampaignEditPage() {
     <SimpleCampaignBuilder
       campaignId={campaignId}
       initialCampaign={campaign}
-      organizationName="DemandGent.ai"
+      organizationName="DemandGentic.ai By Pivotal B2B"
       organizationAddress="123 Innovation Way, San Francisco, CA 94105"
     />
   );

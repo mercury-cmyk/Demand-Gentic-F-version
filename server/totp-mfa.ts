@@ -10,7 +10,10 @@ export interface TotpSecret {
 /**
  * Generate TOTP secret and QR code for user enrollment
  */
-export async function generateTotpSecret(username: string, issuer: string = 'DemandGentic.ai'): Promise<TotpSecret> {
+export async function generateTotpSecret(
+  username: string,
+  issuer: string = 'DemandGentic.ai By Pivotal B2B'
+): Promise<TotpSecret> {
   const secret = speakeasy.generateSecret({
     name: `${issuer} (${username})`,
     issuer: issuer,

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# DemandGentic.ai - Complete Production Reset Script
+# DemandGentic.ai By Pivotal B2B - Complete Production Reset Script
 # =============================================================================
 # This script will:
 # 1. Delete the existing Cloud Run service
@@ -25,7 +25,7 @@ REGION="us-central1"
 SERVICE_NAME="demandgentic-api"
 
 echo -e "${BLUE}=============================================${NC}"
-echo -e "${BLUE}   DemandGentic.ai Production Reset Script     ${NC}"
+echo -e "${BLUE}   DemandGentic.ai By Pivotal B2B Production Reset Script     ${NC}"
 echo -e "${BLUE}=============================================${NC}"
 echo ""
 

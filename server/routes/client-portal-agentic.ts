@@ -686,7 +686,7 @@ router.post("/chat/stream", async (req: Request, res: Response) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const systemPrompt = `You are the DemandGentic AI assistant for ${context.clientName || "our valued client"}.
+    const systemPrompt = `You are the DemandGentic.ai By Pivotal B2B assistant for ${context.clientName || "our valued client"}.
 Help with B2B demand generation: campaign orders, voice simulations, email generation, image creation, and reporting.
 Be helpful, professional, and proactive.`;
 

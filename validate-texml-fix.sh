@@ -30,7 +30,7 @@ echo "Checking TeXML XML structure for incoming calls..."
 
 incoming_response='<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Connecting you to the DemandGentic AI assistant.</Say>
+    <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>
         <Stream url="wss://example.com/openai-realtime-dialer" bidirectionalMode="rtp" />
     </Connect>

@@ -1,4 +1,4 @@
-// Example/test cases for DemanGent Email Generation flows
+// Example/test cases for DemandGentic.ai By Pivotal B2B Email Generation flows
 import { ContentContext } from "./contentContext";
 import { accountAssetFitReasoner, AccountAssetFitInput } from "./accountAssetFitReasoner";
 import { contentEmailGenerator, ContentEmailGeneratorInput } from "./contentEmailGenerator";
@@ -7,7 +7,7 @@ import { enforceGuardrails } from "./guardrails";
 // Example Content Contexts
 const webinarContext: ContentContext = {
   asset_type: "webinar",
-  asset_title: "From Lead Capture to Demand Earn",
+  asset_title: "From Lead Capture to DemandGentic.ai By Pivotal B2B",
   asset_format: "live webinar",
   primary_theme: "earning engagement before pipeline",
   who_it_is_for: "B2B demand and revenue teams",
@@ -39,7 +39,7 @@ const participantContext = {
 };
 
 const assetMetadata = {
-  title: "From Lead Capture to Demand Earn",
+  title: "From Lead Capture to DemandGentic.ai By Pivotal B2B",
   format: "live webinar",
   cta_url: "https://example.com/webinar",
 };

@@ -324,13 +324,13 @@ async function main() {
       console.log(`   ⚠️ No transcript available`);
     }
     
-    const emojiMap: Record<string, string> = {
+    const emojiMap: { [key: string]: string } = {
       approved: '✅',
       under_review: '🔍',
       rejected: '❌',
       new: '📋',
     };
-    const statusEmoji = emojiMap[r.newQaStatus] || '❓';
+    const statusEmoji = emojiMap[r.newQaStatus as string] || '❓';
     
     console.log(`   Status: ${r.currentQaStatus} → ${statusEmoji} ${r.newQaStatus.toUpperCase()}`);
     console.log(`   Reason: ${r.reason}`);

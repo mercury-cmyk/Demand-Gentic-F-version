@@ -1,4 +1,4 @@
-# Deploying DemandGentic.ai to Google Cloud Run
+# Deploying DemandGentic.ai By Pivotal B2B to Google Cloud Run
 
 ## Prerequisites
 

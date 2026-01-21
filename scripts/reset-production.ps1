@@ -1,5 +1,5 @@
 # =============================================================================
-# DemandGentic.ai - Complete Production Reset Script (Windows PowerShell)
+# DemandGentic.ai By Pivotal B2B - Complete Production Reset Script (Windows PowerShell)
 # =============================================================================
 # This script will:
 # 1. Delete the existing Cloud Run service
@@ -18,7 +18,7 @@ $REGION = "us-central1"
 $SERVICE_NAME = "demandgentic-api"
 
 Write-Host "=============================================" -ForegroundColor Blue
-Write-Host "   DemandGentic.ai Production Reset Script     " -ForegroundColor Blue
+Write-Host "   DemandGentic.ai By Pivotal B2B Production Reset Script     " -ForegroundColor Blue
 Write-Host "=============================================" -ForegroundColor Blue
 Write-Host ""
 

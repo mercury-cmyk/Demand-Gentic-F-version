@@ -347,10 +347,10 @@ export function AppSidebar({ userRoles = ["admin"] }: AppSidebarProps) {
             <SidebarGroupLabel className="text-lg font-semibold px-0 text-sidebar-foreground tracking-tight flex items-center gap-2">
               <img
                 src="/demangent-logo.png"
-                alt="DemandGentic.ai"
+                alt="DemandGentic.ai By Pivotal B2B"
                 className="h-6 w-auto"
               />
-              <span className="align-middle">DemandGentic.ai</span>
+              <span className="align-middle">DemandGentic.ai By Pivotal B2B</span>
             </SidebarGroupLabel>
 
             <SidebarGroupAction asChild>

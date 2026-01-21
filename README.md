@@ -1,4 +1,4 @@
-# DemandEarn-AI Project
+# DemandGentic.ai By Pivotal B2B Project
 
 This project contains various scripts for managing AI campaigns and leads.
 

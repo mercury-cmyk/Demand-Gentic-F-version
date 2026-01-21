@@ -37,11 +37,11 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
         <div className="flex items-center gap-2">
           <img
             src="/demangent-logo.png"
-            alt="DemandGentic.ai"
+            alt="DemandGentic.ai By Pivotal B2B"
             className="h-6 w-auto"
           />
           <span className="hidden sm:inline text-sm font-semibold tracking-tight text-foreground/90">
-            DemandGentic.ai
+            DemandGentic.ai By Pivotal B2B
           </span>
         </div>
       </div>
