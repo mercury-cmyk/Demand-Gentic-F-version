@@ -111,6 +111,10 @@ app.use((req, res, next) => {
   // Initialize database with default admin if needed
   await initializeDatabase();
 
+  // Initialize Agent Infrastructure (Core Email & Voice Agents, Governance)
+  const { initializeAgentInfrastructure } = await import("./services/agents");
+  initializeAgentInfrastructure();
+
   // Initialize WebSocket servers BEFORE starting server and Express middleware evaluation
   // This ensures upgrade requests bypass Express routing
   const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");

@@ -88,6 +88,9 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
   // Gatekeeper Logic
   const [gatekeeperMaxAttempts, setGatekeeperMaxAttempts] = useState(data.aiAgentSettings?.gatekeeperLogic?.maxAttempts || 3);
 
+  // AI Agent Concurrency Settings
+  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(data.aiAgentSettings?.maxConcurrentCalls || 50);
+
   // Business Hours Settings
   const [businessHoursEnabled, setBusinessHoursEnabled] = useState(data.aiAgentSettings?.businessHours?.enabled ?? true);
   const [businessHoursTimezone, setBusinessHoursTimezone] = useState(data.aiAgentSettings?.businessHours?.timezone || 'America/New_York');
@@ -206,6 +209,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
         respectContactTimezone: respectContactTimezone,
         operatingDays: operatingDays,
       },
+      maxConcurrentCalls,
     } : undefined;
 
     onNext({
@@ -635,6 +639,36 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
                     </Card>
                   ))}
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* AI Agent Concurrency Settings */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5" />
+                <CardTitle>Concurrency Settings</CardTitle>
+              </div>
+              <CardDescription>
+                Configure how many simultaneous calls the AI agent can handle
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="max-concurrent-calls">Max Concurrent Calls</Label>
+                <Input
+                  id="max-concurrent-calls"
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={maxConcurrentCalls}
+                  onChange={(e) => setMaxConcurrentCalls(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  data-testid="input-max-concurrent-calls"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Maximum number of simultaneous AI calls for this campaign (1-100). Higher values allow faster outreach but require more capacity.
+                </p>
               </div>
             </CardContent>
           </Card>

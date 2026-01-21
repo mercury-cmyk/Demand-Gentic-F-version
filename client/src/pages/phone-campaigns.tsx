@@ -54,6 +54,8 @@ type CallStatsResponse = {
   leadsQualified: number;
   dncRequests: number;
   notInterested: number;
+  noAnswer: number;
+  voicemail: number;
 };
 
 export default function PhoneCampaignsPage() {
@@ -115,6 +117,8 @@ export default function PhoneCampaignsPage() {
               leadsQualified: callStats.leadsQualified || 0,
               dncRequests: callStats.dncRequests || 0,
               notInterested: callStats.notInterested || 0,
+              noAnswer: callStats.noAnswer || 0,
+              voicemail: callStats.voicemail || 0,
             };
           }
           return [campaign.id, snapshot] as const;
@@ -124,6 +128,7 @@ export default function PhoneCampaignsPage() {
       return Object.fromEntries(snapshots);
     },
     enabled: campaigns.length > 0 && !!token,
+    refetchInterval: 5000,
   });
 
   // Fetch queue stats for each campaign (lightweight - just counts)
@@ -162,11 +167,10 @@ export default function PhoneCampaignsPage() {
       }
       return stats;
     },
-    enabled: campaigns.length > 0 && !!token,
-    refetchInterval: 5000,
+    enabled: phoneCampaigns.length > 0 && !!token,
+    refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
+    staleTime: 0, // Always fetch fresh data
   });
-
-  // Fetch available agents
   const { data: agents = [], isLoading: agentsLoading } = useQuery<any[]>({
     queryKey: ["/api/agents"],
   });
@@ -544,7 +548,7 @@ export default function PhoneCampaignsPage() {
                 Create, manage, and track your outbound dialing campaigns
               </p>
             </div>
-            <Button onClick={() => setLocation("/campaigns/telemarketing/create")} data-testid="button-create-phone-campaign">
+            <Button onClick={() => setLocation("/phone-campaigns/create")} data-testid="button-create-phone-campaign">
               <Plus className="mr-2 h-4 w-4" />
               Create Campaign
             </Button>
@@ -602,10 +606,10 @@ export default function PhoneCampaignsPage() {
                       <Phone className="h-5 w-5 text-primary" />
                       <CardTitle data-testid={`text-campaign-name-${campaign.id}`}>{campaign.name}</CardTitle>
                       {getStatusBadge(campaign.status)}
-                      {campaign.dialMode === 'ai_agent' && (
+                      {(campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
                         <Badge variant="outline" className="border-purple-500 text-purple-600 dark:text-purple-400">
                           <Bot className="w-3 h-3 mr-1" />
-                          AI Agent
+                          {campaign.dialMode === 'hybrid' ? 'Hybrid' : 'AI Agent'}
                         </Badge>
                       )}
                     </div>
@@ -827,7 +831,7 @@ export default function PhoneCampaignsPage() {
                           <UserPlus className="w-4 h-4 mr-2" />
                           Assign Agents
                         </DropdownMenuItem>
-                        {campaign.dialMode === 'ai_agent' && (
+                        {(campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
                           <>
                             <DropdownMenuItem
                               onClick={() => setLocation(`/campaigns/${campaign.id}/test`)}
@@ -907,7 +911,7 @@ export default function PhoneCampaignsPage() {
             <p className="text-muted-foreground mb-4">
               {searchQuery ? "No campaigns match your search" : "Get started by creating your first dialer campaign"}
             </p>
-            <Button onClick={() => setLocation("/campaigns/telemarketing/create")}>
+            <Button onClick={() => setLocation("/phone-campaigns/create")}>
               <Plus className="mr-2 h-4 w-4" />
               Create Dialer Campaign
             </Button>

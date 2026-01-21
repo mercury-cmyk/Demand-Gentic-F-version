@@ -25,7 +25,7 @@ declare global {
   }
 }
 
-export function generateToken(user: User, roles: string[] = []): string {
+export function generateToken(user: User, roles: string[] = [], expiresIn?: string): string {
   const payload: JWTPayload = {
     userId: user.id,
     username: user.username,
@@ -34,7 +34,8 @@ export function generateToken(user: User, roles: string[] = []): string {
     roles: roles.length > 0 ? roles : [user.role], // Use provided roles or fallback to legacy role
   };
   
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const tokenExpiresIn = expiresIn ?? JWT_EXPIRES_IN;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: tokenExpiresIn });
 }
 
 export function verifyToken(token: string): JWTPayload | null {

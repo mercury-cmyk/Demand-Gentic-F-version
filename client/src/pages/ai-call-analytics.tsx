@@ -438,7 +438,7 @@ export function AiCallAnalyticsPanel({ embedded = false }: AiCallAnalyticsPanelP
               Create a campaign with "AI Agent" dial mode to start using AI-powered outbound calling.
             </p>
             <Button variant="outline" asChild data-testid="button-create-campaign">
-              <a href="/campaigns/telemarketing/create">Create AI Campaign</a>
+              <a href="/phone-campaigns/create">Create AI Campaign</a>
             </Button>
           </CardContent>
         </Card>

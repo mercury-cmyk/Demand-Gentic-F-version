@@ -49,6 +49,9 @@ export interface CallSession {
     identityConfirmedAt?: string;
     currentState: string;
   };
+
+  // Optional: Real-time conversation quality snapshot
+  conversationQuality?: Record<string, unknown>;
 }
 
 // Preview conversation session for the AI Studio

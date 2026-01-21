@@ -38,10 +38,21 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomFieldDefinition } from "@shared/schema";
 
+type MfaSetup = {
+  qrCode: string;
+  secret: string;
+  backupCodes: string[];
+};
+
 export default function SettingsPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [mfaSetup, setMfaSetup] = useState<MfaSetup | null>(null);
+  const [mfaConfirmCode, setMfaConfirmCode] = useState("");
+  const [mfaDisablePassword, setMfaDisablePassword] = useState("");
+  const [mfaDialogOpen, setMfaDialogOpen] = useState(false);
+  const [mfaDisableDialogOpen, setMfaDisableDialogOpen] = useState(false);
   const [customFieldDialogOpen, setCustomFieldDialogOpen] = useState(false);
   const [editingField, setEditingField] = useState<CustomFieldDefinition | null>(null);
   const { toast } = useToast();
@@ -57,6 +68,81 @@ export default function SettingsPage() {
 
   const { data: customFields, isLoading: fieldsLoading } = useQuery<CustomFieldDefinition[]>({
     queryKey: ['/api/custom-fields'],
+  });
+
+  const { data: mfaStatus, isLoading: mfaStatusLoading } = useQuery<{
+    mfaEnabled: boolean;
+    mfaEnrolledAt?: string | null;
+    hasBackupCodes: boolean;
+  }>({
+    queryKey: ['/api/auth/mfa/status'],
+  });
+
+  const enrollMfaMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/auth/mfa/enroll');
+      return response.json() as Promise<MfaSetup>;
+    },
+    onSuccess: (data) => {
+      setMfaSetup(data);
+      setMfaDialogOpen(true);
+      toast({
+        title: "Set up Google Authenticator",
+        description: "Scan the QR code and enter the 6-digit code to confirm.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "2FA setup failed",
+        description: error.message,
+      });
+    },
+  });
+
+  const confirmMfaMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest('POST', '/api/auth/mfa/confirm', { token: mfaConfirmCode.trim() });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/mfa/status'] });
+      setMfaDialogOpen(false);
+      setMfaSetup(null);
+      setMfaConfirmCode("");
+      toast({
+        title: "2FA enabled",
+        description: "Google Authenticator is now required at login.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Verification failed",
+        description: error.message,
+      });
+    },
+  });
+
+  const disableMfaMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest('POST', '/api/auth/mfa/disable', { password: mfaDisablePassword });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/mfa/status'] });
+      setMfaDisableDialogOpen(false);
+      setMfaDisablePassword("");
+      toast({
+        title: "2FA disabled",
+        description: "Multi-factor authentication has been turned off.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Disable failed",
+        description: error.message,
+      });
+    },
   });
 
   const createFieldMutation = useMutation({
@@ -188,6 +274,8 @@ export default function SettingsPage() {
 
   const contactFields = customFields?.filter(f => f.entityType === 'contact') || [];
   const accountFields = customFields?.filter(f => f.entityType === 'account') || [];
+  const mfaEnabled = !!mfaStatus?.mfaEnabled;
+  const mfaToggleDisabled = mfaStatusLoading || enrollMfaMutation.isLoading || confirmMfaMutation.isLoading || disableMfaMutation.isLoading;
 
   return (
     <div className="space-y-6">
@@ -724,18 +812,164 @@ export default function SettingsPage() {
                 Add an extra layer of security to your account
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable 2FA</Label>
+            <CardContent className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <Label>Enable 2FA (Google Authenticator)</Label>
                   <p className="text-sm text-muted-foreground">
-                    Require authentication code in addition to password
+                    Require a time-based code in addition to your password.
                   </p>
+                  {mfaStatusLoading ? (
+                    <p className="text-xs text-muted-foreground">Checking status...</p>
+                  ) : (
+                    <p className={`text-xs ${mfaEnabled ? "text-green-600" : "text-muted-foreground"}`}>
+                      {mfaEnabled ? "Enabled" : "Disabled"}
+                    </p>
+                  )}
                 </div>
-                <Switch data-testid="switch-2fa" />
+                <Switch
+                  checked={mfaEnabled}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      enrollMfaMutation.mutate();
+                    } else if (mfaEnabled) {
+                      setMfaDisableDialogOpen(true);
+                    }
+                  }}
+                  disabled={mfaToggleDisabled}
+                  data-testid="switch-2fa"
+                />
               </div>
+              {mfaEnabled && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  Keep your backup codes safe in case you lose access to your authenticator.
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          <Dialog
+            open={mfaDialogOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                setMfaDialogOpen(false);
+                setMfaSetup(null);
+                setMfaConfirmCode("");
+              }
+            }}
+          >
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Enable 2FA with Google Authenticator</DialogTitle>
+                <DialogDescription>
+                  Scan the QR code, then enter the 6-digit code to confirm.
+                </DialogDescription>
+              </DialogHeader>
+              {!mfaSetup ? (
+                <div className="py-8 text-center text-muted-foreground">Loading setup...</div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex flex-col items-center gap-3">
+                    <img
+                      src={mfaSetup.qrCode}
+                      alt="Authenticator QR code"
+                      className="h-40 w-40 rounded-md border bg-white p-2"
+                    />
+                    <p className="text-xs text-muted-foreground text-center">
+                      Can't scan? Enter this key manually:{" "}
+                      <span className="font-mono text-foreground">{mfaSetup.secret}</span>
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mfa-confirm-code">Verification code</Label>
+                    <Input
+                      id="mfa-confirm-code"
+                      placeholder="123456"
+                      value={mfaConfirmCode}
+                      onChange={(e) => setMfaConfirmCode(e.target.value)}
+                    />
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-sm font-medium">Backup codes</p>
+                    <p className="text-xs text-muted-foreground">
+                      Save these codes in a safe place. Each code can be used once.
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-xs">
+                      {mfaSetup.backupCodes.map((code) => (
+                        <div key={code} className="rounded bg-muted/50 px-2 py-1 text-center">
+                          {code}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setMfaDialogOpen(false);
+                    setMfaSetup(null);
+                    setMfaConfirmCode("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => confirmMfaMutation.mutate()}
+                  disabled={!mfaConfirmCode || confirmMfaMutation.isLoading}
+                >
+                  {confirmMfaMutation.isLoading ? "Confirming..." : "Confirm"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={mfaDisableDialogOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                setMfaDisableDialogOpen(false);
+                setMfaDisablePassword("");
+              }
+            }}
+          >
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Disable 2FA</DialogTitle>
+                <DialogDescription>
+                  Enter your password to turn off multi-factor authentication.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="mfa-disable-password">Password</Label>
+                <Input
+                  id="mfa-disable-password"
+                  type="password"
+                  value={mfaDisablePassword}
+                  onChange={(e) => setMfaDisablePassword(e.target.value)}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setMfaDisableDialogOpen(false);
+                    setMfaDisablePassword("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => disableMfaMutation.mutate()}
+                  disabled={!mfaDisablePassword || disableMfaMutation.isLoading}
+                >
+                  {disableMfaMutation.isLoading ? "Disabling..." : "Disable 2FA"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="background-jobs" className="space-y-4 mt-6">

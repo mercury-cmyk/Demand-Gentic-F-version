@@ -15,7 +15,8 @@
     "fix-audio": "tsx fix-audio-one-command.ts",
     "diagnose-audio": "tsx diagnose-audio.ts",
     "test-audio": "tsx test-audio-transmission.ts",
-    "check-orchestrator": "tsx check-orchestrator-readiness.ts"
+    "check-orchestrator": "tsx check-orchestrator-readiness.ts",
+    "vector:backfill": "tsx scripts/backfill-vector-documents.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

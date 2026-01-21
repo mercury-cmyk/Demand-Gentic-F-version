@@ -148,7 +148,7 @@ export async function initializeVertexAI(options?: {
 }): Promise<{
   status: "ready" | "degraded" | "failed";
   health: Awaited<ReturnType<typeof healthCheck>>;
-  vectorStats?: ReturnType<typeof getVectorStats>;
+  vectorStats?: Awaited<ReturnType<typeof getVectorStats>>;
   operatorStarted?: boolean;
 }> {
   console.log("[VertexAI] Initializing services...");
@@ -170,7 +170,7 @@ export async function initializeVertexAI(options?: {
     try {
       await indexAccounts();
       await indexContacts();
-      vectorStats = getVectorStats();
+      vectorStats = await getVectorStats();
       console.log("[VertexAI] Vector indexing complete:", vectorStats);
     } catch (error) {
       console.error("[VertexAI] Vector indexing failed:", error);
@@ -199,14 +199,14 @@ export async function initializeVertexAI(options?: {
  */
 export async function getVertexStatus(): Promise<{
   health: Awaited<ReturnType<typeof healthCheck>>;
-  vectorStats: ReturnType<typeof getVectorStats>;
+  vectorStats: Awaited<ReturnType<typeof getVectorStats>>;
   operatorStats: {
     pendingTasks: number;
     totalTasks: number;
   };
 }> {
   const health = await healthCheck();
-  const vectorStats = getVectorStats();
+  const vectorStats = await getVectorStats();
   const operator = getAgenticOperator();
 
   return {

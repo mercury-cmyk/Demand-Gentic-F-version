@@ -78,6 +78,7 @@ export default function EmailCampaignsPage() {
       return Object.fromEntries(snapshots);
     },
     enabled: emailCampaigns.length > 0,
+    refetchInterval: 10000,
   });
 
   const { data: segments = [] } = useQuery<Segment[]>({

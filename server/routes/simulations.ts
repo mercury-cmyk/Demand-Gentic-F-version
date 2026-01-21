@@ -10,6 +10,9 @@
 import { Router } from "express";
 import { requireAuth } from "../auth";
 import { z } from "zod";
+import { db } from "../db";
+import { previewStudioSessions } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import {
   SimulationEngine,
   simulationEngine,
@@ -17,6 +20,7 @@ import {
   type SimulatedHumanProfile,
   type SimulationSessionConfig,
 } from "../services/simulation-engine";
+import { analyzeConversationQuality } from "../services/conversation-quality-analyzer";
 
 const router = Router();
 
@@ -326,7 +330,39 @@ router.post("/:sessionId/end", requireAuth, async (req, res) => {
     
     // Evaluate
     const evaluation = await simulationEngine.evaluateSimulation(session);
-    
+
+    const transcriptText = session.transcript
+      .map((turn) => `${turn.role === "agent" ? "Agent" : "Prospect"}: ${turn.content}`)
+      .join("\n");
+
+    const conversationQuality = await analyzeConversationQuality({
+      transcript: transcriptText,
+      interactionType: "simulation",
+      analysisStage: "post_call",
+      disposition: session.humanProfile?.disposition,
+      campaignId: session.campaignId || undefined,
+    });
+
+    const [dbSession] = await db
+      .select({ metadata: previewStudioSessions.metadata })
+      .from(previewStudioSessions)
+      .where(eq(previewStudioSessions.id, sessionId))
+      .limit(1);
+
+    const existingMetadata = (dbSession?.metadata || {}) as Record<string, unknown>;
+
+    await db.update(previewStudioSessions)
+      .set({
+        status: "completed",
+        endedAt: new Date(),
+        metadata: {
+          ...existingMetadata,
+          simulationEvaluation: evaluation,
+          conversationQuality,
+        },
+      })
+      .where(eq(previewStudioSessions.id, sessionId));
+
     res.json({
       success: true,
       callMode: "SIMULATION",
@@ -337,6 +373,7 @@ router.post("/:sessionId/end", requireAuth, async (req, res) => {
         transcript: session.transcript,
       },
       evaluation,
+      conversationQuality,
     });
   } catch (error) {
     console.error("[Simulations] Error ending simulation:", error);

@@ -51,7 +51,7 @@ export default function CampaignSuppressionsPage() {
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href={campaign.type === 'email' ? '/campaigns/email' : '/campaigns/telemarketing'}>
+        <Link href={campaign.type === 'email' ? '/campaigns/email' : '/phone-campaigns'}>
           <Button variant="outline" size="icon" data-testid="button-back">
             <ArrowLeft className="w-4 h-4" />
           </Button>

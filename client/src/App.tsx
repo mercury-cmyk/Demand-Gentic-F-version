@@ -90,6 +90,9 @@ import ClientPortalAdmin from "@/pages/client-portal-admin";
 import ClientPortalOrderDetail from "@/pages/client-portal-order-detail";
 import ClientPortalLogin from "@/pages/client-portal-login";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
+import ClientPortalSimulations from "@/pages/client-portal-simulations";
+import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
+import QAReviewCenter from "@/pages/qa-review-center";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
 import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
@@ -98,6 +101,7 @@ import CampaignIntelligencePage from "@/pages/ai-studio/campaign-intelligence";
 import AgentCommandCenter from "@/pages/agent-command-center";
 import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
+import IntelligentCampaignCreatePage from "@/pages/intelligent-campaign-create";
 import PreviewStudioPage from "@/pages/preview-studio";
 
 // Settings Hub Pages
@@ -244,15 +248,30 @@ function AuthenticatedApp() {
               <Route path="/email-templates" component={EmailTemplatesPage} />
               <Route path="/email-sequences" component={EmailSequencesPage} />
               
-              {/* Phone Campaigns - support both old /campaigns/telemarketing and new paths */}
-              <Route path="/campaigns/telemarketing" component={PhoneCampaignsPage} />
-              <Route path="/campaigns/telemarketing/create" component={TelemarketingCreatePage} />
+              {/* Phone Campaigns - consolidated under /phone-campaigns */}
               <Route path="/phone-campaigns" component={PhoneCampaignsPage} />
+              <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
               <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Legacy redirects for /campaigns/telemarketing - now redirects to /phone-campaigns */}
+              <Route path="/campaigns/telemarketing">
+                {() => { window.location.href = '/phone-campaigns'; return null; }}
+              </Route>
+              <Route path="/campaigns/telemarketing/create">
+                {() => { window.location.href = '/phone-campaigns/create'; return null; }}
+              </Route>
+              {/* Intelligent Campaign Creation with AI */}
+              <Route path="/campaigns/create/intelligent" component={IntelligentCampaignCreatePage} />
               {/* Added explicit routes for /campaigns/phone path used in navigations */}
               <Route path="/campaigns/phone" component={PhoneCampaignsPage} />
               <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />
+              {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern */}
+              <Route path="/campaigns/appointment_generation/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/lead_qualification/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/survey/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/follow_up/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/event_registration/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/reactivation/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
               
@@ -351,9 +370,11 @@ function AuthenticatedApp() {
               <Route path="/ai-studio/campaign-intelligence" component={CampaignIntelligencePage} />
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               
-              {/* Client Portal */}
+              {/* Client Portal & Hierarchy Management */}
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
+              <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
+              <Route path="/qa-review-center" component={QAReviewCenter} />
               
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
@@ -422,6 +443,7 @@ function Router() {
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/client-portal/login" component={ClientPortalLogin} />
       <Route path="/client-portal/dashboard" component={ClientPortalDashboard} />
+      <Route path="/client-portal/simulations" component={ClientPortalSimulations} />
       <Route>
         <ProtectedRoute>
           <AuthenticatedApp />

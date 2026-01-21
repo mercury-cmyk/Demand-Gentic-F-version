@@ -150,7 +150,7 @@ export default function TelemarketingCreatePage() {
         });
       }
 
-      setLocation("/campaigns/telemarketing");
+      setLocation("/phone-campaigns");
     } catch (error: any) {
       console.error("Campaign creation error:", error);
       toast({
@@ -162,7 +162,7 @@ export default function TelemarketingCreatePage() {
   };
 
   const handleCancel = () => {
-    setLocation("/campaigns/telemarketing");
+    setLocation("/phone-campaigns");
   };
 
   return (

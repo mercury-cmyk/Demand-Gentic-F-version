@@ -65,3 +65,11 @@ export {
   buildProblemIntelligencePromptSection,
   buildCondensedProblemIntelligenceSection,
 } from "./campaign-intelligence-package-service";
+
+// SMI Integration - Industry & Role Intelligence Enhancement
+export {
+  enrichAccountSignalsWithSMI,
+  enrichContactWithSMI,
+  enhanceProblemDetectionWithSMI,
+  getSMILearningInsightsForProblemIntelligence,
+} from "./smi-integration";

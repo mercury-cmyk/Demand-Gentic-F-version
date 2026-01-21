@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -260,10 +261,7 @@ export default function ConversationQualityPage() {
   const { data: qaData, isLoading: qaLoading, refetch } = useQuery<any>({
     queryKey: ['/api/qa/conversations', selectedCampaign, selectedType, searchQuery],
     queryFn: async () => {
-      const response = await fetch(`/api/qa/conversations?${qaParams.toString()}`, {
-        credentials: 'include'
-      });
-      if (!response.ok) throw new Error('Failed to fetch conversations');
+      const response = await apiRequest('GET', `/api/qa/conversations?${qaParams.toString()}`);
       return response.json();
     },
   });
@@ -275,14 +273,12 @@ export default function ConversationQualityPage() {
     ? allConversations
     : allConversations.filter(c => c.source === selectedSource);
 
-  // Stats from API
-  const apiStats = qaData?.stats || {};
   const stats = {
-    total: apiStats.total || conversations.length,
-    calls: apiStats.calls || conversations.filter(c => c.type === 'call').length,
-    emails: apiStats.emails || conversations.filter(c => c.type === 'email').length,
-    testCalls: apiStats.testCalls || conversations.filter(c => c.isTestCall).length,
-    withTranscripts: apiStats.withTranscripts || conversations.filter(c => c.transcript || c.transcriptTurns).length,
+    total: conversations.length,
+    calls: conversations.filter(c => c.type === 'call' && !c.isTestCall).length,
+    emails: conversations.filter(c => c.type === 'email').length,
+    testCalls: conversations.filter(c => c.isTestCall).length,
+    withTranscripts: conversations.filter(c => c.transcript || c.transcriptTurns).length,
   };
 
   return (

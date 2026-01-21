@@ -11,9 +11,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus, Layers } from "lucide-react";
+import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus, Layers, Sparkles } from "lucide-react";
 import { HybridAgentAssignment } from "@/components/hybrid-agent-assignment";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
+import { CampaignContextRegenerate } from "@/components/campaigns/campaign-context-regenerate";
+import { InlineOrgCreator } from "@/components/campaigns/inline-org-creator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -23,8 +25,10 @@ import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowled
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
   const [, paramsB] = useRoute("/phone-campaigns/:id/edit");
+  // Support /campaigns/:type/edit/:id pattern (e.g., /campaigns/appointment_generation/edit/:id)
+  const [, paramsC] = useRoute("/campaigns/:type/edit/:id");
   const [, setLocation] = useLocation();
-  const campaignId = paramsA?.id || paramsB?.id;
+  const campaignId = paramsA?.id || paramsB?.id || paramsC?.id;
   const { toast } = useToast();
 
   // State for campaign fields
@@ -58,6 +62,12 @@ export default function PhoneCampaignEditPage() {
 
   // Organization selection state
   const [problemIntelligenceOrgId, setProblemIntelligenceOrgId] = useState<string | null>(null);
+
+  // Dial Mode state
+  const [dialMode, setDialMode] = useState<'manual' | 'power' | 'hybrid' | 'ai_agent'>('manual');
+
+  // AI Agent Concurrency state (for ai_agent dial mode)
+  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState<number>(50);
 
   // Fetch campaign data
   const { data: campaign, isLoading: campaignLoading } = useQuery<any>({
@@ -136,6 +146,14 @@ export default function PhoneCampaignEditPage() {
 
       // Initialize organization
       setProblemIntelligenceOrgId(campaign.problemIntelligenceOrgId || null);
+
+      // Initialize dial mode
+      setDialMode(campaign.dialMode || 'manual');
+
+      // Initialize AI Agent settings
+      if (campaign.aiAgentSettings?.maxConcurrentCalls) {
+        setMaxConcurrentCalls(campaign.aiAgentSettings.maxConcurrentCalls);
+      }
     }
   }, [campaign]);
 
@@ -217,6 +235,12 @@ export default function PhoneCampaignEditPage() {
       mode: capMode,
     } : null;
 
+    // Build AI Agent settings (merge with existing to preserve other settings)
+    const aiAgentSettings = dialMode === 'ai_agent' ? {
+      ...(campaign?.aiAgentSettings || {}),
+      maxConcurrentCalls,
+    } : campaign?.aiAgentSettings;
+
     updateMutation.mutate({
       name,
       audienceRefs,
@@ -227,6 +251,10 @@ export default function PhoneCampaignEditPage() {
       maxCallDurationSeconds,
       // Organization assignment
       problemIntelligenceOrgId,
+      // Dial mode
+      dialMode,
+      // AI Agent settings (includes concurrency)
+      aiAgentSettings,
       // Campaign Context fields
       campaignObjective,
       productServiceInfo,
@@ -268,7 +296,7 @@ export default function PhoneCampaignEditPage() {
           <Button 
             variant="outline" 
             size="icon" 
-            onClick={() => setLocation('/campaigns/telemarketing')}
+            onClick={() => setLocation('/phone-campaigns')}
             data-testid="button-back"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -356,22 +384,29 @@ export default function PhoneCampaignEditPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="organization">Organization</Label>
-                <Select
-                  value={problemIntelligenceOrgId || "none"}
-                  onValueChange={(value) => setProblemIntelligenceOrgId(value === "none" ? null : value)}
-                >
-                  <SelectTrigger data-testid="select-organization">
-                    <SelectValue placeholder="Select organization (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No organization</SelectItem>
-                    {organizationsData?.organizations?.map((org) => (
-                      <SelectItem key={org.id} value={org.id}>
-                        {org.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select
+                    value={problemIntelligenceOrgId || "none"}
+                    onValueChange={(value) => setProblemIntelligenceOrgId(value === "none" ? null : value)}
+                  >
+                    <SelectTrigger data-testid="select-organization" className="flex-1">
+                      <SelectValue placeholder="Select organization (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No organization</SelectItem>
+                      {organizationsData?.organizations?.map((org) => (
+                        <SelectItem key={org.id} value={org.id}>
+                          {org.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <InlineOrgCreator
+                    onOrgCreated={(orgId) => setProblemIntelligenceOrgId(orgId)}
+                    triggerVariant="button"
+                    triggerSize="default"
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Link this campaign to an organization to use its Problem Intelligence and messaging context
                 </p>
@@ -382,9 +417,28 @@ export default function PhoneCampaignEditPage() {
           {/* Campaign Context Section */}
           <Card className="border-primary/30 bg-primary/5">
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <Target className="w-5 h-5 text-primary" />
-                <CardTitle>Campaign Context</CardTitle>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-primary" />
+                  <CardTitle>Campaign Context</CardTitle>
+                </div>
+                <CampaignContextRegenerate
+                  currentContext={{
+                    campaignObjective,
+                    productServiceInfo,
+                    talkingPoints,
+                    targetAudienceDescription,
+                    successCriteria,
+                  }}
+                  onApply={(generated) => {
+                    setCampaignObjective(generated.campaignObjective);
+                    setProductServiceInfo(generated.productServiceInfo);
+                    setTalkingPoints(generated.talkingPoints);
+                    setTargetAudienceDescription(generated.targetAudienceDescription);
+                    setSuccessCriteria(generated.successCriteria);
+                  }}
+                  campaignName={name}
+                />
               </div>
               <CardDescription>
                 Define the campaign goals and context. This information will be displayed to agents during calls
@@ -642,6 +696,76 @@ export default function PhoneCampaignEditPage() {
 
         {/* Settings Tab */}
         <TabsContent value="settings" className="space-y-4">
+          {/* Dial Mode Selection */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Dialing Mode</CardTitle>
+              <CardDescription>
+                Choose how calls are initiated for this campaign
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Campaign Dialing Mode</Label>
+                <Select
+                  value={dialMode}
+                  onValueChange={(value: 'manual' | 'power' | 'hybrid' | 'ai_agent') => setDialMode(value)}
+                >
+                  <SelectTrigger data-testid="select-dial-mode">
+                    <SelectValue placeholder="Select dialing mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">
+                      <div className="flex flex-col">
+                        <span>Manual Dialing</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="power">
+                      <div className="flex flex-col">
+                        <span>Power Dialing</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="hybrid">
+                      <div className="flex flex-col">
+                        <span>Hybrid Mode</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="ai_agent">
+                      <div className="flex flex-col">
+                        <span>AI Agent</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  {dialMode === 'manual' && 'Agents manually dial each contact one at a time.'}
+                  {dialMode === 'power' && 'System automatically dials the next contact when an agent becomes available.'}
+                  {dialMode === 'hybrid' && 'Combines human agents with AI assistance for call handling.'}
+                  {dialMode === 'ai_agent' && 'AI voice agent handles calls autonomously using the assigned virtual agent.'}
+                </p>
+              </div>
+
+              {/* AI Agent Concurrency Settings */}
+              {dialMode === 'ai_agent' && (
+                <div className="space-y-2 pt-4 border-t">
+                  <Label htmlFor="max-concurrent-calls">Max Concurrent Calls</Label>
+                  <Input
+                    id="max-concurrent-calls"
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={maxConcurrentCalls}
+                    onChange={(e) => setMaxConcurrentCalls(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                    data-testid="input-max-concurrent-calls"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Maximum number of simultaneous AI calls for this campaign (1-100)
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Account Lead Cap</CardTitle>
