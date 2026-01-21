@@ -4,7 +4,7 @@ import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schem
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { generateJSON, chat } from "../vertex-ai/vertex-client";
+import { generateJSON, chat } from "./vertex-ai/vertex-client";
 
 // Lazy DeepSeek client – instantiate only when needed and when credentials exist
 let _deepseekClient: OpenAI | null = null;
