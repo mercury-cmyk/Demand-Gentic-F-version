@@ -164,16 +164,18 @@ export class AiVoiceAgent extends EventEmitter {
       });
     }
 
-    const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}. 
-You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.`;
+    const personaIntro = `You are ${this.settings.persona.name}, a ${this.settings.persona.role} at ${this.settings.persona.companyName}.
+  You are making an outbound sales call to ${this.context.contactFirstName} ${this.context.contactLastName} at ${this.context.companyName}.
+
+  Your job is to be crystal clear about why you're calling, avoid vague phrases like "that's what we do" or "we have a platform", and always connect your reason for calling to a concrete benefit for their team.`;
 
     // Default scripts if not provided
     const defaultScripts = {
       opening: `Hi, this is {{agentName}} from {{agentCompany}}. Am I speaking with {{firstName}}?`,
-      gatekeeper: `I'm calling to discuss how we can help {{companyName}} with their business needs.`,
-      pitch: `I wanted to reach out because we've been helping companies like {{companyName}} achieve their goals. I'd love to learn more about your current challenges and see if there might be a fit.`,
-      closing: `Would you be open to a brief conversation to explore this further?`,
-      objections: ``,
+      gatekeeper: `I'm calling to share a specific idea for how we can improve {{companyName}}'s demand generation performance, not a generic sales pitch.`,
+      pitch: `I'm reaching out because we've been helping B2B teams like {{companyName}} use agentic, intelligence-led outreach to turn more good-fit accounts into real pipeline without adding more manual SDR effort. In a couple of minutes I can share what we're seeing work for demand leaders right now and see if any of it maps to your world.`,
+      closing: `If this sounds at least directionally relevant, let's put 20–25 minutes on the calendar so we can go a level deeper on your current motion and share what's working for peers.`,
+      objections: `If they say they don't have time right now, acknowledge it and immediately pivot to a specific next step. For example: "I completely understand the time crunch. Rather than trying to cram this in now, would it be more helpful if we picked a 20-minute slot later this week so you can actually focus? I can send a calendar link for a time that works best for you." If they offer to receive a link or callback, confirm one concrete next step (either a specific time window or that you'll send a short follow-up with a scheduling link) instead of leaving it open-ended.`,
     };
     const scripts = {
       opening: this.settings.scripts?.opening || defaultScripts.opening,

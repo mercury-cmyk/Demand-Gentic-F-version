@@ -345,7 +345,17 @@ export async function initiateOpenAISipCall(params: {
   let instructions = systemPromptOverride || agentConfig?.systemPrompt || process.env.OPENAI_SIP_INSTRUCTIONS || "You are a professional voice assistant.";
 
   // Build first message/greeting
-  const greeting = firstMessageOverride || agentConfig?.firstMessage || null;
+  let greeting = firstMessageOverride || agentConfig?.firstMessage || null;
+
+  // Ensure we always have a non-empty opening line so the agent
+  // speaks immediately after connection instead of waiting in silence.
+  if (!greeting || !greeting.trim()) {
+    greeting = "Hello, may I speak with you please?";
+  }
+
+  // Keep the in-memory session in sync so the sideband WebSocket
+  // can send the same greeting via response.create when it opens.
+  session.firstMessageOverride = greeting;
 
   // Prepare client_state with call parameters
   const clientState = Buffer.from(JSON.stringify({
