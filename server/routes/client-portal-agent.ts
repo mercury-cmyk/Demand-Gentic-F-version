@@ -27,10 +27,20 @@ import {
   generateWithFunctions,
   chat as vertexChat,
   type FunctionDeclaration,
-  type ChatMessage as VertexChatMessage
+  type ChatMessage as VertexChatMessage,
+  type FunctionCall,
 } from '../services/vertex-ai';
+import {
+  deepSeekChat,
+  deepSeekGenerateWithFunctions,
+  isDeepSeekConfigured,
+} from '../services/deepseek-client';
 
 const router = Router();
+
+const CLIENT_PORTAL_AGENT_PROVIDER =
+  (process.env.CLIENT_PORTAL_AGENT_PROVIDER || 'vertex').toLowerCase();
+const USE_DEEPSEEK = CLIENT_PORTAL_AGENT_PROVIDER === 'deepseek' && isDeepSeekConfigured();
 
 // Define the allowed actions and their schemas for Vertex AI function calling
 const FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
@@ -285,29 +295,49 @@ const FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
 // System prompt for the agent
 const SYSTEM_PROMPT = `You are an AI assistant for the Client Portal of Pivotal B2B, a B2B lead generation company.
 
-You help clients with:
-- Viewing and managing their campaigns
-- Creating orders for verified leads
-- Checking order status and delivery progress
-- Viewing billing information and invoices
-- Accessing reports and analytics
-- Requesting new campaigns
-- Submitting support requests
+You ONLY help the signed-in client with:
+- Viewing and managing THEIR OWN campaigns
+- Creating and managing orders for THEIR OWN verified leads
+- Checking order status and delivery progress for THEIR OWN account
+- Viewing billing information and invoices for THEIR OWN account
+- Accessing reports and analytics for THEIR OWN campaigns and orders
+- Requesting new campaigns for THEIR OWN account
+- Submitting support requests related to THEIR OWN account and campaigns
 
-Guidelines:
-1. Be helpful, professional, and concise
-2. Only perform actions that the client explicitly requests or confirms
-3. When showing data, format it clearly and highlight important information
-4. If an action fails, explain why and suggest alternatives
-5. For sensitive actions (like creating orders), confirm details before executing
-6. Proactively offer relevant information based on context
-7. When a user asks to create an order, always use the create_order function
-8. When a user mentions quantities, extract the number for the order
+Strict scope & privacy rules (NON-NEGOTIABLE):
+1. Never reveal information about other clients, other campaigns, or internal systems.
+2. Never answer questions about general world knowledge, AI models, or anything unrelated to this client's campaigns, orders, billing, or portal usage.
+3. If the user asks about anything outside their own campaigns or portal (e.g., "how do LLMs work?", "what is your architecture?"), politely decline and redirect them back to their campaigns and portal.
+4. Use ONLY the data returned from the allowed functions and the client's own portal context.
 
-You have access to the client's account data and can perform actions on their behalf.
-Always act in the client's best interest and within the scope of allowed actions.
+Two-stage workflow for every request:
 
-Important: When executing actions, call the appropriate function. Do not just describe what you would do - actually call the function to execute it.`;
+Stage 1 — PLAN (no actions executed yet):
+1. **Refine the request**: Rewrite the client's request as a clearer, more precise version, scoped strictly to their campaigns, orders, billing, or reports.
+2. **Propose a plan**: Produce a numbered list of concrete steps you would take to fulfill the request. For each step, note whether it will use a function/tool (e.g., "(uses list_campaigns)") or is purely explanatory.
+3. **Do NOT call any tools/functions in this stage.** You are only planning and explaining what you *would* do.
+4. **Ask for confirmation**: End your response with a short confirmation line such as:
+  - "If this plan looks good, reply with 'confirm' to proceed, or 'decline' if you'd like to adjust it."
+
+Stage 2 — EXECUTE (only after explicit confirmation):
+5. Only when the latest user message clearly indicates confirmation (e.g., "confirm", "confirmed", "yes, proceed") **and** refers to a plan you just proposed, you may call tools/functions to implement that plan.
+6. After executing tools, summarize what you did and key results in 3–6 short, clear bullet points.
+7. If the user declines or wants changes (e.g., "decline", "let's change it", "don't proceed"), do **not** call any tools. Instead, propose an alternative plan (another Stage 1 PLAN) and ask for confirmation again.
+
+Additional guidelines:
+1. Be helpful, professional, and concise.
+2. For sensitive actions (like creating orders), always confirm quantities, campaign, and any other critical parameters in your plan before execution.
+3. When showing data, format it clearly and highlight important information.
+4. If an action fails, explain why and suggest alternatives scoped to this client's campaigns.
+5. When a user asks to create an order, the implementation phase must use the create_order function.
+6. When a user mentions quantities, extract the number for the order.
+
+Tool-calling rules:
+- During Stage 1 (planning), **never** call tools/functions. Only describe the plan and request confirmation.
+- During Stage 2 (after explicit confirmation), call the appropriate function(s) to implement the plan and then summarize the results.
+
+You have access to the client's account data and can perform actions on their behalf **only after they confirm the plan**.
+Always act in the client's best interest and within the scope of allowed actions.`;
 
 // Action handlers
 async function executeAction(
@@ -602,7 +632,7 @@ async function executeAction(
   }
 }
 
-// Main agent endpoint using Vertex AI
+// Main agent endpoint using Vertex AI by default, or DeepSeek when configured
 router.post('/chat', async (req: Request, res: Response) => {
   try {
     const { message, conversationHistory = [] } = req.body;
@@ -618,81 +648,197 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     console.log(`[Client Portal Agent] Processing message from user ${user.clientUserId}: ${message}`);
 
-    // Call Vertex AI with function calling
-    const { text: initialResponse, functionCalls } = await generateWithFunctions(
-      SYSTEM_PROMPT,
-      message,
-      FUNCTION_DECLARATIONS,
-      { temperature: 0.3, maxTokens: 2000 }
-    );
+    const history = (conversationHistory || []) as VertexChatMessage[];
+    const normalized = message.trim().toLowerCase();
 
-    let actions: Array<{ action: string; params: any; result: any }> = [];
-    let navigateTo: string | undefined;
+    // Helper to find the last user + assistant turns for planning context
+    const lastAssistant = [...history].reverse().find((m) => m.role === 'model');
+    const lastUser = [...history].reverse().find((m) => m.role === 'user');
 
-    // Process function calls if any
-    if (functionCalls && functionCalls.length > 0) {
-      console.log(`[Client Portal Agent] Function calls detected:`, functionCalls);
+    const isConfirm = (
+      /\b(confirm|confirmed)\b/.test(normalized) ||
+      normalized === 'yes, proceed' ||
+      normalized === 'yes proceed' ||
+      normalized === 'go ahead'
+    ) && !!lastAssistant;
 
-      for (const funcCall of functionCalls) {
-        const result = await executeAction(
-          funcCall.name,
-          funcCall.args,
-          user.clientAccountId,
-          user.clientUserId
+    const isDecline =
+      /\b(decline|cancel|do not proceed|don\'t proceed|change plan)\b/.test(normalized) ||
+      normalized === 'no' ||
+      normalized === 'no thanks' ||
+      normalized === 'no, thanks';
+
+    // ==================== STAGE 2: EXECUTE ON CONFIRMATION ====================
+    if (isConfirm) {
+      const originalRequest = lastUser?.content || 'previous request';
+      const previousPlan = lastAssistant?.content || 'previously proposed plan';
+
+      const confirmInstruction = `The client previously requested:\n"${originalRequest}"\n\nYou responded with this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now replied: "${message}", which should be treated as explicit confirmation to proceed.\n\nNow move to Stage 2 (EXECUTE):\n- Call the appropriate tools/functions to implement the agreed plan.\n- After executing tools, summarize what you did and the key results in 3–6 short bullet points.\n- Stay strictly within this client's own campaigns, orders, billing, and reports.`;
+
+      let initialResponse: string;
+      let functionCalls: FunctionCall[] = [];
+
+      if (USE_DEEPSEEK) {
+        const result = await deepSeekGenerateWithFunctions(
+          SYSTEM_PROMPT,
+          confirmInstruction,
+          FUNCTION_DECLARATIONS,
+          { temperature: 0.3, maxTokens: 2000 }
         );
-
-        actions.push({ action: funcCall.name, params: funcCall.args, result });
-
-        if (result.navigateTo) {
-          navigateTo = result.navigateTo;
-        }
+        initialResponse = result.text;
+        functionCalls = result.functionCalls;
+      } else {
+        const result = await generateWithFunctions(
+          SYSTEM_PROMPT,
+          confirmInstruction,
+          FUNCTION_DECLARATIONS,
+          { temperature: 0.3, maxTokens: 2000 }
+        );
+        initialResponse = result.text;
+        functionCalls = result.functionCalls;
       }
 
-      // Generate a follow-up response with the action results
-      const actionResultsText = actions.map(a =>
-        `Action: ${a.action}\nResult: ${a.result.success ? 'Success' : 'Failed'}\nMessage: ${a.result.message}${a.result.data ? `\nData: ${JSON.stringify(a.result.data, null, 2)}` : ''}`
-      ).join('\n\n');
+      let actions: Array<{ action: string; params: any; result: any }> = [];
+      let navigateTo: string | undefined;
 
-      const followUpPrompt = `The user asked: "${message}"
+      if (functionCalls && functionCalls.length > 0) {
+        console.log(`[Client Portal Agent] Function calls detected on CONFIRM:`, functionCalls);
 
-I executed the following actions:
-${actionResultsText}
+        for (const funcCall of functionCalls) {
+          const result = await executeAction(
+            funcCall.name,
+            funcCall.args,
+            user.clientAccountId,
+            user.clientUserId
+          );
 
-Please provide a helpful, conversational response summarizing the results for the user. Be concise but informative.`;
+          actions.push({ action: funcCall.name, params: funcCall.args, result });
 
-      const followUpResponse = await vertexChat(
-        SYSTEM_PROMPT,
-        [{ role: 'user', content: followUpPrompt }],
-        { temperature: 0.7, maxTokens: 1000 }
-      );
+          if (result.navigateTo) {
+            navigateTo = result.navigateTo;
+          }
+        }
 
-      // Update conversation history
+        const actionResultsText = actions
+          .map((a) =>
+            `Action: ${a.action}\nResult: ${a.result.success ? 'Success' : 'Failed'}\nMessage: ${a.result.message}${a.result.data ? `\nData: ${JSON.stringify(a.result.data, null, 2)}` : ''}`
+          )
+          .join('\n\n');
+
+        const followUpPrompt = `The client originally asked: "${originalRequest}"\n\nYou proposed a plan, and they confirmed. You then executed these actions:\n${actionResultsText}\n\nNow provide a helpful, conversational response summarizing what you did and the key results. Be concise but informative, and stay strictly within this client's own campaigns and portal context.`;
+
+        const followUpResponse = USE_DEEPSEEK
+          ? await deepSeekChat(
+              SYSTEM_PROMPT,
+              [{ role: 'user', content: followUpPrompt }],
+              { temperature: 0.7, maxTokens: 1000 }
+            )
+          : await vertexChat(
+              SYSTEM_PROMPT,
+              [{ role: 'user', content: followUpPrompt }],
+              { temperature: 0.7, maxTokens: 1000 }
+            );
+
+        const newHistory: VertexChatMessage[] = [
+          ...history.slice(-18),
+          { role: 'user' as const, content: message },
+          { role: 'model' as const, content: followUpResponse },
+        ];
+
+        return res.json({
+          response: followUpResponse,
+          actions,
+          navigateTo,
+          conversationHistory: newHistory,
+        });
+      }
+
+      // No function calls on confirm – just return the model text
       const newHistory: VertexChatMessage[] = [
-        ...conversationHistory.slice(-18),
+        ...history.slice(-18),
         { role: 'user' as const, content: message },
-        { role: 'model' as const, content: followUpResponse }
+        { role: 'model' as const, content: initialResponse },
       ];
 
       return res.json({
-        response: followUpResponse,
-        actions,
-        navigateTo,
-        conversationHistory: newHistory
+        response: initialResponse,
+        actions: [],
+        navigateTo: undefined,
+        conversationHistory: newHistory,
       });
     }
 
-    // No function calls, just return the response
+    // ==================== DECLINE / ALTERNATIVE PLAN ====================
+    if (isDecline) {
+      const originalRequest = lastUser?.content || 'previous request';
+      const previousPlan = lastAssistant?.content || 'previously proposed plan';
+
+      const declinePrompt = `The client previously requested:\n"${originalRequest}"\n\nYou proposed this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now declined or wants to change the plan, saying: "${message}".\n\nDo NOT call any tools or make changes. Instead:\n1) Briefly restate and refine their updated request.\n2) Provide a revised numbered step-by-step plan you COULD take (Stage 1 PLAN only).\n3) Stay strictly within their own campaigns, orders, billing, and portal usage.\n4) End by asking them to reply with 'confirm' to proceed with the new plan, or 'decline' to adjust again.`;
+
+      const altResponse = USE_DEEPSEEK
+        ? await deepSeekChat(
+            SYSTEM_PROMPT,
+            [{ role: 'user', content: declinePrompt }],
+            { temperature: 0.4, maxTokens: 1200 }
+          )
+        : await vertexChat(
+            SYSTEM_PROMPT,
+            [{ role: 'user', content: declinePrompt }],
+            { temperature: 0.4, maxTokens: 1200 }
+          );
+
+      const newHistory: VertexChatMessage[] = [
+        ...history.slice(-18),
+        { role: 'user' as const, content: message },
+        { role: 'model' as const, content: altResponse },
+      ];
+
+      return res.json({
+        response: altResponse,
+        actions: [],
+        navigateTo: undefined,
+        conversationHistory: newHistory,
+      });
+    }
+
+    // ==================== STAGE 1: PLAN ONLY (NO ACTIONS YET) ====================
+    let initialResponse: string;
+
+    if (USE_DEEPSEEK) {
+      // Planning-only: no tools needed, just use DeepSeek chat with the system prompt
+      initialResponse = await deepSeekChat(
+        SYSTEM_PROMPT,
+        [{ role: 'user', content: message }],
+        { temperature: 0.3, maxTokens: 2000 }
+      );
+    } else {
+      const result = await generateWithFunctions(
+        SYSTEM_PROMPT,
+        message,
+        FUNCTION_DECLARATIONS,
+        { temperature: 0.3, maxTokens: 2000 }
+      );
+      initialResponse = result.text;
+
+      // Intentionally ignore any functionCalls here to enforce "plan first, execute later"
+      if (result.functionCalls && result.functionCalls.length > 0) {
+        console.log(
+          `[Client Portal Agent] Ignoring ${result.functionCalls.length} function call(s) during planning stage.`
+        );
+      }
+    }
+
     const newHistory: VertexChatMessage[] = [
-      ...conversationHistory.slice(-18),
+      ...history.slice(-18),
       { role: 'user' as const, content: message },
-      { role: 'model' as const, content: initialResponse }
+      { role: 'model' as const, content: initialResponse },
     ];
 
     return res.json({
       response: initialResponse,
       actions: [],
-      navigateTo,
-      conversationHistory: newHistory
+      navigateTo: undefined,
+      conversationHistory: newHistory,
     });
 
   } catch (error: any) {
