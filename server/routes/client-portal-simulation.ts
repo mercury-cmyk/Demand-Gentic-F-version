@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import {
   campaigns,
   clientCampaignAccess,
@@ -19,6 +19,15 @@ const router = Router();
 // Initialize Gemini client
 const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '');
 
+// Mock contact data for simulations
+interface MockContact {
+  fullName: string;
+  firstName: string;
+  lastName: string;
+  jobTitle: string;
+  accountName: string;
+}
+
 // In-memory session store
 interface SimulationSession {
   id: string;
@@ -27,9 +36,48 @@ interface SimulationSession {
   systemPrompt: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   createdAt: Date;
+  mockContact?: MockContact;
 }
 
 const simulationSessions = new Map<string, SimulationSession>();
+
+// Sample mock contact data pools for realistic simulations
+const MOCK_FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Casey', 'Riley', 'Quinn', 'Cameron', 'Avery', 'Drew'];
+const MOCK_LAST_NAMES = ['Johnson', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson', 'Anderson', 'Thompson', 'Martinez', 'Garcia'];
+const MOCK_JOB_TITLES = [
+  'VP of Marketing',
+  'Director of Business Development',
+  'Chief Revenue Officer',
+  'Senior Director of Sales',
+  'Head of Demand Generation',
+  'VP of Sales Operations',
+  'Director of Growth',
+  'Chief Marketing Officer',
+  'VP of Partnerships',
+  'Head of Sales Enablement'
+];
+const MOCK_COMPANY_SUFFIXES = ['Technologies', 'Solutions', 'Group', 'Inc.', 'Corporation', 'Partners', 'Enterprises'];
+
+/**
+ * Generate mock contact data for simulation
+ */
+function generateMockContact(campaignName: string): MockContact {
+  const firstName = MOCK_FIRST_NAMES[Math.floor(Math.random() * MOCK_FIRST_NAMES.length)];
+  const lastName = MOCK_LAST_NAMES[Math.floor(Math.random() * MOCK_LAST_NAMES.length)];
+  const jobTitle = MOCK_JOB_TITLES[Math.floor(Math.random() * MOCK_JOB_TITLES.length)];
+  
+  // Generate a realistic account name based on campaign or random suffix
+  const suffix = MOCK_COMPANY_SUFFIXES[Math.floor(Math.random() * MOCK_COMPANY_SUFFIXES.length)];
+  const accountName = `Acme ${suffix}`;
+  
+  return {
+    fullName: `${firstName} ${lastName}`,
+    firstName,
+    lastName,
+    jobTitle,
+    accountName,
+  };
+}
 
 // Clean up old sessions periodically
 setInterval(() => {
@@ -61,7 +109,10 @@ router.post('/start', async (req: Request, res: Response) => {
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          eq(clientCampaignAccess.campaignId, campaignId)
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaignId),
+            eq(clientCampaignAccess.campaignId, campaignId)
+          )
         )
       )
       .limit(1);
@@ -105,11 +156,14 @@ router.post('/start', async (req: Request, res: Response) => {
       console.log('[Simulation] No virtual agent assignment found');
     }
 
-    // Build simulation system prompt
-    const systemPrompt = buildSimulationPrompt(campaign, agentPersona);
+    // Generate mock contact for this simulation
+    const mockContact = generateMockContact(campaign.name);
     
-    // Generate first message based on campaign
-    const firstMessage = generateFirstMessage(campaign);
+    // Build simulation system prompt with mock contact context
+    const systemPrompt = buildSimulationPrompt(campaign, agentPersona, mockContact);
+    
+    // Generate first message based on campaign with mock contact data
+    const firstMessage = generateFirstMessage(campaign, mockContact);
 
     // Create session
     const sessionId = uuidv4();
@@ -120,6 +174,7 @@ router.post('/start', async (req: Request, res: Response) => {
       systemPrompt,
       messages: [{ role: 'assistant', content: firstMessage }],
       createdAt: new Date(),
+      mockContact,
     };
 
     simulationSessions.set(sessionId, session);
@@ -130,6 +185,10 @@ router.post('/start', async (req: Request, res: Response) => {
       context: {
         campaignId: campaign.id,
         campaignName: campaign.name,
+        // Include mock contact data for display
+        accountName: mockContact.accountName,
+        contactName: mockContact.fullName,
+        contactTitle: mockContact.jobTitle,
       },
     });
   } catch (error) {
@@ -159,10 +218,13 @@ router.post('/chat', async (req: Request, res: Response) => {
         .select()
         .from(clientCampaignAccess)
         .where(
-          and(
-            eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaignId),
             eq(clientCampaignAccess.campaignId, campaignId)
           )
+        )
         )
         .limit(1);
 
@@ -180,14 +242,18 @@ router.post('/chat', async (req: Request, res: Response) => {
         return res.status(404).json({ error: 'Campaign not found' });
       }
 
+      // Generate mock contact for on-the-fly session
+      const mockContact = generateMockContact(campaign.name);
+
       const newSessionId = uuidv4();
       session = {
         id: newSessionId,
         campaignId,
         campaignName: campaign.name,
-        systemPrompt: buildSimulationPrompt(campaign, ''),
+        systemPrompt: buildSimulationPrompt(campaign, '', mockContact),
         messages: [],
         createdAt: new Date(),
+        mockContact,
       };
       simulationSessions.set(newSessionId, session);
     }
@@ -258,28 +324,51 @@ async function generateGeminiResponse(
 }
 
 /**
- * Generate first message based on campaign data
+ * Generate first message based on campaign data and mock contact
+ * Uses the standard opening format: "Hello, may I please speak with [Name], the [Title] at [Company]?"
  */
-function generateFirstMessage(campaign: any): string {
-  const companyName = campaign.name || 'our company';
-  
+function generateFirstMessage(campaign: any, mockContact: MockContact): string {
   // Check if campaign has AI agent settings with opening script
   if (campaign.aiAgentSettings?.scripts?.opening) {
-    return campaign.aiAgentSettings.scripts.opening;
+    // Substitute mock contact variables in the custom opening script
+    let openingScript = campaign.aiAgentSettings.scripts.opening;
+    openingScript = openingScript.replace(/\{\{contact\.full_name\}\}/gi, mockContact.fullName);
+    openingScript = openingScript.replace(/\{\{contact\.first_name\}\}/gi, mockContact.firstName);
+    openingScript = openingScript.replace(/\{\{contact\.job_title\}\}/gi, mockContact.jobTitle);
+    openingScript = openingScript.replace(/\{\{account\.name\}\}/gi, mockContact.accountName);
+    openingScript = openingScript.replace(/\{\{ContactFullName\}\}/gi, mockContact.fullName);
+    openingScript = openingScript.replace(/\{\{ContactFirstName\}\}/gi, mockContact.firstName);
+    openingScript = openingScript.replace(/\{\{JobTitle\}\}/gi, mockContact.jobTitle);
+    openingScript = openingScript.replace(/\{\{AccountName\}\}/gi, mockContact.accountName);
+    return openingScript;
   }
 
-  // Default first message
-  return `Hi, this is a representative from ${companyName}. How are you doing today?`;
+  // Default first message - standard outbound call opening
+  // This matches the format used by test AI agent calls
+  return `Hello, may I please speak with ${mockContact.fullName}, the ${mockContact.jobTitle} at ${mockContact.accountName}?`;
 }
 
 /**
  * Build the simulation system prompt from campaign data
  */
-function buildSimulationPrompt(campaign: any, agentPersona: string): string {
+function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?: MockContact): string {
   const parts: string[] = [];
 
   parts.push(`You are an AI sales development representative for a campaign called "${campaign.name}".`);
   parts.push(`This is a SIMULATION MODE where the user is playing the role of a prospect to test your capabilities.`);
+  
+  // Add mock contact context so AI knows who it's speaking with
+  if (mockContact) {
+    parts.push(`\n## PROSPECT CONTEXT (The person you are calling)`);
+    parts.push(`- Full Name: ${mockContact.fullName}`);
+    parts.push(`- First Name: ${mockContact.firstName}`);
+    parts.push(`- Job Title: ${mockContact.jobTitle}`);
+    parts.push(`- Company: ${mockContact.accountName}`);
+    parts.push(`\nUse this context throughout the conversation. Address them by name when appropriate.`);
+    parts.push(`When they confirm their identity, acknowledge it: "Great, thanks for confirming [Name]."`);
+    parts.push(`Reference their role and company naturally in your pitch.`);
+  }
+  
   parts.push(`\n## Your Role`);
   parts.push(`- Act as a professional, friendly SDR making an outbound call`);
   parts.push(`- Follow the campaign's objectives and qualification criteria`);
@@ -371,11 +460,15 @@ function buildSimulationPrompt(campaign: any, agentPersona: string): string {
 
   parts.push(`\n## Conversation Guidelines`);
   parts.push(`- Keep responses conversational and natural (1-3 sentences typically)`);
-  parts.push(`- Listen actively and respond to what the prospect says`);
+  parts.push(`- Listen actively and respond DIRECTLY to what the prospect says`);
+  parts.push(`- If they confirm their identity (e.g., "Yes", "Speaking", "This is [name]"), acknowledge it and proceed with your pitch`);
+  parts.push(`- If they ask "Who is this?" or "What company?", introduce yourself clearly`);
   parts.push(`- If they show interest, try to qualify them and suggest next steps`);
   parts.push(`- If they object, acknowledge their concern and try to address it`);
-  parts.push(`- Be respectful if they're not interested - thank them for their time`);
-  parts.push(`- Never be pushy or aggressive`);
+  parts.push(`- If they say they're busy, offer to call back at a better time`);
+  parts.push(`- If they're not interested, thank them politely and end the call`);
+  parts.push(`- Be respectful and never be pushy or aggressive`);
+  parts.push(`- Use the prospect's first name naturally in conversation`);
 
   return parts.join('\n');
 }
@@ -478,7 +571,10 @@ router.post('/generate-email-template', async (req: Request, res: Response) => {
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, clientUser.clientAccountId),
-          eq(clientCampaignAccess.campaignId, campaignId)
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaignId),
+            eq(clientCampaignAccess.campaignId, campaignId)
+          )
         )
       )
       .limit(1);

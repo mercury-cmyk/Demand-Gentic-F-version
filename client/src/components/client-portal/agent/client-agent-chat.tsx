@@ -462,6 +462,28 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
   );
 }
 
+// Controlled Agent Chat Panel - can be opened from sidebar or other components
+export function ClientAgentPanel({
+  open,
+  onOpenChange,
+  onNavigate
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onNavigate?: (section: string) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-[400px] sm:w-[450px] p-0">
+        <SheetHeader className="sr-only">
+          <SheetTitle>AI Agent Assistant</SheetTitle>
+        </SheetHeader>
+        <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none" />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 // Floating chat button component
 export function ClientAgentButton({ onNavigate }: { onNavigate?: (section: string) => void }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -477,6 +499,9 @@ export function ClientAgentButton({ onNavigate }: { onNavigate?: (section: strin
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="w-[400px] sm:w-[450px] p-0">
+        <SheetHeader className="sr-only">
+          <SheetTitle>AI Agent Assistant</SheetTitle>
+        </SheetHeader>
         <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none" />
       </SheetContent>
     </Sheet>

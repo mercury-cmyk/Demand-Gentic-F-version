@@ -47,6 +47,7 @@ interface SimulationContext {
   campaignName: string;
   accountName?: string;
   contactName?: string;
+  contactTitle?: string;
   systemPrompt?: string;
   firstMessage?: string;
 }
@@ -77,14 +78,13 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
 
   // Fetch client's campaigns
   const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({
-    queryKey: ['client-campaigns-for-simulation'],
+    queryKey: ['client-portal-voice-campaigns'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/campaigns', {
+      const res = await fetch('/api/client-portal/qualified-leads/campaigns', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error('Failed to fetch campaigns');
-      const data = await res.json();
-      return data.campaigns || [];
+      return res.json();
     },
     enabled: open,
   });
@@ -421,7 +421,7 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
           <div className="flex flex-col flex-1 min-h-0">
             {/* Context Bar */}
             {context && (
-              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg mb-3">
+              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg mb-3 flex-wrap">
                 <Badge variant="outline" className="flex items-center gap-1">
                   <Target className="h-3 w-3" />
                   {context.campaignName}
@@ -436,6 +436,7 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
                   <Badge variant="secondary" className="flex items-center gap-1">
                     <UserCircle className="h-3 w-3" />
                     {context.contactName}
+                    {context.contactTitle && <span className="text-muted-foreground ml-1">({context.contactTitle})</span>}
                   </Badge>
                 )}
                 <div className="flex-1" />

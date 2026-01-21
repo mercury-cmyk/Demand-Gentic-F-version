@@ -35,7 +35,7 @@ import {
   clientCampaignAccess,
   virtualAgents,
 } from "@shared/schema";
-import { eq, and, desc, sql, gte, lte, count, sum, innerJoin } from "drizzle-orm";
+import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
 
 // ==================== TYPES ====================
 
@@ -127,14 +127,14 @@ export interface EmailGenerationRequest {
   campaignId?: string;
   emailType: "cold_outreach" | "follow_up" | "nurture" | "event_invite" | "case_study" | "product_announcement";
   tone: "professional" | "friendly" | "urgent" | "consultative";
-  targetPersona: {
+  targetPersona?: {
     title: string;
     industry: string;
     painPoints: string[];
   };
-  valueProposition: string;
-  callToAction: string;
-  personalizationLevel: 1 | 2 | 3;
+  valueProposition?: string;
+  callToAction?: string;
+  personalizationLevel?: 1 | 2 | 3;
   generateVariants?: number;
 }
 
@@ -217,14 +217,18 @@ export class VertexClientAgenticHub extends EventEmitter {
   private async assertCampaignAccess(campaignId: string) {
     const [record] = await db
       .select({ campaign: campaigns })
-      .from(clientCampaignAccess)
-      .innerJoin(campaigns, eq(clientCampaignAccess.campaignId, campaigns.id))
-      .where(
+      .from(campaigns)
+      .innerJoin(
+        clientCampaignAccess,
         and(
           eq(clientCampaignAccess.clientAccountId, this.context.clientAccountId),
-          eq(clientCampaignAccess.campaignId, campaignId)
+          or(
+            eq(clientCampaignAccess.regularCampaignId, campaigns.id),
+            eq(clientCampaignAccess.campaignId, campaigns.id)
+          )
         )
       )
+      .where(eq(campaigns.id, campaignId))
       .limit(1);
 
     if (!record) {
@@ -232,6 +236,34 @@ export class VertexClientAgenticHub extends EventEmitter {
     }
 
     return record.campaign;
+  }
+
+  private formatCampaignValue(value: unknown): string {
+    if (!value) return "Not specified";
+
+    if (Array.isArray(value)) {
+      const items = value
+        .map((item) => {
+          if (!item) return "";
+          if (typeof item === "string") return item;
+          if (typeof item === "object") {
+            const objection = (item as { objection?: string }).objection;
+            const response = (item as { response?: string }).response;
+            if (objection) {
+              return response ? `${objection} -> ${response}` : objection;
+            }
+            return JSON.stringify(item);
+          }
+          return String(item);
+        })
+        .filter(Boolean);
+
+      return items.length ? items.join(", ") : "Not specified";
+    }
+
+    if (typeof value === "string") return value;
+
+    return JSON.stringify(value);
   }
 
   // ==================== CAMPAIGN ORDER AGENT ====================
@@ -607,10 +639,12 @@ Return JSON:
 
     try {
       const variantCount = request.generateVariants || 1;
+      const personalizationLevel = request.personalizationLevel || 2;
+      let campaign: typeof campaigns.$inferSelect | null = null;
 
       if (request.campaignId) {
         try {
-          await this.assertCampaignAccess(request.campaignId);
+          campaign = await this.assertCampaignAccess(request.campaignId);
         } catch (err: any) {
           return {
             success: false,
@@ -619,19 +653,55 @@ Return JSON:
         }
       }
 
+      const targetPersona = request.targetPersona || {
+        title: "Decision Maker",
+        industry: "B2B",
+        painPoints: ["efficiency", "growth"],
+      };
+
+      const valueProposition =
+        request.valueProposition ||
+        campaign?.productServiceInfo ||
+        campaign?.campaignObjective ||
+        "Drive qualified pipeline";
+
+      const callToAction =
+        request.callToAction ||
+        campaign?.successCriteria ||
+        "Book a meeting";
+
+      const campaignContext = campaign
+        ? `CAMPAIGN CONTEXT:
+- Name: ${campaign.name}
+- Objective: ${campaign.campaignObjective || "Not specified"}
+- Product/Service: ${campaign.productServiceInfo || "Not specified"}
+- Target Audience: ${campaign.targetAudienceDescription || "Not specified"}
+- Talking Points: ${this.formatCampaignValue(campaign.talkingPoints)}
+- Objections: ${this.formatCampaignValue(campaign.campaignObjections)}
+- Success Criteria: ${campaign.successCriteria || "Not specified"}
+- Context Brief: ${campaign.campaignContextBrief || "Not specified"}`
+        : `TARGET PERSONA:
+- Title: ${targetPersona.title}
+- Industry: ${targetPersona.industry}
+- Pain Points: ${targetPersona.painPoints.join(", ")}`;
+
+      const contextRules = campaign
+        ? "Use the campaign context as the source of truth. Do not invent product or audience details beyond what is provided."
+        : "Use the target persona and value proposition provided.";
+
       const emailPrompt = `You are an expert B2B email copywriter. Generate ${variantCount} high-converting ${request.emailType} email(s).
 
-TARGET PERSONA:
-- Title: ${request.targetPersona.title}
-- Industry: ${request.targetPersona.industry}
-- Pain Points: ${request.targetPersona.painPoints.join(", ")}
+${campaignContext}
 
 EMAIL PARAMETERS:
 - Type: ${request.emailType}
 - Tone: ${request.tone}
-- Value Proposition: ${request.valueProposition}
-- Call to Action: ${request.callToAction}
-- Personalization Level: ${request.personalizationLevel} (1=basic, 2=contextual, 3=deep)
+- Value Proposition: ${valueProposition}
+- Call to Action: ${callToAction}
+- Personalization Level: ${personalizationLevel} (1=basic, 2=contextual, 3=deep)
+
+CONTEXT RULES:
+${contextRules}
 
 EMAIL BEST PRACTICES:
 - Subject lines: 40-60 characters, create curiosity, avoid spam triggers
@@ -656,17 +726,29 @@ Return JSON:
   "copywritingNotes": "explanation of approach and A/B testing recommendations"
 }`;
 
+      console.log("[ClientAgenticHub] Generating email with Vertex AI...");
+      
       const result = await generateJSON<{
         emails: GeneratedEmail[];
         copywritingNotes: string;
       }>(emailPrompt, { temperature: 0.7 });
+
+      console.log("[ClientAgenticHub] Email generation result:", JSON.stringify(result, null, 2));
+
+      if (!result || !result.emails || !Array.isArray(result.emails)) {
+        console.error("[ClientAgenticHub] Invalid result structure:", result);
+        return {
+          success: false,
+          message: "Email generation returned invalid structure",
+        };
+      }
 
       this.emit("agent:completed", "email_generation", { count: result.emails.length });
 
       return {
         success: true,
         data: result.emails,
-        message: `Generated ${result.emails.length} email variant(s). Average spam score: ${(result.emails.reduce((sum, e) => sum + e.spamScore, 0) / result.emails.length).toFixed(1)}/10`,
+        message: `Generated ${result.emails.length} email variant(s). Average spam score: ${(result.emails.reduce((sum, e) => sum + (e.spamScore || 0), 0) / result.emails.length).toFixed(1)}/10`,
         reasoning: result.copywritingNotes,
         suggestedActions: [
           "A/B test subject lines for best open rates",
@@ -675,6 +757,8 @@ Return JSON:
         ],
       };
     } catch (error: any) {
+      console.error("[ClientAgenticHub] Email generation error:", error);
+      console.error("[ClientAgenticHub] Error stack:", error.stack);
       this.emit("agent:error", "email_generation", error);
       return {
         success: false,
@@ -704,7 +788,15 @@ Return JSON:
       let campaignContext = "";
       try {
         const campaign = await this.assertCampaignAccess(campaignId);
-        campaignContext = `Campaign: ${campaign.name}\nType: ${campaign.type}`;
+        campaignContext = `CAMPAIGN CONTEXT:
+- Name: ${campaign.name}
+- Type: ${campaign.type}
+- Objective: ${campaign.campaignObjective || "Not specified"}
+- Product/Service: ${campaign.productServiceInfo || "Not specified"}
+- Target Audience: ${campaign.targetAudienceDescription || "Not specified"}
+- Talking Points: ${this.formatCampaignValue(campaign.talkingPoints)}
+- Success Criteria: ${campaign.successCriteria || "Not specified"}
+- Context Brief: ${campaign.campaignContextBrief || "Not specified"}`;
       } catch (err: any) {
         return {
           success: false,

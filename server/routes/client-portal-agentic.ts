@@ -267,29 +267,42 @@ router.get("/simulations/scenarios", async (req: Request, res: Response) => {
  */
 router.post("/emails/generate", async (req: Request, res: Response) => {
   try {
+    const clientUser = (req as any).clientUser;
+    if (!clientUser) {
+      console.error("[Client Agentic] No clientUser on request");
+      return res.status(401).json({ success: false, message: "Authentication required" });
+    }
+
+    console.log("[Client Agentic] Generating emails for client:", clientUser.email);
+    
     const context = getClientContext(req);
     const hub = createClientAgenticHub(context);
 
+    const { campaignId } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ success: false, message: "Campaign is required" });
+    }
+
     const emailRequest: EmailGenerationRequest = {
-      campaignId: req.body.campaignId,
+      campaignId,
       emailType: req.body.emailType || "cold_outreach",
       tone: req.body.tone || "professional",
-      targetPersona: {
-        title: req.body.targetTitle || "VP of Marketing",
-        industry: req.body.targetIndustry || "Technology",
-        painPoints: req.body.painPoints || ["efficiency", "growth"],
-      },
-      valueProposition: req.body.valueProposition || "Drive qualified pipeline",
-      callToAction: req.body.callToAction || "Schedule a call",
       personalizationLevel: req.body.personalizationLevel || 2,
       generateVariants: req.body.variants || 1,
     };
 
+    console.log("[Client Agentic] Email request:", JSON.stringify(emailRequest, null, 2));
+
     const result = await hub.generateEmails(emailRequest);
+    
+    console.log("[Client Agentic] Email generation result:", JSON.stringify(result, null, 2));
+    
     res.json(result);
   } catch (error: any) {
     console.error("[Client Agentic] Email generation error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error("[Client Agentic] Error stack:", error.stack);
+    res.status(500).json({ success: false, message: error.message || "Failed to generate emails" });
   }
 });
 
@@ -303,8 +316,12 @@ router.post("/emails/sequence", async (req: Request, res: Response) => {
 
     const { campaignId, sequenceLength, sequenceType } = req.body;
 
+    if (!campaignId) {
+      return res.status(400).json({ success: false, message: "Campaign is required" });
+    }
+
     const result = await hub.generateEmailSequence(
-      campaignId || "",
+      campaignId,
       sequenceLength || 5,
       sequenceType || "cold"
     );
@@ -371,6 +388,58 @@ Return JSON:
     res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("[Client Agentic] Email analysis error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Send test email with proper HTML formatting
+ * Uses the simple email template structure for campaign-context-aware emails
+ */
+router.post("/emails/send-test", async (req: Request, res: Response) => {
+  try {
+    const { to, subject, html, preheader, campaignName, campaignId } = req.body;
+
+    if (!to || !subject || !html) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields: to, subject, html" 
+      });
+    }
+
+    // Validate email address
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid email address format" 
+      });
+    }
+
+    // Import and use the bulk email service
+    const { sendTestEmail } = await import("../services/bulk-email-service");
+    
+    const result = await sendTestEmail({
+      to: [to],
+      subject,
+      html,
+    });
+
+    if (result.success) {
+      console.log(`[Client Portal] Test email sent to ${to} for campaign: ${campaignName || campaignId || 'unknown'}`);
+      res.json({
+        success: true,
+        message: `Test email sent to ${to}`,
+        sent: result.sent,
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: result.error || "Failed to send test email",
+      });
+    }
+  } catch (error: any) {
+    console.error("[Client Agentic] Test email error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
