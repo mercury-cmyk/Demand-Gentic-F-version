@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [showMfaInput, setShowMfaInput] = useState(false);
   const [mfaToken, setMfaToken] = useState("");
   const [useBackupCode, setUseBackupCode] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   // Redirect after successful login once authentication state is updated
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function LoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, rememberMe }),
       });
 
       console.log('[LOGIN] Response status:', response.status);
@@ -100,7 +102,8 @@ export default function LoginPage() {
           username, 
           password, 
           token: mfaToken,
-          useBackupCode 
+          useBackupCode,
+          rememberMe,
         }),
       });
 
@@ -180,6 +183,15 @@ export default function LoginPage() {
                   data-testid="input-password"
                   className="h-11"
                 />
+              </div>
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Checkbox
+                    checked={rememberMe}
+                    onCheckedChange={(checked) => setRememberMe(checked === true)}
+                  />
+                  Keep me signed in for 30 days
+                </label>
               </div>
               <Button 
                 type="submit" 

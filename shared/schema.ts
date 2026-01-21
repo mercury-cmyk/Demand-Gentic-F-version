@@ -19,6 +19,7 @@ import {
   primaryKey,
   date,
   decimal,
+  vector,
   json // Import json type
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -221,6 +222,14 @@ export const manualQueueStateEnum = pgEnum('manual_queue_state', [
 ]);
 
 export const entityTypeEnum = pgEnum('entity_type', ['account', 'contact']);
+
+export const vectorDocumentTypeEnum = pgEnum('vector_document_type', [
+  'account',
+  'contact',
+  'call',
+  'knowledge',
+  'campaign'
+]);
 
 export const pipelineTypeEnum = pgEnum('pipeline_type', ['revenue', 'expansion', 'agency']);
 
@@ -4755,6 +4764,42 @@ export const voiceCommandIntentEnum = pgEnum('voice_command_intent', [
   'unknown'
 ]);
 
+// ==================== CLIENT ASSIGNMENT & QA GATING ENUMS ====================
+
+/**
+ * Project Type Enum
+ * Classifies client projects by campaign/work type
+ */
+export const projectTypeEnum = pgEnum('project_type', [
+  'call_campaign',
+  'email_campaign',
+  'data_enrichment',
+  'verification',
+  'combo',
+  'custom'
+]);
+
+/**
+ * QA Content Type Enum
+ * Types of content that can go through QA gating
+ */
+export const qaContentTypeEnum = pgEnum('qa_content_type', [
+  'simulation',
+  'mock_call',
+  'report',
+  'data_export'
+]);
+
+/**
+ * Client Relationship Type Enum
+ * Defines the relationship between clients and campaign organizations
+ */
+export const clientRelationshipTypeEnum = pgEnum('client_relationship_type', [
+  'managed',
+  'partner',
+  'reseller'
+]);
+
 // Client Projects - Container for campaigns and billing
 export const clientProjects = pgTable("client_projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -4789,6 +4834,24 @@ export const clientProjects = pgTable("client_projects", {
   // Metadata
   landingPageUrl: text("landing_page_url"), // Optional landing page URL
   projectFileUrl: text("project_file_url"), // Optional uploaded file URL
+
+  // Project Type Classification (for client assignment)
+  projectType: projectTypeEnum("project_type").default('custom'),
+
+  // Campaign Organization Reference (for three-tier hierarchy)
+  campaignOrganizationId: varchar("campaign_organization_id"),
+
+  // QA Gate Configuration
+  qaGateConfig: jsonb("qa_gate_config").$type<{
+    enabled: boolean;
+    autoApproveThreshold: number;
+    requireManualReview: boolean;
+  }>().default({
+    enabled: true,
+    autoApproveThreshold: 85,
+    requireManualReview: false
+  }),
+
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -4796,6 +4859,8 @@ export const clientProjects = pgTable("client_projects", {
   clientIdx: index("client_projects_client_idx").on(table.clientAccountId),
   statusIdx: index("client_projects_status_idx").on(table.status),
   codeIdx: index("client_projects_code_idx").on(table.projectCode),
+  typeIdx: index("client_projects_type_idx").on(table.projectType),
+  orgIdx: index("client_projects_org_idx").on(table.campaignOrganizationId),
 }));
 
 // Link campaigns to projects
@@ -5196,6 +5261,267 @@ export type ClientInvoiceItem = typeof clientInvoiceItems.$inferSelect;
 export type ClientDeliveryLink = typeof clientDeliveryLinks.$inferSelect;
 export type ClientVoiceCommand = typeof clientVoiceCommands.$inferSelect;
 export type ClientVoiceConfig = typeof clientVoiceConfig.$inferSelect;
+
+// ==================== CLIENT ASSIGNMENT & QA GATING SYSTEM ====================
+
+/**
+ * Client Organization Links
+ * Links clients to campaign organizations for three-tier hierarchy
+ * Super Org -> Campaign Orgs -> Clients (many-to-many)
+ */
+export const clientOrganizationLinks = pgTable("client_organization_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  campaignOrganizationId: varchar("campaign_organization_id").notNull(),
+
+  // Relationship metadata
+  relationshipType: clientRelationshipTypeEnum("relationship_type").notNull().default('managed'),
+  isPrimary: boolean("is_primary").notNull().default(false),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientOrgUniq: uniqueIndex("client_organization_links_unique_idx").on(table.clientAccountId, table.campaignOrganizationId),
+  clientIdx: index("client_organization_links_client_idx").on(table.clientAccountId),
+  orgIdx: index("client_organization_links_org_idx").on(table.campaignOrganizationId),
+  primaryIdx: index("client_organization_links_primary_idx").on(table.clientAccountId),
+}));
+
+/**
+ * QA Gated Content
+ * Universal QA gating registry for all client-facing content
+ * (simulations, mock calls, reports, data exports)
+ */
+export const qaGatedContent = pgTable("qa_gated_content", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Content identification
+  contentType: qaContentTypeEnum("content_type").notNull(),
+  contentId: varchar("content_id").notNull(),
+
+  // Context references
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // QA Status
+  qaStatus: qaStatusEnum("qa_status").notNull().default('new'),
+  qaScore: integer("qa_score"),
+  qaNotes: text("qa_notes"),
+  qaData: jsonb("qa_data").$type<Record<string, unknown>>(),
+
+  // Review tracking
+  reviewedBy: varchar("reviewed_by").references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp("reviewed_at"),
+  autoReviewed: boolean("auto_reviewed").notNull().default(false),
+
+  // Visibility control
+  clientVisible: boolean("client_visible").notNull().default(false),
+  publishedAt: timestamp("published_at"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  contentIdx: index("qa_gated_content_content_idx").on(table.contentType, table.contentId),
+  campaignIdx: index("qa_gated_content_campaign_idx").on(table.campaignId),
+  clientIdx: index("qa_gated_content_client_idx").on(table.clientAccountId),
+  projectIdx: index("qa_gated_content_project_idx").on(table.projectId),
+  statusIdx: index("qa_gated_content_status_idx").on(table.qaStatus),
+  visibleIdx: index("qa_gated_content_visible_idx").on(table.clientAccountId, table.clientVisible),
+  uniqueContentIdx: uniqueIndex("qa_gated_content_unique_idx").on(table.contentType, table.contentId, table.clientAccountId),
+}));
+
+/**
+ * Client Simulation Sessions
+ * Store client-facing AI simulation sessions with QA gating
+ */
+export const clientSimulationSessions = pgTable("client_simulation_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // References
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // Session data
+  sessionName: text("session_name"),
+  transcript: jsonb("transcript").$type<Array<{ role: string; content: string; timestamp?: string }>>(),
+  structuredTranscript: jsonb("structured_transcript"),
+  durationSeconds: integer("duration_seconds"),
+
+  // QA gating reference
+  qaContentId: varchar("qa_content_id").references(() => qaGatedContent.id, { onDelete: 'set null' }),
+
+  // Configuration used
+  simulationConfig: jsonb("simulation_config").$type<{
+    persona?: string;
+    scenario?: string;
+    agentSettings?: Record<string, unknown>;
+  }>(),
+
+  // AI evaluation
+  evaluationResult: jsonb("evaluation_result").$type<{
+    score?: number;
+    strengths?: string[];
+    improvements?: string[];
+    summary?: string;
+  }>(),
+  evaluationScore: integer("evaluation_score"),
+
+  // Metadata
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+
+  // Timestamps
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (table) => ({
+  clientIdx: index("client_simulation_sessions_client_idx").on(table.clientAccountId),
+  campaignIdx: index("client_simulation_sessions_campaign_idx").on(table.campaignId),
+  projectIdx: index("client_simulation_sessions_project_idx").on(table.projectId),
+  qaIdx: index("client_simulation_sessions_qa_idx").on(table.qaContentId),
+}));
+
+/**
+ * Client Mock Calls
+ * Store mock/test calls for client review with QA gating
+ */
+export const clientMockCalls = pgTable("client_mock_calls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // References
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // Call data
+  callName: text("call_name"),
+  recordingUrl: text("recording_url"),
+  recordingS3Key: text("recording_s3_key"),
+  transcript: text("transcript"),
+  structuredTranscript: jsonb("structured_transcript"),
+  durationSeconds: integer("duration_seconds"),
+
+  // Call metadata
+  callType: varchar("call_type", { length: 50 }).default('test'), // test, demo, sample
+  disposition: varchar("disposition", { length: 100 }),
+
+  // QA gating reference
+  qaContentId: varchar("qa_content_id").references(() => qaGatedContent.id, { onDelete: 'set null' }),
+
+  // AI analysis
+  aiAnalysis: jsonb("ai_analysis").$type<{
+    score?: number;
+    qualificationStatus?: string;
+    highlights?: string[];
+    recommendations?: string[];
+  }>(),
+  aiScore: integer("ai_score"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_mock_calls_client_idx").on(table.clientAccountId),
+  campaignIdx: index("client_mock_calls_campaign_idx").on(table.campaignId),
+  qaIdx: index("client_mock_calls_qa_idx").on(table.qaContentId),
+}));
+
+/**
+ * Client Reports
+ * Store generated reports for client delivery with QA gating
+ */
+export const clientReports = pgTable("client_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // References
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // Report details
+  reportName: text("report_name").notNull(),
+  reportType: varchar("report_type", { length: 100 }).notNull(), // performance, lead_summary, call_analytics, email_analytics
+  reportPeriodStart: date("report_period_start"),
+  reportPeriodEnd: date("report_period_end"),
+
+  // Content
+  reportData: jsonb("report_data").notNull().$type<Record<string, unknown>>(),
+  reportSummary: text("report_summary"),
+
+  // File storage
+  fileUrl: text("file_url"),
+  fileFormat: varchar("file_format", { length: 20 }).default('json'), // json, csv, pdf, xlsx
+  fileSizeBytes: integer("file_size_bytes"),
+
+  // QA gating reference
+  qaContentId: varchar("qa_content_id").references(() => qaGatedContent.id, { onDelete: 'set null' }),
+
+  // Audit
+  generatedBy: varchar("generated_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_reports_client_idx").on(table.clientAccountId),
+  campaignIdx: index("client_reports_campaign_idx").on(table.campaignId),
+  typeIdx: index("client_reports_type_idx").on(table.reportType),
+  qaIdx: index("client_reports_qa_idx").on(table.qaContentId),
+}));
+
+// Relations for Client Assignment & QA Gating
+export const clientOrganizationLinksRelations = relations(clientOrganizationLinks, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientOrganizationLinks.clientAccountId], references: [clientAccounts.id] }),
+  createdByUser: one(users, { fields: [clientOrganizationLinks.createdBy], references: [users.id] }),
+}));
+
+export const qaGatedContentRelations = relations(qaGatedContent, ({ one }) => ({
+  campaign: one(campaigns, { fields: [qaGatedContent.campaignId], references: [campaigns.id] }),
+  clientAccount: one(clientAccounts, { fields: [qaGatedContent.clientAccountId], references: [clientAccounts.id] }),
+  project: one(clientProjects, { fields: [qaGatedContent.projectId], references: [clientProjects.id] }),
+  reviewedByUser: one(users, { fields: [qaGatedContent.reviewedBy], references: [users.id] }),
+  createdByUser: one(users, { fields: [qaGatedContent.createdBy], references: [users.id] }),
+}));
+
+export const clientSimulationSessionsRelations = relations(clientSimulationSessions, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientSimulationSessions.clientAccountId], references: [clientAccounts.id] }),
+  clientUser: one(clientUsers, { fields: [clientSimulationSessions.clientUserId], references: [clientUsers.id] }),
+  campaign: one(campaigns, { fields: [clientSimulationSessions.campaignId], references: [campaigns.id] }),
+  project: one(clientProjects, { fields: [clientSimulationSessions.projectId], references: [clientProjects.id] }),
+  qaContent: one(qaGatedContent, { fields: [clientSimulationSessions.qaContentId], references: [qaGatedContent.id] }),
+}));
+
+export const clientMockCallsRelations = relations(clientMockCalls, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientMockCalls.clientAccountId], references: [clientAccounts.id] }),
+  campaign: one(campaigns, { fields: [clientMockCalls.campaignId], references: [campaigns.id] }),
+  project: one(clientProjects, { fields: [clientMockCalls.projectId], references: [clientProjects.id] }),
+  qaContent: one(qaGatedContent, { fields: [clientMockCalls.qaContentId], references: [qaGatedContent.id] }),
+  createdByUser: one(users, { fields: [clientMockCalls.createdBy], references: [users.id] }),
+}));
+
+export const clientReportsRelations = relations(clientReports, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientReports.clientAccountId], references: [clientAccounts.id] }),
+  campaign: one(campaigns, { fields: [clientReports.campaignId], references: [campaigns.id] }),
+  project: one(clientProjects, { fields: [clientReports.projectId], references: [clientProjects.id] }),
+  qaContent: one(qaGatedContent, { fields: [clientReports.qaContentId], references: [qaGatedContent.id] }),
+  generatedByUser: one(users, { fields: [clientReports.generatedBy], references: [users.id] }),
+}));
+
+// Types for Client Assignment & QA Gating
+export type ClientOrganizationLink = typeof clientOrganizationLinks.$inferSelect;
+export type InsertClientOrganizationLink = typeof clientOrganizationLinks.$inferInsert;
+export type QAGatedContent = typeof qaGatedContent.$inferSelect;
+export type InsertQAGatedContent = typeof qaGatedContent.$inferInsert;
+export type ClientSimulationSession = typeof clientSimulationSessions.$inferSelect;
+export type InsertClientSimulationSession = typeof clientSimulationSessions.$inferInsert;
+export type ClientMockCall = typeof clientMockCalls.$inferSelect;
+export type InsertClientMockCall = typeof clientMockCalls.$inferInsert;
+export type ClientReport = typeof clientReports.$inferSelect;
+export type InsertClientReport = typeof clientReports.$inferInsert;
+
+// ==================== END CLIENT ASSIGNMENT & QA GATING SYSTEM ====================
 
 // ==================== END ENHANCED CLIENT PORTAL SYSTEM ====================
 
@@ -6148,6 +6474,43 @@ export const insertVerificationEmailValidationJobSchema = createInsertSchema(ver
 export const insertVerificationEnrichmentJobSchema = createInsertSchema(verificationEnrichmentJobs).omit({ id: true, createdAt: true, updatedAt: true, startedAt: true, finishedAt: true });
 export const insertVerificationCampaignWorkflowSchema = createInsertSchema(verificationCampaignWorkflows).omit({ id: true, createdAt: true, updatedAt: true, startedAt: true, completedAt: true });
 export const insertExportTemplateSchema = createInsertSchema(exportTemplates).omit({ id: true, createdAt: true, updatedAt: true });
+
+// ========================================
+// VECTOR DOCUMENTS (pgvector)
+// ========================================
+
+export const vectorDocuments = pgTable("vector_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceType: vectorDocumentTypeEnum("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 768 }).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, any>>().default(sql`'{}'::jsonb`),
+  accountId: varchar("account_id", { length: 36 }),
+  industry: text("industry"),
+  disposition: text("disposition"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  sourceIdx: uniqueIndex("vector_documents_source_idx").on(table.sourceType, table.sourceId),
+  sourceTypeIdx: index("vector_documents_source_type_idx").on(table.sourceType),
+  accountIdx: index("vector_documents_account_idx").on(table.accountId),
+  industryIdx: index("vector_documents_industry_idx").on(table.industry),
+  dispositionIdx: index("vector_documents_disposition_idx").on(table.disposition),
+  embeddingHnswIdx: index("vector_documents_embedding_hnsw_idx")
+    .using("hnsw", table.embedding.op("vector_cosine_ops")),
+  embeddingIvfflatIdx: index("vector_documents_embedding_ivfflat_idx")
+    .using("ivfflat", table.embedding.op("vector_cosine_ops"))
+    .with({ lists: 100 }),
+}));
+
+export const insertVectorDocumentSchema = createInsertSchema(vectorDocuments).omit({ 
+  id: true, 
+  createdAt: true, 
+  updatedAt: true 
+});
+export type VectorDocumentRecord = typeof vectorDocuments.$inferSelect;
+export type InsertVectorDocument = z.infer<typeof insertVectorDocumentSchema>;
 
 // ========================================
 // AI-POWERED PROJECT CREATION
@@ -8204,4 +8567,605 @@ export const CREDENTIAL_CATEGORIES = {
 } as const;
 
 export type CredentialCategory = typeof CREDENTIAL_CATEGORIES[keyof typeof CREDENTIAL_CATEGORIES];
+
+// ==================== SMI AGENT - Search, Mapping & Intelligence ====================
+
+/**
+ * Decision Authority Enum
+ * Classification of contact's decision-making power
+ */
+export const decisionAuthorityEnum = pgEnum('decision_authority', [
+  'decision_maker',
+  'influencer',
+  'user',
+  'gatekeeper'
+]);
+
+/**
+ * Buying Committee Role Enum
+ * Role within the buying committee
+ */
+export const buyingCommitteeRoleEnum = pgEnum('buying_committee_role', [
+  'champion',
+  'blocker',
+  'evaluator',
+  'budget_holder',
+  'end_user'
+]);
+
+/**
+ * Learning Insight Type Enum
+ * Types of patterns detected from learning
+ */
+export const insightTypeEnum = pgEnum('insight_type', [
+  'role_pattern',
+  'industry_pattern',
+  'objection_pattern',
+  'approach_pattern',
+  'messaging_pattern'
+]);
+
+/**
+ * Learning Insight Scope Enum
+ * Scope of learning insights
+ */
+export const insightScopeEnum = pgEnum('insight_scope', [
+  'global',
+  'organization',
+  'campaign'
+]);
+
+/**
+ * Role Adjacency Type Enum
+ * Types of relationships between roles
+ */
+export const roleAdjacencyTypeEnum = pgEnum('role_adjacency_type', [
+  'equivalent',
+  'senior_to',
+  'junior_to',
+  'collaborates_with',
+  'reports_to',
+  'manages'
+]);
+
+/**
+ * Title Mapping Source Enum
+ * Source of title-to-role mapping
+ */
+export const titleMappingSourceEnum = pgEnum('title_mapping_source', [
+  'manual',
+  'ai',
+  'system',
+  'imported'
+]);
+
+/**
+ * Industry Level Enum
+ * Hierarchy level in industry taxonomy
+ */
+export const industryLevelEnum = pgEnum('industry_level', [
+  'sector',
+  'industry',
+  'sub_industry'
+]);
+
+/**
+ * Job Role Taxonomy - Master Reference for B2B Roles
+ * Normalized roles with function, seniority, and decision authority
+ */
+export const jobRoleTaxonomy = pgTable('job_role_taxonomy', {
+  id: serial('id').primaryKey(),
+  roleName: text('role_name').notNull(),
+  roleCode: text('role_code').notNull().unique(),
+  roleCategory: text('role_category').notNull(), // 'functional', 'technical', 'executive', 'support', 'specialist'
+  jobFunction: text('job_function').notNull(), // 'IT', 'Finance', 'HR', 'Marketing', 'Operations', 'Sales', 'Legal', 'Executive'
+  seniorityLevel: text('seniority_level').notNull(), // 'entry', 'mid', 'senior', 'director', 'vp', 'c_level', 'board'
+  decisionAuthority: decisionAuthorityEnum('decision_authority').notNull().default('influencer'),
+  department: text('department'),
+  synonyms: text('synonyms').array().default(sql`'{}'`),
+  keywords: text('keywords').array().default(sql`'{}'`),
+  parentRoleId: integer('parent_role_id').references((): any => jobRoleTaxonomy.id),
+  typicalReportsTo: integer('typical_reports_to').references((): any => jobRoleTaxonomy.id),
+  description: text('description'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  functionIdx: index('job_role_taxonomy_function_idx').on(table.jobFunction),
+  seniorityIdx: index('job_role_taxonomy_seniority_idx').on(table.seniorityLevel),
+  categoryIdx: index('job_role_taxonomy_category_idx').on(table.roleCategory),
+  authorityIdx: index('job_role_taxonomy_authority_idx').on(table.decisionAuthority),
+}));
+
+/**
+ * Job Title Mappings - Raw Titles to Normalized Roles
+ * Maps user-provided job titles to canonical roles in taxonomy
+ */
+export const jobTitleMappings = pgTable('job_title_mappings', {
+  id: serial('id').primaryKey(),
+  rawTitle: text('raw_title').notNull(),
+  rawTitleNormalized: text('raw_title_normalized').notNull(),
+  mappedRoleId: integer('mapped_role_id').references(() => jobRoleTaxonomy.id).notNull(),
+  confidence: numeric('confidence', { precision: 5, scale: 4 }).notNull().default('0.8'),
+  mappingSource: titleMappingSourceEnum('mapping_source').notNull().default('manual'),
+  verifiedBy: varchar('verified_by', { length: 36 }).references(() => users.id),
+  verifiedAt: timestamp('verified_at'),
+  usageCount: integer('usage_count').default(0),
+  lastUsedAt: timestamp('last_used_at'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  normalizedIdx: uniqueIndex('job_title_mappings_normalized_idx').on(table.rawTitleNormalized),
+  roleIdx: index('job_title_mappings_role_idx').on(table.mappedRoleId),
+  sourceIdx: index('job_title_mappings_source_idx').on(table.mappingSource),
+  confidenceIdx: index('job_title_mappings_confidence_idx').on(table.confidence),
+}));
+
+/**
+ * Role Adjacency - Graph of Related Roles
+ * Defines relationships between roles (equivalent, senior/junior, collaborators)
+ */
+export const roleAdjacency = pgTable('role_adjacency', {
+  id: serial('id').primaryKey(),
+  sourceRoleId: integer('source_role_id').references(() => jobRoleTaxonomy.id).notNull(),
+  targetRoleId: integer('target_role_id').references(() => jobRoleTaxonomy.id).notNull(),
+  adjacencyType: roleAdjacencyTypeEnum('adjacency_type').notNull(),
+  relationshipStrength: numeric('relationship_strength', { precision: 5, scale: 4 }).notNull().default('0.5'),
+  contextNotes: text('context_notes'),
+  isBidirectional: boolean('is_bidirectional').default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  pairUniq: uniqueIndex('role_adjacency_pair_uniq').on(table.sourceRoleId, table.targetRoleId, table.adjacencyType),
+  sourceIdx: index('role_adjacency_source_idx').on(table.sourceRoleId),
+  targetIdx: index('role_adjacency_target_idx').on(table.targetRoleId),
+}));
+
+/**
+ * Industry Taxonomy - Hierarchical Industry Classification
+ * Includes SIC/NAICS mappings and industry intelligence
+ */
+export const industryTaxonomy = pgTable('industry_taxonomy', {
+  id: serial('id').primaryKey(),
+  industryName: text('industry_name').notNull(),
+  industryCode: text('industry_code').notNull().unique(),
+  displayName: text('display_name').notNull(),
+  sicCodes: text('sic_codes').array().default(sql`'{}'`),
+  naicsCodes: text('naics_codes').array().default(sql`'{}'`),
+  parentIndustryId: integer('parent_industry_id').references((): any => industryTaxonomy.id),
+  industryLevel: industryLevelEnum('industry_level').notNull().default('industry'),
+  synonyms: text('synonyms').array().default(sql`'{}'`),
+  keywords: text('keywords').array().default(sql`'{}'`),
+  description: text('description'),
+  // Intelligence fields
+  typicalChallenges: jsonb('typical_challenges').default('[]'),
+  regulatoryConsiderations: jsonb('regulatory_considerations').default('[]'),
+  buyingBehaviors: jsonb('buying_behaviors').default('{}'),
+  seasonalPatterns: jsonb('seasonal_patterns').default('{}'),
+  technologyTrends: jsonb('technology_trends').default('[]'),
+  competitiveLandscape: jsonb('competitive_landscape').default('{}'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  parentIdx: index('industry_taxonomy_parent_idx').on(table.parentIndustryId),
+  levelIdx: index('industry_taxonomy_level_idx').on(table.industryLevel),
+}));
+
+/**
+ * Industry Department Pain Points - Industry x Department Matrix
+ * Pain points, priorities, and decision factors by industry and department
+ */
+export const industryDepartmentPainPoints = pgTable('industry_department_pain_points', {
+  id: serial('id').primaryKey(),
+  industryId: integer('industry_id').references(() => industryTaxonomy.id).notNull(),
+  department: text('department').notNull(), // 'IT', 'Finance', 'HR', 'Marketing', 'Operations', 'Sales', 'Legal', 'Executive'
+  painPoints: jsonb('pain_points').notNull().default('[]'),
+  priorities: jsonb('priorities').default('[]'),
+  budgetConsiderations: jsonb('budget_considerations').default('{}'),
+  decisionFactors: jsonb('decision_factors').default('[]'),
+  successMetrics: jsonb('success_metrics').default('[]'),
+  commonObjections: jsonb('common_objections').default('[]'),
+  messagingAngles: jsonb('messaging_angles').default('[]'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  industryDeptUniq: uniqueIndex('industry_dept_pain_uniq').on(table.industryId, table.department),
+  industryIdx: index('industry_dept_industry_idx').on(table.industryId),
+  deptIdx: index('industry_dept_dept_idx').on(table.department),
+}));
+
+/**
+ * Business Perspectives - Evaluation Lens Definitions
+ * Defines Finance, HR, Marketing, Operations, IT/Security perspectives
+ */
+export const businessPerspectives = pgTable('business_perspectives', {
+  id: serial('id').primaryKey(),
+  perspectiveCode: text('perspective_code').notNull().unique(),
+  perspectiveName: text('perspective_name').notNull(),
+  description: text('description'),
+  evaluationCriteria: jsonb('evaluation_criteria').notNull().default('[]'),
+  keyMetrics: jsonb('key_metrics').default('[]'),
+  commonConcerns: jsonb('common_concerns').default('[]'),
+  valueDrivers: jsonb('value_drivers').default('[]'),
+  roiFactors: jsonb('roi_factors').default('[]'),
+  riskFactors: jsonb('risk_factors').default('[]'),
+  messagingTemplates: jsonb('messaging_templates').default('[]'),
+  proofPointTypes: jsonb('proof_point_types').default('[]'),
+  applicableToDepartments: text('applicable_to_departments').array().default(sql`'{}'`),
+  priorityOrder: integer('priority_order').default(50),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  activeIdx: index('business_perspectives_active_idx').on(table.isActive),
+}));
+
+/**
+ * Account Perspective Analysis - Cached Multi-Perspective Intelligence
+ * Generated analysis for accounts from each business perspective
+ */
+export const accountPerspectiveAnalysis = pgTable('account_perspective_analysis', {
+  id: serial('id').primaryKey(),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'cascade' }).notNull(),
+  perspectiveId: integer('perspective_id').references(() => businessPerspectives.id).notNull(),
+  analysisJson: jsonb('analysis_json').notNull(),
+  keyConsiderations: text('key_considerations').array().default(sql`'{}'`),
+  valueDrivers: text('value_drivers').array().default(sql`'{}'`),
+  potentialConcerns: text('potential_concerns').array().default(sql`'{}'`),
+  recommendedApproach: text('recommended_approach'),
+  messagingAngles: text('messaging_angles').array().default(sql`'{}'`),
+  questionsToAsk: text('questions_to_ask').array().default(sql`'{}'`),
+  confidence: numeric('confidence', { precision: 5, scale: 4 }).notNull().default('0.5'),
+  signalsUsed: text('signals_used').array().default(sql`'{}'`),
+  generationModel: text('generation_model'),
+  sourceFingerprint: text('source_fingerprint'),
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
+  expiresAt: timestamp('expires_at'),
+  isStale: boolean('is_stale').default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  accountPerspectiveUniq: uniqueIndex('account_perspective_uniq').on(table.accountId, table.perspectiveId),
+  expiresIdx: index('account_perspective_expires_idx').on(table.expiresAt),
+  staleIdx: index('account_perspective_stale_idx').on(table.isStale),
+}));
+
+/**
+ * Contact Intelligence - Cached Contact-Level Intelligence
+ * Role mapping, decision authority, engagement recommendations
+ */
+export const contactIntelligence = pgTable('contact_intelligence', {
+  id: serial('id').primaryKey(),
+  contactId: varchar('contact_id', { length: 36 }).references(() => contacts.id, { onDelete: 'cascade' }).notNull().unique(),
+  // Role Intelligence
+  normalizedRoleId: integer('normalized_role_id').references(() => jobRoleTaxonomy.id),
+  roleConfidence: numeric('role_confidence', { precision: 5, scale: 4 }),
+  roleMappingSource: titleMappingSourceEnum('role_mapping_source'),
+  decisionAuthority: decisionAuthorityEnum('decision_authority'),
+  buyingCommitteeRole: buyingCommitteeRoleEnum('buying_committee_role'),
+  // Persona Intelligence
+  likelyPriorities: jsonb('likely_priorities').default('[]'),
+  communicationStyleHints: jsonb('communication_style_hints').default('{}'),
+  painPointSensitivity: jsonb('pain_point_sensitivity').default('{}'),
+  // Engagement Intelligence
+  bestApproach: text('best_approach'), // 'direct', 'consultative', 'educational', 'peer-based'
+  preferredValueProps: text('preferred_value_props').array().default(sql`'{}'`),
+  recommendedMessagingAngles: text('recommended_messaging_angles').array().default(sql`'{}'`),
+  // Behavioral patterns
+  engagementHistorySummary: jsonb('engagement_history_summary').default('{}'),
+  objectionHistory: text('objection_history').array().default(sql`'{}'`),
+  interestSignals: text('interest_signals').array().default(sql`'{}'`),
+  // Scoring
+  engagementPropensity: numeric('engagement_propensity', { precision: 5, scale: 4 }),
+  qualificationPropensity: numeric('qualification_propensity', { precision: 5, scale: 4 }),
+  // Cache Management
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
+  generationModel: text('generation_model'),
+  sourceFingerprint: text('source_fingerprint'),
+  expiresAt: timestamp('expires_at'),
+  isStale: boolean('is_stale').default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  roleIdx: index('contact_intelligence_role_idx').on(table.normalizedRoleId),
+  authorityIdx: index('contact_intelligence_authority_idx').on(table.decisionAuthority),
+  committeeIdx: index('contact_intelligence_committee_idx').on(table.buyingCommitteeRole),
+  expiresIdx: index('contact_intelligence_expires_idx').on(table.expiresAt),
+}));
+
+/**
+ * Call Outcome Learnings - Structured Learning Records
+ * Captures signals from call outcomes for pattern detection
+ */
+export const callOutcomeLearnings = pgTable('call_outcome_learnings', {
+  id: serial('id').primaryKey(),
+  callSessionId: varchar('call_session_id', { length: 36 }).notNull(),
+  campaignId: varchar('campaign_id', { length: 36 }).references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar('contact_id', { length: 36 }).references(() => contacts.id, { onDelete: 'set null' }),
+  accountId: varchar('account_id', { length: 36 }).references(() => accounts.id, { onDelete: 'set null' }),
+  // Outcome Classification
+  outcomeCode: text('outcome_code').notNull(),
+  outcomeCategory: text('outcome_category').notNull(), // 'positive', 'neutral', 'negative', 'inconclusive'
+  outcomeQualityScore: numeric('outcome_quality_score', { precision: 5, scale: 4 }),
+  // Signals
+  engagementSignals: jsonb('engagement_signals').notNull().default('{}'),
+  objectionSignals: jsonb('objection_signals').default('{}'),
+  qualificationSignals: jsonb('qualification_signals').default('{}'),
+  conversationQualitySignals: jsonb('conversation_quality_signals').default('{}'),
+  roleSignals: jsonb('role_signals').default('{}'),
+  industrySignals: jsonb('industry_signals').default('{}'),
+  messagingSignals: jsonb('messaging_signals').default('{}'),
+  // Context
+  contactRoleId: integer('contact_role_id').references(() => jobRoleTaxonomy.id),
+  industryId: integer('industry_id').references(() => industryTaxonomy.id),
+  problemIds: integer('problem_ids').array().default(sql`'{}'`),
+  messagingAngleUsed: text('messaging_angle_used'),
+  approachUsed: text('approach_used'),
+  valuePropsPresented: text('value_props_presented').array().default(sql`'{}'`),
+  // Adjustments
+  adjustmentsApplied: jsonb('adjustments_applied').default('{}'),
+  // Call metadata
+  callDurationSeconds: integer('call_duration_seconds'),
+  talkRatio: numeric('talk_ratio', { precision: 5, scale: 4 }),
+  callTimestamp: timestamp('call_timestamp').notNull(),
+  // Processing
+  processedForLearning: boolean('processed_for_learning').default(false),
+  processedAt: timestamp('processed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  campaignIdx: index('call_outcome_learnings_campaign_idx').on(table.campaignId),
+  contactIdx: index('call_outcome_learnings_contact_idx').on(table.contactId),
+  outcomeIdx: index('call_outcome_learnings_outcome_idx').on(table.outcomeCode),
+  roleIdx: index('call_outcome_learnings_role_idx').on(table.contactRoleId),
+  industryIdx: index('call_outcome_learnings_industry_idx').on(table.industryId),
+  timestampIdx: index('call_outcome_learnings_timestamp_idx').on(table.callTimestamp),
+}));
+
+/**
+ * Learning Insights - Aggregated Patterns from Call Outcomes
+ * Detected patterns for roles, industries, objections, approaches
+ */
+export const learningInsights = pgTable('learning_insights', {
+  id: serial('id').primaryKey(),
+  insightType: insightTypeEnum('insight_type').notNull(),
+  insightScope: insightScopeEnum('insight_scope').notNull(),
+  scopeId: varchar('scope_id', { length: 36 }),
+  // Pattern Details
+  patternKey: text('pattern_key').notNull(),
+  patternName: text('pattern_name').notNull(),
+  patternDescription: text('pattern_description').notNull(),
+  patternData: jsonb('pattern_data').notNull(),
+  // Segmentation
+  appliesToRoles: integer('applies_to_roles').array().default(sql`'{}'`),
+  appliesToIndustries: integer('applies_to_industries').array().default(sql`'{}'`),
+  appliesToSeniority: text('applies_to_seniority').array().default(sql`'{}'`),
+  appliesToDepartments: text('applies_to_departments').array().default(sql`'{}'`),
+  // Statistics
+  sampleSize: integer('sample_size').notNull(),
+  successRate: numeric('success_rate', { precision: 5, scale: 4 }),
+  avgEngagementScore: numeric('avg_engagement_score', { precision: 5, scale: 4 }),
+  avgQualificationScore: numeric('avg_qualification_score', { precision: 5, scale: 4 }),
+  confidence: numeric('confidence', { precision: 5, scale: 4 }).notNull(),
+  statisticalSignificance: numeric('statistical_significance', { precision: 5, scale: 4 }),
+  // Recommendations
+  recommendedAdjustments: jsonb('recommended_adjustments').default('{}'),
+  recommendedMessaging: text('recommended_messaging').array().default(sql`'{}'`),
+  recommendedApproaches: text('recommended_approaches').array().default(sql`'{}'`),
+  antiPatterns: text('anti_patterns').array().default(sql`'{}'`),
+  // Validity
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
+  generationModel: text('generation_model'),
+  validFrom: timestamp('valid_from').notNull().defaultNow(),
+  validUntil: timestamp('valid_until'),
+  isActive: boolean('is_active').default(true),
+  // Versioning
+  version: integer('version').default(1),
+  previousVersionId: integer('previous_version_id').references((): any => learningInsights.id),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  typeIdx: index('learning_insights_type_idx').on(table.insightType),
+  scopeIdx: index('learning_insights_scope_idx').on(table.insightScope, table.scopeId),
+  keyIdx: index('learning_insights_key_idx').on(table.patternKey),
+  activeIdx: index('learning_insights_active_idx').on(table.isActive),
+}));
+
+/**
+ * Contact Predictive Scores - Campaign-Specific Predictions
+ * Likelihood scores for engagement, qualification, and priority
+ */
+export const contactPredictiveScores = pgTable('contact_predictive_scores', {
+  id: serial('id').primaryKey(),
+  contactId: varchar('contact_id', { length: 36 }).references(() => contacts.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar('campaign_id', { length: 36 }).references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  // Scores
+  engagementLikelihood: numeric('engagement_likelihood', { precision: 5, scale: 4 }).notNull(),
+  qualificationLikelihood: numeric('qualification_likelihood', { precision: 5, scale: 4 }).notNull(),
+  conversionLikelihood: numeric('conversion_likelihood', { precision: 5, scale: 4 }),
+  // Contributing Factors
+  roleScore: numeric('role_score', { precision: 5, scale: 4 }),
+  industryScore: numeric('industry_score', { precision: 5, scale: 4 }),
+  problemFitScore: numeric('problem_fit_score', { precision: 5, scale: 4 }),
+  historicalPatternScore: numeric('historical_pattern_score', { precision: 5, scale: 4 }),
+  accountFitScore: numeric('account_fit_score', { precision: 5, scale: 4 }),
+  timingScore: numeric('timing_score', { precision: 5, scale: 4 }),
+  // Factor explanations
+  scoreFactors: jsonb('score_factors').default('{}'),
+  // Recommendations
+  recommendedApproach: text('recommended_approach'),
+  recommendedMessagingAngles: text('recommended_messaging_angles').array().default(sql`'{}'`),
+  recommendedValueProps: text('recommended_value_props').array().default(sql`'{}'`),
+  recommendedProofPoints: text('recommended_proof_points').array().default(sql`'{}'`),
+  // Priority
+  callPriority: integer('call_priority').notNull().default(50),
+  priorityTier: text('priority_tier'), // 'high', 'medium', 'low'
+  // Flags
+  hasBlockingFactors: boolean('has_blocking_factors').default(false),
+  blockingFactors: text('blocking_factors').array().default(sql`'{}'`),
+  // Cache Management
+  generatedAt: timestamp('generated_at').notNull().defaultNow(),
+  generationModel: text('generation_model'),
+  sourceFingerprint: text('source_fingerprint'),
+  expiresAt: timestamp('expires_at'),
+  isStale: boolean('is_stale').default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  contactCampaignUniq: uniqueIndex('contact_predictive_scores_uniq').on(table.contactId, table.campaignId),
+  priorityIdx: index('contact_predictive_scores_priority_idx').on(table.campaignId, table.callPriority),
+  engagementIdx: index('contact_predictive_scores_engagement_idx').on(table.campaignId, table.engagementLikelihood),
+  tierIdx: index('contact_predictive_scores_tier_idx').on(table.campaignId, table.priorityTier),
+}));
+
+/**
+ * SMI Audit Log - Audit Trail for SMI Operations
+ * Tracks all SMI Agent operations for governance
+ */
+export const smiAuditLog = pgTable('smi_audit_log', {
+  id: serial('id').primaryKey(),
+  operationType: text('operation_type').notNull(),
+  operationSubtype: text('operation_subtype'),
+  entityType: text('entity_type'),
+  entityId: varchar('entity_id', { length: 36 }),
+  inputData: jsonb('input_data'),
+  outputData: jsonb('output_data'),
+  confidence: numeric('confidence', { precision: 5, scale: 4 }),
+  modelUsed: text('model_used'),
+  processingTimeMs: integer('processing_time_ms'),
+  tokensUsed: integer('tokens_used'),
+  triggeredBy: varchar('triggered_by', { length: 36 }).references(() => users.id),
+  triggeredBySystem: boolean('triggered_by_system').default(false),
+  campaignId: varchar('campaign_id', { length: 36 }),
+  sessionId: varchar('session_id', { length: 36 }),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => ({
+  operationIdx: index('smi_audit_log_operation_idx').on(table.operationType),
+  entityIdx: index('smi_audit_log_entity_idx').on(table.entityType, table.entityId),
+  campaignIdx: index('smi_audit_log_campaign_idx').on(table.campaignId),
+  timestampIdx: index('smi_audit_log_timestamp_idx').on(table.createdAt),
+}));
+
+// ==================== SMI AGENT INSERT SCHEMAS ====================
+
+export const insertJobRoleTaxonomySchema = createInsertSchema(jobRoleTaxonomy).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertJobTitleMappingSchema = createInsertSchema(jobTitleMappings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertRoleAdjacencySchema = createInsertSchema(roleAdjacency).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertIndustryTaxonomySchema = createInsertSchema(industryTaxonomy).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertIndustryDepartmentPainPointsSchema = createInsertSchema(industryDepartmentPainPoints).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertBusinessPerspectiveSchema = createInsertSchema(businessPerspectives).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAccountPerspectiveAnalysisSchema = createInsertSchema(accountPerspectiveAnalysis).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertContactIntelligenceSchema = createInsertSchema(contactIntelligence).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertCallOutcomeLearningSchema = createInsertSchema(callOutcomeLearnings).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertLearningInsightSchema = createInsertSchema(learningInsights).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertContactPredictiveScoreSchema = createInsertSchema(contactPredictiveScores).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSmiAuditLogSchema = createInsertSchema(smiAuditLog).omit({
+  id: true,
+  createdAt: true,
+});
+
+// ==================== SMI AGENT TYPES ====================
+
+export type JobRoleTaxonomy = typeof jobRoleTaxonomy.$inferSelect;
+export type InsertJobRoleTaxonomy = z.infer<typeof insertJobRoleTaxonomySchema>;
+
+export type JobTitleMapping = typeof jobTitleMappings.$inferSelect;
+export type InsertJobTitleMapping = z.infer<typeof insertJobTitleMappingSchema>;
+
+export type RoleAdjacency = typeof roleAdjacency.$inferSelect;
+export type InsertRoleAdjacency = z.infer<typeof insertRoleAdjacencySchema>;
+
+export type IndustryTaxonomy = typeof industryTaxonomy.$inferSelect;
+export type InsertIndustryTaxonomy = z.infer<typeof insertIndustryTaxonomySchema>;
+
+export type IndustryDepartmentPainPoints = typeof industryDepartmentPainPoints.$inferSelect;
+export type InsertIndustryDepartmentPainPoints = z.infer<typeof insertIndustryDepartmentPainPointsSchema>;
+
+export type BusinessPerspective = typeof businessPerspectives.$inferSelect;
+export type InsertBusinessPerspective = z.infer<typeof insertBusinessPerspectiveSchema>;
+
+export type AccountPerspectiveAnalysis = typeof accountPerspectiveAnalysis.$inferSelect;
+export type InsertAccountPerspectiveAnalysis = z.infer<typeof insertAccountPerspectiveAnalysisSchema>;
+
+export type ContactIntelligence = typeof contactIntelligence.$inferSelect;
+export type InsertContactIntelligence = z.infer<typeof insertContactIntelligenceSchema>;
+
+export type CallOutcomeLearning = typeof callOutcomeLearnings.$inferSelect;
+export type InsertCallOutcomeLearning = z.infer<typeof insertCallOutcomeLearningSchema>;
+
+export type LearningInsight = typeof learningInsights.$inferSelect;
+export type InsertLearningInsight = z.infer<typeof insertLearningInsightSchema>;
+
+export type ContactPredictiveScore = typeof contactPredictiveScores.$inferSelect;
+export type InsertContactPredictiveScore = z.infer<typeof insertContactPredictiveScoreSchema>;
+
+export type SmiAuditLog = typeof smiAuditLog.$inferSelect;
+export type InsertSmiAuditLog = z.infer<typeof insertSmiAuditLogSchema>;
+
+// SMI Enum Types
+export type DecisionAuthority = 'decision_maker' | 'influencer' | 'user' | 'gatekeeper';
+export type BuyingCommitteeRole = 'champion' | 'blocker' | 'evaluator' | 'budget_holder' | 'end_user';
+export type InsightType = 'role_pattern' | 'industry_pattern' | 'objection_pattern' | 'approach_pattern' | 'messaging_pattern';
+export type InsightScope = 'global' | 'organization' | 'campaign';
+export type RoleAdjacencyType = 'equivalent' | 'senior_to' | 'junior_to' | 'collaborates_with' | 'reports_to' | 'manages';
+export type TitleMappingSource = 'manual' | 'ai' | 'system' | 'imported';
+export type IndustryLevel = 'sector' | 'industry' | 'sub_industry';
+export type SmiApproach = 'direct' | 'consultative' | 'educational' | 'peer-based';
+export type PriorityTier = 'high' | 'medium' | 'low';
 

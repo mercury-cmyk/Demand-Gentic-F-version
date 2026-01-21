@@ -23,8 +23,10 @@ import {
   virtualAgents,
   clientInvoices,
   clientBillingConfig,
+  leads,
+  verificationCampaigns,
 } from "@shared/schema";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import {
   VertexClientAgenticHub,
   createClientAgenticHub,
@@ -702,6 +704,335 @@ Be helpful, professional, and proactive.`;
     console.error("[Client Agentic] Stream chat error:", error);
     res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
     res.end();
+  }
+});
+
+// ==================== CAMPAIGN STATS & ANALYTICS ENDPOINTS ====================
+
+/**
+ * Get comprehensive campaign stats for client
+ */
+router.get("/stats/overview", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const clientAccountId = context.clientAccountId;
+
+    // Get all campaigns client has access to
+    const campaignAccessList = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(eq(clientCampaignAccess.clientAccountId, clientAccountId));
+
+    const regularCampaignIds = campaignAccessList
+      .map(a => a.regularCampaignId)
+      .filter((id): id is string => id !== null);
+
+    const verificationCampaignIds = campaignAccessList
+      .map(a => a.campaignId)
+      .filter((id): id is string => id !== null);
+
+    // Get regular campaign details with lead counts
+    let regularCampaignStats: any[] = [];
+    if (regularCampaignIds.length > 0) {
+      // Get campaign details
+      const regularCampaignsData = await db
+        .select()
+        .from(campaigns)
+        .where(inArray(campaigns.id, regularCampaignIds));
+
+      // Get lead counts by status
+      const leadStats = await db
+        .select({
+          campaignId: leads.campaignId,
+          qaStatus: leads.qaStatus,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(leads)
+        .where(inArray(leads.campaignId, regularCampaignIds))
+        .groupBy(leads.campaignId, leads.qaStatus);
+
+      // Get account counts per campaign
+      const accountCounts = await db
+        .select({
+          campaignId: leads.campaignId,
+          count: sql<number>`count(DISTINCT ${leads.accountName})::int`,
+        })
+        .from(leads)
+        .where(
+          and(
+            inArray(leads.campaignId, regularCampaignIds),
+            eq(leads.qaStatus, 'approved')
+          )
+        )
+        .groupBy(leads.campaignId);
+
+      const accountCountMap = accountCounts.reduce((acc, c) => {
+        if (c.campaignId) acc[c.campaignId] = c.count;
+        return acc;
+      }, {} as Record<string, number>);
+
+      // Aggregate lead stats by campaign
+      const leadStatsByCampaign = leadStats.reduce((acc, stat) => {
+        if (!stat.campaignId) return acc;
+        if (!acc[stat.campaignId]) {
+          acc[stat.campaignId] = {
+            total: 0,
+            approved: 0,
+            pending: 0,
+            rejected: 0,
+          };
+        }
+        acc[stat.campaignId].total += stat.count;
+        if (stat.qaStatus === 'approved' || stat.qaStatus === 'published') {
+          acc[stat.campaignId].approved += stat.count;
+        } else if (stat.qaStatus === 'new' || stat.qaStatus === 'under_review') {
+          acc[stat.campaignId].pending += stat.count;
+        } else if (stat.qaStatus === 'rejected') {
+          acc[stat.campaignId].rejected += stat.count;
+        }
+        return acc;
+      }, {} as Record<string, any>);
+
+      regularCampaignStats = regularCampaignsData.map(campaign => ({
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        type: 'regular',
+        leads: leadStatsByCampaign[campaign.id] || { total: 0, approved: 0, pending: 0, rejected: 0 },
+        accounts: accountCountMap[campaign.id] || 0,
+      }));
+    }
+
+    // Get verification campaign stats
+    let verificationCampaignStats: any[] = [];
+    if (verificationCampaignIds.length > 0) {
+      const verificationCampaignsData = await db
+        .select()
+        .from(verificationCampaigns)
+        .where(inArray(verificationCampaigns.id, verificationCampaignIds));
+
+      verificationCampaignStats = verificationCampaignsData.map(campaign => ({
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        type: 'verification',
+        totalContacts: campaign.totalContacts || 0,
+        verifiedContacts: campaign.verifiedContacts || 0,
+      }));
+    }
+
+    // Calculate totals
+    const totalApprovedLeads = regularCampaignStats.reduce((sum, c) => sum + c.leads.approved, 0);
+    const totalPendingLeads = regularCampaignStats.reduce((sum, c) => sum + c.leads.pending, 0);
+    const totalAccounts = regularCampaignStats.reduce((sum, c) => sum + c.accounts, 0);
+    const totalCampaigns = regularCampaignStats.length + verificationCampaignStats.length;
+
+    res.json({
+      success: true,
+      data: {
+        summary: {
+          totalCampaigns,
+          totalApprovedLeads,
+          totalPendingLeads,
+          totalUniqueAccounts: totalAccounts,
+          regularCampaignCount: regularCampaignStats.length,
+          verificationCampaignCount: verificationCampaignStats.length,
+        },
+        regularCampaigns: regularCampaignStats,
+        verificationCampaigns: verificationCampaignStats,
+      },
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Stats overview error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Get AI-powered campaign report with natural language insights
+ */
+router.post("/reports/ai-generate", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const { reportType = 'summary', campaignId, dateRange } = req.body;
+
+    // Get stats first
+    const statsRes = await fetch(`${req.protocol}://${req.get('host')}/api/client-portal/agentic/stats/overview`, {
+      headers: req.headers as any,
+    });
+    const statsData = await statsRes.json();
+
+    if (!statsData.success) {
+      throw new Error("Failed to fetch stats");
+    }
+
+    const stats = statsData.data;
+
+    // Generate AI report
+    const reportPrompt = `You are a B2B demand generation analyst. Generate a comprehensive report for a client based on their campaign data.
+
+CAMPAIGN DATA:
+${JSON.stringify(stats, null, 2)}
+
+REPORT TYPE: ${reportType}
+${campaignId ? `FOCUS CAMPAIGN: ${campaignId}` : 'All Campaigns'}
+${dateRange ? `DATE RANGE: ${dateRange}` : 'All Time'}
+
+Generate a natural language report that includes:
+1. Executive Summary - Key metrics and highlights
+2. Campaign Performance - Analysis of each campaign
+3. Lead Quality Insights - Breakdown of QA-approved vs pending leads
+4. Account Penetration - Unique accounts reached
+5. Recommendations - Actionable next steps
+
+Return JSON:
+{
+  "executiveSummary": "paragraph summarizing performance",
+  "highlights": [
+    { "metric": "name", "value": "value", "trend": "up|down|stable", "insight": "explanation" }
+  ],
+  "campaignAnalysis": [
+    { "campaignName": "name", "performance": "good|average|needs_attention", "summary": "analysis", "recommendations": ["rec1"] }
+  ],
+  "leadQualityInsights": "paragraph about lead quality",
+  "accountPenetration": "paragraph about account reach",
+  "recommendations": ["rec1", "rec2", "rec3"],
+  "nextSteps": ["step1", "step2"]
+}`;
+
+    const report = await generateJSON(reportPrompt, { temperature: 0.4 });
+
+    res.json({
+      success: true,
+      data: {
+        report,
+        stats: stats.summary,
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Report generation error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Natural language query for reports
+ */
+router.post("/reports/query", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const { question } = req.body;
+
+    if (!question) {
+      return res.status(400).json({ success: false, message: "Question is required" });
+    }
+
+    // Get all campaign data for context
+    const campaignAccessList = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(eq(clientCampaignAccess.clientAccountId, context.clientAccountId));
+
+    const regularCampaignIds = campaignAccessList
+      .map(a => a.regularCampaignId)
+      .filter((id): id is string => id !== null);
+
+    // Get lead data summary
+    let leadSummary = { total: 0, approved: 0, pending: 0, rejected: 0 };
+    let campaignDetails: any[] = [];
+    let uniqueAccounts = 0;
+
+    if (regularCampaignIds.length > 0) {
+      const campaignsData = await db
+        .select()
+        .from(campaigns)
+        .where(inArray(campaigns.id, regularCampaignIds));
+
+      const leadStats = await db
+        .select({
+          qaStatus: leads.qaStatus,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(leads)
+        .where(inArray(leads.campaignId, regularCampaignIds))
+        .groupBy(leads.qaStatus);
+
+      const accountCount = await db
+        .select({
+          count: sql<number>`count(DISTINCT ${leads.accountName})::int`,
+        })
+        .from(leads)
+        .where(
+          and(
+            inArray(leads.campaignId, regularCampaignIds),
+            eq(leads.qaStatus, 'approved')
+          )
+        );
+
+      uniqueAccounts = accountCount[0]?.count || 0;
+
+      leadStats.forEach(stat => {
+        leadSummary.total += stat.count;
+        if (stat.qaStatus === 'approved' || stat.qaStatus === 'published') {
+          leadSummary.approved += stat.count;
+        } else if (stat.qaStatus === 'new' || stat.qaStatus === 'under_review') {
+          leadSummary.pending += stat.count;
+        } else if (stat.qaStatus === 'rejected') {
+          leadSummary.rejected += stat.count;
+        }
+      });
+
+      campaignDetails = campaignsData.map(c => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+      }));
+    }
+
+    // Use AI to answer the question
+    const answerPrompt = `You are a helpful data analyst for a B2B lead generation client. Answer their question based on the available data.
+
+CLIENT DATA:
+- Total Campaigns: ${campaignDetails.length}
+- Campaigns: ${campaignDetails.map(c => c.name).join(', ') || 'None'}
+- Total Leads: ${leadSummary.total}
+- QA Approved Leads (ready for client): ${leadSummary.approved}
+- Pending Review: ${leadSummary.pending}
+- Rejected: ${leadSummary.rejected}
+- Unique Accounts: ${uniqueAccounts}
+
+CLIENT QUESTION: ${question}
+
+Provide a helpful, concise answer. If you don't have enough data to answer, say so and suggest what data would be needed.
+
+Return JSON:
+{
+  "answer": "Your natural language answer here",
+  "relevantMetrics": [
+    { "name": "metric name", "value": "value" }
+  ],
+  "suggestions": ["suggestion if applicable"],
+  "needsMoreData": false
+}`;
+
+    const response = await generateJSON(answerPrompt, { temperature: 0.3 });
+
+    res.json({
+      success: true,
+      data: {
+        question,
+        response,
+        context: {
+          campaignCount: campaignDetails.length,
+          leadSummary,
+          uniqueAccounts,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Query error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

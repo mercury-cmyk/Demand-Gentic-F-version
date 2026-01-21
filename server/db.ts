@@ -53,18 +53,49 @@ if (!hasPooler) {
   );
 }
 
-console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES ✓ (already configured)' : 'YES ✓ (added -pooler)');
+console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
+
+const parseEnvInt = (value: string | undefined, fallback: number, allowZero = false) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (!allowZero && parsed <= 0) {
+    return fallback;
+  }
+  if (allowZero && parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+};
+
+const DB_POOL_MAX = parseEnvInt(process.env.DB_POOL_MAX, 35);
+const DB_POOL_MIN = Math.min(parseEnvInt(process.env.DB_POOL_MIN, 4, true), DB_POOL_MAX);
+const DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_IDLE_TIMEOUT_MS, 90000);
+const DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.DB_POOL_CONN_TIMEOUT_MS, 30000);
+const DB_POOL_MAX_USES = parseEnvInt(process.env.DB_POOL_MAX_USES, 10000);
+const DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.DB_POOL_KEEP_ALIVE_MS, 10000);
+
+const WORKER_DB_POOL_MAX = parseEnvInt(process.env.WORKER_DB_POOL_MAX, 25);
+const WORKER_DB_POOL_MIN = Math.min(parseEnvInt(process.env.WORKER_DB_POOL_MIN, 2, true), WORKER_DB_POOL_MAX);
+const WORKER_DB_POOL_IDLE_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_IDLE_TIMEOUT_MS, 90000);
+const WORKER_DB_POOL_CONN_TIMEOUT_MS = parseEnvInt(process.env.WORKER_DB_POOL_CONN_TIMEOUT_MS, 30000);
+const WORKER_DB_POOL_MAX_USES = parseEnvInt(process.env.WORKER_DB_POOL_MAX_USES, 10000);
+const WORKER_DB_POOL_KEEP_ALIVE_MS = parseEnvInt(process.env.WORKER_DB_POOL_KEEP_ALIVE_MS, 10000);
+
 
 // Production-optimized connection pool for 3M+ contacts scale
-// Neon guidance: Keep total connections <50 per project
-// API processes: 25 connections, Workers: 15-20 connections (total ~40-45)
+// Neon guidance: Keep total connections under your project limit.
+// Defaults: API 35 connections, workers 25 connections (override via env vars).
 export const pool = new Pool({ 
   connectionString: databaseUrl,
-  max: 25, // API server pool - leaves 15-20 for workers
-  min: 2, // Keep 2 warm connections to reduce Neon handshake latency
-  idleTimeoutMillis: 60000, // 60s - keep connections warm longer to reduce reconnect storms
-  connectionTimeoutMillis: 20000, // 20s - more time for Neon pooler during load spikes
-  maxUses: 5000, // Recycle after 5k uses to prevent stale connections
+  max: DB_POOL_MAX, // API server pool - leaves room for workers
+  min: DB_POOL_MIN, // Keep warm connections to reduce Neon handshake latency
+  idleTimeoutMillis: DB_POOL_IDLE_TIMEOUT_MS, // Keep connections warm longer to reduce reconnect storms
+  connectionTimeoutMillis: DB_POOL_CONN_TIMEOUT_MS, // More time for Neon pooler during load spikes
+  maxUses: DB_POOL_MAX_USES, // Recycle to prevent stale connections
+  keepAlive: true,
+  keepAliveInitialDelayMillis: DB_POOL_KEEP_ALIVE_MS,
 });
 
 // Log connection pool events to help diagnose issues
@@ -185,14 +216,16 @@ export async function withRetry<T>(
 export const db = drizzle({ client: pool, schema });
 
 // Separate connection pool for background workers (BullMQ)
-// Workers get 15-20 connections, limiting per-worker pools to max 5 connections
+// Keep worker pool capacity aligned with Neon connection limits.
 export const workerPool = new Pool({
   connectionString: databaseUrl,
-  max: 20, // Worker pool: 6-8 workers × ~3 connections each
-  min: 2, // Keep 2 warm connections to reduce Neon handshake latency
-  idleTimeoutMillis: 60000, // 60s - keep connections warm for bursty workloads
-  connectionTimeoutMillis: 20000, // 20s - more time for Neon pooler during load spikes
-  maxUses: 5000, // Recycle after 5k uses
+  max: WORKER_DB_POOL_MAX, // Worker pool connections
+  min: WORKER_DB_POOL_MIN, // Keep warm connections to reduce Neon handshake latency
+  idleTimeoutMillis: WORKER_DB_POOL_IDLE_TIMEOUT_MS, // Keep connections warm for bursty workloads
+  connectionTimeoutMillis: WORKER_DB_POOL_CONN_TIMEOUT_MS, // More time for Neon pooler during load spikes
+  maxUses: WORKER_DB_POOL_MAX_USES, // Recycle after N uses
+  keepAlive: true,
+  keepAliveInitialDelayMillis: WORKER_DB_POOL_KEEP_ALIVE_MS,
 });
 
 // Log worker pool events

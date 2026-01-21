@@ -10,8 +10,20 @@
 
 import { generateEmbedding, generateEmbeddings } from "./vertex-client";
 import { db } from "../../db";
-import { accounts, contacts, callSessions } from "@shared/schema";
-import { eq, sql, desc } from "drizzle-orm";
+import { accounts, contacts, callSessions, vectorDocuments } from "@shared/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
+
+// ==================== CONSTANTS ====================
+
+const VECTOR_DIMENSION = 768;
+const DEFAULT_LIMIT = 10;
+
+const parseEnvInt = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const EMBEDDING_BATCH_SIZE = parseEnvInt(process.env.VECTOR_EMBEDDING_BATCH_SIZE, 50);
 
 // ==================== TYPES ====================
 
@@ -22,6 +34,9 @@ export interface VectorDocument {
   embedding?: number[];
   metadata: Record<string, any>;
   createdAt: Date;
+  accountId?: string | null;
+  industry?: string | null;
+  disposition?: string | null;
 }
 
 export interface SearchResult {
@@ -30,177 +45,136 @@ export interface SearchResult {
   rank: number;
 }
 
-export interface VectorIndex {
-  name: string;
-  documents: VectorDocument[];
-  dimension: number;
-}
+type VectorDocumentType = VectorDocument["type"];
 
-// ==================== IN-MEMORY VECTOR STORE ====================
-// Note: For production, use Vertex AI Vector Search (Matching Engine)
+// ==================== HELPERS ====================
 
-class InMemoryVectorStore {
-  private indices: Map<string, VectorIndex> = new Map();
-  private defaultDimension = 768; // text-embedding-004 dimension
+const toVectorLiteral = (embedding: number[]) => `[${embedding.join(",")}]`;
 
-  /**
-   * Create or get an index
-   */
-  getOrCreateIndex(name: string): VectorIndex {
-    if (!this.indices.has(name)) {
-      this.indices.set(name, {
-        name,
-        documents: [],
-        dimension: this.defaultDimension,
-      });
-    }
-    return this.indices.get(name)!;
+const buildVectorParams = (embedding: number[]) => {
+  const literal = toVectorLiteral(embedding);
+  return sql`${literal}::vector`;
+};
+
+const normalizeMetadata = (metadata: Record<string, any> | null | undefined) =>
+  metadata ?? {};
+
+const upsertDocumentsWithEmbeddings = async (
+  docs: VectorDocument[],
+  embeddings: number[][]
+): Promise<void> => {
+  if (docs.length === 0) {
+    return;
   }
 
-  /**
-   * Add document to index
-   */
-  async addDocument(indexName: string, doc: Omit<VectorDocument, "embedding">): Promise<VectorDocument> {
-    const index = this.getOrCreateIndex(indexName);
+  const now = new Date();
+  const values = docs.map((doc, index) => ({
+    sourceType: doc.type,
+    sourceId: doc.id,
+    content: doc.content,
+    embedding: embeddings[index],
+    metadata: normalizeMetadata(doc.metadata),
+    accountId: doc.accountId ?? null,
+    industry: doc.industry ?? null,
+    disposition: doc.disposition ?? null,
+    updatedAt: now,
+  }));
 
-    // Generate embedding
-    const embedding = await generateEmbedding(doc.content, "RETRIEVAL_DOCUMENT");
+  await db
+    .insert(vectorDocuments)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [vectorDocuments.sourceType, vectorDocuments.sourceId],
+      set: {
+        content: sql`excluded.content`,
+        embedding: sql`excluded.embedding`,
+        metadata: sql`excluded.metadata`,
+        accountId: sql`excluded.account_id`,
+        industry: sql`excluded.industry`,
+        disposition: sql`excluded.disposition`,
+        updatedAt: now,
+      },
+    });
+};
 
-    const fullDoc: VectorDocument = {
-      ...doc,
-      embedding,
-    };
-
-    // Remove existing document with same ID
-    index.documents = index.documents.filter(d => d.id !== doc.id);
-
-    // Add new document
-    index.documents.push(fullDoc);
-
-    return fullDoc;
+const upsertDocuments = async (docs: VectorDocument[]): Promise<number> => {
+  if (docs.length === 0) {
+    return 0;
   }
 
-  /**
-   * Add multiple documents
-   */
-  async addDocuments(indexName: string, docs: Omit<VectorDocument, "embedding">[]): Promise<VectorDocument[]> {
-    const index = this.getOrCreateIndex(indexName);
-
-    // Generate embeddings in batch
-    const contents = docs.map(d => d.content);
+  let total = 0;
+  for (let i = 0; i < docs.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = docs.slice(i, i + EMBEDDING_BATCH_SIZE);
+    const contents = batch.map((doc) => doc.content);
     const embeddings = await generateEmbeddings(contents, "RETRIEVAL_DOCUMENT");
-
-    const fullDocs: VectorDocument[] = docs.map((doc, i) => ({
-      ...doc,
-      embedding: embeddings[i],
-    }));
-
-    // Remove existing documents with same IDs
-    const newIds = new Set(docs.map(d => d.id));
-    index.documents = index.documents.filter(d => !newIds.has(d.id));
-
-    // Add new documents
-    index.documents.push(...fullDocs);
-
-    return fullDocs;
+    await upsertDocumentsWithEmbeddings(batch, embeddings);
+    total += batch.length;
   }
 
-  /**
-   * Search by vector similarity
-   */
-  async search(
-    indexName: string,
-    query: string,
-    options: { limit?: number; filter?: (doc: VectorDocument) => boolean } = {}
-  ): Promise<SearchResult[]> {
-    const index = this.indices.get(indexName);
-    if (!index || index.documents.length === 0) {
-      return [];
-    }
+  return total;
+};
 
-    // Generate query embedding
-    const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
+const searchDocuments = async (
+  type: VectorDocumentType,
+  query: string,
+  options: {
+    limit?: number;
+    industryFilter?: string;
+    accountId?: string;
+    dispositionFilter?: string;
+  } = {}
+): Promise<SearchResult[]> => {
+  const queryEmbedding = await generateEmbedding(query, "RETRIEVAL_QUERY");
+  const vectorParam = buildVectorParams(queryEmbedding);
+  const limit = options.limit || DEFAULT_LIMIT;
 
-    // Calculate similarities
-    let results = index.documents
-      .filter(d => d.embedding && (!options.filter || options.filter(d)))
-      .map(doc => ({
-        document: doc,
-        score: this.cosineSimilarity(queryEmbedding, doc.embedding!),
-        rank: 0,
-      }));
-
-    // Sort by score descending
-    results.sort((a, b) => b.score - a.score);
-
-    // Assign ranks and limit
-    results = results.slice(0, options.limit || 10).map((r, i) => ({
-      ...r,
-      rank: i + 1,
-    }));
-
-    return results;
+  const filters = [eq(vectorDocuments.sourceType, type)];
+  if (type === "account" && options.industryFilter) {
+    filters.push(eq(vectorDocuments.industry, options.industryFilter));
+  }
+  if (type === "contact" && options.accountId) {
+    filters.push(eq(vectorDocuments.accountId, options.accountId));
+  }
+  if (type === "call" && options.dispositionFilter) {
+    filters.push(eq(vectorDocuments.disposition, options.dispositionFilter));
   }
 
-  /**
-   * Calculate cosine similarity
-   */
-  private cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
+  const whereClause = filters.length === 1 ? filters[0] : and(...filters);
 
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
+  const rows = await db
+    .select({
+      sourceId: vectorDocuments.sourceId,
+      sourceType: vectorDocuments.sourceType,
+      content: vectorDocuments.content,
+      metadata: vectorDocuments.metadata,
+      accountId: vectorDocuments.accountId,
+      industry: vectorDocuments.industry,
+      disposition: vectorDocuments.disposition,
+      createdAt: vectorDocuments.createdAt,
+      score: sql<number>`1 - (${vectorDocuments.embedding} <=> ${vectorParam})`,
+    })
+    .from(vectorDocuments)
+    .where(whereClause)
+    .orderBy(sql`${vectorDocuments.embedding} <=> ${vectorParam}`)
+    .limit(limit);
 
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
+  return rows.map((row, index) => ({
+    document: {
+      id: row.sourceId,
+      type: row.sourceType as VectorDocumentType,
+      content: row.content,
+      metadata: normalizeMetadata(row.metadata as Record<string, any> | null),
+      createdAt: row.createdAt,
+      accountId: row.accountId ?? null,
+      industry: row.industry ?? null,
+      disposition: row.disposition ?? null,
+    },
+    score: Number(row.score ?? 0),
+    rank: index + 1,
+  }));
+};
 
-    const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
-    return magnitude === 0 ? 0 : dotProduct / magnitude;
-  }
-
-  /**
-   * Delete document
-   */
-  deleteDocument(indexName: string, docId: string): boolean {
-    const index = this.indices.get(indexName);
-    if (!index) return false;
-
-    const initialLength = index.documents.length;
-    index.documents = index.documents.filter(d => d.id !== docId);
-    return index.documents.length < initialLength;
-  }
-
-  /**
-   * Clear index
-   */
-  clearIndex(indexName: string): void {
-    const index = this.indices.get(indexName);
-    if (index) {
-      index.documents = [];
-    }
-  }
-
-  /**
-   * Get index stats
-   */
-  getIndexStats(indexName: string): { documentCount: number; dimension: number } | null {
-    const index = this.indices.get(indexName);
-    if (!index) return null;
-
-    return {
-      documentCount: index.documents.length,
-      dimension: index.dimension,
-    };
-  }
-}
-
-// ==================== VECTOR SEARCH SERVICE ====================
-
-const vectorStore = new InMemoryVectorStore();
+// ==================== INDEXING ====================
 
 /**
  * Index accounts for semantic search
@@ -214,30 +188,33 @@ export async function indexAccounts(accountIds?: string[]): Promise<number> {
 
   const accountList = await query.limit(1000);
 
-  const docs: Omit<VectorDocument, "embedding">[] = accountList.map(account => ({
-    id: `account-${account.id}`,
-    type: "account" as const,
+  const docs: VectorDocument[] = accountList.map((account) => ({
+    id: account.id,
+    type: "account",
     content: [
       account.name,
-      account.industry || "",
+      account.industryStandardized || "",
       account.description || "",
-      account.specialties?.join(" ") || "",
-      `${account.employeeCount || 0} employees`,
+      account.industrySecondary?.join(" ") || "",
+      account.employeesSizeRange || "",
       account.revenueRange || "",
       account.hqCity || "",
       account.hqCountry || "",
-    ].filter(Boolean).join(" | "),
+    ]
+      .filter(Boolean)
+      .join(" | "),
     metadata: {
       accountId: account.id,
       name: account.name,
-      industry: account.industry,
+      industry: account.industryStandardized,
       domain: account.domain,
     },
     createdAt: new Date(),
+    accountId: account.id,
+    industry: account.industryStandardized || null,
   }));
 
-  await vectorStore.addDocuments("accounts", docs);
-  return docs.length;
+  return upsertDocuments(docs);
 }
 
 /**
@@ -252,55 +229,58 @@ export async function indexContacts(contactIds?: string[]): Promise<number> {
 
   const contactList = await query.limit(1000);
 
-  const docs: Omit<VectorDocument, "embedding">[] = contactList.map(contact => ({
-    id: `contact-${contact.id}`,
-    type: "contact" as const,
+  const docs: VectorDocument[] = contactList.map((contact) => ({
+    id: contact.id,
+    type: "contact",
     content: [
       `${contact.firstName} ${contact.lastName}`,
-      contact.title || "",
+      contact.jobTitle || "",
       contact.department || "",
       contact.seniorityLevel || "",
-    ].filter(Boolean).join(" | "),
+    ]
+      .filter(Boolean)
+      .join(" | "),
     metadata: {
       contactId: contact.id,
       accountId: contact.accountId,
       name: `${contact.firstName} ${contact.lastName}`,
-      title: contact.title,
+      title: contact.jobTitle,
     },
     createdAt: new Date(),
+    accountId: contact.accountId || null,
   }));
 
-  await vectorStore.addDocuments("contacts", docs);
-  return docs.length;
+  return upsertDocuments(docs);
 }
 
 /**
  * Index call transcripts for pattern learning
  */
-export async function indexCallTranscripts(limit: number = 100): Promise<number> {
+export async function indexCallTranscripts(limit: number = 100, offset: number = 0): Promise<number> {
   const calls = await db
     .select()
     .from(callSessions)
-    .where(sql`${callSessions.transcript} IS NOT NULL AND ${callSessions.transcript} != ''`)
+    .where(sql`${callSessions.aiTranscript} IS NOT NULL AND ${callSessions.aiTranscript} != ''`)
     .orderBy(desc(callSessions.createdAt))
-    .limit(limit);
+    .limit(limit)
+    .offset(offset);
 
-  const docs: Omit<VectorDocument, "embedding">[] = calls.map(call => ({
-    id: `call-${call.id}`,
-    type: "call" as const,
-    content: call.transcript || "",
+  const docs: VectorDocument[] = calls.map((call) => ({
+    id: call.id,
+    type: "call",
+    content: call.aiTranscript || "",
     metadata: {
       callId: call.id,
       campaignId: call.campaignId,
-      disposition: call.disposition,
-      duration: call.callDuration,
+      disposition: call.aiDisposition,
+      duration: call.durationSec,
       createdAt: call.createdAt,
     },
     createdAt: new Date(),
+    disposition: call.aiDisposition || null,
   }));
 
-  await vectorStore.addDocuments("calls", docs);
-  return docs.length;
+  return upsertDocuments(docs);
 }
 
 /**
@@ -311,14 +291,21 @@ export async function addKnowledge(
   content: string,
   metadata: Record<string, any> = {}
 ): Promise<VectorDocument> {
-  return vectorStore.addDocument("knowledge", {
-    id: `knowledge-${id}`,
+  const embedding = await generateEmbedding(content, "RETRIEVAL_DOCUMENT");
+  const doc: VectorDocument = {
+    id,
     type: "knowledge",
     content,
+    embedding,
     metadata,
     createdAt: new Date(),
-  });
+  };
+
+  await upsertDocumentsWithEmbeddings([doc], [embedding]);
+  return doc;
 }
+
+// ==================== SEARCH ====================
 
 /**
  * Search for similar accounts
@@ -327,11 +314,9 @@ export async function findSimilarAccounts(
   query: string,
   options: { limit?: number; industryFilter?: string } = {}
 ): Promise<SearchResult[]> {
-  return vectorStore.search("accounts", query, {
-    limit: options.limit || 10,
-    filter: options.industryFilter
-      ? doc => doc.metadata.industry === options.industryFilter
-      : undefined,
+  return searchDocuments("account", query, {
+    limit: options.limit,
+    industryFilter: options.industryFilter,
   });
 }
 
@@ -342,11 +327,9 @@ export async function findSimilarContacts(
   query: string,
   options: { limit?: number; accountId?: string } = {}
 ): Promise<SearchResult[]> {
-  return vectorStore.search("contacts", query, {
-    limit: options.limit || 10,
-    filter: options.accountId
-      ? doc => doc.metadata.accountId === options.accountId
-      : undefined,
+  return searchDocuments("contact", query, {
+    limit: options.limit,
+    accountId: options.accountId,
   });
 }
 
@@ -357,11 +340,9 @@ export async function searchCallPatterns(
   query: string,
   options: { limit?: number; dispositionFilter?: string } = {}
 ): Promise<SearchResult[]> {
-  return vectorStore.search("calls", query, {
-    limit: options.limit || 10,
-    filter: options.dispositionFilter
-      ? doc => doc.metadata.disposition === options.dispositionFilter
-      : undefined,
+  return searchDocuments("call", query, {
+    limit: options.limit,
+    dispositionFilter: options.dispositionFilter,
   });
 }
 
@@ -372,9 +353,7 @@ export async function searchKnowledge(
   query: string,
   options: { limit?: number } = {}
 ): Promise<SearchResult[]> {
-  return vectorStore.search("knowledge", query, {
-    limit: options.limit || 10,
-  });
+  return searchDocuments("knowledge", query, { limit: options.limit });
 }
 
 /**
@@ -389,23 +368,52 @@ export async function findSuccessPatterns(
     dispositionFilter: "qualified_lead",
   });
 
-  return results.slice(0, limit).map(r => ({
-    pattern: r.document.content.slice(0, 500),
-    score: r.score,
-    disposition: r.document.metadata.disposition,
+  return results.slice(0, limit).map((result) => ({
+    pattern: result.document.content.slice(0, 500),
+    score: result.score,
+    disposition: result.document.disposition || result.document.metadata.disposition,
   }));
 }
 
 /**
  * Get vector store stats
  */
-export function getVectorStats(): Record<string, { documentCount: number; dimension: number } | null> {
-  return {
-    accounts: vectorStore.getIndexStats("accounts"),
-    contacts: vectorStore.getIndexStats("contacts"),
-    calls: vectorStore.getIndexStats("calls"),
-    knowledge: vectorStore.getIndexStats("knowledge"),
+export async function getVectorStats(): Promise<Record<string, { documentCount: number; dimension: number }>> {
+  const rows = await db
+    .select({
+      sourceType: vectorDocuments.sourceType,
+      count: sql<number>`count(*)`,
+    })
+    .from(vectorDocuments)
+    .groupBy(vectorDocuments.sourceType);
+
+  const baseStats = {
+    accounts: { documentCount: 0, dimension: VECTOR_DIMENSION },
+    contacts: { documentCount: 0, dimension: VECTOR_DIMENSION },
+    calls: { documentCount: 0, dimension: VECTOR_DIMENSION },
+    knowledge: { documentCount: 0, dimension: VECTOR_DIMENSION },
   };
+
+  rows.forEach((row) => {
+    switch (row.sourceType) {
+      case "account":
+        baseStats.accounts.documentCount = Number(row.count);
+        break;
+      case "contact":
+        baseStats.contacts.documentCount = Number(row.count);
+        break;
+      case "call":
+        baseStats.calls.documentCount = Number(row.count);
+        break;
+      case "knowledge":
+        baseStats.knowledge.documentCount = Number(row.count);
+        break;
+      default:
+        break;
+    }
+  });
+
+  return baseStats;
 }
 
 // ==================== VERTEX AI MATCHING ENGINE INTEGRATION ====================
@@ -424,7 +432,7 @@ export interface MatchingEngineConfig {
  */
 export async function initializeMatchingEngine(config: MatchingEngineConfig): Promise<void> {
   console.log(`[VectorSearch] Matching Engine would be initialized with:`, config);
-  console.log(`[VectorSearch] Using in-memory store for development. Configure Matching Engine for production.`);
+  console.log(`[VectorSearch] Using pgvector for production indexing in this deployment.`);
 }
 
 export default {

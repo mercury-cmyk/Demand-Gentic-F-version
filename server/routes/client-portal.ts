@@ -1073,6 +1073,150 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
   }
 });
 
+// ==================== QA-GATED CONTENT ROUTES ====================
+
+import {
+  getClientSimulations,
+  getClientMockCalls,
+  getClientReports,
+  checkClientContentVisibility,
+} from "./qa-gated-content";
+
+/**
+ * GET /api/client-portal/simulations
+ * Get QA-approved simulations for the client
+ */
+router.get('/simulations', requireClientAuth, async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Check visibility settings
+    const [clientAccount] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientAccountId))
+      .limit(1);
+
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    if (visibilitySettings.showSimulations === false) {
+      return res.json({ simulations: [], message: "Simulations are not enabled for this account" });
+    }
+
+    const simulations = await getClientSimulations(clientAccountId);
+
+    res.json({
+      success: true,
+      simulations,
+      count: simulations.length,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get simulations error:', error);
+    res.status(500).json({ message: "Failed to fetch simulations" });
+  }
+});
+
+/**
+ * GET /api/client-portal/mock-calls
+ * Get QA-approved mock calls for the client
+ */
+router.get('/mock-calls', requireClientAuth, async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Check visibility settings
+    const [clientAccount] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientAccountId))
+      .limit(1);
+
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    if (visibilitySettings.showMockCalls === false) {
+      return res.json({ mockCalls: [], message: "Mock calls are not enabled for this account" });
+    }
+
+    const mockCalls = await getClientMockCalls(clientAccountId);
+
+    res.json({
+      success: true,
+      mockCalls,
+      count: mockCalls.length,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get mock calls error:', error);
+    res.status(500).json({ message: "Failed to fetch mock calls" });
+  }
+});
+
+/**
+ * GET /api/client-portal/reports
+ * Get QA-approved reports for the client
+ */
+router.get('/reports', requireClientAuth, async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Check visibility settings
+    const [clientAccount] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientAccountId))
+      .limit(1);
+
+    const visibilitySettings = (clientAccount?.visibilitySettings as Record<string, boolean>) || {};
+    if (visibilitySettings.showReports === false) {
+      return res.json({ reports: [], message: "Reports are not enabled for this account" });
+    }
+
+    const reports = await getClientReports(clientAccountId);
+
+    res.json({
+      success: true,
+      reports,
+      count: reports.length,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get reports error:', error);
+    res.status(500).json({ message: "Failed to fetch reports" });
+  }
+});
+
+/**
+ * GET /api/client-portal/approved-content
+ * Get all QA-approved content for the client (simulations, mock calls, reports)
+ */
+router.get('/approved-content', requireClientAuth, async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const { type } = req.query;
+
+    // Get content based on type filter
+    let content: {
+      simulations?: unknown[];
+      mockCalls?: unknown[];
+      reports?: unknown[];
+    } = {};
+
+    if (!type || type === 'simulation') {
+      content.simulations = await getClientSimulations(clientAccountId);
+    }
+    if (!type || type === 'mock_call') {
+      content.mockCalls = await getClientMockCalls(clientAccountId);
+    }
+    if (!type || type === 'report') {
+      content.reports = await getClientReports(clientAccountId);
+    }
+
+    res.json({
+      success: true,
+      content,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get approved content error:', error);
+    res.status(500).json({ message: "Failed to fetch approved content" });
+  }
+});
+
 // ==================== ADMIN ROUTES ====================
 
 router.get('/admin/clients', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
@@ -1125,7 +1269,8 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .from(clientUsers)
       .where(eq(clientUsers.clientAccountId, client.id));
 
-    const access = await db
+    // Get verification campaign access
+    const verificationAccess = await db
       .select({
         access: clientCampaignAccess,
         campaign: verificationCampaigns,
@@ -1134,17 +1279,66 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .innerJoin(verificationCampaigns, eq(clientCampaignAccess.campaignId, verificationCampaigns.id))
       .where(eq(clientCampaignAccess.clientAccountId, client.id));
 
+    // Get regular campaign access (for QA-approved leads)
+    const regularAccess = await db
+      .select({
+        access: clientCampaignAccess,
+        campaign: campaigns,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, client.id),
+          isNotNull(clientCampaignAccess.regularCampaignId)
+        )
+      );
+
     const projects = await db
       .select()
       .from(clientProjects)
       .where(eq(clientProjects.clientAccountId, client.id))
       .orderBy(desc(clientProjects.createdAt));
 
+    // Get lead counts for each regular campaign
+    const regularCampaignIds = regularAccess.map(a => a.campaign.id);
+    let leadCounts: Record<string, number> = {};
+    if (regularCampaignIds.length > 0) {
+      const counts = await db
+        .select({
+          campaignId: leads.campaignId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(leads)
+        .where(
+          and(
+            inArray(leads.campaignId, regularCampaignIds),
+            eq(leads.qaStatus, 'approved')
+          )
+        )
+        .groupBy(leads.campaignId);
+      
+      leadCounts = counts.reduce((acc, c) => {
+        if (c.campaignId) acc[c.campaignId] = c.count;
+        return acc;
+      }, {} as Record<string, number>);
+    }
+
     res.json({
       ...client,
       users,
       projects,
-      campaigns: access.map(a => ({ ...a.access, campaign: a.campaign })),
+      campaigns: verificationAccess.map(a => ({ 
+        ...a.access, 
+        campaign: a.campaign,
+        type: 'verification'
+      })),
+      regularCampaigns: regularAccess.map(a => ({ 
+        ...a.access, 
+        campaign: a.campaign,
+        type: 'regular',
+        approvedLeadCount: leadCounts[a.campaign.id] || 0
+      })),
     });
   } catch (error) {
     console.error('[CLIENT PORTAL] Get client error:', error);
@@ -1318,19 +1512,27 @@ router.patch('/admin/clients/:clientId/users/:userId', requireAuth, requireRole(
 
 router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
-    const { campaignId } = req.body;
+    const { campaignId, campaignType } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ message: "Campaign ID required" });
     }
 
+    // Support both verification campaigns and regular campaigns (for QA leads)
+    const accessData: any = {
+      clientAccountId: req.params.clientId,
+      grantedBy: req.user!.userId,
+    };
+
+    if (campaignType === 'regular') {
+      accessData.regularCampaignId = campaignId;
+    } else {
+      accessData.campaignId = campaignId;
+    }
+
     const [access] = await db
       .insert(clientCampaignAccess)
-      .values({
-        clientAccountId: req.params.clientId,
-        campaignId,
-        grantedBy: req.user!.userId,
-      })
+      .values(accessData)
       .returning();
 
     res.status(201).json(access);

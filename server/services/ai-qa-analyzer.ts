@@ -4,7 +4,7 @@ import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schem
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { generateJSON, chat } from "../vertex-ai/vertex-client";
+import { generateJSON, chat } from "./vertex-ai/vertex-client";
 
 // Lazy DeepSeek client – instantiate only when needed and when credentials exist
 let _deepseekClient: OpenAI | null = null;
@@ -614,7 +614,7 @@ export async function reEvaluateCampaignLeads(campaignId: string): Promise<{
     }
 
     console.log(`[AI-QA] Re-evaluation complete. Processed: ${result.processed}, Updated: ${result.updated}, Failed: ${result.failed}`);
-    
+
   } catch (error) {
     result.success = false;
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -623,4 +623,382 @@ export async function reEvaluateCampaignLeads(campaignId: string): Promise<{
   }
 
   return result;
+}
+
+// ==================== QA CONTENT TYPE ANALYSIS ====================
+
+import {
+  clientSimulationSessions,
+  clientMockCalls,
+  clientReports,
+} from "@shared/schema";
+
+/**
+ * Generic content analysis result for non-lead content types
+ */
+export interface ContentAnalysisResult {
+  score: number;
+  qualificationStatus: 'qualified' | 'not_qualified' | 'needs_review';
+  highlights: string[];
+  recommendations: string[];
+  analysis: {
+    quality: { score: number; evidence: string };
+    completeness: { score: number; evidence: string };
+    professionalism: { score: number; evidence: string };
+    clientReadiness: { score: number; evidence: string };
+  };
+}
+
+/**
+ * Analyze simulation session quality for client delivery
+ */
+export async function analyzeSimulationQuality(sessionId: string): Promise<ContentAnalysisResult | null> {
+  try {
+    const [session] = await db
+      .select()
+      .from(clientSimulationSessions)
+      .where(eq(clientSimulationSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      console.error(`[AI-QA] Simulation session not found: ${sessionId}`);
+      return null;
+    }
+
+    // Build analysis based on session data
+    let qualityScore = 50;
+    let completenessScore = 50;
+    let professionalismScore = 70;
+    let clientReadinessScore = 50;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Analyze transcript quality
+    const transcript = session.transcript as Array<{ role: string; content: string }> | null;
+    if (transcript && Array.isArray(transcript)) {
+      const messageCount = transcript.length;
+      const totalLength = transcript.reduce((acc, msg) => acc + (msg.content?.length || 0), 0);
+
+      if (messageCount >= 6) {
+        qualityScore += 20;
+        highlights.push('Substantial conversation with multiple exchanges');
+      } else if (messageCount < 3) {
+        recommendations.push('Very short conversation - may not demonstrate full capabilities');
+      }
+
+      if (totalLength > 500) {
+        completenessScore += 15;
+        highlights.push('Detailed responses throughout conversation');
+      }
+
+      // Check for agent vs user balance
+      const agentMessages = transcript.filter(m => m.role === 'assistant' || m.role === 'agent').length;
+      const userMessages = transcript.filter(m => m.role === 'user' || m.role === 'prospect').length;
+      if (agentMessages > 0 && userMessages > 0 && Math.abs(agentMessages - userMessages) <= 2) {
+        professionalismScore += 10;
+        highlights.push('Balanced conversation flow');
+      }
+    } else {
+      recommendations.push('No transcript available for analysis');
+      completenessScore -= 20;
+    }
+
+    // Analyze duration
+    if (session.durationSeconds) {
+      if (session.durationSeconds >= 60) {
+        qualityScore += 15;
+        clientReadinessScore += 15;
+        highlights.push('Good conversation duration');
+      } else if (session.durationSeconds < 30) {
+        recommendations.push('Short duration - consider longer demonstration');
+        clientReadinessScore -= 10;
+      }
+    }
+
+    // Check for evaluation results
+    if (session.evaluationResult) {
+      const evalResult = session.evaluationResult as { score?: number; strengths?: string[]; improvements?: string[] };
+      if (evalResult.strengths && evalResult.strengths.length > 0) {
+        highlights.push(...evalResult.strengths.slice(0, 2));
+        qualityScore += 10;
+      }
+      if (evalResult.improvements && evalResult.improvements.length > 0) {
+        recommendations.push(...evalResult.improvements.slice(0, 2));
+      }
+    }
+
+    // Check session name (indicates intentional demo)
+    if (session.sessionName) {
+      clientReadinessScore += 5;
+      highlights.push('Named session for client reference');
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.35) +
+      (completenessScore * 0.25) +
+      (professionalismScore * 0.2) +
+      (clientReadinessScore * 0.2)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Conversation depth and engagement' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Transcript and data completeness' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Conversation flow and tone' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client presentation' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing simulation:', error);
+    return null;
+  }
+}
+
+/**
+ * Analyze mock call quality for client delivery
+ */
+export async function analyzeMockCallQuality(callId: string): Promise<ContentAnalysisResult | null> {
+  try {
+    const [call] = await db
+      .select()
+      .from(clientMockCalls)
+      .where(eq(clientMockCalls.id, callId))
+      .limit(1);
+
+    if (!call) {
+      console.error(`[AI-QA] Mock call not found: ${callId}`);
+      return null;
+    }
+
+    let qualityScore = 50;
+    let completenessScore = 50;
+    let professionalismScore = 60;
+    let clientReadinessScore = 50;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Check recording availability
+    if (call.recordingUrl) {
+      qualityScore += 20;
+      clientReadinessScore += 15;
+      highlights.push('Call recording available for playback');
+    } else {
+      recommendations.push('No recording available - client cannot listen to call');
+      clientReadinessScore -= 15;
+    }
+
+    // Check transcript
+    if (call.transcript && call.transcript.length > 100) {
+      completenessScore += 20;
+      highlights.push('Full transcript available');
+
+      // Simple keyword analysis for professionalism
+      const lowerTranscript = call.transcript.toLowerCase();
+      if (lowerTranscript.includes('thank') || lowerTranscript.includes('appreciate')) {
+        professionalismScore += 10;
+      }
+      if (lowerTranscript.includes('interested') || lowerTranscript.includes('tell me more')) {
+        qualityScore += 10;
+        highlights.push('Positive engagement detected');
+      }
+    } else if (call.transcript) {
+      completenessScore += 10;
+      recommendations.push('Transcript is brief - consider more detailed call');
+    } else {
+      recommendations.push('No transcript available');
+      completenessScore -= 10;
+    }
+
+    // Check duration
+    if (call.durationSeconds) {
+      if (call.durationSeconds >= 60) {
+        qualityScore += 15;
+        highlights.push('Good call duration for demonstration');
+      } else if (call.durationSeconds >= 30) {
+        qualityScore += 10;
+      } else {
+        recommendations.push('Very short call - may not effectively demonstrate capabilities');
+      }
+    }
+
+    // Check disposition
+    if (call.disposition) {
+      completenessScore += 10;
+      if (['qualified', 'connected', 'callback-requested'].includes(call.disposition)) {
+        qualityScore += 10;
+        highlights.push(`Positive outcome: ${call.disposition}`);
+      }
+    }
+
+    // Use existing AI analysis if available
+    if (call.aiAnalysis) {
+      const analysis = call.aiAnalysis as { highlights?: string[]; recommendations?: string[] };
+      if (analysis.highlights) highlights.push(...analysis.highlights.slice(0, 2));
+      if (analysis.recommendations) recommendations.push(...analysis.recommendations.slice(0, 2));
+    }
+
+    if (call.aiScore) {
+      // Weight existing AI score into quality
+      qualityScore = Math.round((qualityScore + call.aiScore) / 2);
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.4) +
+      (completenessScore * 0.25) +
+      (professionalismScore * 0.15) +
+      (clientReadinessScore * 0.2)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Call quality and engagement' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Recording and transcript availability' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Call conduct and tone' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client review' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing mock call:', error);
+    return null;
+  }
+}
+
+/**
+ * Analyze report quality for client delivery
+ */
+export async function analyzeReportQuality(reportId: string): Promise<ContentAnalysisResult | null> {
+  try {
+    const [report] = await db
+      .select()
+      .from(clientReports)
+      .where(eq(clientReports.id, reportId))
+      .limit(1);
+
+    if (!report) {
+      console.error(`[AI-QA] Report not found: ${reportId}`);
+      return null;
+    }
+
+    let qualityScore = 60;
+    let completenessScore = 50;
+    let professionalismScore = 70;
+    let clientReadinessScore = 60;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Check report data
+    const reportData = report.reportData as Record<string, unknown> | null;
+    if (reportData && Object.keys(reportData).length > 0) {
+      completenessScore += 20;
+      const dataPoints = Object.keys(reportData).length;
+      if (dataPoints >= 5) {
+        qualityScore += 15;
+        highlights.push('Comprehensive data included');
+      }
+    } else {
+      recommendations.push('Report data is empty or missing');
+      completenessScore -= 20;
+    }
+
+    // Check summary
+    if (report.reportSummary && report.reportSummary.length > 50) {
+      qualityScore += 15;
+      clientReadinessScore += 10;
+      highlights.push('Executive summary provided');
+    } else {
+      recommendations.push('Add a summary for quick client review');
+    }
+
+    // Check date range
+    if (report.reportPeriodStart && report.reportPeriodEnd) {
+      completenessScore += 15;
+      highlights.push('Clear reporting period defined');
+    } else {
+      recommendations.push('Specify the report date range');
+    }
+
+    // Check file export
+    if (report.fileUrl) {
+      clientReadinessScore += 15;
+      highlights.push('Export file available for download');
+
+      if (report.fileFormat === 'pdf') {
+        professionalismScore += 10;
+        highlights.push('Professional PDF format');
+      }
+    } else {
+      recommendations.push('Generate a downloadable file for client');
+    }
+
+    // Check report type
+    if (report.reportType) {
+      completenessScore += 5;
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.3) +
+      (completenessScore * 0.3) +
+      (professionalismScore * 0.15) +
+      (clientReadinessScore * 0.25)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Data quality and insights' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Report completeness' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Professional presentation' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client delivery' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing report:', error);
+    return null;
+  }
+}
+
+/**
+ * Unified content analysis entry point
+ * Routes to appropriate analyzer based on content type
+ */
+export async function analyzeContentQualification(
+  contentType: 'simulation' | 'mock_call' | 'report' | 'lead',
+  contentId: string
+): Promise<ContentAnalysisResult | AIAnalysisResult | null> {
+  switch (contentType) {
+    case 'simulation':
+      return analyzeSimulationQuality(contentId);
+    case 'mock_call':
+      return analyzeMockCallQuality(contentId);
+    case 'report':
+      return analyzeReportQuality(contentId);
+    case 'lead':
+      return analyzeLeadQualification(contentId);
+    default:
+      console.error(`[AI-QA] Unknown content type: ${contentType}`);
+      return null;
+  }
 }

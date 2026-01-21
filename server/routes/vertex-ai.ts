@@ -374,7 +374,9 @@ router.post("/operator/stop", async (req: Request, res: Response) => {
  */
 router.post("/vector/index", async (req: Request, res: Response) => {
   try {
-    const { type, ids, limit } = req.body;
+    const { type, ids, limit, offset } = req.body;
+    const resolvedLimit = typeof limit === "number" ? limit : Number(limit) || 100;
+    const resolvedOffset = typeof offset === "number" ? offset : Number(offset) || 0;
 
     let count = 0;
     switch (type) {
@@ -385,7 +387,7 @@ router.post("/vector/index", async (req: Request, res: Response) => {
         count = await indexContacts(ids);
         break;
       case "calls":
-        count = await indexCallTranscripts(limit || 100);
+        count = await indexCallTranscripts(resolvedLimit, resolvedOffset);
         break;
       default:
         return res.status(400).json({ error: "Invalid type. Use: accounts, contacts, or calls" });
@@ -458,7 +460,7 @@ router.post("/vector/knowledge", async (req: Request, res: Response) => {
  */
 router.get("/vector/stats", async (req: Request, res: Response) => {
   try {
-    const stats = getVectorStats();
+    const stats = await getVectorStats();
     res.json(stats);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

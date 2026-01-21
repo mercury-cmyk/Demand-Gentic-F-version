@@ -149,6 +149,8 @@ export default function CampaignsPage() {
       return Object.fromEntries(snapshots);
     },
     enabled: campaigns.length > 0,
+    refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
+    staleTime: 0, // Always fetch fresh data
   });
 
   // Fetch queue stats for phone campaigns
@@ -189,7 +191,8 @@ export default function CampaignsPage() {
       return stats;
     },
     enabled: phoneCampaigns.length > 0 && !!token,
-    refetchInterval: 10000,
+    refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
+    staleTime: 0, // Always fetch fresh data
   });
 
   // Toggle status mutation
@@ -349,7 +352,7 @@ export default function CampaignsPage() {
                 <Mail className="mr-2 h-4 w-4" />
                 Email Campaign
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setLocation("/campaigns/telemarketing/create")}>
+              <DropdownMenuItem onClick={() => setLocation("/phone-campaigns/create")}>
                 <Phone className="mr-2 h-4 w-4" />
                 Phone Campaign
               </DropdownMenuItem>
@@ -425,7 +428,20 @@ export default function CampaignsPage() {
                 const isPhone = isPhoneCampaign(campaign);
                 const isEmail = isEmailCampaign(campaign);
                 const campaignQueueStats = isPhone ? queueStats[campaign.id] : undefined;
-                const emailStats: EmailStats | null = campaignSnapshots[String(campaign.id)]?.email || null;
+                const snapshot = campaignSnapshots[String(campaign.id)];
+                const emailSnapshot = snapshot?.email || null;
+                const callSnapshot = snapshot?.call || null;
+                const emailStats: EmailStats | null = emailSnapshot || null;
+                const emailRecipients = emailSnapshot?.totalRecipients ?? campaign.sent ?? 0;
+                const emailOpens = emailSnapshot?.opens ?? campaign.opened ?? 0;
+                const engagementRate = emailRecipients > 0
+                  ? Math.round((emailOpens / emailRecipients) * 100)
+                  : 0;
+                const callAttempts = callSnapshot?.callsMade ?? campaign.calls ?? 0;
+                const callConnected = callSnapshot?.callsConnected ?? campaign.connected ?? 0;
+                const connectRate = callAttempts > 0
+                  ? Math.round((callConnected / callAttempts) * 100)
+                  : 0;
 
                 return (
                   <Collapsible
@@ -451,12 +467,12 @@ export default function CampaignsPage() {
                                   </>
                                 )}
                                 <span className="capitalize">{isPhone ? 'Phone' : campaign.type}</span>
-                                {isPhone && campaign.dialMode === 'ai_agent' && (
+                                {isPhone && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'hybrid') && (
                                   <>
                                     <span>•</span>
                                     <Badge variant="outline" className="text-[10px] py-0 px-1.5 border-purple-300 text-purple-600">
                                       <Bot className="h-3 w-3 mr-1" />
-                                      AI Agent
+                                      {campaign.dialMode === 'hybrid' ? 'Hybrid' : 'AI Agent'}
                                     </Badge>
                                   </>
                                 )}
@@ -487,17 +503,11 @@ export default function CampaignsPage() {
                                   {isEmail ? 'Engagement Rate' : 'Connect Rate'}
                                 </span>
                                 <span className="font-medium">
-                                  {isEmail
-                                    ? `${campaign.sent && campaign.opened ? Math.round((campaign.opened / campaign.sent) * 100) : 0}%`
-                                    : `${campaign.calls && campaign.connected ? Math.round((campaign.connected / campaign.calls) * 100) : 0}%`
-                                  }
+                                  {isEmail ? `${engagementRate}%` : `${connectRate}%`}
                                 </span>
                               </div>
                               <Progress
-                                value={isEmail
-                                  ? (campaign.opened / campaign.sent) * 100
-                                  : (campaign.connected / campaign.calls) * 100
-                                }
+                                value={isEmail ? engagementRate : connectRate}
                                 className="h-2"
                               />
                             </div>

@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { InlineOrgCreator } from "@/components/campaigns/inline-org-creator";
 import type { FilterGroup } from "@shared/filter-types";
 import type { Segment, List as ListType, DomainSet } from "@shared/schema";
 
@@ -230,28 +231,35 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
                 <Building2 className="w-4 h-4" />
                 Organization
               </Label>
-              <Select
-                value={selectedOrgId || ""}
-                onValueChange={(value) => setSelectedOrgId(value)}
-              >
-                <SelectTrigger id="organization-select" data-testid="select-organization">
-                  <SelectValue placeholder="Select organization..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {orgsData?.organizations?.map((org) => (
-                    <SelectItem key={org.id} value={org.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{org.name}</span>
-                        {org.isDefault && (
-                          <Badge variant="secondary" className="text-[10px] h-4">
-                            Default
-                          </Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select
+                  value={selectedOrgId || ""}
+                  onValueChange={(value) => setSelectedOrgId(value)}
+                >
+                  <SelectTrigger id="organization-select" data-testid="select-organization" className="flex-1">
+                    <SelectValue placeholder="Select organization..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {orgsData?.organizations?.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{org.name}</span>
+                          {org.isDefault && (
+                            <Badge variant="secondary" className="text-[10px] h-4">
+                              Default
+                            </Badge>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <InlineOrgCreator
+                  onOrgCreated={(orgId) => setSelectedOrgId(orgId)}
+                  triggerVariant="button"
+                  triggerSize="default"
+                />
+              </div>
               <p className="text-xs text-muted-foreground">
                 Used for problem intelligence and service catalog matching
               </p>

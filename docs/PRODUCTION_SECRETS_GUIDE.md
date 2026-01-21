@@ -106,6 +106,13 @@ curl -X POST https://your-app.replit.app/api/test/email-validation/single \
 | `SMTP_CONNECT_TIMEOUT_MS` | SMTP connection timeout | `10000` |
 | `DOMAIN_CACHE_TTL_HOURS` | Domain cache TTL | `24` |
 
+### Conversation Quality (DeepSeek)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEEPSEEK_API_KEY` | Required for real-time conversation quality monitoring | none |
+| `CONVERSATION_QUALITY_MODEL` | Override DeepSeek model for conversation quality | `deepseek-chat` |
+
 ## Security Best Practices
 
 1. ✅ **Never commit** `DATABASE_URL` to version control

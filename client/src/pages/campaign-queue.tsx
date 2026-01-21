@@ -176,7 +176,7 @@ export default function CampaignQueuePage() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setLocation("/campaigns/telemarketing")}
+            onClick={() => setLocation("/phone-campaigns")}
             data-testid="button-back"
           >
             <ArrowLeft className="w-5 h-5" />

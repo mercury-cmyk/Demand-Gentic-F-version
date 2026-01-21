@@ -28,7 +28,7 @@ import {
   FileDown, Eye, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
   ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
-  Link as LinkIcon, Upload, Trash2
+  Link as LinkIcon, Upload, Trash2, Mic, ShoppingCart, FileEdit, TestTube
 } from 'lucide-react';
 import { ClientAgentButton } from '@/components/client-portal/agent/client-agent-chat';
 import {
@@ -40,6 +40,10 @@ import {
   CampaignCard,
   RequestLeadsDialog,
 } from '@/components/client-portal/campaigns';
+import { CampaignSimulationPanel } from '@/components/client-portal/simulation/campaign-simulation-panel';
+import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
+import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
+import { EmailTemplateGeneratorPanel } from '@/components/client-portal/email/email-template-generator-panel';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 
 interface ClientUser {
@@ -186,6 +190,7 @@ export default function ClientPortalDashboard() {
     landingPageUrl: '',
     projectFileUrl: '',
     fileName: '', // For display only
+    projectType: 'custom' as 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom',
   });
 
   // Lead drawer state
@@ -214,6 +219,13 @@ export default function ClientPortalDashboard() {
   // Request leads dialog state
   const [showRequestLeadsDialog, setShowRequestLeadsDialog] = useState(false);
   const [selectedCampaignForRequest, setSelectedCampaignForRequest] = useState<string | undefined>(undefined);
+
+  // New agentic panels state
+  const [showSimulationPanel, setShowSimulationPanel] = useState(false);
+  const [showReportsPanel, setShowReportsPanel] = useState(false);
+  const [showOrderPanel, setShowOrderPanel] = useState(false);
+  const [showEmailGenerator, setShowEmailGenerator] = useState(false);
+  const [selectedCampaignForSimulation, setSelectedCampaignForSimulation] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('clientPortalUser');
@@ -327,13 +339,14 @@ export default function ClientPortalDashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
       setShowCreateDialog(false);
-      setNewProject({ 
-        name: '', 
-        description: '', 
+      setNewProject({
+        name: '',
+        description: '',
         requestedLeads: '',
-        landingPageUrl: '', 
-        projectFileUrl: '', 
-        fileName: '' 
+        landingPageUrl: '',
+        projectFileUrl: '',
+        fileName: '',
+        projectType: 'custom'
       });
       toast({ title: 'Campaign request created successfully' });
     },
@@ -426,6 +439,7 @@ export default function ClientPortalDashboard() {
       requestedLeadCount: newProject.requestedLeads ? parseInt(newProject.requestedLeads) : undefined,
       landingPageUrl: newProject.landingPageUrl || undefined,
       projectFileUrl: newProject.projectFileUrl || undefined,
+      projectType: newProject.projectType,
     });
   };
 
@@ -589,6 +603,14 @@ export default function ClientPortalDashboard() {
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
   ];
 
+  // Quick action items for the sidebar
+  const quickActionItems = [
+    { id: 'simulate', label: 'Voice Simulation', icon: Mic, color: 'from-violet-500 to-purple-500', onClick: () => setShowSimulationPanel(true) },
+    { id: 'order', label: 'Order Campaign', icon: ShoppingCart, color: 'from-green-500 to-emerald-500', onClick: () => setShowOrderPanel(true) },
+    { id: 'ai-reports', label: 'AI Reports', icon: Sparkles, color: 'from-amber-500 to-orange-500', onClick: () => setShowReportsPanel(true) },
+    { id: 'email-gen', label: 'Email Generator', icon: FileEdit, color: 'from-blue-500 to-cyan-500', onClick: () => setShowEmailGenerator(true) },
+  ];
+
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900">
       {/* Enterprise Sidebar */}
@@ -639,6 +661,32 @@ export default function ClientPortalDashboard() {
                 activeTab === item.id ? `bg-gradient-to-br ${item.color}` : 'bg-slate-100 dark:bg-slate-700'
               }`}>
                 <item.icon className={`h-4 w-4 ${activeTab === item.id ? 'text-white' : 'text-slate-600 dark:text-slate-400'}`} />
+              </div>
+              {!sidebarCollapsed && (
+                <span className="text-sm font-medium truncate">{item.label}</span>
+              )}
+            </button>
+          ))}
+
+          {/* AI Tools Divider */}
+          {!sidebarCollapsed && (
+            <div className="pt-4 pb-2">
+              <div className="flex items-center gap-2 px-3">
+                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">AI Tools</span>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Action Items */}
+          {quickActionItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={item.onClick}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50"
+            >
+              <div className={`h-8 w-8 rounded-lg flex items-center justify-center bg-gradient-to-br ${item.color}`}>
+                <item.icon className="h-4 w-4 text-white" />
               </div>
               {!sidebarCollapsed && (
                 <span className="text-sm font-medium truncate">{item.label}</span>
@@ -702,10 +750,18 @@ export default function ClientPortalDashboard() {
                   <h2 className="text-2xl font-bold">Welcome back, {user.firstName}!</h2>
                   <p className="text-blue-100 mt-1">Here's what's happening with your campaigns today.</p>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setShowCreateDialog(true)} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Create Campaign
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={() => setShowOrderPanel(true)} className="gap-2">
+                    <ShoppingCart className="h-4 w-4" />
+                    Order Campaign
+                  </Button>
+                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setShowSimulationPanel(true)}>
+                    <Mic className="h-4 w-4 mr-2" />
+                    Voice Simulation
+                  </Button>
+                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setShowReportsPanel(true)}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    AI Reports
                   </Button>
                   <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setActiveTab('support')}>
                     <MessageSquare className="h-4 w-4 mr-2" />
@@ -830,63 +886,46 @@ export default function ClientPortalDashboard() {
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-foreground">Agentic Quick Actions</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5">Ask our AI agent to help with common tasks</p>
+                        <h3 className="text-sm font-semibold text-foreground">AI-Powered Tools</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">Leverage AI to supercharge your campaign management</p>
                       </div>
-                      <Button 
-                        size="sm" 
-                        variant="ghost" 
-                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-100"
-                        onClick={() => setActiveTab('support')}
-                      >
-                        View All
-                      </Button>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
-                        onClick={() => {
-                          setActiveTab('support');
-                          // Context will auto-populate in agent chat
-                        }}
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-violet-200 hover:border-violet-400"
+                        onClick={() => setShowSimulationPanel(true)}
                       >
-                        <Plus className="h-3.5 w-3.5" />
-                        Create Campaign
+                        <Mic className="h-3.5 w-3.5 text-violet-600" />
+                        Voice Simulation
                       </Button>
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
-                        onClick={() => {
-                          setActiveTab('support');
-                        }}
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-green-200 hover:border-green-400"
+                        onClick={() => setShowOrderPanel(true)}
                       >
-                        <FileText className="h-3.5 w-3.5" />
-                        Explain This Report
+                        <ShoppingCart className="h-3.5 w-3.5 text-green-600" />
+                        Order Campaign
                       </Button>
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
-                        onClick={() => {
-                          setActiveTab('support');
-                        }}
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-amber-200 hover:border-amber-400"
+                        onClick={() => setShowReportsPanel(true)}
                       >
-                        <Mail className="h-3.5 w-3.5" />
-                        Generate Email Examples
+                        <BarChart3 className="h-3.5 w-3.5 text-amber-600" />
+                        AI Reports
                       </Button>
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all"
-                        onClick={() => {
-                          setActiveTab('support');
-                        }}
+                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-blue-200 hover:border-blue-400"
+                        onClick={() => setShowEmailGenerator(true)}
                       >
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        Analyze Performance
+                        <Mail className="h-3.5 w-3.5 text-blue-600" />
+                        Email Generator
                       </Button>
                     </div>
                   </div>
@@ -1772,6 +1811,28 @@ export default function ClientPortalDashboard() {
               />
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="projectType">Project Type</Label>
+              <Select
+                value={newProject.projectType}
+                onValueChange={(value: 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom') =>
+                  setNewProject(prev => ({ ...prev, projectType: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select project type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="call_campaign">Call Campaign</SelectItem>
+                  <SelectItem value="email_campaign">Email Campaign</SelectItem>
+                  <SelectItem value="data_enrichment">Data Enrichment</SelectItem>
+                  <SelectItem value="verification">Verification</SelectItem>
+                  <SelectItem value="combo">Combined (Multi-channel)</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="requestedLeads">Number of Leads Needed</Label>
@@ -2016,6 +2077,35 @@ export default function ClientPortalDashboard() {
       <ExportLeadsDialog
         open={showExportDialog}
         onClose={() => setShowExportDialog(false)}
+      />
+
+      {/* Voice Simulation Panel */}
+      <CampaignSimulationPanel
+        open={showSimulationPanel}
+        onOpenChange={setShowSimulationPanel}
+        campaignId={selectedCampaignForSimulation}
+      />
+
+      {/* AI Reports Panel */}
+      <AgenticReportsPanel
+        open={showReportsPanel}
+        onOpenChange={setShowReportsPanel}
+      />
+
+      {/* Campaign Order Panel */}
+      <AgenticCampaignOrderPanel
+        open={showOrderPanel}
+        onOpenChange={setShowOrderPanel}
+        onOrderCreated={() => {
+          // Optionally refresh data after order creation
+          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
+        }}
+      />
+
+      {/* Email Template Generator Panel */}
+      <EmailTemplateGeneratorPanel
+        open={showEmailGenerator}
+        onOpenChange={setShowEmailGenerator}
       />
 
       {/* AI Agent Button - Floating assistant */}

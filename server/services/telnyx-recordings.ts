@@ -408,6 +408,19 @@ export async function syncRecordingForLead(leadId: string): Promise<boolean> {
     throw new Error(`Lead not found: ${leadId}`);
   }
 
+  // Early exit: Skip leads without evidence that an actual call was made
+  // Contact phones alone don't count - they just mean we *could* call, not that we *did*
+  const hasCallEvidence = !!(
+    lead.attempt?.telnyxCallId ||  // Call attempt has Telnyx call ID
+    lead.lead.telnyxCallId ||      // Lead has direct Telnyx call ID
+    lead.lead.dialedNumber         // Lead has a dialed number recorded
+  );
+
+  if (!hasCallEvidence) {
+    console.log(`[Telnyx-Sync] Skipping lead ${leadId} - no call evidence (no telnyxCallId or dialedNumber). Lead may have been manually submitted.`);
+    return false;
+  }
+
   // Strategy 1: Use telnyxCallId from call_attempts (legacy auto-dialer)
   if (lead.attempt?.telnyxCallId) {
     console.log(`[Telnyx-Sync] Trying Strategy 1a: Fetch by call_control_id (from attempt) for lead ${leadId}`);

@@ -59,16 +59,16 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
     }
 
-    // Verify campaign is a call campaign with AI agent mode
+    // Verify campaign is a call campaign with AI agent mode (ai_agent or hybrid)
     if (campaign.type !== "call") {
       return res.status(400).json({ message: "Test calls are only available for call campaigns" });
     }
 
-    if (campaign.dialMode !== "ai_agent") {
+    if (campaign.dialMode !== "ai_agent" && campaign.dialMode !== "hybrid") {
       return res.status(400).json({
-        message: "Test calls are only available for AI Agent campaigns",
+        message: "Test calls are only available for AI Agent or Hybrid campaigns",
         dialMode: campaign.dialMode,
-        requiredDialMode: "ai_agent"
+        requiredDialMode: "ai_agent or hybrid"
       });
     }
 

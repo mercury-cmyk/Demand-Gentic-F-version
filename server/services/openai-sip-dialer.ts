@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import OpenAI from "openai";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, callSessions } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, callSessions, callProducerTracking } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { analyzeConversationQuality } from "./conversation-quality-analyzer";
 import { processDisposition } from "./disposition-engine";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import {
@@ -900,6 +901,20 @@ export async function endCall(callId: string, outcome: string): Promise<void> {
       else if (outcome === 'error') statusString = 'failed';
       else if (outcome === 'busy') statusString = 'busy';
 
+      const conversationQuality = await analyzeConversationQuality({
+        transcript: transcriptText,
+        interactionType: "live_call",
+        analysisStage: "post_call",
+        callDurationSeconds: duration,
+        disposition: finalDisposition,
+        campaignId: session.campaignId,
+      });
+
+      const mergedAnalysis = {
+        ...(finalSummary || {}),
+        conversationQuality,
+      };
+
       // Safe casting to enum values handled by Drizzle/Postgres usually, 
       // but ensure string matches enum values: 'connecting', 'ringing', 'connected', 'no_answer', 'busy', 'failed', 'voicemail_detected', 'cancelled', 'completed'
       
@@ -908,11 +923,24 @@ export async function endCall(callId: string, outcome: string): Promise<void> {
         endedAt: new Date(),
         durationSec: duration,
         aiTranscript: transcriptText,
-        aiAnalysis: finalSummary, // This is JSONB in schema
+        aiAnalysis: mergedAnalysis, // This is JSONB in schema
         aiDisposition: finalDisposition,
       }).where(eq(callSessions.id, session.dbCallSessionId));
 
       console.log(`${LOG_PREFIX} Updated call_sessions record ${session.dbCallSessionId}`);
+
+      if (session.campaignId) {
+        await db.insert(callProducerTracking).values({
+          callSessionId: session.dbCallSessionId,
+          campaignId: session.campaignId,
+          contactId: session.contactId || undefined,
+          producerType: "ai",
+          virtualAgentId: session.virtualAgentId || undefined,
+          handoffStage: "ai_initial",
+          transcriptAnalysis: mergedAnalysis as any,
+          qualityScore: conversationQuality.overallScore,
+        });
+      }
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to update call_sessions record:`, error);
     }

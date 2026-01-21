@@ -96,7 +96,7 @@ export function CommandPalette() {
       id: "nav-telemarketing",
       label: "Telemarketing",
       icon: Phone,
-      onSelect: () => navigate("/campaigns/telemarketing"),
+      onSelect: () => navigate("/phone-campaigns"),
       section: "Navigation",
       keywords: ["calls", "calling", "phone"],
     },
@@ -137,11 +137,11 @@ export function CommandPalette() {
     },
     {
       id: "action-new-tele-campaign",
-      label: "New Telemarketing Campaign",
+      label: "New Phone Campaign",
       icon: Phone,
-      onSelect: () => navigate("/campaigns/telemarketing/new"),
+      onSelect: () => navigate("/phone-campaigns/create"),
       section: "Quick Actions",
-      keywords: ["create", "add", "call"],
+      keywords: ["create", "add", "call", "phone", "telemarketing"],
     },
     {
       id: "action-invite-user",

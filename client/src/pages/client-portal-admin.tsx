@@ -33,6 +33,12 @@ import {
   CheckCircle,
   AlertCircle,
   RefreshCw,
+  Network,
+  ExternalLink,
+  Mail,
+  Phone,
+  Database,
+  Target,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
 
@@ -94,6 +100,8 @@ export default function ClientPortalAdmin() {
   const [selectedClient, setSelectedClient] = useState<ClientAccount | null>(null);
   const [clientDetail, setClientDetail] = useState<any>(null);
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
+  const [grantAccessCampaignType, setGrantAccessCampaignType] = useState<'data' | 'email' | 'phone'>('data');
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
 
   // Queries
   const { data: clients, isLoading: clientsLoading } = useQuery<ClientAccount[]>({
@@ -104,8 +112,33 @@ export default function ClientPortalAdmin() {
     queryKey: ['/api/client-portal/admin/orders'],
   });
 
-  const { data: campaigns } = useQuery<VerificationCampaign[]>({
+  // Data/Verification campaigns
+  const { data: verificationCampaigns } = useQuery<VerificationCampaign[]>({
     queryKey: ['/api/verification-campaigns'],
+  });
+
+  // Email campaigns
+  const { data: emailCampaigns } = useQuery<any[]>({
+    queryKey: ['/api/campaigns', { type: 'email' }],
+    queryFn: async () => {
+      const response = await fetch('/api/campaigns?type=email', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!response.ok) throw new Error('Failed to fetch email campaigns');
+      return response.json();
+    },
+  });
+
+  // Phone campaigns
+  const { data: phoneCampaigns } = useQuery<any[]>({
+    queryKey: ['/api/campaigns', { type: 'call' }],
+    queryFn: async () => {
+      const response = await fetch('/api/campaigns?type=call', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
+      });
+      if (!response.ok) throw new Error('Failed to fetch phone campaigns');
+      return response.json();
+    },
   });
 
   const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<Invoice[]>({
@@ -144,8 +177,8 @@ export default function ClientPortalAdmin() {
   });
 
   const grantAccessMutation = useMutation({
-    mutationFn: async (campaignId: string) => {
-      return apiRequest('POST', `/api/client-portal/admin/clients/${selectedClient?.id}/campaigns`, { campaignId });
+    mutationFn: async ({ campaignId, campaignType }: { campaignId: string; campaignType: 'verification' | 'regular' }) => {
+      return apiRequest('POST', `/api/client-portal/admin/clients/${selectedClient?.id}/campaigns`, { campaignId, campaignType });
     },
     onSuccess: () => {
       if (selectedClient) {
@@ -297,10 +330,14 @@ export default function ClientPortalAdmin() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-4 w-full max-w-2xl">
+        <TabsList className="grid grid-cols-5 w-full max-w-3xl">
           <TabsTrigger value="clients">
             <Building2 className="h-4 w-4 mr-2" />
             Clients
+          </TabsTrigger>
+          <TabsTrigger value="hierarchy">
+            <Network className="h-4 w-4 mr-2" />
+            Hierarchy
           </TabsTrigger>
           <TabsTrigger value="orders">
             <FileText className="h-4 w-4 mr-2" />
@@ -450,19 +487,59 @@ export default function ClientPortalAdmin() {
                           Grant Access
                         </Button>
                       </div>
-                      {clientDetail.campaigns && clientDetail.campaigns.length > 0 ? (
+                      
+                      {/* All Campaigns Table */}
+                      {((clientDetail.campaigns && clientDetail.campaigns.length > 0) || 
+                        (clientDetail.regularCampaigns && clientDetail.regularCampaigns.length > 0)) ? (
                         <Table>
                           <TableHeader>
                             <TableRow>
                               <TableHead>Campaign</TableHead>
+                              <TableHead>Type</TableHead>
                               <TableHead>Status</TableHead>
                               <TableHead>Granted</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {clientDetail.campaigns.map((access: any) => (
-                              <TableRow key={access.id}>
+                            {/* Data/Verification Campaigns */}
+                            {clientDetail.campaigns?.map((access: any) => (
+                              <TableRow key={`data-${access.id}`}>
                                 <TableCell className="font-medium">{access.campaign.name}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="flex items-center gap-1 w-fit">
+                                    <Database className="h-3 w-3" />
+                                    Data
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={
+                                      access.campaign.status === 'active' ? 'default' : 'secondary'
+                                    }
+                                  >
+                                    {access.campaign.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {new Date(access.createdAt).toLocaleDateString()}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            {/* Email/Phone Campaigns */}
+                            {clientDetail.regularCampaigns?.map((access: any) => (
+                              <TableRow key={`regular-${access.id}`}>
+                                <TableCell className="font-medium">{access.campaign.name}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="flex items-center gap-1 w-fit">
+                                    {access.campaign.campaignType === 'email' ? (
+                                      <><Mail className="h-3 w-3" /> Email</>
+                                    ) : access.campaign.campaignType === 'call' ? (
+                                      <><Phone className="h-3 w-3" /> Phone</>
+                                    ) : (
+                                      <><Target className="h-3 w-3" /> {access.campaign.campaignType}</>
+                                    )}
+                                  </Badge>
+                                </TableCell>
                                 <TableCell>
                                   <Badge
                                     variant={
@@ -494,6 +571,79 @@ export default function ClientPortalAdmin() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ==================== HIERARCHY TAB ==================== */}
+        <TabsContent value="hierarchy">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Client-Organization Hierarchy</CardTitle>
+                  <CardDescription>
+                    Manage the three-tier hierarchy: Super Organization → Campaign Organizations → Clients
+                  </CardDescription>
+                </div>
+                <Button onClick={() => setLocation('/client-hierarchy-manager')}>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open Full Manager
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Super Organization</CardDescription>
+                    <CardTitle className="text-2xl">Pivotal B2B</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Platform owner managing all campaign organizations
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Campaign Organizations</CardDescription>
+                    <CardTitle className="text-2xl">—</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Internal teams managing campaigns and projects
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardDescription>Clients</CardDescription>
+                    <CardTitle className="text-2xl">{clients?.length || 0}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      External entities receiving deliverables
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="mt-6 p-4 bg-muted rounded-lg">
+                <h4 className="font-medium mb-2">Quick Actions</h4>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setLocation('/client-hierarchy-manager')}>
+                    <Network className="h-4 w-4 mr-2" />
+                    View Full Hierarchy
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setLocation('/qa-review-center')}>
+                    <Eye className="h-4 w-4 mr-2" />
+                    QA Review Center
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ==================== ORDERS TAB ==================== */}
@@ -862,31 +1012,146 @@ export default function ClientPortalAdmin() {
       </Dialog>
 
       {/* Grant Campaign Access Dialog */}
-      <Dialog open={showGrantAccess} onOpenChange={setShowGrantAccess}>
-        <DialogContent>
+      <Dialog open={showGrantAccess} onOpenChange={(open) => {
+        setShowGrantAccess(open);
+        if (!open) {
+          setSelectedCampaignId('');
+          setGrantAccessCampaignType('data');
+        }
+      }}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Grant Campaign Access</DialogTitle>
             <DialogDescription>
-              Select a campaign to grant access to {selectedClient?.name}
+              Select a campaign type and campaign to grant access to {selectedClient?.name}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <Select onValueChange={(value) => grantAccessMutation.mutate(value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a campaign" />
-              </SelectTrigger>
-              <SelectContent>
-                {campaigns?.map((campaign) => (
-                  <SelectItem key={campaign.id} value={campaign.id}>
-                    {campaign.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Campaign Type Tabs */}
+            <Tabs value={grantAccessCampaignType} onValueChange={(v) => {
+              setGrantAccessCampaignType(v as 'data' | 'email' | 'phone');
+              setSelectedCampaignId('');
+            }}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="data" className="flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Data
+                </TabsTrigger>
+                <TabsTrigger value="email" className="flex items-center gap-2">
+                  <Mail className="h-4 w-4" />
+                  Email
+                </TabsTrigger>
+                <TabsTrigger value="phone" className="flex items-center gap-2">
+                  <Phone className="h-4 w-4" />
+                  Phone
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Data/Verification Campaigns */}
+              <TabsContent value="data" className="mt-4">
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a data campaign" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {verificationCampaigns?.map((campaign) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        <div className="flex items-center gap-2">
+                          <Database className="h-4 w-4 text-green-600" />
+                          {campaign.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {(!verificationCampaigns || verificationCampaigns.length === 0) && (
+                      <div className="p-4 text-sm text-muted-foreground text-center">
+                        No data campaigns available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Data campaigns provide access to verified contacts and enrichment data.
+                </p>
+              </TabsContent>
+
+              {/* Email Campaigns */}
+              <TabsContent value="email" className="mt-4">
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an email campaign" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {emailCampaigns?.map((campaign) => (
+                      <SelectItem key={campaign.id} value={String(campaign.id)}>
+                        <div className="flex items-center gap-2">
+                          <Mail className="h-4 w-4 text-blue-600" />
+                          {campaign.name}
+                          <Badge variant="secondary" className="ml-2 text-xs">
+                            {campaign.status}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {(!emailCampaigns || emailCampaigns.length === 0) && (
+                      <div className="p-4 text-sm text-muted-foreground text-center">
+                        No email campaigns available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Email campaigns provide access to email marketing leads and responses.
+                </p>
+              </TabsContent>
+
+              {/* Phone Campaigns */}
+              <TabsContent value="phone" className="mt-4">
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a phone campaign" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {phoneCampaigns?.map((campaign) => (
+                      <SelectItem key={campaign.id} value={String(campaign.id)}>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-purple-600" />
+                          {campaign.name}
+                          <Badge variant="secondary" className="ml-2 text-xs">
+                            {campaign.status}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {(!phoneCampaigns || phoneCampaigns.length === 0) && (
+                      <div className="p-4 text-sm text-muted-foreground text-center">
+                        No phone campaigns available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Phone campaigns provide access to call leads and QA-approved conversations.
+                </p>
+              </TabsContent>
+            </Tabs>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGrantAccess(false)}>
               Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (selectedCampaignId) {
+                  grantAccessMutation.mutate({
+                    campaignId: selectedCampaignId,
+                    campaignType: grantAccessCampaignType === 'data' ? 'verification' : 'regular'
+                  });
+                }
+              }}
+              disabled={!selectedCampaignId || grantAccessMutation.isPending}
+            >
+              {grantAccessMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Grant Access
             </Button>
           </DialogFooter>
         </DialogContent>

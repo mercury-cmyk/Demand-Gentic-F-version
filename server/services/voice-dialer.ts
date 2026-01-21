@@ -2,7 +2,7 @@
 import { Server as HttpServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db";
-import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking } from "@shared/schema";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking, campaignOrganizations } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
@@ -73,6 +73,7 @@ import {
   buildContactContextSection,
 } from "./foundation-capabilities";
 import { getOrganizationBrain } from "./agent-brain-service";
+import { analyzeConversationQuality } from "./conversation-quality-analyzer";
 import {
   DEFAULT_ADVANCED_SETTINGS,
   DEFAULT_SYSTEM_TOOLS,
@@ -100,6 +101,9 @@ const TELNYX_G711_FRAME_MS = 20;
 const TELNYX_MAX_FRAMES_PER_TICK = 5;
 // Cap buffer to avoid runaway memory if Telnyx isn't ready.
 const TELNYX_MAX_BUFFER_BYTES = TELNYX_G711_FRAME_BYTES * 2000; // ~40s of audio
+const REALTIME_QUALITY_DEBOUNCE_MS = 15000;
+const REALTIME_QUALITY_MIN_TURNS = 4;
+const REALTIME_QUALITY_MAX_CHARS = 6000;
 
 interface OpenAIRealtimeSession {
   callId: string;
@@ -187,6 +191,10 @@ interface OpenAIRealtimeSession {
   };
   // Campaign-level max call duration (enforced strictly)
   campaignMaxCallDurationSeconds: number | null;
+  // Real-time quality monitoring
+  realtimeQualityTimer: ReturnType<typeof setTimeout> | null;
+  realtimeQualityInFlight: boolean;
+  lastRealtimeQualityAt: Date | null;
   // Intelligent audio detection state (IVR, hold music, human detection)
   audioDetection: {
     hasGreetingSent: boolean; // Track if AI has sent its opening greeting
@@ -849,6 +857,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
+              // Real-time quality monitoring
+              realtimeQualityTimer: null,
+              realtimeQualityInFlight: false,
+              lastRealtimeQualityAt: null,
             };
           } else {
             console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
@@ -1423,15 +1435,31 @@ const openaiWs = new WebSocket(url, {
 
 openaiWs.on("open", async () => {
   try {
+    // ORGANIZATION NAME RESOLUTION - Critical for agent identity
+    // Priority: campaignConfig.organizationName > campaignConfig.companyName > orgBrain > fallback
     let resolvedOrgName = campaignConfig?.organizationName || campaignConfig?.companyName;
+    
     if (!resolvedOrgName) {
+      console.warn(`${LOG_PREFIX} ⚠️ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
+  1. aiAgentSettings.persona.companyName
+  2. problemIntelligenceOrgId linked to campaignOrganizations`);
+      
       try {
         const orgBrain = await getOrganizationBrain();
-        resolvedOrgName = orgBrain?.identity?.companyName || 'our organization';
+        resolvedOrgName = orgBrain?.identity?.companyName;
+        if (resolvedOrgName) {
+          console.log(`${LOG_PREFIX} Using fallback org name from Organization Brain: ${resolvedOrgName}`);
+        }
       } catch (e) {
         console.warn(`${LOG_PREFIX} Could not fetch Organization Brain for org name:`, e);
-        resolvedOrgName = 'our organization';
       }
+      
+      if (!resolvedOrgName) {
+        resolvedOrgName = 'our organization';
+        console.error(`${LOG_PREFIX} ❌ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
+      }
+    } else {
+      console.log(`${LOG_PREFIX} ✅ Organization name resolved: "${resolvedOrgName}"`);
     }
 
       const voiceTemplateValues = buildVoiceTemplateValues({
@@ -1865,16 +1893,31 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       : baseSettings;
     const agentSettings = mergeAgentSettings(mergedBase);
 
-    // Resolve org name for template interpolation - use campaign persona or fall back to Organization Brain
+    // ORGANIZATION NAME RESOLUTION - Critical for agent identity
+    // Priority: campaignConfig.organizationName > campaignConfig.companyName > orgBrain > fallback
     let resolvedOrgNameGemini = campaignConfig?.organizationName || campaignConfig?.companyName;
+    
     if (!resolvedOrgNameGemini) {
+      console.warn(`${LOG_PREFIX} [Gemini] ⚠️ MISSING ORG NAME: Campaign ${session.campaignId} has no organizationName or companyName. Check:
+  1. aiAgentSettings.persona.companyName
+  2. problemIntelligenceOrgId linked to campaignOrganizations`);
+      
       try {
         const orgBrain = await getOrganizationBrain();
-        resolvedOrgNameGemini = orgBrain?.identity?.companyName || 'our organization';
+        resolvedOrgNameGemini = orgBrain?.identity?.companyName;
+        if (resolvedOrgNameGemini) {
+          console.log(`${LOG_PREFIX} [Gemini] Using fallback org name from Organization Brain: ${resolvedOrgNameGemini}`);
+        }
       } catch (e) {
         console.warn(`${LOG_PREFIX} [Gemini] Could not fetch Organization Brain for org name:`, e);
-        resolvedOrgNameGemini = 'our organization';
       }
+      
+      if (!resolvedOrgNameGemini) {
+        resolvedOrgNameGemini = 'our organization';
+        console.error(`${LOG_PREFIX} [Gemini] ❌ CRITICAL: No organization name found for campaign ${session.campaignId}. Using generic fallback. FIX: Set problemIntelligenceOrgId or aiAgentSettings.persona.companyName`);
+      }
+    } else {
+      console.log(`${LOG_PREFIX} [Gemini] ✅ Organization name resolved: "${resolvedOrgNameGemini}"`);
     }
 
     // Build system prompt
@@ -1954,6 +1997,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] User: "${event.text}"`);
         session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+        scheduleRealtimeQualityAnalysis(session);
       }
     });
 
@@ -1961,6 +2005,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
         session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+        scheduleRealtimeQualityAnalysis(session);
       }
     });
 
@@ -2382,6 +2427,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             timestamp: new Date()
           });
         }
+        scheduleRealtimeQualityAnalysis(session);
       }
       break;
 
@@ -2404,6 +2450,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             timestamp: new Date()
           });
         }
+        scheduleRealtimeQualityAnalysis(session);
       }
       break;
 
@@ -2548,6 +2595,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
               text: message.transcript,
               timestamp: new Date()
             });
+            scheduleRealtimeQualityAnalysis(session);
 
             session.detectedDisposition = 'voicemail';
             session.callOutcome = 'voicemail';
@@ -2593,6 +2641,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
                   text: message.transcript,
                   timestamp: new Date()
                 });
+                scheduleRealtimeQualityAnalysis(session);
 
                 session.detectedDisposition = 'voicemail';
                 session.callOutcome = 'voicemail';
@@ -2630,6 +2679,7 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             text: message.transcript,
             timestamp: new Date()
           });
+          scheduleRealtimeQualityAnalysis(session);
 
           // Mark human as detected for the first time
           if (!session.audioDetection.humanDetected) {
@@ -3844,6 +3894,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.isActive = false;
   session.callOutcome = outcome;
 
+  if (session.realtimeQualityTimer) {
+    clearTimeout(session.realtimeQualityTimer);
+    session.realtimeQualityTimer = null;
+  }
+
   stopTelnyxOutboundPacer(session);
   session.telnyxOutboundBuffer = Buffer.alloc(0);
 
@@ -3923,16 +3978,53 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
           .join('\n');
 
+        const conversationQuality = await analyzeConversationQuality({
+          transcript: fullTranscript,
+          interactionType: "test_call",
+          analysisStage: "post_call",
+          callDurationSeconds: callDuration,
+          disposition,
+          campaignId: session.campaignId,
+          agentName: session.virtualAgentId,
+        });
+
+        const detectedIssues = conversationQuality.issues.map((issue) => ({
+          type: issue.type,
+          severity: issue.severity,
+          description: issue.description,
+          suggestion: issue.recommendation,
+        }));
+
+        const promptImprovementSuggestions = conversationQuality.recommendations.map((rec) => ({
+          category: rec.category,
+          currentBehavior: rec.currentBehavior,
+          suggestedChange: rec.suggestedChange,
+          expectedImprovement: rec.expectedImpact,
+        }));
+
+        const derivedTestResult =
+          conversationQuality.overallScore >= 80
+            ? "success"
+            : conversationQuality.overallScore >= 60
+              ? "needs_improvement"
+              : "failed";
+
+        const callSummaryText =
+          session.callSummary?.summary || notes || conversationQuality.summary;
+
         // Update the test call record with post-call data
         await db.update(campaignTestCalls).set({
           status: 'completed',
           endedAt: new Date(),
           durationSeconds: callDuration,
           disposition: disposition,
-          callSummary: session.callSummary?.summary || notes,
+          callSummary: callSummaryText,
           transcriptTurns: transcriptTurns,
           fullTranscript: fullTranscript,
           aiPerformanceMetrics: aiPerformanceMetrics,
+          detectedIssues,
+          promptImprovementSuggestions,
+          testResult: derivedTestResult,
           updatedAt: new Date(),
         }).where(eq(campaignTestCalls.id, testCallId));
 
@@ -4022,6 +4114,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             if (!session.calledNumber) {
               console.warn(`${LOG_PREFIX} Missing called_number for call ${session.callId} - skipping call_sessions insert`);
             } else {
+              // CRITICAL: contactId must be a valid UUID or null - empty strings cause FK violations
+              const validContactId = session.contactId && session.contactId.length > 0 ? session.contactId : null;
+              const validCampaignId = session.campaignId && session.campaignId.length > 0 ? session.campaignId : null;
+              const validQueueItemId = session.queueItemId && session.queueItemId.length > 0 ? session.queueItemId : null;
+              
               const [callSession] = await db.insert(callSessions).values({
                 telnyxCallId: (session as any).telnyxCallControlId || undefined,
                 fromNumber: (session as any).fromNumber || undefined,
@@ -4036,9 +4133,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
                 aiTranscript: fullTranscript || undefined,
                 aiAnalysis: aiAnalysis as any,
                 aiDisposition: disposition,
-                campaignId: session.campaignId,
-                contactId: session.contactId,
-                queueItemId: session.queueItemId,
+                campaignId: validCampaignId,
+                contactId: validContactId,
+                queueItemId: validQueueItemId,
               }).returning();
 
               callSessionId = callSession.id;
@@ -4172,6 +4269,41 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           disposition,
           callSummary: session.callSummary,
         });
+
+        if (callSessionId) {
+          try {
+            const conversationQuality = await analyzeConversationQuality({
+              transcript: fullTranscript,
+              interactionType: "live_call",
+              analysisStage: "post_call",
+              callDurationSeconds: callDuration,
+              disposition,
+              campaignId: session.campaignId,
+              agentName: session.virtualAgentId,
+            });
+
+            const mergedAnalysis = {
+              ...(aiAnalysis || {}),
+              conversationQuality,
+            };
+
+            await db.update(callSessions)
+              .set({
+                aiAnalysis: mergedAnalysis as any,
+                updatedAt: new Date(),
+              })
+              .where(eq(callSessions.id, callSessionId));
+
+            await db.update(callProducerTracking)
+              .set({
+                transcriptAnalysis: mergedAnalysis as any,
+                qualityScore: conversationQuality.overallScore,
+              })
+              .where(eq(callProducerTracking.callSessionId, callSessionId));
+          } catch (analysisError) {
+            console.error(`${LOG_PREFIX} Failed to persist conversation quality for ${callSessionId}:`, analysisError);
+          }
+        }
       }
     } catch (error) {
       console.error(`${LOG_PREFIX} Error processing disposition:`, error);
@@ -4215,9 +4347,67 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       /no longer interested/i,
     ];
 
-    return transcripts
+  return transcripts
       .filter((t) => t.role === "user")
       .some((t) => declinePatterns.some((pattern) => pattern.test(t.text)));
+  }
+
+  function buildRealtimeTranscriptSnapshot(session: OpenAIRealtimeSession): string {
+    const turns = session.transcripts.slice(-20);
+    let text = turns
+      .map((turn) => `${turn.role === "assistant" ? "Agent" : "Contact"}: ${turn.text}`)
+      .join("\n");
+    if (text.length > REALTIME_QUALITY_MAX_CHARS) {
+      text = text.slice(text.length - REALTIME_QUALITY_MAX_CHARS);
+    }
+    return text;
+  }
+
+  async function runRealtimeQualityAnalysis(session: OpenAIRealtimeSession): Promise<void> {
+    if (session.realtimeQualityInFlight || session.isEnding) return;
+    if (session.transcripts.length < REALTIME_QUALITY_MIN_TURNS) return;
+
+    session.realtimeQualityInFlight = true;
+    session.realtimeQualityTimer = null;
+
+    try {
+      const transcriptSnapshot = buildRealtimeTranscriptSnapshot(session);
+      if (!transcriptSnapshot.trim()) return;
+
+      const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+      const conversationQuality = await analyzeConversationQuality({
+        transcript: transcriptSnapshot,
+        interactionType: session.isTestSession ? "test_call" : "live_call",
+        analysisStage: "realtime",
+        callDurationSeconds: callDuration,
+        disposition: session.detectedDisposition || undefined,
+        campaignId: session.campaignId,
+        agentName: session.virtualAgentId,
+      });
+
+      await updateCallSessionStatus(session.callId, "active", {
+        conversationQuality,
+      });
+
+      session.lastRealtimeQualityAt = new Date();
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Real-time quality analysis failed for ${session.callId}:`, error);
+    } finally {
+      session.realtimeQualityInFlight = false;
+    }
+  }
+
+  function scheduleRealtimeQualityAnalysis(session: OpenAIRealtimeSession): void {
+    if (session.isEnding) return;
+    if (session.agentSettings?.advanced?.privacy?.noPiiLogging) return;
+    if (session.transcripts.length < REALTIME_QUALITY_MIN_TURNS) return;
+    if (session.realtimeQualityTimer) return;
+
+    session.realtimeQualityTimer = setTimeout(() => {
+      runRealtimeQualityAnalysis(session).catch((error) => {
+        console.error(`${LOG_PREFIX} Real-time analysis error:`, error);
+      });
+    }, REALTIME_QUALITY_DEBOUNCE_MS);
   }
 
   function isMinimalHumanInteraction(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
@@ -4836,12 +5026,52 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       .where(eq(campaigns.id, campaignId))
       .limit(1);
 
-    if (!campaign) return null;
+    if (!campaign) {
+      console.log(`${LOG_PREFIX} [getCampaignConfig] Campaign not found for ID: ${campaignId}`);
+      return null;
+    }
+
+    // Debug log the raw campaign data
+    console.log(`${LOG_PREFIX} [getCampaignConfig] Raw campaign data:`, {
+      id: campaign.id,
+      name: campaign.name,
+      hasCallScript: !!campaign.callScript,
+      callScriptPreview: campaign.callScript?.slice(0, 100) || 'NULL',
+      hasAiAgentSettings: !!campaign.aiAgentSettings,
+      problemIntelligenceOrgId: campaign.problemIntelligenceOrgId,
+    });
 
     const aiSettings = campaign.aiAgentSettings as any || {};
     
-    // Extract organization name from persona.companyName (primary source for campaigns)
-    const companyName = aiSettings?.persona?.companyName;
+    // Extract organization name - priority order:
+    // 1. aiSettings.persona.companyName (explicit per-campaign setting)
+    // 2. problemIntelligenceOrgId -> campaignOrganizations.name (linked organization)
+    // 3. Fall back to null (will use global org brain later)
+    let companyName = aiSettings?.persona?.companyName;
+    
+    // If no explicit company name in AI settings, look up from linked organization
+    if (!companyName && campaign.problemIntelligenceOrgId) {
+      try {
+        const [org] = await db
+          .select({ name: campaignOrganizations.name })
+          .from(campaignOrganizations)
+          .where(eq(campaignOrganizations.id, campaign.problemIntelligenceOrgId))
+          .limit(1);
+        if (org?.name) {
+          companyName = org.name;
+          console.log(`${LOG_PREFIX} [getCampaignConfig] ✅ Campaign Organization (calling FROM): "${companyName}" (via problemIntelligenceOrgId)`);
+        }
+      } catch (orgErr) {
+        console.warn(`${LOG_PREFIX} [getCampaignConfig] Could not resolve organization from problemIntelligenceOrgId:`, orgErr);
+      }
+    }
+    
+    // Log final resolved org name
+    if (companyName) {
+      console.log(`${LOG_PREFIX} [getCampaignConfig] Campaign Organization resolved: "${companyName}"`);
+    } else {
+      console.warn(`${LOG_PREFIX} [getCampaignConfig] ⚠️ No Campaign Organization set! AI agent may use wrong company name.`);
+    }
     
     return {
       id: campaign.id,
@@ -4923,11 +5153,15 @@ function buildVoiceTemplateValues({
   if (contactInfo?.jobTitle && !values["contact.job_title"]) values["contact.job_title"] = contactInfo.jobTitle;
   if (contactInfo?.email && !values["contact.email"]) values["contact.email"] = contactInfo.email;
 
-  const companyName = contactInfo?.companyName || contactInfo?.company;
-  if (companyName && !values["account.name"]) values["account.name"] = companyName;
+  // Account Name = The prospect's company (who we're calling TO)
+  const accountName = contactInfo?.companyName || contactInfo?.company;
+  if (accountName && !values["account.name"]) values["account.name"] = accountName;
 
-  // Include org.name for template interpolation
+  // Org Name = Campaign Organization (who we're calling FROM / representing)
   if (orgName && !values["org.name"]) values["org.name"] = orgName;
+
+  // Log both for debugging call identity
+  console.log(`${LOG_PREFIX} [Template Values] org.name (calling FROM): "${orgName || 'NOT SET'}" | account.name (calling TO): "${accountName || 'NOT SET'}"`);
 
   if (!values["system.caller_id"] && callerId) values["system.caller_id"] = callerId;
   if (!values["system.called_number"] && calledNumber) values["system.called_number"] = calledNumber;
@@ -5202,8 +5436,22 @@ async function buildSystemPrompt(
 ### 1. IDENTITY CONFIRMATION (REQUIRED FIRST)
 - Your FIRST task is to confirm you are speaking with the right person by name.
 - Wait for them to say "yes", "that's me", "speaking", or confirm their name BEFORE proceeding.
-- If they say "who is this?" or "what's this about?" - give a brief, neutral answer without company name, then ask again if you're speaking with [Name].
+- If they say "who is this?" or "who's calling?":
+  * Respond naturally: "Oh hi, this is [agent first name only]. Am I speaking with [Contact Name]?"
+  * Do NOT mention the company name or purpose yet
+  * Keep the tone casual and peer-like, not scripted
+- If they say "what's this about?" or "what's this regarding?":
+  * Keep it vague: "Just wanted to connect briefly. Is this [Contact Name]?"
+  * Do NOT explain the purpose until identity is confirmed
 - Do NOT proceed to your pitch until identity is EXPLICITLY confirmed.
+
+### 1b. AFTER IDENTITY CONFIRMATION - SMOOTH TRANSITION
+Once they confirm identity, do NOT immediately launch into the company name or purpose. Instead:
+- Take a brief pause (half a beat)
+- Start with appreciation: "Hey [First Name], thanks for taking a moment..."
+- Then introduce yourself naturally: "I'm calling from [Company] - and just so you know upfront, this isn't a sales call."
+- Pause briefly again before continuing
+- The goal is to sound like a peer reaching out, NOT like a cold caller reading a script
 
 ### 2. SILENT TOOL USE (ABSOLUTE RULE)
 - NEVER speak the name of tools (like "submit_disposition" or "hangup").

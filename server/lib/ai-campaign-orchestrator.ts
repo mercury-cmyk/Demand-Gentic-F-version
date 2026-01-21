@@ -26,7 +26,7 @@ import {
 } from '../utils/business-hours';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 2; // Max 2 concurrent calls (lowered from 20 to avoid Telnyx D2 limits)
+const DEFAULT_MAX_CONCURRENT_CALLS = 50; // Max 50 concurrent calls
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 600000; // 10 minutes - increased to allow long AI conversations without reset
@@ -582,7 +582,17 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
     LIMIT ${limit * 3}
   `);
   
-  return result.rows as any[];
+  // Normalize snake_case columns from raw SQL to camelCase for consistency
+  // This prevents issues where code expects item.contactId but raw SQL returns contact_id
+  return (result.rows as any[]).map(row => ({
+    ...row,
+    // Ensure both snake_case and camelCase are available
+    contactId: row.contact_id || row.contactId,
+    accountId: row.account_id || row.accountId,
+    campaignId: row.campaign_id || row.campaignId,
+    phoneNumber: row.phone_number || row.phoneNumber,
+    queueItemId: row.id, // The queue item id
+  }));
 }
 
 /**

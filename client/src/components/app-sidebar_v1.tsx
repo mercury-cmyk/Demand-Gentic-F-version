@@ -123,7 +123,7 @@ const getNavSections = (): NavSection[] => [
         items: [
           { title: "All Campaigns", url: "/campaigns", roles: ["admin", "campaign_manager"] },
           { title: "Email Campaigns", url: "/campaigns/email", roles: ["admin", "campaign_manager"] },
-          { title: "Pipeline Dialer", url: "/campaigns/telemarketing", roles: ["admin", "campaign_manager"] },
+          { title: "Pipeline Dialer", url: "/phone-campaigns", roles: ["admin", "campaign_manager"] },
           { title: "Telemarketing Suppressions", url: "/telemarketing/suppressions", roles: ["admin", "campaign_manager", "data_ops"] },
           { title: "Campaign Configuration", url: "/campaigns/config", roles: ["admin", "campaign_manager"] },
         ],
