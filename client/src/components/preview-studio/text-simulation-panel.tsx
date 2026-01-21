@@ -73,6 +73,8 @@ export function TextSimulationPanel({
   const [sessionMemory, setSessionMemory] = useState<SessionMemory>(createInitialSessionMemory());
   const [provider, setProvider] = useState<'openai' | 'gemini'>('openai');
   const [simulationStarted, setSimulationStarted] = useState(false);
+  const [useServerAnalysis, setUseServerAnalysis] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -199,12 +201,128 @@ export function TextSimulationPanel({
   };
 
   // End simulation and trigger analysis
-  const handleEndSimulation = useCallback(() => {
+  const handleEndSimulation = useCallback(async () => {
     if (messages.length < 2) return;
 
-    const report = generateEvaluationReport(messages, sessionMemory);
-    onAnalysisReady(report);
-  }, [messages, sessionMemory, onAnalysisReady]);
+    if (useServerAnalysis) {
+      // Use server-side AI analysis (Vertex AI)
+      setIsAnalyzing(true);
+      try {
+        // Send messages as array for server to process
+        const transcript = messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        const response = await apiRequest('POST', '/api/preview-studio/analyze', {
+          transcript,
+          campaignId,
+          accountId,
+          sessionId,
+        });
+        const analysisResult = await response.json();
+        
+        // Map server analysis to EvaluationReport format
+        const analysis = analysisResult.analysis || {};
+        const scorecard = analysis.scorecard || {};
+        
+        const report: EvaluationReport = {
+          executiveSummary: {
+            whatWentWell: analysis.executiveSummary?.whatWentWell || [],
+            whatHurtConversation: analysis.executiveSummary?.needsImprovement || [],
+            verdict: (analysis.executiveSummary?.verdict || 'needs-edits') as 'approve' | 'needs-edits' | 'reject',
+          },
+          scorecard: {
+            clarity: Math.round((scorecard.intelligence || 20) * 0.67), // Scale 30→20
+            authority: Math.round((scorecard.closing || 25) * 0.72), // Scale 35→25
+            brevity: Math.round((scorecard.voicemail || 10) * 1.5), // Scale 10→15
+            questionQuality: Math.round((scorecard.intelligence || 20) * 0.5), // Scale 30→15
+            objectionHandling: Math.round((scorecard.objectionHandling || 25) * 0.43), // Scale 35→15
+            compliance: Math.round((scorecard.humanity || 18) * 0.6), // Scale 25→15
+            humanity: Math.round((scorecard.humanity || 15) * 0.8), // Scale 25→20
+            intelligence: Math.round((scorecard.intelligence || 10) * 0.5), // Scale 30→15
+            total: Math.round((scorecard.total || 90) * 0.82), // Scale 135→110 approximate
+          },
+          timelineHighlights: (analysis.timelineHighlights || []).map((h: any, i: number) => ({
+            turn: h.turnNumber || i + 1,
+            role: h.speaker === 'agent' ? 'assistant' : 'user',
+            summary: h.summary || '',
+            tag: h.tag || 'unclear',
+          })),
+          objectionReview: {
+            detected: analysis.objectionReview?.details || [],
+            responseQuality: `${analysis.objectionReview?.objectionsHandled || 0}/${analysis.objectionReview?.objectionsIdentified || 0} handled`,
+            betterAlternatives: [],
+          },
+          promptImprovements: (analysis.promptImprovements || []).map((p: string) => ({
+            originalLine: 'Current prompt behavior',
+            replacement: p,
+            reason: 'AI recommendation',
+          })),
+          recommendedPrompt: (analysis.promptImprovements || []).join('\n'),
+          learningNotes: [
+            ...(analysis.executiveSummary?.needsImprovement || []),
+            analysis.nextStepRecommendation || '',
+          ].filter(Boolean),
+          voicemailDiscipline: {
+            passed: analysis.voicemailDiscipline?.passed ?? true,
+            violations: analysis.voicemailDiscipline?.violations || [],
+          },
+          humanityReport: {
+            score: scorecard.humanity || 15,
+            maxScore: 25,
+            passed: (scorecard.humanity || 15) >= 18,
+            issues: analysis.humanityReport?.issues || [],
+          },
+          intelligenceReport: {
+            score: scorecard.intelligence || 20,
+            maxScore: 30,
+            passed: (scorecard.intelligence || 20) >= 20,
+            issues: analysis.intelligenceReport?.insights || [],
+          },
+        };
+        onAnalysisReady(report);
+      } catch (error) {
+        console.error('Server analysis failed, falling back to client:', error);
+        // Fallback to client-side analysis
+        const report = generateEvaluationReport(messages, sessionMemory);
+        onAnalysisReady(report);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    } else {
+      // Use client-side heuristic analysis
+      const report = generateEvaluationReport(messages, sessionMemory);
+      onAnalysisReady(report);
+    }
+  }, [messages, sessionMemory, onAnalysisReady, useServerAnalysis, campaignId, accountId, sessionId]);
+
+  // Save session to leads for conversation intelligence
+  const handleSaveToLeads = useCallback(async () => {
+    if (messages.length < 2 || !campaignId || !accountId) return;
+
+    try {
+      const transcript = messages.map(m => 
+        `${m.role === 'assistant' ? 'Agent' : 'Prospect'}: ${m.content}`
+      ).join('\n');
+
+      const response = await apiRequest('POST', '/api/preview-studio/save-as-lead', {
+        campaignId,
+        accountId,
+        contactId,
+        transcript,
+        sessionId,
+        simulationType: 'text',
+        provider,
+      });
+      const result = await response.json();
+      console.log('Saved to leads:', result);
+      return result;
+    } catch (error) {
+      console.error('Failed to save to leads:', error);
+      throw error;
+    }
+  }, [messages, campaignId, accountId, contactId, sessionId, provider]);
 
   // Reset simulation
   const handleReset = () => {
@@ -278,6 +396,23 @@ export function TextSimulationPanel({
                 </div>
               </div>
 
+              {/* Server Analysis Toggle */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border">
+                <input
+                  type="checkbox"
+                  id="serverAnalysis"
+                  checked={useServerAnalysis}
+                  onChange={(e) => setUseServerAnalysis(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <label htmlFor="serverAnalysis" className="flex-1">
+                  <div className="text-sm font-medium">Use Server AI Analysis</div>
+                  <div className="text-xs text-muted-foreground">
+                    Analyze with Vertex AI (same as production calls) instead of client-side heuristics
+                  </div>
+                </label>
+              </div>
+
               <div className="flex justify-center">
                 <Button size="lg" onClick={handleStartSimulation}>
                   <MessageSquare className="h-4 w-4 mr-2" />
@@ -313,6 +448,7 @@ export function TextSimulationPanel({
                 <CardTitle className="text-base">Text Simulation</CardTitle>
                 <CardDescription className="text-xs">
                   {messages.length} messages - {provider === 'openai' ? 'OpenAI' : 'Gemini'}
+                  {useServerAnalysis && ' (Server AI)'}
                 </CardDescription>
               </div>
             </div>
@@ -322,13 +458,27 @@ export function TextSimulationPanel({
                 Reset
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSaveToLeads}
+                disabled={messages.length < 2}
+                title="Save to Conversation Intelligence for background AI analysis"
+              >
+                <Sparkles className="h-3 w-3 mr-1" />
+                Save to CI
+              </Button>
+              <Button
                 variant="default"
                 size="sm"
                 onClick={handleEndSimulation}
-                disabled={messages.length < 2}
+                disabled={messages.length < 2 || isAnalyzing}
               >
-                <Brain className="h-3 w-3 mr-1" />
-                End & Analyze
+                {isAnalyzing ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Brain className="h-3 w-3 mr-1" />
+                )}
+                {isAnalyzing ? 'Analyzing...' : 'End & Analyze'}
               </Button>
             </div>
           </div>

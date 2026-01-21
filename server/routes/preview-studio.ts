@@ -11,6 +11,7 @@ import {
   accounts,
   contacts,
   campaignAgentAssignments,
+  leads,
   type PreviewStudioSession,
   type PreviewSimulationTranscript,
   type PreviewGeneratedContent,
@@ -23,6 +24,7 @@ import {
   type AccountMessagingBriefPayload,
   type AccountProfileData,
 } from "../services/account-messaging-service";
+import { generateJSON, chat } from "../services/vertex-ai/vertex-client";
 import {
   getOrBuildAccountCallBrief,
   getOrBuildParticipantCallPlan,
@@ -1471,6 +1473,241 @@ router.post("/transcript", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Error adding transcript:", error);
     res.status(500).json({ message: "Failed to add transcript" });
+  }
+});
+
+/**
+ * POST /api/preview-studio/analyze
+ * Server-side AI analysis of Preview Studio conversation using Vertex AI (Gemini)
+ */
+router.post("/analyze", requireAuth, async (req, res) => {
+  try {
+    const { transcript, sessionId, campaignId, contactId } = req.body;
+
+    if (!transcript || (Array.isArray(transcript) && transcript.length === 0)) {
+      return res.status(400).json({ message: "Transcript is required" });
+    }
+
+    console.log(`[Preview Studio AI] Analyzing conversation (${Array.isArray(transcript) ? transcript.length + ' turns' : 'text transcript'})`);
+
+    // Build conversation text from transcript (handle both string and array)
+    let conversationText: string;
+    if (typeof transcript === 'string') {
+      conversationText = transcript;
+    } else {
+      conversationText = transcript.map((t: any) => 
+        `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.content}`
+      ).join('\n');
+    }
+
+    // Get campaign context if available
+    let campaignContext = '';
+    if (campaignId) {
+      try {
+        const [campaign] = await db
+          .select()
+          .from(campaigns)
+          .where(eq(campaigns.id, campaignId))
+          .limit(1);
+        if (campaign) {
+          campaignContext = `
+Campaign: ${campaign.name}
+Objective: ${campaign.campaignObjective || 'Not specified'}
+Product/Service: ${campaign.productService || 'Not specified'}
+`;
+        }
+      } catch (e) {
+        // Ignore campaign lookup errors
+      }
+    }
+
+    // Build AI analysis prompt
+    const analysisPrompt = `You are an expert B2B sales call analyst. Analyze this Preview Studio conversation and provide a comprehensive 135-point evaluation.
+
+${campaignContext ? '## Campaign Context' + campaignContext : ''}
+
+## Conversation Transcript
+${conversationText}
+
+## Analysis Required
+Provide a detailed JSON analysis with the following structure:
+
+{
+  "executiveSummary": {
+    "verdict": "approve" | "needs-edits" | "reject",
+    "whatWentWell": ["list of 2-4 positive points"],
+    "needsImprovement": ["list of 2-4 improvement areas"]
+  },
+  "scorecard": {
+    "voicemail": number (0-10),
+    "humanity": number (0-25),
+    "intelligence": number (0-30),
+    "objectionHandling": number (0-35),
+    "closing": number (0-35),
+    "total": number (0-135)
+  },
+  "voicemailDiscipline": {
+    "passed": boolean,
+    "violations": ["list of any voicemail-related violations"]
+  },
+  "humanityReport": {
+    "gratitudeExpressions": number,
+    "warmClosing": boolean,
+    "professionalTone": boolean,
+    "issues": ["list of any humanity/professionalism issues"]
+  },
+  "intelligenceReport": {
+    "questionQuality": "excellent" | "good" | "fair" | "poor",
+    "activeListening": boolean,
+    "contextualResponses": boolean,
+    "insights": ["key intelligence gathering observations"]
+  },
+  "objectionReview": {
+    "objectionsIdentified": number,
+    "objectionsHandled": number,
+    "handlingQuality": "excellent" | "good" | "fair" | "poor",
+    "details": ["specific objection handling observations"]
+  },
+  "timelineHighlights": [
+    {
+      "turnNumber": number,
+      "tag": "good-move" | "missed-opportunity" | "risk" | "unclear",
+      "speaker": "agent" | "contact",
+      "summary": "brief description of what happened",
+      "recommendation": "what should have been done differently (if applicable)"
+    }
+  ],
+  "promptImprovements": ["list of 2-4 specific prompt improvement suggestions"],
+  "conversationQuality": {
+    "overall": "excellent" | "good" | "fair" | "poor",
+    "engagement": number (1-10),
+    "clarity": number (1-10),
+    "persuasiveness": number (1-10)
+  },
+  "nextStepRecommendation": "string describing recommended next action"
+}
+
+Analyze the conversation thoroughly and return ONLY valid JSON.`;
+
+    // Call Vertex AI for analysis
+    const aiAnalysis = await generateJSON<any>(analysisPrompt, {
+      temperature: 0.3,
+      maxTokens: 4000,
+    });
+
+    console.log(`[Preview Studio AI] Analysis complete. Score: ${aiAnalysis.scorecard?.total || 'N/A'}/135`);
+
+    res.json({
+      success: true,
+      analysis: aiAnalysis,
+      source: 'vertex-ai',
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error: any) {
+    console.error("[Preview Studio AI] Analysis error:", error);
+    res.status(500).json({ 
+      message: "Failed to analyze conversation", 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * POST /api/preview-studio/save-as-lead
+ * Save Preview Studio session as a lead for conversation intelligence tracking
+ */
+router.post("/save-as-lead", requireAuth, async (req, res) => {
+  try {
+    const { 
+      sessionId, 
+      campaignId, 
+      contactId, 
+      transcript, 
+      analysis,
+      disposition = 'preview-test',
+      notes 
+    } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ message: "Campaign ID is required" });
+    }
+
+    console.log(`[Preview Studio] Saving session as lead for campaign: ${campaignId}`);
+
+    // Build transcript text if array provided
+    let transcriptText = '';
+    if (Array.isArray(transcript)) {
+      transcriptText = transcript.map((t: any) => 
+        `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.content}`
+      ).join('\n');
+    } else if (typeof transcript === 'string') {
+      transcriptText = transcript;
+    }
+
+    // Get contact details if provided
+    let contactName = 'Preview Test Contact';
+    let contactEmail = '';
+    if (contactId) {
+      try {
+        const [contact] = await db
+          .select()
+          .from(contacts)
+          .where(eq(contacts.id, contactId))
+          .limit(1);
+        if (contact) {
+          contactName = contact.fullName || 
+            `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || 
+            'Preview Test Contact';
+          contactEmail = contact.email || '';
+        }
+      } catch (e) {
+        // Ignore contact lookup errors
+      }
+    }
+
+    // Generate unique lead ID
+    const leadId = `preview-${sessionId || Date.now()}`;
+
+    // Create lead record
+    const [lead] = await db.insert(leads).values({
+      id: leadId,
+      contactId: contactId || undefined,
+      contactName,
+      contactEmail,
+      campaignId,
+      dialedNumber: '',
+      notes: `[Preview Studio Test - ${disposition}]${notes ? '\n\n' + notes : ''}${analysis?.executiveSummary ? '\n\nAnalysis Summary:\nVerdict: ' + analysis.executiveSummary.verdict + '\nScore: ' + (analysis.scorecard?.total || 'N/A') + '/135' : ''}`,
+      transcript: transcriptText,
+      transcriptionStatus: transcriptText ? 'completed' : 'pending',
+      qaStatus: 'new',
+      accountName: '',
+      customFields: {
+        previewStudioSession: true,
+        sessionId: sessionId,
+        analysisScore: analysis?.scorecard?.total,
+        analysisVerdict: analysis?.executiveSummary?.verdict,
+        aiAnalysis: analysis,
+      },
+      aiScore: analysis?.scorecard?.total,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).onConflictDoNothing().returning();
+
+    console.log(`[Preview Studio] Created lead from session: ${leadId}`);
+
+    res.json({
+      success: true,
+      leadId: lead?.id || leadId,
+      message: "Session saved as lead for conversation intelligence tracking",
+    });
+
+  } catch (error: any) {
+    console.error("[Preview Studio] Error saving as lead:", error);
+    res.status(500).json({ 
+      message: "Failed to save session as lead", 
+      error: error.message 
+    });
   }
 });
 

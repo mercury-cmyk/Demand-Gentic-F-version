@@ -4,6 +4,7 @@ import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schem
 import { eq } from "drizzle-orm";
 import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { generateJSON, chat } from "../vertex-ai/vertex-client";
 
 // Lazy DeepSeek client – instantiate only when needed and when credentials exist
 let _deepseekClient: OpenAI | null = null;
@@ -189,27 +190,26 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       analysisPrompt = buildAnalysisPrompt(lead, contact, account, campaign, qaParams, existingQaData);
     }
 
-    // Call DeepSeek for analysis (cost-effective, reliable over public API)
-    const deepseek = getDeepSeekClient();
+    // Use Vertex AI (Gemini) for analysis - no external API keys needed
     const systemPrompt = await buildAgentSystemPrompt(
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    const result = await deepseek.chat.completions.create({
-      model: process.env.AI_QA_DEEPSEEK_MODEL || "deepseek-chat",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: analysisPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 2000,
-      response_format: { type: "json_object" },
-    });
-
-    const analysisText = result.choices[0]?.message?.content?.trim();
-    if (!analysisText) return null;
-
-    let rawAnalysis: any = JSON.parse(analysisText);
+    const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+    
+    let rawAnalysis: any;
+    try {
+      rawAnalysis = await generateJSON<any>(fullPrompt, {
+        temperature: 0.3,
+        maxTokens: 2000,
+      });
+    } catch (parseError) {
+      console.error('[AI-QA] Failed to parse Gemini response as JSON, retrying with explicit instruction');
+      // Retry with more explicit JSON instruction
+      const retryPrompt = `${fullPrompt}\n\nIMPORTANT: Your response MUST be valid JSON only. No markdown, no explanation, just the JSON object.`;
+      const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
+      rawAnalysis = JSON.parse(textResponse);
+    }
 
     // Normalize response format (dynamic prompts return ai_score/ai_qualification_status, legacy returns score/qualification_status)
     const normalizedAnalysis: AIAnalysisResult = {
