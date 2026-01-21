@@ -59,6 +59,8 @@ type CallStatsResponse = {
   leadsQualified: number;
   dncRequests: number;
   notInterested: number;
+  noAnswer: number;
+  voicemail: number;
 };
 
 export default function CampaignsPage() {
@@ -138,6 +140,8 @@ export default function CampaignsPage() {
                 leadsQualified: callStats.leadsQualified || 0,
                 dncRequests: callStats.dncRequests || 0,
                 notInterested: callStats.notInterested || 0,
+                noAnswer: callStats.noAnswer || 0,
+                voicemail: callStats.voicemail || 0,
               };
             }
           }

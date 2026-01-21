@@ -54,6 +54,8 @@ type CallStatsResponse = {
   leadsQualified: number;
   dncRequests: number;
   notInterested: number;
+  noAnswer: number;
+  voicemail: number;
 };
 
 export default function PhoneCampaignsPage() {
@@ -115,6 +117,8 @@ export default function PhoneCampaignsPage() {
               leadsQualified: callStats.leadsQualified || 0,
               dncRequests: callStats.dncRequests || 0,
               notInterested: callStats.notInterested || 0,
+              noAnswer: callStats.noAnswer || 0,
+              voicemail: callStats.voicemail || 0,
             };
           }
           return [campaign.id, snapshot] as const;

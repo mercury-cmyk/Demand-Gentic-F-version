@@ -4959,14 +4959,42 @@ export function registerRoutes(app: Express) {
         .leftJoin(callSessions, eq(dialerCallAttempts.callSessionId, callSessions.id))
         .where(eq(dialerCallAttempts.campaignId, campaignId));
 
+      // AI Agent calls: query call_sessions directly for AI agent calls
+      // These are calls made by the AI agent that may not have dialer_call_attempts entries
+      // Calls Connected = someone actually answered (excludes no_answer, voicemail, invalid_data, busy, failed)
+      const [aiCallStats] = await db
+        .select({
+          callsMade: sql<number>`COUNT(*)::int`,
+          // Calls Connected = NOT (no_answer, voicemail, invalid_data, busy, failed, cancelled)
+          // i.e., someone picked up the phone and there was a conversation
+          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} NOT IN (
+            'no_answer', 'voicemail', 'invalid_data', 'busy', 'failed', 'cancelled', 'machine_detected'
+          ) AND ${callSessions.aiDisposition} IS NOT NULL THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('dnc', 'do_not_call') THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
+          noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
+        })
+        .from(callSessions)
+        .where(eq(callSessions.campaignId, campaignId));
+
+      // Use AI call stats as primary source since they represent actual calls made
+      // Legacy and dialer stats are for backward compatibility with older call flows
+      const totalCallsMade = aiCallStats?.callsMade || 0;
+
       res.json({
         campaignId,
         contactsInQueue: queueStats.queued,
-        callsMade: (legacyStats?.callsMade || 0) + (dialerStats?.callsMade || 0),
-        callsConnected: (legacyStats?.callsConnected || 0) + (dialerStats?.callsConnected || 0),
-        leadsQualified: (legacyStats?.leadsQualified || 0) + (dialerStats?.leadsQualified || 0),
-        dncRequests: (legacyStats?.dncRequests || 0) + (dialerStats?.dncRequests || 0),
-        notInterested: (legacyStats?.notInterested || 0) + (dialerStats?.notInterested || 0),
+        callsMade: totalCallsMade > 0 ? totalCallsMade : (legacyStats?.callsMade || 0) + (dialerStats?.callsMade || 0),
+        callsConnected: (aiCallStats?.callsConnected || 0) > 0 
+          ? aiCallStats.callsConnected 
+          : (legacyStats?.callsConnected || 0) + (dialerStats?.callsConnected || 0),
+        leadsQualified: (aiCallStats?.leadsQualified || 0) + (legacyStats?.leadsQualified || 0) + (dialerStats?.leadsQualified || 0),
+        dncRequests: (aiCallStats?.dncRequests || 0) + (legacyStats?.dncRequests || 0) + (dialerStats?.dncRequests || 0),
+        notInterested: (aiCallStats?.notInterested || 0) + (legacyStats?.notInterested || 0) + (dialerStats?.notInterested || 0),
+        noAnswer: aiCallStats?.noAnswer || 0,
+        voicemail: aiCallStats?.voicemail || 0,
         timestamp: Date.now(), // Real-time verification
       });
     } catch (error) {

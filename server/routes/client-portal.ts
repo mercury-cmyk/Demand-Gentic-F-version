@@ -1607,6 +1607,47 @@ router.get('/admin/orders', requireAuth, requireRole('admin', 'campaign_manager'
 
 router.get('/admin/orders/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
+    // First try to find in clientProjects (new campaign request system)
+    const [project] = await db
+      .select({
+        project: clientProjects,
+        client: clientAccounts,
+      })
+      .from(clientProjects)
+      .innerJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+      .where(eq(clientProjects.id, req.params.id))
+      .limit(1);
+
+    if (project) {
+      // Return project as order-like structure
+      return res.json({
+        order: {
+          id: project.project.id,
+          orderNumber: project.project.projectCode || `CR-${project.project.id.substring(0, 8).toUpperCase()}`,
+          status: project.project.status,
+          requestedQuantity: project.project.requestedLeadCount || 0,
+          approvedQuantity: null,
+          deliveredQuantity: 0,
+          ratePerLead: project.project.ratePerLead,
+          clientNotes: project.project.description,
+          adminNotes: null,
+          landingPageUrl: project.project.landingPageUrl,
+          projectFileUrl: project.project.projectFileUrl,
+          createdAt: project.project.createdAt,
+          updatedAt: project.project.updatedAt,
+          submittedAt: project.project.createdAt,
+          isProjectBased: true, // Flag to indicate this is from client_projects
+        },
+        client: project.client,
+        campaign: {
+          id: null,
+          name: project.project.name,
+        },
+        contacts: [], // Projects don't have pre-selected contacts
+      });
+    }
+
+    // Fallback to legacy clientPortalOrders
     const [order] = await db
       .select({
         order: clientPortalOrders,
@@ -1645,8 +1686,34 @@ router.get('/admin/orders/:id', requireAuth, requireRole('admin', 'campaign_mana
 
 router.patch('/admin/orders/:id/approve', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
-    const { approvedQuantity, adminNotes } = req.body;
+    const { approvedQuantity, adminNotes, costPerLead } = req.body;
 
+    // First check if this is a project-based order
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, req.params.id))
+      .limit(1);
+
+    if (project) {
+      // Update project status to approved/active with CPL
+      const [updated] = await db
+        .update(clientProjects)
+        .set({
+          status: 'active',
+          ratePerLead: costPerLead ? String(costPerLead) : project.ratePerLead,
+          updatedAt: new Date(),
+        })
+        .where(eq(clientProjects.id, req.params.id))
+        .returning();
+
+      return res.json({
+        ...updated,
+        message: 'Campaign request approved and activated',
+      });
+    }
+
+    // Fallback to legacy order system
     const [order] = await db
       .select()
       .from(clientPortalOrders)
@@ -1692,6 +1759,31 @@ router.patch('/admin/orders/:id/reject', requireAuth, requireRole('admin', 'camp
   try {
     const { rejectionReason } = req.body;
 
+    // First check if this is a project-based order
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, req.params.id))
+      .limit(1);
+
+    if (project) {
+      // Update project status to rejected
+      const [updated] = await db
+        .update(clientProjects)
+        .set({
+          status: 'rejected',
+          updatedAt: new Date(),
+        })
+        .where(eq(clientProjects.id, req.params.id))
+        .returning();
+
+      return res.json({
+        ...updated,
+        message: 'Campaign request rejected',
+      });
+    }
+
+    // Fallback to legacy order system
     const [order] = await db
       .select()
       .from(clientPortalOrders)

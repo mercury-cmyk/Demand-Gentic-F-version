@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Check, X, Download, Edit2, MessageSquare, FileText, Send, Package } from 'lucide-react';
+import { ArrowLeft, Check, X, Download, Edit2, MessageSquare, FileText, Send, Package, DollarSign } from 'lucide-react';
 
 export default function ClientPortalOrderDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +22,7 @@ export default function ClientPortalOrderDetail() {
   const [showFulfill, setShowFulfill] = useState(false);
   const [showEditContact, setShowEditContact] = useState<any>(null);
   const [approvedQuantity, setApprovedQuantity] = useState<number | null>(null);
+  const [costPerLead, setCostPerLead] = useState<number | null>(null);
   const [adminNotes, setAdminNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [editedData, setEditedData] = useState<Record<string, string>>({});
@@ -35,6 +36,7 @@ export default function ClientPortalOrderDetail() {
     mutationFn: async () => {
       return apiRequest('PATCH', `/api/client-portal/admin/orders/${id}/approve`, {
         approvedQuantity: approvedQuantity || orderData?.order?.requestedQuantity,
+        costPerLead,
         adminNotes,
       });
     },
@@ -213,9 +215,9 @@ export default function ClientPortalOrderDetail() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {order.status === 'submitted' && (
+              {['submitted', 'pending'].includes(order.status) && (
                 <>
-                  <Button onClick={() => { setApprovedQuantity(order.requestedQuantity); setShowApprove(true); }} data-testid="button-approve">
+                  <Button onClick={() => { setApprovedQuantity(order.requestedQuantity); setCostPerLead(order.ratePerLead || null); setShowApprove(true); }} data-testid="button-approve">
                     <Check className="h-4 w-4 mr-2" />
                     Approve
                   </Button>
@@ -308,9 +310,26 @@ export default function ClientPortalOrderDetail() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Approve Order</DialogTitle>
-            <DialogDescription>Set the approved quantity and add notes</DialogDescription>
+            <DialogDescription>Set the CPL rate, approved quantity and add notes</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <Label>Cost Per Lead (CPL) *</Label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g. 25.00"
+                  className="pl-9"
+                  value={costPerLead ?? ''}
+                  onChange={(e) => setCostPerLead(e.target.value ? parseFloat(e.target.value) : null)}
+                  data-testid="input-cost-per-lead"
+                />
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">Set the rate per qualified lead for billing</p>
+            </div>
             <div>
               <Label>Approved Quantity</Label>
               <Input
@@ -332,7 +351,7 @@ export default function ClientPortalOrderDetail() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowApprove(false)}>Cancel</Button>
-            <Button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} data-testid="button-confirm-approve">
+            <Button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending || !costPerLead} data-testid="button-confirm-approve">
               {approveMutation.isPending ? 'Approving...' : 'Approve'}
             </Button>
           </DialogFooter>
