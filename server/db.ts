@@ -10,42 +10,49 @@ import * as schema from "../shared/schema.ts";
 
 neonConfig.webSocketConstructor = ws;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+// Get DATABASE_URL - don't throw immediately, allow server to start for healthcheck
+let databaseUrl = process.env.DATABASE_URL || '';
+let dbConfigError: string | null = null;
+
+if (!databaseUrl) {
+  dbConfigError = "DATABASE_URL must be set. Did you forget to provision a database?";
+  console.error(`❌ ${dbConfigError}`);
+  console.error("   Server will start but database operations will fail.");
+  // Use a placeholder to prevent null errors during module init
+  // Actual DB operations will fail with clear error messages
+  databaseUrl = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
 }
 
 // PRODUCTION DATABASE OVERRIDE
 // Workaround for Replit deployment secret bug - allow overriding production database URL
 // This bypasses the deployment secret that keeps reverting to an outdated database value
-let databaseUrl = process.env.DATABASE_URL;
-
-if (process.env.REPLIT_DEPLOYMENT === '1') {
+if (!dbConfigError && process.env.REPLIT_DEPLOYMENT === '1') {
   // Running in production deployment - use deployment-provided production database URL
   const productionDbUrl = process.env.REPLIT_PRODUCTION_DATABASE_URL;
 
   if (!productionDbUrl) {
-    throw new Error(
-      'REPLIT_PRODUCTION_DATABASE_URL must be set when REPLIT_DEPLOYMENT=1'
-    );
+    dbConfigError = 'REPLIT_PRODUCTION_DATABASE_URL must be set when REPLIT_DEPLOYMENT=1';
+    console.error(`❌ ${dbConfigError}`);
+  } else {
+    console.log('[DB] Production deployment detected - using override database URL');
+    const endpoint = productionDbUrl.match(/ep-[^.]+/)?.[0] ?? 'unknown';
+    console.log(`[DB] Target database: ${endpoint} (Production)`);
+    databaseUrl = productionDbUrl;
   }
-
-  console.log('[DB] Production deployment detected - using override database URL');
-  const endpoint = productionDbUrl.match(/ep-[^.]+/)?.[0] ?? 'unknown';
-  console.log(`[DB] Target database: ${endpoint} (Production)`);
-  databaseUrl = productionDbUrl;
-} else {
+} else if (!dbConfigError) {
   console.log('[DB] Development mode - using DATABASE_URL from environment');
   console.log('[DB] Database endpoint:', databaseUrl.match(/ep-[^.]+/)?.[0] || 'unknown');
 }
+
+// Export config error for health checks
+export { dbConfigError };
 
 // Ensure DATABASE_URL uses Neon's connection pooler for high concurrency
 // This prevents "too many connections" errors by using pooling infrastructure
 // Only add -pooler if it's not already present
 const hasPooler = databaseUrl.includes('-pooler');
 
-if (!hasPooler) {
+if (!hasPooler && !dbConfigError) {
   // Replace .region.neon.tech with -pooler.region.neon.tech
   databaseUrl = databaseUrl.replace(
     /\.([a-z0-9-]+)\.neon\.tech/,
@@ -53,7 +60,9 @@ if (!hasPooler) {
   );
 }
 
-console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
+if (!dbConfigError) {
+  console.log('[DB] Using Neon connection pooler:', hasPooler ? 'YES (already configured)' : 'YES (added -pooler)');
+}
 
 const parseEnvInt = (value: string | undefined, fallback: number, allowZero = false) => {
   const parsed = Number(value);
