@@ -123,13 +123,43 @@ async function initializeRedisConnection(): Promise<IORedis | undefined> {
   }
 }
 
-// Perform top-level await for connection
-try {
-  redisConnection = await initializeRedisConnection();
-} catch (err) {
-  console.error('[Queue] Top-level Redis initialization failed:', err);
-  redisConnection = undefined;
+// Connection initialization state
+let connectionInitialized = false;
+let connectionInitPromise: Promise<IORedis | undefined> | null = null;
+
+/**
+ * Initialize Redis connection (called on first queue access, not at module load)
+ * This is non-blocking to allow server to start before Redis connects
+ */
+async function ensureRedisInitialized(): Promise<IORedis | undefined> {
+  if (connectionInitialized) {
+    return redisConnection;
+  }
+  
+  if (connectionInitPromise) {
+    return connectionInitPromise;
+  }
+  
+  connectionInitPromise = initializeRedisConnection();
+  try {
+    redisConnection = await connectionInitPromise;
+    connectionInitialized = true;
+    return redisConnection;
+  } catch (err) {
+    console.error('[Queue] Redis initialization failed:', err);
+    connectionInitialized = true; // Mark as initialized (to failed state)
+    redisConnection = undefined;
+    return undefined;
+  }
 }
+
+// Start Redis initialization in background (non-blocking)
+// This allows module to load without waiting for Redis
+setImmediate(() => {
+  ensureRedisInitialized().catch((err) => {
+    console.error('[Queue] Background Redis initialization failed:', err);
+  });
+});
 
 /**
  * Get connection options for BullMQ that suppress eviction policy warnings
@@ -149,6 +179,14 @@ export function getRedisConnection(): IORedis | undefined {
     return undefined;
   }
   return redisConnection;
+}
+
+/**
+ * Async version of getRedisConnection that waits for initialization
+ */
+export async function getRedisConnectionAsync(): Promise<IORedis | undefined> {
+  await ensureRedisInitialized();
+  return getRedisConnection();
 }
 
 /**

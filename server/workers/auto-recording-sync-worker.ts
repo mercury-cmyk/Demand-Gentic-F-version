@@ -9,11 +9,26 @@ import { submitTranscription, submitStructuredTranscription } from '../services/
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 
-const connection = new Redis(getRedisUrl(), {
-  ...getRedisConnectionOptions(),
-  maxRetriesPerRequest: null,
-});
-connection.on('error', () => {});
+// Lazy Redis connection - only connect when worker is actually used
+let connection: Redis | null = null;
+
+function getConnection(): Redis {
+  if (!connection) {
+    const redisUrl = getRedisUrl();
+    if (!redisUrl) {
+      throw new Error('[AutoRecordingSyncWorker] Redis URL not configured');
+    }
+    connection = new Redis(redisUrl, {
+      ...getRedisConnectionOptions(),
+      maxRetriesPerRequest: null,
+      lazyConnect: true, // Don't connect until first command
+    });
+    connection.on('error', (err) => {
+      console.error('[AutoRecordingSyncWorker] Redis connection error:', err.message);
+    });
+  }
+  return connection;
+}
 
 /**
  * Fetch recording from Telnyx
@@ -158,8 +173,23 @@ async function transcribeWithSpeakers(
   }
 }
 
-// Create worker
-export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
+// Worker instance - created lazily to avoid blocking module load
+let autoRecordingSyncWorker: Worker<AutoRecordingSyncJobData> | null = null;
+
+// Initialize worker (call this after server starts)
+export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJobData> | null {
+  if (autoRecordingSyncWorker) {
+    return autoRecordingSyncWorker;
+  }
+
+  const redisUrl = getRedisUrl();
+  if (!redisUrl) {
+    console.log('[AutoRecordingSyncWorker] Redis not configured, worker disabled');
+    return null;
+  }
+
+  try {
+    autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
   'auto-recording-sync',
   async (job) => {
     const { leadId, callAttemptId, contactFirstName, telnyxCallId, dialedNumber } = job.data;
@@ -319,17 +349,26 @@ export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
     }
   },
   {
-    connection,
+    connection: getConnection(),
     concurrency: 5, // Process up to 5 jobs concurrently
   }
 );
 
-autoRecordingSyncWorker.on('error', (err) => {
-  // Suppress Redis connection errors - they're expected when Redis is unavailable
-  if (err.code === 'ECONNREFUSED' || err.message?.includes('ECONNREFUSED')) {
-    return; // Silent - Redis is optional
-  }
-  console.error('[AutoRecordingSyncWorker] Worker error:', err);
-});
+    autoRecordingSyncWorker.on('error', (err) => {
+      // Suppress Redis connection errors - they're expected when Redis is unavailable
+      if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message?.includes('ECONNREFUSED') || err.message?.includes('ETIMEDOUT')) {
+        return; // Silent - Redis connection issues are handled with reconnection
+      }
+      console.error('[AutoRecordingSyncWorker] Worker error:', err);
+    });
 
-console.log('[AutoRecordingSyncWorker] Worker started successfully');
+    console.log('[AutoRecordingSyncWorker] Worker initialized successfully');
+    return autoRecordingSyncWorker;
+  } catch (error) {
+    console.error('[AutoRecordingSyncWorker] Failed to initialize worker:', error);
+    return null;
+  }
+}
+
+// Export the worker getter for compatibility
+export { autoRecordingSyncWorker };

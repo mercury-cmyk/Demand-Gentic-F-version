@@ -108,36 +108,93 @@ app.use((req, res, next) => {
   // WebSocket upgrades will be handled separately via server.on('upgrade')
   const server = createServer(app);
 
+  // CRITICAL: Start listening FIRST so Cloud Run health check passes
+  // Cloud Run requires the container to listen on PORT within the startup timeout
+  // All other initialization happens AFTER the server is listening
+  const port = parseInt(process.env.PORT || '8080', 10);
+  const host = process.env.HOST || '0.0.0.0';
+
+  await new Promise<void>((resolve) => {
+    server.listen({ port, host }, () => {
+      log(`Server listening on http://${host}:${port} - starting initialization...`);
+      resolve();
+    });
+  });
+
+  // CRITICAL: Register routes IMMEDIATELY after listening so health check endpoint works
+  // This must happen before any potentially slow initialization
+  registerRoutes(app);
+
+  // Add error handler after routes
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+    console.error('[Express Error]', err);
+    if (!res.headersSent) {
+      res.status(status).json({ message });
+    }
+  });
+
+  log('Routes registered - health check available at /api/health');
+
+  // Now initialize everything else (after server is listening and health check is available)
+  // This ensures health checks pass even if initialization is slow
+
   // Initialize database with default admin if needed
-  await initializeDatabase();
+  try {
+    await initializeDatabase();
+  } catch (err) {
+    console.error('[STARTUP] Database initialization failed (non-blocking):', err);
+  }
 
   // Initialize Agent Infrastructure (Core Email & Voice Agents, Governance)
-  const { initializeAgentInfrastructure } = await import("./services/agents");
-  initializeAgentInfrastructure();
+  try {
+    const { initializeAgentInfrastructure } = await import("./services/agents");
+    initializeAgentInfrastructure();
+  } catch (err) {
+    console.error('[STARTUP] Agent infrastructure initialization failed (non-blocking):', err);
+  }
 
-  // Initialize WebSocket servers BEFORE starting server and Express middleware evaluation
-  // This ensures upgrade requests bypass Express routing
-  const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");
-  const mediaWss = initializeAiMediaStreaming(server);
+  // Initialize WebSocket servers for real-time communication
+  // Wrapped in try-catch to ensure failures don't prevent server startup
+  let mediaWss: any = null;
+  let voiceDialerWss: any = null;
+  let campaignRunnerWss: any = null;
+  let handleGeminiLiveConnection: any = null;
 
-  // Initialize Voice Dialer for AI calling (Gemini + OpenAI) with disposition detection
-  // Note: WebSocketServer needs server reference but path-based routing won't work with
-  // Express. We manually handle the upgrade event instead.
-  const { initializeVoiceDialer } = await import("./services/voice-dialer");
-  const voiceDialerWss = initializeVoiceDialer(server);
-  voiceDialerWss.on('error', (err) => {
-    console.error('[WebSocket Upgrade] Voice Dialer WSS error:', err);
-  });
+  try {
+    const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");
+    mediaWss = initializeAiMediaStreaming(server);
+  } catch (err) {
+    console.error('[STARTUP] AI Media Streaming initialization failed (non-blocking):', err);
+  }
 
-  // Initialize Gemini Live Dialer
-  const { handleGeminiLiveConnection } = await import("./services/gemini-live-dialer");
+  try {
+    const { initializeVoiceDialer } = await import("./services/voice-dialer");
+    voiceDialerWss = initializeVoiceDialer(server);
+    voiceDialerWss?.on('error', (err: Error) => {
+      console.error('[WebSocket Upgrade] Voice Dialer WSS error:', err);
+    });
+  } catch (err) {
+    console.error('[STARTUP] Voice Dialer initialization failed (non-blocking):', err);
+  }
 
-  // Initialize Campaign Runner WebSocket for browser-based WebRTC calling
-  const { initializeCampaignRunnerWS } = await import("./services/campaign-runner-ws");
-  const campaignRunnerWss = initializeCampaignRunnerWS(server);
-  campaignRunnerWss.on('error', (err) => {
-    console.error('[WebSocket Upgrade] Campaign Runner WSS error:', err);
-  });
+  try {
+    const geminiModule = await import("./services/gemini-live-dialer");
+    handleGeminiLiveConnection = geminiModule.handleGeminiLiveConnection;
+  } catch (err) {
+    console.error('[STARTUP] Gemini Live Dialer initialization failed (non-blocking):', err);
+  }
+
+  try {
+    const { initializeCampaignRunnerWS } = await import("./services/campaign-runner-ws");
+    campaignRunnerWss = initializeCampaignRunnerWS(server);
+    campaignRunnerWss?.on('error', (err: Error) => {
+      console.error('[WebSocket Upgrade] Campaign Runner WSS error:', err);
+    });
+  } catch (err) {
+    console.error('[STARTUP] Campaign Runner WS initialization failed (non-blocking):', err);
+  }
 
   // Initialize Log Streaming Service (optional - requires GCP Pub/Sub permissions)
   // Disabled by default since cloud-logs API endpoints work without it
@@ -173,18 +230,29 @@ app.use((req, res, next) => {
 
     if (pathname === '/voice-dialer') {
       console.log('[WebSocket Upgrade] Handling Voice Dialer connection');
-      
+
+      if (!voiceDialerWss) {
+        console.warn('[WebSocket Upgrade] Voice Dialer not initialized');
+        socket.destroy();
+        return;
+      }
       try {
-        voiceDialerWss.handleUpgrade(req, socket as any, head, (ws) => {
+        voiceDialerWss.handleUpgrade(req, socket as any, head, (ws: any) => {
           console.log('[WebSocket Upgrade] ✅ Voice Dialer connection established');
           voiceDialerWss.emit('connection', ws, req);
         });
       } catch (error) {
         console.error('[WebSocket Upgrade] Exception in handleUpgrade:', error);
+        socket.destroy();
       }
     } else if (pathname === '/gemini-live-dialer') {
       console.log('[WebSocket Upgrade] Handling Gemini Live Dialer connection');
-      
+
+      if (!handleGeminiLiveConnection) {
+        console.warn('[WebSocket Upgrade] Gemini Live Dialer not initialized');
+        socket.destroy();
+        return;
+      }
       const { WebSocketServer } = require('ws');
       const geminiWss = new WebSocketServer({ noServer: true });
       geminiWss.handleUpgrade(req, socket as any, head, (ws: WsWebSocket) => {
@@ -193,15 +261,25 @@ app.use((req, res, next) => {
       });
     } else if (pathname === '/ai-media-stream') {
       console.log('[WebSocket Upgrade] Handling AI Media Stream connection');
-      
-      mediaWss.handleUpgrade(req, socket as any, head, (ws) => {
+
+      if (!mediaWss) {
+        console.warn('[WebSocket Upgrade] AI Media Stream not initialized');
+        socket.destroy();
+        return;
+      }
+      mediaWss.handleUpgrade(req, socket as any, head, (ws: any) => {
         console.log('[WebSocket Upgrade] ✅ AI Media Stream connection established');
         mediaWss.emit('connection', ws, req);
       });
     } else if (pathname === '/campaign-runner') {
       console.log('[WebSocket Upgrade] Handling Campaign Runner connection');
-      
-      campaignRunnerWss.handleUpgrade(req, socket as any, head, (ws) => {
+
+      if (!campaignRunnerWss) {
+        console.warn('[WebSocket Upgrade] Campaign Runner not initialized');
+        socket.destroy();
+        return;
+      }
+      campaignRunnerWss.handleUpgrade(req, socket as any, head, (ws: any) => {
         console.log('[WebSocket Upgrade] ✅ Campaign Runner connection established');
         campaignRunnerWss.emit('connection', ws, req);
       });
@@ -298,7 +376,15 @@ app.use((req, res, next) => {
   
   // Initialize auto recording sync worker (BullMQ)
   if (hasRedis) {
-    await import("./workers/auto-recording-sync-worker");
+    const { initializeAutoRecordingSyncWorker } = await import("./workers/auto-recording-sync-worker");
+    // Initialize in background, don't block server startup
+    setImmediate(() => {
+      try {
+        initializeAutoRecordingSyncWorker();
+      } catch (err) {
+        console.error('[AutoRecordingSyncWorker] Background init failed:', err);
+      }
+    });
   }
   
   // Initialize AI Campaign Orchestrator (BullMQ) - maintains call concurrency for ai_agent campaigns
@@ -424,20 +510,9 @@ app.use((req, res, next) => {
     console.log("   Set REDIS_URL or REDIS_URL_PROD to enable Redis.");
   }
   console.log("=".repeat(70) + "\n");
-  
-  registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    
-    // Log the error but don't crash the server
-    console.error('[Express Error]', err);
-
-    if (!res.headersSent) {
-      res.status(status).json({ message });
-    }
-  });
+  // Routes and error handler were already registered at startup (lines 124-136)
+  // to ensure health check endpoint is available immediately
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
@@ -453,15 +528,7 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Cloud Run automatically sets PORT=8080
-  // For local dev, default to 8080
-  const port = parseInt(process.env.PORT || '8080', 10);
-  const host = process.env.HOST || '0.0.0.0';
-  server.listen({
-    port,
-    host,
-  }, () => {
-    log(`serving on http://${host}:${port}`);
-  });
+  // Server is already listening (started at the beginning)
+  // Log that all initialization is complete
+  log(`Initialization complete - server ready on http://${host}:${port}`);
 })();
