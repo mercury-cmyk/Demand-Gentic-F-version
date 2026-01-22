@@ -11,31 +11,14 @@ import { storage } from "../storage";
 
 const router = Router();
 const LOG_PREFIX = "[Telnyx-WebRTC]";
-const DEFAULT_WS_SERVER = "wss://rtc.telnyx.com:14938";
-
-const normalizeWsServer = (value?: string): string => {
-  if (!value) return DEFAULT_WS_SERVER;
-  try {
-    const url = new URL(value);
-    if (url.hostname.toLowerCase() === "sip.telnyx.com") {
-      url.hostname = "rtc.telnyx.com";
-    }
-    if (!url.port) {
-      url.port = "14938";
-    }
-    url.protocol = "wss:";
-    return url.toString();
-  } catch (_error) {
-    return DEFAULT_WS_SERVER;
-  }
-};
+// NOTE: The Telnyx SDK handles signaling internally - we don't expose wsServer to clients
+// The SDK connects to the appropriate signaling server automatically
 
 interface TelnyxWebRTCCredentials {
   username: string;
   password: string;
   callerIdNumber?: string;
   callerIdName?: string;
-  wsServer?: string;
 }
 
 /**
@@ -50,13 +33,7 @@ router.get("/credentials", requireAuth, async (req: Request, res: Response) => {
     let username: string | undefined;
     let password: string | undefined;
     let callerIdNumber: string | undefined;
-    // Prefer explicit websocket endpoint for clients (default to Telnyx SIP signaling port 14938)
-    const wsServer = normalizeWsServer(
-      process.env.TELNYX_WEBRTC_WEBSOCKET
-      || process.env.VITE_REACT_APP_SIP_WEBSOCKET
-      || process.env.TELNYX_WS_SERVER
-      || DEFAULT_WS_SERVER
-    );
+    // NOTE: The Telnyx SDK handles signaling automatically - no wsServer needed
 
     // PRIORITY 1: Use environment variables for WebRTC (WebRTC credentials are different from SIP trunk)
     username = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
@@ -88,7 +65,6 @@ router.get("/credentials", requireAuth, async (req: Request, res: Response) => {
       password,
       callerIdNumber,
       callerIdName: (req as any).user?.username || 'Agent',
-      wsServer,
     };
 
     return res.json(credentials);

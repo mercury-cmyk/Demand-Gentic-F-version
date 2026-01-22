@@ -17,10 +17,27 @@ export function serveStatic(app: Express) {
     return;
   }
 
+  const indexPath = path.resolve(distPath, "index.html");
   console.log(`[Static] Serving static files from: ${distPath}`);
+  console.log(`[Static] Index.html exists: ${fs.existsSync(indexPath)}`);
+  
+  // Serve static assets (js, css, images, etc.)
   app.use(express.static(distPath));
 
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  // SPA fallback - serve index.html for all non-API routes
+  // This enables client-side routing for React Router
+  app.get("*", (req, res, next) => {
+    // Skip API routes - they should 404 if not matched
+    if (req.path.startsWith('/api/')) {
+      return next();
+    }
+    
+    // Skip if requesting a file with extension (likely static asset)
+    if (req.path.includes('.') && !req.path.endsWith('.html')) {
+      return next();
+    }
+    
+    console.log(`[Static] SPA fallback for: ${req.path}`);
+    res.sendFile(indexPath);
   });
 }

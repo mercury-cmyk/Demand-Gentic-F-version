@@ -36,9 +36,9 @@ export interface TelnyxConnectionOptions {
   fallbackPort?: number;
 }
 
-// Telnyx default endpoint configuration
-export const TELNYX_RTC_HOST = 'rtc.telnyx.com';
-export const TELNYX_RTC_PORT = 14938;
+// NOTE: The Telnyx SDK handles signaling internally - these constants are kept for reference only
+// Do NOT use these to manually configure the SDK connection
+export const TELNYX_SDK_NOTE = 'The Telnyx SDK handles signaling automatically';
 
 export class NetworkDiagnostics {
 
@@ -149,36 +149,30 @@ export class NetworkDiagnostics {
 
   /**
    * Get alternative Telnyx connection configurations
-   * for troubleshooting connectivity issues
+   * for troubleshooting connectivity issues.
+   * NOTE: The Telnyx SDK handles signaling automatically - these only affect ICE servers
    */
   static getAlternativeConfigs(): TelnyxConnectionOptions[] {
     return [
-      // Standard configuration
+      // Standard configuration - SDK uses default signaling
       {
         enableFallback: false
       },
 
-      // Force secure transport
+      // Force secure transport - SDK uses default signaling
       {
         secure: true,
         enableFallback: false
       },
 
       // Alternative STUN/TURN servers for corporate networks
+      // (only affects ICE negotiation, not signaling)
       {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun.stunprotocol.org:3478' }
         ],
-        enableFallback: false
-      },
-
-      // Telnyx with explicit host/port (if behind corporate proxy)
-      {
-        host: TELNYX_RTC_HOST,
-        port: 443,
-        secure: true,
         enableFallback: false
       }
     ];

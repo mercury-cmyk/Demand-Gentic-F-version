@@ -50,7 +50,12 @@ function replaceNgrokUrls(value: string): string {
 
 // Secrets configuration
 async function getSecretsToSync(): Promise<SecretConfig[]> {
-  const envLocal = parseEnvFile(path.join(__dirname, '.env.local'));
+  // Try .env.local first, fall back to .env
+  const envLocalPath = path.join(__dirname, '.env.local');
+  const envPath = path.join(__dirname, '.env');
+  const envFilePath = fs.existsSync(envLocalPath) ? envLocalPath : envPath;
+  console.log(`📂 Reading from: ${path.basename(envFilePath)}`);
+  const envLocal = parseEnvFile(envFilePath);
   
   // Generated JWT secret (from previous step)
   const JWT_SECRET = '4f34480d3577e15deefcdf3be6e875afc6f2304ac4870f89dfb550076314fb45';
