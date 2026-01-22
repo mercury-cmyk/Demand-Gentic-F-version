@@ -5103,6 +5103,56 @@ export function registerRoutes(app: Express) {
       }
       // ===== END ORGANIZATION NAME VALIDATION =====
 
+      // ===== AUTOMATIC PROMPT REGENERATION VIA VERTEX AI (ON CREATE) =====
+      // For AI campaigns, refine the prompt through Vertex AI with Gemini best practices
+      if (createdCampaign.dialMode === 'ai_agent') {
+        try {
+          const basePrompt = createdCampaign.aiAgentSettings?.systemPrompt ||
+                            createdCampaign.callScript ||
+                            '';
+
+          if (basePrompt && basePrompt.trim().length > 0) {
+            console.log(`[Campaign Create] AI campaign detected - triggering Vertex AI refinement...`);
+
+            const { refineCampaignPrompt } = await import('./services/vertex-ai/vertex-prompt-refiner');
+
+            const refinedResult = await refineCampaignPrompt(
+              campaign.id,
+              basePrompt,
+              {
+                voiceProvider: 'gemini',
+                emotionalTone: 'consultative',
+                pacePreference: 'normal',
+                complianceLevel: 'strict',
+                enforceBrandVoice: true,
+              }
+            );
+
+            // Store refined prompt back to campaign
+            const refinedSettings = {
+              ...createdCampaign.aiAgentSettings,
+              refinedSystemPrompt: refinedResult.refinedPrompt,
+              voiceDirectives: refinedResult.voiceDirectives,
+              refinementMetadata: {
+                qualityScore: refinedResult.qualityScore,
+                refinedAt: refinedResult.metadata.refinedAt,
+                optimizations: refinedResult.optimizations,
+                warnings: refinedResult.warnings,
+              },
+            };
+
+            await storage.updateCampaign(campaign.id, {
+              aiAgentSettings: refinedSettings,
+            });
+
+            console.log(`[Campaign Create] ✅ Vertex AI refinement complete. Quality score: ${refinedResult.qualityScore}/100`);
+          }
+        } catch (refinementError) {
+          console.error(`[Campaign Create] ⚠️ Vertex AI refinement failed (non-blocking):`, refinementError);
+        }
+      }
+      // ===== END AUTOMATIC PROMPT REGENERATION =====
+
       // AUTO-CONFIGURE AGENTS based on Campaign Type
       try {
         const { configureCampaignAgents } = await import('./services/campaign-configuration');
@@ -5272,7 +5322,71 @@ export function registerRoutes(app: Express) {
       if (!campaign) {
         return res.status(404).json({ message: "Campaign not found" });
       }
-      
+
+      // ===== AUTOMATIC PROMPT REGENERATION VIA VERTEX AI =====
+      // When AI agent settings are updated, regenerate the prompt through Vertex AI
+      const updatedCampaignData = campaign as any;
+      const isAiCampaign = updatedCampaignData.dialMode === 'ai_agent';
+      const hasPromptChanges = 'aiAgentSettings' in updateData ||
+                               'callScript' in updateData ||
+                               'talkingPoints' in updateData ||
+                               'problemIntelligenceOrgId' in updateData;
+
+      if (isAiCampaign && hasPromptChanges) {
+        try {
+          console.log(`[Campaign Update] AI campaign detected with prompt changes - triggering Vertex AI refinement...`);
+
+          const { refineCampaignPrompt } = await import('./services/vertex-ai/vertex-prompt-refiner');
+
+          // Get the base prompt from campaign settings
+          const basePrompt = updatedCampaignData.aiAgentSettings?.systemPrompt ||
+                            updatedCampaignData.callScript ||
+                            '';
+
+          if (basePrompt && basePrompt.trim().length > 0) {
+            // Refine through Vertex AI with Gemini best practices
+            const refinedResult = await refineCampaignPrompt(
+              req.params.id,
+              basePrompt,
+              {
+                voiceProvider: 'gemini',
+                emotionalTone: 'consultative',
+                pacePreference: 'normal',
+                complianceLevel: 'strict',
+                enforceBrandVoice: true,
+              }
+            );
+
+            // Store the refined prompt back to the campaign
+            const refinedSettings = {
+              ...updatedCampaignData.aiAgentSettings,
+              refinedSystemPrompt: refinedResult.refinedPrompt,
+              voiceDirectives: refinedResult.voiceDirectives,
+              refinementMetadata: {
+                qualityScore: refinedResult.qualityScore,
+                refinedAt: refinedResult.metadata.refinedAt,
+                optimizations: refinedResult.optimizations,
+                warnings: refinedResult.warnings,
+              },
+            };
+
+            // Update campaign with refined settings
+            await storage.updateCampaign(req.params.id, {
+              aiAgentSettings: refinedSettings,
+            });
+
+            console.log(`[Campaign Update] ✅ Vertex AI refinement complete. Quality score: ${refinedResult.qualityScore}/100`);
+            if (refinedResult.warnings.length > 0) {
+              console.log(`[Campaign Update] ⚠️ Warnings: ${refinedResult.warnings.join(', ')}`);
+            }
+          }
+        } catch (refinementError) {
+          // Don't fail the update if refinement fails - log and continue
+          console.error(`[Campaign Update] ⚠️ Vertex AI refinement failed (non-blocking):`, refinementError);
+        }
+      }
+      // ===== END AUTOMATIC PROMPT REGENERATION =====
+
       // ===== ORGANIZATION NAME VALIDATION (PREVENT WRONG ORG IN CALLS) =====
       // Check if AI calling campaigns have proper organization configuration
       const updatedCampaign = campaign as any;
