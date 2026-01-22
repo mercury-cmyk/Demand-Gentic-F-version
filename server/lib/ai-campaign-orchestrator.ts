@@ -1007,7 +1007,8 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
 
         // Contact data comes from the SQL query (snake_case)
         // Use virtual agent name if available, fall back to aiSettings persona
-        const agentName = virtualAgent?.name || aiSettings.persona?.name || "your representative";
+        // NOTE: Default must be a real name, not "your representative" which is in PLACEHOLDER_VALUES blocklist
+        const agentName = virtualAgent?.name || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
         
         // Create call attempt record for proper tracking
