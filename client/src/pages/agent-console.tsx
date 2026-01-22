@@ -683,7 +683,7 @@ export default function AgentConsolePage() {
   }, [queueData, queueLoading, queueFetching, queueError, selectedCampaignId]);
 
   // Fetch contact details for current contact
-  const currentQueueItem = queueData[currentContactIndex];
+  const currentQueueItem = queueData?.[currentContactIndex];
   const { data: contactDetails } = useQuery<Contact>({
     queryKey: currentQueueItem ? [`/api/contacts/${currentQueueItem.contactId}`] : [],
     enabled: !!currentQueueItem?.contactId,
@@ -1101,7 +1101,7 @@ export default function AgentConsolePage() {
   const campaigns: Campaign[] = agentAssignments.length > 0 
     ? agentAssignments.map(a => ({ id: a.campaignId, name: a.campaignName }))
     : Array.from(
-        new Map(queueData.map(item => [item.campaignId, { id: item.campaignId, name: item.campaignName }])).values()
+        new Map((queueData || []).map(item => [item.campaignId, { id: item.campaignId, name: item.campaignName }])).values()
       );
 
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
@@ -1337,7 +1337,7 @@ export default function AgentConsolePage() {
   };
 
   const handleNextContact = () => {
-    if (currentContactIndex < queueData.length - 1) {
+    if (currentContactIndex < (queueData?.length || 0) - 1) {
       setCurrentContactIndex(currentContactIndex + 1);
     }
   };
@@ -1374,10 +1374,10 @@ export default function AgentConsolePage() {
     }
   };
 
-  const queueProgress = queueData.length > 0 ? ((currentContactIndex + 1) / queueData.length) * 100 : 0;
+  const queueProgress = (queueData?.length || 0) > 0 ? ((currentContactIndex + 1) / (queueData?.length || 1)) * 100 : 0;
 
   // Show loading state when initially loading (not during background refetch)
-  if (queueLoading && !queueData.length) {
+  if (queueLoading && !(queueData?.length)) {
     return (
       <div className="container mx-auto p-6">
         <div className="mb-6">
@@ -1538,7 +1538,7 @@ export default function AgentConsolePage() {
           <div className="px-3 pb-2">
             <div className="text-center mb-1">
               <span className="text-white text-[10px] font-medium">
-                Contact {currentContactIndex + 1} of {queueData.length}
+                Contact {currentContactIndex + 1} of {queueData?.length || 0}
               </span>
             </div>
             <Progress value={queueProgress} className="h-1 bg-white/20" />
@@ -1579,7 +1579,7 @@ export default function AgentConsolePage() {
           <div className="flex-1 max-w-lg mx-4">
             <div className="text-center mb-1">
               <span className="text-white text-sm font-medium">
-                Contact {currentContactIndex + 1} of {queueData.length}
+                Contact {currentContactIndex + 1} of {queueData?.length || 0}
               </span>
             </div>
             <Progress value={queueProgress} className="h-2 bg-white/20" />
@@ -1665,7 +1665,7 @@ export default function AgentConsolePage() {
                   variant="outline"
                   size="sm"
                   onClick={handlePreviousContact}
-                  disabled={currentContactIndex === 0 || queueData.length === 0 || isCallActive || (callMadeToContact && !dispositionSaved)}
+                  disabled={currentContactIndex === 0 || (queueData?.length || 0) === 0 || isCallActive || (callMadeToContact && !dispositionSaved)}
                   className="flex-1 bg-white/90 hover:bg-white border-0 text-foreground font-medium shadow-lg hover:shadow-xl transition-all"
                   data-testid="button-previous-contact"
                 >
@@ -1676,8 +1676,8 @@ export default function AgentConsolePage() {
                   size="sm"
                   onClick={handleNextContact}
                   disabled={
-                    currentContactIndex >= queueData.length - 1 || 
-                    queueData.length === 0 ||
+                    currentContactIndex >= (queueData?.length || 0) - 1 || 
+                    (queueData?.length || 0) === 0 ||
                     isCallActive ||
                     (callMadeToContact && !dispositionSaved)
                   }
@@ -1700,9 +1700,9 @@ export default function AgentConsolePage() {
             ) : (
               <>
                 <div className="text-[10px] text-muted-foreground px-2 mb-2">
-                  Showing {Math.min(queueData.length, 15)} of {queueData.length} contacts
+                  Showing {Math.min(queueData?.length || 0, 15)} of {queueData?.length || 0} contacts
                 </div>
-                {queueData.slice(0, 15).map((item, index) => {
+                {(queueData || []).slice(0, 15).map((item, index) => {
                   const isDisabled = (isCallActive || (callMadeToContact && !dispositionSaved)) && index !== currentContactIndex;
                   const isActive = index === currentContactIndex;
                   return (
