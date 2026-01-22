@@ -2815,12 +2815,13 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
             session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
             console.log(`${LOG_PREFIX} Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
 
-            // Inject a system reminder to prevent identity re-verification
-            // Use setImmediate to not block the audio processing pipeline
-            setImmediate(() => {
-              injectIdentityLockReminder(session).catch(err => {
-                console.error(`${LOG_PREFIX} Error injecting identity lock:`, err);
-              });
+            // CRITICAL FIX: Call injectIdentityLockReminder SYNCHRONOUSLY (no setImmediate)
+            // This ensures the agent responds IMMEDIATELY after identity confirmation
+            // without any delay that could allow the prospect to take control
+            // 
+            // IMPORTANT: Also pass the transcript to detect if prospect asked an early question
+            await injectIdentityLockReminder(session, message.transcript).catch(err => {
+              console.error(`${LOG_PREFIX} Error injecting identity lock:`, err);
             });
           }
         }
@@ -3341,13 +3342,97 @@ function shouldSendGreeting(session: OpenAIRealtimeSession): boolean {
  * Inject a system-level reminder into the conversation to prevent identity re-verification.
  * Uses conversation.item.create to add a system message that reinforces the identity lock,
  * then IMMEDIATELY triggers a response to ensure the agent speaks without pause.
+ * 
+ * CRITICAL: This function now accepts the prospect's transcript to detect if they asked
+ * an early question (e.g., "What is this about?", "Tell me about your product") so the
+ * agent can acknowledge and bridge to the introduction without going silent.
  */
-async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promise<void> {
+async function injectIdentityLockReminder(session: OpenAIRealtimeSession, prospectTranscript?: string): Promise<void> {
   if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
     return;
   }
 
   try {
+    // Detect if the prospect asked an early question in their identity confirmation response
+    const lowerTranscript = (prospectTranscript || '').toLowerCase();
+    const earlyQuestionPatterns = [
+      'what is this',
+      'what\'s this',
+      'what do you',
+      'what does your',
+      'tell me about',
+      'tell me more',
+      'can you tell me',
+      'why are you calling',
+      'what are you calling about',
+      'what is your product',
+      'what does your company do',
+      'what features',
+      'what functionalities',
+      'how does it work',
+      'how do you',
+      'what services',
+      'what platform',
+      'what software',
+      '?', // Any question mark indicates they asked something
+    ];
+    
+    const hasEarlyQuestion = earlyQuestionPatterns.some(pattern => lowerTranscript.includes(pattern));
+    
+    let responseInstructions: string;
+    
+    if (hasEarlyQuestion) {
+      // Prospect asked a question immediately after confirming identity
+      // Agent must acknowledge and bridge to introduction
+      responseInstructions = `The contact just confirmed their identity AND asked a direct question: "${prospectTranscript}"
+
+CRITICAL: You MUST respond IMMEDIATELY. Do NOT go silent. Do NOT pause.
+
+FOLLOW THIS EXACT PATTERN:
+1. Acknowledge their question briefly: "Great question — let me give you the quick version."
+2. Deliver a condensed introduction (20-30 seconds):
+   - Who you are and your company
+   - What you do in ONE sentence
+   - Why you're reaching out to THEM specifically
+3. Re-engage with a question: "Is that something you're focused on right now?" or "Does that make sense?"
+
+EXAMPLE RESPONSE:
+"Absolutely — thanks for asking. I'm calling from [Company]. We help [target audience] with [key value proposition]. The reason I'm reaching out is [brief relevance to their role]. Is that something you're focused on right now?"
+
+DO NOT:
+- Ask who you're speaking with (already confirmed)
+- Wait for them to speak first
+- Pause or hesitate
+- Say only "um" or "let me think"
+- Go silent for more than 1 second
+
+Speak NOW and deliver your response to their question while introducing yourself.`;
+      
+      console.log(`${LOG_PREFIX} EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript.substring(0, 80)}..."`);
+    } else {
+      // Standard identity confirmation - proceed with introduction
+      responseInstructions = `The contact just confirmed their identity. You MUST speak immediately - do not wait for them to say anything else.
+
+CRITICAL: Within 2 SECONDS of this message, you MUST be speaking. Silence = FAILURE.
+        
+Proceed directly to acknowledge their time and explain the purpose of your call:
+1. Thank them: "Thanks for confirming! I really appreciate you taking a moment."
+2. Introduce yourself: "I'm calling from [Company]."
+3. Set expectations: "This isn't a sales call."
+4. State purpose briefly: Why you're calling them specifically.
+5. Ask an open-ended question to start the conversation.
+
+EXAMPLE: "Thanks for confirming! I really appreciate you taking a moment. I'm calling from [Company]. This isn't a sales call — I'm reaching out because we're doing some research in your industry and I'd love to get your perspective on [topic]. Is that something you have a few minutes to discuss?"
+
+Do NOT:
+- Ask who you're speaking with (already confirmed)
+- Wait for them to speak first
+- Pause or hesitate
+- Leave any silence after this message
+
+Speak NOW and deliver your introduction.`;
+    }
+
     // Add a system message to reinforce identity lock
     session.openaiWs.send(JSON.stringify({
       type: "conversation.item.create",
@@ -3365,8 +3450,9 @@ CRITICAL RULES NOW IN EFFECT:
 3. If the contact says "I don't know" or hesitates, treat it as uncertainty about the TOPIC, not about WHO they are
 4. Proceed with the conversation naturally - move to introduction and context framing
 5. Any ambiguity in responses is about the subject matter, not identity
+${hasEarlyQuestion ? `\n6. THE PROSPECT ASKED A QUESTION - You MUST answer it while delivering your introduction. Do NOT ignore their question.` : ''}
 
-Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and explaining the call purpose.`
+Current state: RIGHT_PARTY_INTRO - proceed IMMEDIATELY with your response. NO SILENCE ALLOWED.`
           }
         ]
       }
@@ -3378,22 +3464,11 @@ Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and exp
       type: "response.create",
       response: {
         modalities: ["text", "audio"],
-        instructions: `The contact just confirmed their identity. You MUST speak immediately - do not wait for them to say anything else.
-        
-Proceed directly to acknowledge their time and explain the purpose of your call. Be warm, professional, and get straight to the point.
-
-Example: "Thank you for taking my call. I'll keep this brief - I'm reaching out because..."
-
-Do NOT:
-- Ask who you're speaking with (already confirmed)
-- Wait for them to speak first
-- Pause or hesitate
-
-Speak NOW and deliver your introduction.`
+        instructions: responseInstructions
       }
     }));
 
-    console.log(`${LOG_PREFIX} Injected identity lock reminder AND triggered response for call: ${session.callId}`);
+    console.log(`${LOG_PREFIX} Injected identity lock reminder AND triggered response for call: ${session.callId} (earlyQuestion: ${hasEarlyQuestion})`);
   } catch (error) {
     console.error(`${LOG_PREFIX} Error injecting identity lock reminder for call ${session.callId}:`, error);
   }
