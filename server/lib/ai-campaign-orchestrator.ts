@@ -220,8 +220,9 @@ const ENABLED_CALLING_REGIONS: Record<string, boolean> = {
   'CA': true, 'CANADA': true,
   'MX': true, 'MEXICO': true,
   
-  // United Kingdom / Ireland
-  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
+  // United Kingdom / Ireland (including common data variants)
+  'GB': true, 'UK': true, 'UNITED KINGDOM': true, 'UNITED KINGDOM UK': true, 
+  'ENGLAND': true, 'SCOTLAND': true, 'WALES': true,
   'IE': true, 'IRELAND': true,
   
   // Europe (Major Markets)
@@ -319,11 +320,53 @@ function normalizeCountryName(country: string): string {
 
 /**
  * Check if a contact's country is in an enabled calling region
+ * Handles various formats: "Indonesia", "indonesia", " Indonesia ", "id", "ID", etc.
  */
 function isCountryEnabled(country: string | null | undefined): boolean {
   if (!country) return false;
-  const normalizedCountry = normalizeCountryName(country);
-  return ENABLED_CALLING_REGIONS[normalizedCountry] === true;
+  
+  // Clean up the input - trim whitespace and normalize
+  const cleaned = country.toString().trim().toUpperCase();
+  if (!cleaned) return false;
+  
+  // Try direct match first
+  if (ENABLED_CALLING_REGIONS[cleaned] === true) return true;
+  
+  // Try normalized version (handles typos)
+  const normalizedCountry = normalizeCountryName(cleaned);
+  if (ENABLED_CALLING_REGIONS[normalizedCountry] === true) return true;
+  
+  // Try common long-form to short-form mappings
+  const COUNTRY_ALIASES: Record<string, string> = {
+    'REPUBLIC OF INDONESIA': 'INDONESIA',
+    'REPUBLIC OF INDIA': 'INDIA',
+    'PEOPLE\'S REPUBLIC OF CHINA': 'CHINA',
+    'REPUBLIC OF CHINA': 'TAIWAN',
+    'KINGDOM OF SAUDI ARABIA': 'SAUDI ARABIA',
+    'KINGDOM OF BAHRAIN': 'BAHRAIN',
+    'STATE OF QATAR': 'QATAR',
+    'STATE OF KUWAIT': 'KUWAIT',
+    'SULTANATE OF OMAN': 'OMAN',
+    'COMMONWEALTH OF AUSTRALIA': 'AUSTRALIA',
+    'NEW SOUTH WALES': 'AUSTRALIA',
+    'VICTORIA': 'AUSTRALIA',
+    'QUEENSLAND': 'AUSTRALIA',
+    'ENGLAND': 'UNITED KINGDOM',
+    'NORTHERN IRELAND': 'UNITED KINGDOM',
+    'SCOTLAND': 'UNITED KINGDOM',
+    'WALES': 'UNITED KINGDOM',
+    'HONG KONG SAR': 'HONG KONG',
+    'HONG KONG S.A.R.': 'HONG KONG',
+    'MACAO': 'HONG KONG',
+    'MACAU': 'HONG KONG',
+  };
+  
+  if (COUNTRY_ALIASES[cleaned]) {
+    const aliased = COUNTRY_ALIASES[cleaned];
+    if (ENABLED_CALLING_REGIONS[aliased] === true) return true;
+  }
+  
+  return false;
 }
 
 interface OrchestratorJobData {
@@ -504,7 +547,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
       COALESCE(
         c.timezone,
         CASE 
-          WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES') THEN 'Europe/London'
+          WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'UNITED KINGDOM UK', 'ENGLAND', 'SCOTLAND', 'WALES') THEN 'Europe/London'
           WHEN UPPER(c.country) IN ('US', 'USA', 'UNITED STATES', 'AMERICA') THEN 'America/New_York'
           WHEN UPPER(c.country) IN ('CA', 'CANADA') THEN 'America/Toronto'
           WHEN c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%' THEN 'Europe/London'
@@ -522,7 +565,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
           AND EXTRACT(HOUR FROM NOW() AT TIME ZONE c.timezone) BETWEEN 9 AND 16
         )
         -- UK (from country or phone)
-        WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES')
+        WHEN UPPER(c.country) IN ('GB', 'UK', 'UNITED KINGDOM', 'UNITED KINGDOM UK', 'ENGLAND', 'SCOTLAND', 'WALES')
              OR c.mobile_phone_e164 LIKE '+44%' OR c.direct_phone_e164 LIKE '+44%'
         THEN (
           EXTRACT(DOW FROM NOW() AT TIME ZONE 'Europe/London') BETWEEN 1 AND 5
@@ -736,6 +779,9 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   
   // Track timezone stats for logging
   const timezoneStats = new Map<string, { total: number; callable: number }>();
+  
+  // Track rejected countries for debugging
+  const rejectedCountries = new Map<string, number>();
 
   for (const item of queueItems) {
     let contact: any = null;
@@ -749,9 +795,12 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
     const state = (item as any).state;
     const timezone = (item as any).timezone;
     
-    // Check if country is in enabled calling regions (AU, ME, NA, UK)
+    // Check if country is in enabled calling regions
     if (!isCountryEnabled(country)) {
       countryNotEnabled++;
+      // Track which countries are being rejected
+      const countryKey = country ? String(country).toUpperCase() : 'NULL/EMPTY';
+      rejectedCountries.set(countryKey, (rejectedCountries.get(countryKey) || 0) + 1);
       continue; // Skip contacts from disabled regions
     }
     
@@ -866,7 +915,14 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   
   // Log business hours filtering by timezone
   if (countryNotEnabled > 0) {
-    console.log(`[AI Orchestrator] Region filter: ${countryNotEnabled} contacts skipped (country not in enabled regions: AU, ME, NA, UK)`);
+    console.log(`[AI Orchestrator] Region filter: ${countryNotEnabled} contacts skipped (country NULL or not in enabled regions)`);
+    // Log top 5 rejected countries for debugging
+    const topRejected = Array.from(rejectedCountries.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([c, n]) => `${c}(${n})`)
+      .join(', ');
+    console.log(`[AI Orchestrator]   Top rejected: ${topRejected}`);
   }
   console.log(`[AI Orchestrator] Business hours check: ${outsideBusinessHours} contacts skipped (outside their local business hours)`);
   for (const [tz, stats] of timezoneStats.entries()) {
