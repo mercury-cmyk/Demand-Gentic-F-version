@@ -27,20 +27,10 @@ import {
   generateWithFunctions,
   chat as vertexChat,
   type FunctionDeclaration,
-  type ChatMessage as VertexChatMessage,
-  type FunctionCall,
+  type ChatMessage as VertexChatMessage
 } from '../services/vertex-ai';
-import {
-  deepSeekChat,
-  deepSeekGenerateWithFunctions,
-  isDeepSeekConfigured,
-} from '../services/deepseek-client';
 
 const router = Router();
-
-const CLIENT_PORTAL_AGENT_PROVIDER =
-  (process.env.CLIENT_PORTAL_AGENT_PROVIDER || 'vertex').toLowerCase();
-const USE_DEEPSEEK = CLIENT_PORTAL_AGENT_PROVIDER === 'deepseek' && isDeepSeekConfigured();
 
 // Define the allowed actions and their schemas for Vertex AI function calling
 const FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
@@ -675,28 +665,12 @@ router.post('/chat', async (req: Request, res: Response) => {
 
       const confirmInstruction = `The client previously requested:\n"${originalRequest}"\n\nYou responded with this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now replied: "${message}", which should be treated as explicit confirmation to proceed.\n\nNow move to Stage 2 (EXECUTE):\n- Call the appropriate tools/functions to implement the agreed plan.\n- After executing tools, summarize what you did and the key results in 3–6 short bullet points.\n- Stay strictly within this client's own campaigns, orders, billing, and reports.`;
 
-      let initialResponse: string;
-      let functionCalls: FunctionCall[] = [];
-
-      if (USE_DEEPSEEK) {
-        const result = await deepSeekGenerateWithFunctions(
-          SYSTEM_PROMPT,
-          confirmInstruction,
-          FUNCTION_DECLARATIONS,
-          { temperature: 0.3, maxTokens: 2000 }
-        );
-        initialResponse = result.text;
-        functionCalls = result.functionCalls;
-      } else {
-        const result = await generateWithFunctions(
-          SYSTEM_PROMPT,
-          confirmInstruction,
-          FUNCTION_DECLARATIONS,
-          { temperature: 0.3, maxTokens: 2000 }
-        );
-        initialResponse = result.text;
-        functionCalls = result.functionCalls;
-      }
+      const { text: initialResponse, functionCalls } = await generateWithFunctions(
+        SYSTEM_PROMPT,
+        confirmInstruction,
+        FUNCTION_DECLARATIONS,
+        { temperature: 0.3, maxTokens: 2000 }
+      );
 
       let actions: Array<{ action: string; params: any; result: any }> = [];
       let navigateTo: string | undefined;
@@ -727,17 +701,11 @@ router.post('/chat', async (req: Request, res: Response) => {
 
         const followUpPrompt = `The client originally asked: "${originalRequest}"\n\nYou proposed a plan, and they confirmed. You then executed these actions:\n${actionResultsText}\n\nNow provide a helpful, conversational response summarizing what you did and the key results. Be concise but informative, and stay strictly within this client's own campaigns and portal context.`;
 
-        const followUpResponse = USE_DEEPSEEK
-          ? await deepSeekChat(
-              SYSTEM_PROMPT,
-              [{ role: 'user', content: followUpPrompt }],
-              { temperature: 0.7, maxTokens: 1000 }
-            )
-          : await vertexChat(
-              SYSTEM_PROMPT,
-              [{ role: 'user', content: followUpPrompt }],
-              { temperature: 0.7, maxTokens: 1000 }
-            );
+        const followUpResponse = await vertexChat(
+          SYSTEM_PROMPT,
+          [{ role: 'user', content: followUpPrompt }],
+          { temperature: 0.7, maxTokens: 1000 }
+        );
 
         const newHistory: VertexChatMessage[] = [
           ...history.slice(-18),
@@ -775,17 +743,11 @@ router.post('/chat', async (req: Request, res: Response) => {
 
       const declinePrompt = `The client previously requested:\n"${originalRequest}"\n\nYou proposed this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now declined or wants to change the plan, saying: "${message}".\n\nDo NOT call any tools or make changes. Instead:\n1) Briefly restate and refine their updated request.\n2) Provide a revised numbered step-by-step plan you COULD take (Stage 1 PLAN only).\n3) Stay strictly within their own campaigns, orders, billing, and portal usage.\n4) End by asking them to reply with 'confirm' to proceed with the new plan, or 'decline' to adjust again.`;
 
-      const altResponse = USE_DEEPSEEK
-        ? await deepSeekChat(
-            SYSTEM_PROMPT,
-            [{ role: 'user', content: declinePrompt }],
-            { temperature: 0.4, maxTokens: 1200 }
-          )
-        : await vertexChat(
-            SYSTEM_PROMPT,
-            [{ role: 'user', content: declinePrompt }],
-            { temperature: 0.4, maxTokens: 1200 }
-          );
+      const altResponse = await vertexChat(
+        SYSTEM_PROMPT,
+        [{ role: 'user', content: declinePrompt }],
+        { temperature: 0.4, maxTokens: 1200 }
+      );
 
       const newHistory: VertexChatMessage[] = [
         ...history.slice(-18),
@@ -802,30 +764,16 @@ router.post('/chat', async (req: Request, res: Response) => {
     }
 
     // ==================== STAGE 1: PLAN ONLY (NO ACTIONS YET) ====================
-    let initialResponse: string;
+    const { text: initialResponse, functionCalls } = await generateWithFunctions(
+      SYSTEM_PROMPT,
+      message,
+      FUNCTION_DECLARATIONS,
+      { temperature: 0.3, maxTokens: 2000 }
+    );
 
-    if (USE_DEEPSEEK) {
-      // Planning-only: no tools needed, just use DeepSeek chat with the system prompt
-      initialResponse = await deepSeekChat(
-        SYSTEM_PROMPT,
-        [{ role: 'user', content: message }],
-        { temperature: 0.3, maxTokens: 2000 }
-      );
-    } else {
-      const result = await generateWithFunctions(
-        SYSTEM_PROMPT,
-        message,
-        FUNCTION_DECLARATIONS,
-        { temperature: 0.3, maxTokens: 2000 }
-      );
-      initialResponse = result.text;
-
-      // Intentionally ignore any functionCalls here to enforce "plan first, execute later"
-      if (result.functionCalls && result.functionCalls.length > 0) {
-        console.log(
-          `[Client Portal Agent] Ignoring ${result.functionCalls.length} function call(s) during planning stage.`
-        );
-      }
+    // Intentionally ignore any functionCalls here to enforce "plan first, execute later"
+    if (functionCalls && functionCalls.length > 0) {
+      console.log(`[Client Portal Agent] Ignoring ${functionCalls.length} function call(s) during planning stage.`);
     }
 
     const newHistory: VertexChatMessage[] = [

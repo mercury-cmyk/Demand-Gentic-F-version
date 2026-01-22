@@ -113,14 +113,4 @@ const _disabledWorkerFunction = async (job: any) => {
 
       throw error; // Re-throw to trigger retry
     }
-  },
-  {
-    connection: redisConnection,
-    concurrency: 3, // Process 3 verifications in parallel
-  }
-) : null);
-
 };
-
-// Worker event handlers - DISABLED
-// LinkedIn verification feature is no longer active

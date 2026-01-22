@@ -5,11 +5,11 @@
  * Falls back gracefully if not configured.
  */
 
-import OpenAI from 'openai';
+import OpenAI from "openai";
 
 // DeepSeek uses OpenAI-compatible API
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
 
 let deepSeekClient: OpenAI | null = null;
 
@@ -26,7 +26,7 @@ export function isDeepSeekConfigured(): boolean {
 function getClient(): OpenAI {
   if (!deepSeekClient) {
     if (!DEEPSEEK_API_KEY) {
-      throw new Error('DeepSeek API key not configured');
+      throw new Error("DeepSeek API key not configured");
     }
     deepSeekClient = new OpenAI({
       apiKey: DEEPSEEK_API_KEY,
@@ -37,7 +37,7 @@ function getClient(): OpenAI {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -68,13 +68,13 @@ export async function deepSeekChat(
   }
 ): Promise<string> {
   if (!isDeepSeekConfigured()) {
-    throw new Error('DeepSeek is not configured');
+    throw new Error("DeepSeek is not configured");
   }
 
   const client = getClient();
   const response = await client.chat.completions.create({
-    model: options?.model || 'deepseek-chat',
-    messages: messages.map(m => ({
+    model: options?.model || "deepseek-chat",
+    messages: messages.map((m) => ({
       role: m.role,
       content: m.content,
     })),
@@ -82,7 +82,7 @@ export async function deepSeekChat(
     max_tokens: options?.maxTokens ?? 2048,
   });
 
-  return response.choices[0]?.message?.content || '';
+  return response.choices[0]?.message?.content || "";
 }
 
 /**
@@ -101,7 +101,7 @@ export async function deepSeekGenerateWithFunctions(
   functionCalls?: FunctionCall[];
 }> {
   if (!isDeepSeekConfigured()) {
-    throw new Error('DeepSeek is not configured');
+    throw new Error("DeepSeek is not configured");
   }
 
   const client = getClient();
@@ -110,19 +110,19 @@ export async function deepSeekGenerateWithFunctions(
 
   if (options?.systemPrompt) {
     messages.push({
-      role: 'system',
+      role: "system",
       content: options.systemPrompt,
     });
   }
 
   messages.push({
-    role: 'user',
+    role: "user",
     content: prompt,
   });
 
   // Convert function declarations to OpenAI tool format
-  const tools: OpenAI.Chat.ChatCompletionTool[] = functions.map(fn => ({
-    type: 'function',
+  const tools: OpenAI.Chat.ChatCompletionTool[] = functions.map((fn) => ({
+    type: "function",
     function: {
       name: fn.name,
       description: fn.description,
@@ -131,7 +131,7 @@ export async function deepSeekGenerateWithFunctions(
   }));
 
   const response = await client.chat.completions.create({
-    model: options?.model || 'deepseek-chat',
+    model: options?.model || "deepseek-chat",
     messages,
     tools: tools.length > 0 ? tools : undefined,
     temperature: options?.temperature ?? 0.7,
@@ -140,19 +140,19 @@ export async function deepSeekGenerateWithFunctions(
   const message = response.choices[0]?.message;
 
   if (!message) {
-    return { text: '' };
+    return { text: "" };
   }
 
   // Check for tool calls
   if (message.tool_calls && message.tool_calls.length > 0) {
-    const functionCalls: FunctionCall[] = message.tool_calls.map(tc => ({
+    const functionCalls: FunctionCall[] = message.tool_calls.map((tc) => ({
       name: tc.function.name,
-      args: JSON.parse(tc.function.arguments || '{}'),
+      args: JSON.parse(tc.function.arguments || "{}"),
     }));
     return { functionCalls };
   }
 
-  return { text: message.content || '' };
+  return { text: message.content || "" };
 }
 
 export default {
