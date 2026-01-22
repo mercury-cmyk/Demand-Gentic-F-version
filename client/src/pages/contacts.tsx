@@ -290,7 +290,7 @@ function ContactsPage() {
     isSelected,
     isAllSelected,
     isSomeSelected,
-  } = useSelection(selectAllPages ? filteredContacts : paginatedContacts);
+  } = useSelection(selectAllPages ? filteredContactsToShow : paginatedContacts);
 
   // Handle select all pages toggle
   const handleSelectAllPages = () => {
@@ -301,7 +301,7 @@ function ContactsPage() {
       setSelectAllPages(true);
       // Select all filtered contacts across all pages
       clearSelection();
-      filteredContacts.forEach(contact => selectItem(contact.id));
+      filteredContactsToShow.forEach(contact => selectItem(contact.id));
     }
   };
 
@@ -327,7 +327,7 @@ function ContactsPage() {
   });
 
   const handleBulkExport = () => {
-    const selectedContacts = filteredContacts.filter(c => selectedIds.has(c.id));
+    const selectedContacts = filteredContactsToShow.filter(c => selectedIds.has(c.id));
     const csv = exportContactsToCSV(selectedContacts);
     downloadCSV(csv, `contacts_bulk_export_${new Date().toISOString().split('T')[0]}.csv`);
     toast({
@@ -779,7 +779,7 @@ function ContactsPage() {
             }}
           >
             <Filter className="mr-2 h-4 w-4" />
-            Clear Filters ({filteredContacts.length} shown)
+            Clear Filters ({filteredContactsToShow.length} shown)
           </Button>
         )}
       </div>
@@ -791,19 +791,19 @@ function ContactsPage() {
               <div className="flex-1">
                 <p className="font-medium">
                   {selectAllPages 
-                    ? `All ${filteredContacts.length} contacts selected (smart mode - processes in background)` 
+                    ? `All ${filteredContactsToShow.length} contacts selected (smart mode - processes in background)` 
                     : `${selectedCount} contact${selectedCount !== 1 ? 's' : ''} selected on this page`}
                 </p>
-                {!selectAllPages && filteredContacts.length > paginatedContacts.length && (
+                {!selectAllPages && filteredContactsToShow.length > paginatedContacts.length && (
                   <button
                     onClick={handleSelectAllPages}
                     className="text-sm text-primary hover:underline mt-1"
                     data-testid="button-select-all-pages"
                   >
-                    Select all {filteredContacts.length} contacts across all pages (recommended for 1000+)
+                    Select all {filteredContactsToShow.length} contacts across all pages (recommended for 1000+)
                   </button>
                 )}
-                {selectAllPages && filteredContacts.length > 1000 && (
+                {selectAllPages && filteredContactsToShow.length > 1000 && (
                   <p className="text-sm text-muted-foreground mt-1">
                     Large selections will be processed in the background without performance impact
                   </p>
@@ -864,7 +864,7 @@ function ContactsPage() {
             </TableBody>
           </Table>
         </div>
-      ) : filteredContacts.length > 0 ? (
+      ) : filteredContactsToShow.length > 0 ? (
         <>
           <div className="border rounded-lg">
             <Table>
@@ -997,7 +997,7 @@ function ContactsPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-sm text-muted-foreground">
-                Showing {startIndex + 1} to {Math.min(endIndex, filteredContacts.length)} of {filteredContacts.length} contacts
+                Showing {startIndex + 1} to {Math.min(endIndex, filteredContactsToShow.length)} of {filteredContactsToShow.length} contacts
               </p>
               <div className="flex items-center gap-2">
                 <Button
