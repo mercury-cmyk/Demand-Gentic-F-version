@@ -21,6 +21,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhoneCampaignSuppressionManager } from "@/components/phone-campaign-suppression-manager";
 import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowledge-config";
+import { SidebarFilters } from "@/components/filters/sidebar-filters";
 
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
@@ -36,7 +37,12 @@ export default function PhoneCampaignEditPage() {
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedLists, setSelectedLists] = useState<string[]>([]);
   const [selectedDomainSets, setSelectedDomainSets] = useState<string[]>([]);
-  const [audienceSource, setAudienceSource] = useState<"segment" | "list" | "domain_set">("segment");
+  const [audienceSource, setAudienceSource] = useState<"filters" | "segment" | "list" | "domain_set">("segment");
+  // Advanced filters + exclusions (parity with create workflow)
+  const [filterGroup, setFilterGroup] = useState<any | undefined>(undefined);
+  const [appliedFilterGroup, setAppliedFilterGroup] = useState<any | undefined>(undefined);
+  const [excludedSegments, setExcludedSegments] = useState<string[]>([]);
+  const [excludedLists, setExcludedLists] = useState<string[]>([]);
 
   // Campaign Context fields (replaces call script)
   const [campaignObjective, setCampaignObjective] = useState("");
@@ -90,6 +96,13 @@ export default function PhoneCampaignEditPage() {
     queryKey: ['/api/domain-sets'],
   });
 
+  // Live count for applied filters (when using Advanced Filters)
+  const { data: filterCountData } = useQuery<{ count: number}>({
+    queryKey: ["/api/filters/count/contact", JSON.stringify(appliedFilterGroup)],
+    enabled: audienceSource === "filters" && !!appliedFilterGroup && (appliedFilterGroup?.conditions?.length ?? 0) > 0,
+    refetchOnWindowFocus: false,
+  });
+
   // Fetch export templates for lead delivery
   const { data: exportTemplates = [] } = useQuery<any[]>({
     queryKey: ['/api/export-templates'],
@@ -117,9 +130,15 @@ export default function PhoneCampaignEditPage() {
         setSelectedSegments(campaign.audienceRefs.segments || []);
         setSelectedLists(campaign.audienceRefs.lists || []);
         setSelectedDomainSets(campaign.audienceRefs.domain_sets || []);
+        setExcludedSegments(campaign.audienceRefs.excludedSegments || []);
+        setExcludedLists(campaign.audienceRefs.excludedLists || []);
+        setFilterGroup(campaign.audienceRefs.filterGroup || undefined);
+        setAppliedFilterGroup(campaign.audienceRefs.filterGroup || undefined);
 
         // Determine source
-        if (campaign.audienceRefs.segments?.length > 0) {
+        if (campaign.audienceRefs.filterGroup && (campaign.audienceRefs.filterGroup.conditions?.length ?? 0) > 0) {
+          setAudienceSource("filters");
+        } else if (campaign.audienceRefs.segments?.length > 0) {
           setAudienceSource("segment");
         } else if (campaign.audienceRefs.lists?.length > 0) {
           setAudienceSource("list");
@@ -208,9 +227,14 @@ export default function PhoneCampaignEditPage() {
     delete audienceRefs.segments;
     delete audienceRefs.lists;
     delete audienceRefs.domain_sets;
+    delete audienceRefs.filterGroup;
+    delete audienceRefs.excludedSegments;
+    delete audienceRefs.excludedLists;
 
     // Set only the selected source
-    if (audienceSource === 'segment' && selectedSegments.length > 0) {
+    if (audienceSource === 'filters' && filterGroup && (filterGroup.conditions?.length ?? 0) > 0) {
+      audienceRefs.filterGroup = filterGroup;
+    } else if (audienceSource === 'segment' && selectedSegments.length > 0) {
       audienceRefs.segments = selectedSegments;
     } else if (audienceSource === 'list' && selectedLists.length > 0) {
       audienceRefs.lists = selectedLists;
@@ -219,13 +243,21 @@ export default function PhoneCampaignEditPage() {
     }
 
     // Validate audience selection
-    if (!audienceRefs.segments && !audienceRefs.lists && !audienceRefs.domain_sets) {
+    if (!audienceRefs.filterGroup && !audienceRefs.segments && !audienceRefs.lists && !audienceRefs.domain_sets) {
       toast({
         title: "Validation Error",
         description: "Please select at least one audience (segment, list, or domain set)",
         variant: "destructive",
       });
       return;
+    }
+
+    // Persist exclusions when present
+    if (excludedSegments.length > 0) {
+      audienceRefs.excludedSegments = excludedSegments;
+    }
+    if (excludedLists.length > 0) {
+      audienceRefs.excludedLists = excludedLists;
     }
 
     // Build account cap
@@ -562,6 +594,10 @@ export default function PhoneCampaignEditPage() {
                 <Label>Audience Source</Label>
                 <RadioGroup value={audienceSource} onValueChange={(value: any) => setAudienceSource(value)}>
                   <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="filters" id="filters" data-testid="radio-filters" />
+                    <Label htmlFor="filters">Advanced Filters</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <RadioGroupItem value="segment" id="segment" data-testid="radio-segment" />
                     <Label htmlFor="segment">Segments</Label>
                   </div>
@@ -575,6 +611,35 @@ export default function PhoneCampaignEditPage() {
                   </div>
                 </RadioGroup>
               </div>
+
+              {/* Advanced Filters */}
+              {audienceSource === "filters" && (
+                <div className="space-y-4">
+                  <Label>Advanced Audience Filters</Label>
+                  {/* SidebarFilters reused from create workflow */}
+                  {/* Avoid importing types; treat filterGroup as any for edit parity */}
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {/**/}
+                  <SidebarFilters
+                    entityType="contact"
+                    onApplyFilter={(newFilter: any) => {
+                      setFilterGroup(newFilter);
+                      setAppliedFilterGroup(newFilter);
+                    }}
+                    initialFilter={filterGroup}
+                  />
+                  {filterGroup && (filterGroup.conditions?.length ?? 0) > 0 && (
+                    <div className="border rounded-lg p-3 bg-muted/30">
+                      <p className="text-sm">
+                        Active Filters: <strong>{filterGroup.logic}</strong> of {(filterGroup.conditions?.length ?? 0)} conditions
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Estimated Audience Size: <strong>{(filterCountData?.count ?? 0).toLocaleString()}</strong> contacts
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Segments Selection */}
               {audienceSource === "segment" && (
@@ -659,6 +724,62 @@ export default function PhoneCampaignEditPage() {
                   </div>
                 </div>
               )}
+
+              {/* Exclusions (Segments/Lists) */}
+              <div className="space-y-2">
+                <Label>Exclusions</Label>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm">Exclude Segments</Label>
+                    <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+                      {segments.map((segment: any) => (
+                        <div key={`ex-seg-${segment.id}`} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`ex-segment-${segment.id}`}
+                            checked={excludedSegments.includes(segment.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setExcludedSegments([...excludedSegments, segment.id]);
+                              } else {
+                                setExcludedSegments(excludedSegments.filter(id => id !== segment.id));
+                              }
+                            }}
+                          />
+                          <Label htmlFor={`ex-segment-${segment.id}`} className="cursor-pointer">
+                            {segment.name}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-sm">Exclude Lists</Label>
+                    <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+                      {lists.map((list: any) => (
+                        <div key={`ex-list-${list.id}`} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`ex-list-${list.id}`}
+                            checked={excludedLists.includes(list.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setExcludedLists([...excludedLists, list.id]);
+                              } else {
+                                setExcludedLists(excludedLists.filter(id => id !== list.id));
+                              }
+                            }}
+                          />
+                          <Label htmlFor={`ex-list-${list.id}`} className="cursor-pointer">
+                            {list.name}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Exclusions apply regardless of selected source.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
