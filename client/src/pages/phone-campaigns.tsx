@@ -167,7 +167,7 @@ export default function PhoneCampaignsPage() {
       }
       return stats;
     },
-    enabled: phoneCampaigns.length > 0 && !!token,
+    enabled: campaigns.length > 0 && !!token,
     refetchInterval: 2000, // Real-time stats - refresh every 2 seconds
     staleTime: 0, // Always fetch fresh data
   });
@@ -555,11 +555,11 @@ export default function PhoneCampaignsPage() {
           </div>
 
           {/* Active Filters Badge */}
-          {filterGroup && filterGroup.filters.length > 0 && (
+          {filterGroup && filterGroup.conditions.length > 0 && (
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="flex items-center gap-1">
                 <Filter className="h-3 w-3" />
-                {filterGroup.filters.length} filter{filterGroup.filters.length !== 1 ? 's' : ''} active
+                {filterGroup.conditions.length} filter{filterGroup.conditions.length !== 1 ? 's' : ''} active
               </Badge>
               <Button 
                 variant="ghost" 
