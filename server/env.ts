@@ -7,10 +7,10 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const envSchema = z.object({
-  // Telnyx
-  TELNYX_API_KEY: z.string().min(1, "TELNYX_API_KEY is required"),
-  TELNYX_FROM_NUMBER: z.string().min(1, "TELNYX_FROM_NUMBER is required"),
-  TELNYX_TEXML_APP_ID: z.string().min(1, "TELNYX_TEXML_APP_ID is required"),
+  // Telnyx - now optional with warnings (allow server to start for Cloud Run healthcheck)
+  TELNYX_API_KEY: z.string().optional(),
+  TELNYX_FROM_NUMBER: z.string().optional(),
+  TELNYX_TEXML_APP_ID: z.string().optional(),
 
   // Voice Providers
   OPENAI_API_KEY: z.string().optional(),
@@ -31,24 +31,41 @@ const envSchema = z.object({
   // Replit-specific (optional)
   REPLIT_DEV_DOMAIN: z.string().optional(),
 
-}).refine(data => data.GOOGLE_AI_API_KEY || data.GEMINI_API_KEY, {
-  message: "Either GOOGLE_AI_API_KEY or GEMINI_API_KEY must be set for Google voice provider.",
-  path: ["GEMINI_API_KEY"],
 });
+
+// Track environment validation status for runtime checks
+export let envValidationErrors: string[] = [];
 
 try {
   const parsedEnv = envSchema.parse(process.env);
-  console.log("✅ Environment variables validated successfully.");
   
-  // For convenience, you can export the parsed and validated environment variables
-  // and import them in other files.
-  // This is just an example, adapt it to your project structure.
+  // Check for critical missing vars (warn but don't exit - allow healthcheck to pass)
+  const criticalVars = ['TELNYX_API_KEY', 'TELNYX_FROM_NUMBER', 'TELNYX_TEXML_APP_ID'];
+  const missingCritical = criticalVars.filter(v => !process.env[v]);
+  
+  if (missingCritical.length > 0) {
+    envValidationErrors = missingCritical;
+    console.error("⚠️  Missing critical environment variables:", missingCritical.join(', '));
+    console.error("   Voice calling features will not work until these are configured.");
+  }
+  
+  // Check for at least one Google AI key
+  if (!process.env.GOOGLE_AI_API_KEY && !process.env.GEMINI_API_KEY) {
+    envValidationErrors.push('GOOGLE_AI_API_KEY or GEMINI_API_KEY');
+    console.error("⚠️  Missing GOOGLE_AI_API_KEY or GEMINI_API_KEY - Google voice provider won't work.");
+  }
+  
+  if (envValidationErrors.length === 0) {
+    console.log("✅ Environment variables validated successfully.");
+  } else {
+    console.log("⚠️  Server starting with missing env vars (see warnings above).");
+  }
   
 } catch (error) {
   if (error instanceof z.ZodError) {
-    console.error("❌ Invalid environment variables:", error.format());
-    // Exit the process with an error code to prevent the app from running with invalid config
-    process.exit(1);
+    console.error("❌ Environment validation error:", error.format());
+    // DON'T exit - let server start so Cloud Run healthcheck passes and we can see logs
+    envValidationErrors.push('Schema validation failed');
   }
 }
 

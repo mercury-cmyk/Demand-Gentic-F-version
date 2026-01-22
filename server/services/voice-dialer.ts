@@ -942,7 +942,12 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               },
             };
           } else {
-            console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
+            // This block runs for both test sessions AND fallback sessions (production calls with generated IDs)
+            if (isTestSession) {
+              console.warn(`${LOG_PREFIX} [TEST] Test session for call ${sessionId} - DB validation skipped.`);
+            } else {
+              console.log(`${LOG_PREFIX} [FALLBACK] Production call ${sessionId} with generated IDs - DB validation skipped. Dispositions still processed.`);
+            }
             session = {
               callId: sessionId!,
               runId: runId || '',
