@@ -341,15 +341,23 @@ Call submit_disposition with "voicemail" when:
 - No human answers after greeting plays
 - **AI call screening detected** (Google Call Assist, call screening bots, etc.) - the actual person never answered
 
-### not_interested (DEFAULT FOR HUMAN CONTACT WITHOUT INTEREST)
+### not_interested (ONLY FOR EXPLICIT REJECTION)
 Call submit_disposition with "not_interested" when:
-- Prospect says "no thanks", "not interested", "I'm not the right person"
-- Prospect declines to continue the conversation
+- Prospect EXPLICITLY says "no thanks", "not interested", "I'm not the right person"
+- Prospect EXPLICITLY declines to continue the conversation
 - Prospect says they're too busy (without requesting callback)
-- No engagement after your pitch
-- **Prospect hangs up during or after your pitch without showing interest**
-- **Short conversation with no positive signals (use this as default)**
-- **ANY connected call that doesn't meet qualified_lead criteria**
+- **Prospect hangs up AFTER your pitch with no positive signals AND identity was confirmed**
+- **ONLY use this when you have CLEAR verbal rejection from the named contact**
+
+### needs_review (DEFAULT FOR AMBIGUOUS CALLS)
+Call submit_disposition with "needs_review" when:
+- Short call (< 30 seconds) where you couldn't complete identity verification
+- Gatekeeper interaction where you couldn't reach the target contact
+- Technical audio issues prevented normal conversation
+- Identity was NOT confirmed and call ended without clear rejection
+- Call ended during your introduction (before pitch)
+- Conversation was cut short for unclear reasons
+- **Use this as DEFAULT for ambiguous situations instead of not_interested**
 
 ### do_not_call
 Call submit_disposition with "do_not_call" when:
@@ -368,7 +376,7 @@ Call submit_disposition with "no_answer" when:
 - Call connects but no human response at all
 - Only silence after your greeting (no voice detected)
 - Ring with no pickup
-- **DO NOT use this if a human answered** - use not_interested or qualified_lead instead
+- **DO NOT use this if a human answered** - use needs_review, not_interested, or qualified_lead instead
 
 ### qualified_lead
 Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are met:
@@ -384,8 +392,9 @@ Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are
 2. Did no one answer or only silence? → **no_answer**
 3. Did they say remove/stop calling? → **do_not_call**
 4. Was it wrong number/person left company? → **invalid_data**
-5. Did they show clear interest AND confirm identity AND have real conversation? → **qualified_lead**
-6. **ALL OTHER HUMAN CONTACT → not_interested** (this is the safe default)
+5. Did you confirm identity AND have meaningful conversation with interest signals? → **qualified_lead**
+6. Did the CONFIRMED contact explicitly reject? → **not_interested**
+7. **Everything else (ambiguous, short, gatekeeper, etc.) → needs_review**
 
 ## Tone & Human Presence
 Calm, clear, natural pauses. One question at a time. Never interrupt, rush, or sound scripted.
@@ -868,15 +877,23 @@ Call submit_disposition with "voicemail" when:
 - No human answers after greeting plays
 - **AI call screening detected** (Google Call Assist, call screening bots, etc.) - the actual person never answered
 
-### not_interested (DEFAULT FOR HUMAN CONTACT WITHOUT INTEREST)
+### not_interested (ONLY FOR EXPLICIT REJECTION)
 Call submit_disposition with "not_interested" when:
-- Prospect says "no thanks", "not interested", "I'm not the right person"
-- Prospect declines to continue the conversation
+- Prospect EXPLICITLY says "no thanks", "not interested", "I'm not the right person"
+- Prospect EXPLICITLY declines to continue the conversation
 - Prospect says they're too busy (without requesting callback)
-- No engagement after your pitch
-- **Prospect hangs up during or after your pitch without showing interest**
-- **Short conversation with no positive signals (use this as default)**
-- **ANY connected call that doesn't meet qualified_lead criteria**
+- **Prospect hangs up AFTER your pitch with no positive signals AND identity was confirmed**
+- **ONLY use this when you have CLEAR verbal rejection from the named contact**
+
+### needs_review (DEFAULT FOR AMBIGUOUS CALLS)
+Call submit_disposition with "needs_review" when:
+- Short call (< 30 seconds) where you couldn't complete identity verification
+- Gatekeeper interaction where you couldn't reach the target contact
+- Technical audio issues prevented normal conversation
+- Identity was NOT confirmed and call ended without clear rejection
+- Call ended during your introduction (before pitch)
+- Conversation was cut short for unclear reasons
+- **Use this as DEFAULT for ambiguous situations instead of not_interested**
 
 ### do_not_call
 Call submit_disposition with "do_not_call" when:
@@ -895,7 +912,7 @@ Call submit_disposition with "no_answer" when:
 - Call connects but no human response at all
 - Only silence after your greeting (no voice detected)
 - Ring with no pickup
-- **DO NOT use this if a human answered** - use not_interested or qualified_lead instead
+- **DO NOT use this if a human answered** - use needs_review, not_interested, or qualified_lead instead
 
 ### qualified_lead
 Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are met:
@@ -911,8 +928,9 @@ Call submit_disposition with "qualified_lead" ONLY when ALL THREE conditions are
 2. Did no one answer or only silence? → **no_answer**
 3. Did they say remove/stop calling? → **do_not_call**
 4. Was it wrong number/person left company? → **invalid_data**
-5. Did they show clear interest AND confirm identity AND have real conversation? → **qualified_lead**
-6. **ALL OTHER HUMAN CONTACT → not_interested** (this is the safe default)
+5. Did you confirm identity AND have meaningful conversation with interest signals? → **qualified_lead**
+6. Did the CONFIRMED contact explicitly reject? → **not_interested**
+7. **Everything else (ambiguous, short, gatekeeper, etc.) → needs_review**
 
 ---
 

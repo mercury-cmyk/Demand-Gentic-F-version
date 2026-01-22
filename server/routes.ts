@@ -9,6 +9,7 @@ import { getBestPhoneForContact, normalizePhoneWithCountryCode } from "./lib/pho
 import { isWithinBusinessHours, getBusinessHoursForCountry, DEFAULT_BUSINESS_HOURS, type BusinessHoursConfig, type ContactTimezoneInfo } from "./utils/business-hours";
 import { buildFilterQuery } from "./filter-builder";
 import { generateTotpSecret, verifyTotpToken, verifyBackupCode, generateBackupCodes } from "./totp-mfa";
+import { processDisposition } from "./services/disposition-engine";
 import webhooksRouter from "./routes/webhooks";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
@@ -106,7 +107,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3, getPublicUrl } from "./lib/s3";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, pipelineOpportunities, filterFieldCategoryEnum, campaignOrganizations, type FilterField, type InsertMailboxAccount } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, pipelineOpportunities, filterFieldCategoryEnum, campaignOrganizations, type CanonicalDisposition, type FilterField, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -4941,60 +4942,45 @@ export function registerRoutes(app: Express) {
         .from(calls)
         .where(eq(calls.campaignId, campaignId));
 
-      // Dialer calls: join with call_sessions to check identityConfirmed in aiAnalysis
-      // Identity is confirmed when aiAnalysis->'conversationState'->>'identityConfirmed' = 'true'
+      // PRIMARY STATS SOURCE: dialer_call_attempts (single source of truth)
+      // CRITICAL FIX: Query ONLY from dialer_call_attempts where call_started_at IS NOT NULL
+      // This ensures we only count actual calls made, not queued items or duplicates
+      // Also filters out already-processed dispositions to prevent double counting
       const [dialerStats] = await db
         .select({
           callsMade: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL THEN 1 END)::int`,
-          // Calls Connected = identity confirmed in the associated call session
-          callsConnected: sql<number>`COUNT(CASE WHEN (
-            ${callSessions.aiAnalysis}::jsonb->'conversationState'->>'identityConfirmed' = 'true'
-            OR ${callSessions.aiAnalysis}::jsonb->>'identityConfirmed' = 'true'
+          // Calls Connected = call was answered (connected = true) OR positive disposition
+          callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND (
+            ${dialerCallAttempts.connected} = true
+            OR ${dialerCallAttempts.disposition} IN ('qualified_lead', 'not_interested', 'do_not_call')
           ) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
+          // FIXED: noAnswer and voicemail now come from dialer_call_attempts, not call_sessions
+          noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND (
+            ${dialerCallAttempts.disposition} = 'voicemail' OR ${dialerCallAttempts.voicemailDetected} = true
+          ) THEN 1 END)::int`,
         })
         .from(dialerCallAttempts)
-        .leftJoin(callSessions, eq(dialerCallAttempts.callSessionId, callSessions.id))
         .where(eq(dialerCallAttempts.campaignId, campaignId));
 
-      // AI Agent calls: query call_sessions directly for AI agent calls
-      // These are calls made by the AI agent that may not have dialer_call_attempts entries
-      // Calls Connected = someone actually answered (excludes no_answer, voicemail, invalid_data, busy, failed)
-      const [aiCallStats] = await db
-        .select({
-          callsMade: sql<number>`COUNT(*)::int`,
-          // Calls Connected = NOT (no_answer, voicemail, invalid_data, busy, failed, cancelled)
-          // i.e., someone picked up the phone and there was a conversation
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} NOT IN (
-            'no_answer', 'voicemail', 'invalid_data', 'busy', 'failed', 'cancelled', 'machine_detected'
-          ) AND ${callSessions.aiDisposition} IS NOT NULL THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'qualified_lead' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('dnc', 'do_not_call') THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
-          noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'no_answer' THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'voicemail' THEN 1 END)::int`,
-        })
-        .from(callSessions)
-        .where(eq(callSessions.campaignId, campaignId));
-
-      // Use AI call stats as primary source since they represent actual calls made
-      // Legacy and dialer stats are for backward compatibility with older call flows
-      const totalCallsMade = aiCallStats?.callsMade || 0;
+      // Calculate totals from the single source of truth (dialer_call_attempts)
+      // Legacy stats are only used if dialer stats are empty (backward compatibility)
+      const hasDialerStats = (dialerStats?.callsMade || 0) > 0;
 
       res.json({
         campaignId,
         contactsInQueue: queueStats.queued,
-        callsMade: totalCallsMade > 0 ? totalCallsMade : (legacyStats?.callsMade || 0) + (dialerStats?.callsMade || 0),
-        callsConnected: (aiCallStats?.callsConnected || 0) > 0 
-          ? aiCallStats.callsConnected 
-          : (legacyStats?.callsConnected || 0) + (dialerStats?.callsConnected || 0),
-        leadsQualified: (aiCallStats?.leadsQualified || 0) + (legacyStats?.leadsQualified || 0) + (dialerStats?.leadsQualified || 0),
-        dncRequests: (aiCallStats?.dncRequests || 0) + (legacyStats?.dncRequests || 0) + (dialerStats?.dncRequests || 0),
-        notInterested: (aiCallStats?.notInterested || 0) + (legacyStats?.notInterested || 0) + (dialerStats?.notInterested || 0),
-        noAnswer: aiCallStats?.noAnswer || 0,
-        voicemail: aiCallStats?.voicemail || 0,
+        callsMade: hasDialerStats ? dialerStats.callsMade : (legacyStats?.callsMade || 0),
+        callsConnected: hasDialerStats ? dialerStats.callsConnected : (legacyStats?.callsConnected || 0),
+        leadsQualified: (dialerStats?.leadsQualified || 0) + (legacyStats?.leadsQualified || 0),
+        dncRequests: (dialerStats?.dncRequests || 0) + (legacyStats?.dncRequests || 0),
+        notInterested: (dialerStats?.notInterested || 0) + (legacyStats?.notInterested || 0),
+        // FIXED: Use dialer_call_attempts as source of truth for noAnswer/voicemail
+        noAnswer: dialerStats?.noAnswer || 0,
+        voicemail: dialerStats?.voicemail || 0,
         timestamp: Date.now(), // Real-time verification
       });
     } catch (error) {
@@ -6709,7 +6695,9 @@ export function registerRoutes(app: Express) {
             )
             .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
 
-          console.log('[AGENT QUEUE] Raw manualQueue from DB:', JSON.stringify(manualQueue, null, 2));
+          if (process.env.DEBUG_AGENT_QUEUE === 'true') {
+            console.log('[AGENT QUEUE] Raw manualQueue from DB:', JSON.stringify(manualQueue, null, 2));
+          }
 
           // Process each queue item to get best phone
           const processedQueue = manualQueue.map(item => {
@@ -7688,166 +7676,184 @@ export function registerRoutes(app: Express) {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      console.log('[DISPOSITION] Received disposition request:', {
-        disposition: req.body.disposition,
-        contactId: req.body.contactId,
-        campaignId: req.body.campaignId,
-        queueItemId: req.body.queueItemId
-      });
+      const rawDisposition = typeof req.body.disposition === "string"
+        ? req.body.disposition.trim()
+        : "";
+      if (!rawDisposition) {
+        return res.status(400).json({ message: "Disposition is required" });
+      }
+
+      const campaignId = req.body.campaignId;
+      const contactId = req.body.contactId;
+      const queueItemId = req.body.queueItemId;
+
+      if (!campaignId || !contactId) {
+        return res.status(400).json({ message: "Missing required fields: campaignId, contactId" });
+      }
+
+      const mapToCanonicalDisposition = (value: string): CanonicalDisposition => {
+        const d = value.toLowerCase().trim();
+
+        if (["qualified", "lead", "qualified_lead", "meeting_booked", "callback_requested", "callback-requested", "callback"].includes(d)) {
+          return "qualified_lead";
+        }
+        if (["voicemail", "voicemail_left", "machine"].includes(d)) {
+          return "voicemail";
+        }
+        if (["no_answer", "no-answer", "busy", "failed", "connected", "completed", "needs_review", "hung_up"].includes(d)) {
+          return "no_answer";
+        }
+        if (["not_interested", "not interested"].includes(d)) {
+          return "not_interested";
+        }
+        if (["dnc", "dnc_request", "dnc-request", "do_not_call", "do not call"].includes(d)) {
+          return "do_not_call";
+        }
+        if (["wrong_number", "invalid", "invalid_data", "invalid-data"].includes(d)) {
+          return "invalid_data";
+        }
+        return "no_answer";
+      };
+
+      const canonicalDisposition = mapToCanonicalDisposition(rawDisposition);
 
       // Check if user is admin
       const userRoles = req.user?.roles || [req.user?.role];
-      const isAdmin = userRoles.includes('admin');
+      const isAdmin = userRoles.includes("admin");
 
-      // STRICT: Verify queue item ownership before allowing disposition (unless admin)
-      if (req.body.queueItemId) {
-        const queueItem = await storage.getQueueItemById(req.body.queueItemId);
+      let queueItem: any | null = null;
+      if (queueItemId) {
+        queueItem = await storage.getQueueItemById(queueItemId);
         if (!queueItem) {
           return res.status(404).json({ message: "Queue item not found" });
         }
 
-        // STRICT: Only allow disposition if the queue item is assigned to this agent (or admin)
-        if (!isAdmin && queueItem.agentId !== agentId) {
+        if (!isAdmin && queueItem.agentId && queueItem.agentId !== agentId) {
           return res.status(403).json({ message: "You can only create dispositions for queue items assigned to you" });
         }
       }
 
-      // Build the call data object manually to avoid schema validation issues
-      const callData = {
-        agentId,
-        campaignId: req.body.campaignId,
-        contactId: req.body.contactId,
-        queueItemId: req.body.queueItemId,
-        disposition: req.body.disposition,
-        duration: req.body.duration || 0,
-        notes: req.body.notes || null,
-        qualificationData: req.body.qualificationData || null,
-        callbackRequested: req.body.callbackRequested || false,
-        telnyxCallId: req.body.telnyxCallId || null,
-        dialedNumber: req.body.dialedNumber || null, // Capture dialed phone number from frontend
-      };
-
-      const call = await storage.createCallDisposition(callData);
-
-      // ==================== INTELLIGENT DISPOSITION HANDLING ====================
-      // Check for specific dispositions and perform associated actions
-
-      const disposition = req.body.disposition;
-      const contactId = req.body.contactId;
-      const campaignId = req.body.campaignId;
-
-      // Get contact details for suppression actions
       let contact = null;
-      let account = null;
       if (contactId) {
         try {
           contact = await storage.getContact(contactId);
-          // Also fetch account to get company main phone
-          if (contact && contact.accountId) {
-            account = await storage.getAccount(contact.accountId);
-          }
         } catch (error) {
-          console.error('[DISPOSITION] Error fetching contact:', error);
+          console.error("[DISPOSITION] Error fetching contact:", error);
         }
       }
 
-      // 1. DNC REQUEST - Add CONTACT to global Do Not Call list
-      // NOTE: We add the CONTACT to DNC, not the phone numbers, because multiple contacts
-      // may share the same company phone. We don't want to block everyone at that company.
-      if (disposition === 'dnc-request' && contact && contactId) {
+      const dialedNumber =
+        req.body.dialedNumber ||
+        queueItem?.dialedNumber ||
+        contact?.directPhoneE164 ||
+        contact?.mobilePhoneE164 ||
+        contact?.directPhone ||
+        contact?.mobilePhone ||
+        null;
+
+      if (!dialedNumber) {
+        return res.status(400).json({ message: "Missing dialedNumber for call attempt" });
+      }
+
+      const { dialerRuns, dialerCallAttempts } = await import("@shared/schema");
+
+      const [existingRun] = await db
+        .select()
+        .from(dialerRuns)
+        .where(and(
+          eq(dialerRuns.campaignId, campaignId),
+          eq(dialerRuns.runType, "manual_dial"),
+          eq(dialerRuns.agentType, "human"),
+          eq(dialerRuns.humanAgentId, agentId),
+          inArray(dialerRuns.status, ["active", "pending", "paused"])
+        ))
+        .orderBy(desc(dialerRuns.createdAt))
+        .limit(1);
+
+      const run = existingRun || (await db.insert(dialerRuns).values({
+        campaignId,
+        runType: "manual_dial",
+        agentType: "human",
+        humanAgentId: agentId,
+        status: "active",
+        startedAt: new Date(),
+        maxConcurrentCalls: 1,
+        callTimeoutSeconds: 30,
+        createdBy: agentId,
+      }).returning())[0];
+
+      const callDurationSeconds = Number(req.body.duration) || 0;
+      const callStartedAt = callDurationSeconds > 0
+        ? new Date(Date.now() - callDurationSeconds * 1000)
+        : null;
+      const callEndedAt = new Date();
+      const isVoicemail = canonicalDisposition === "voicemail";
+      const isNoAnswer = canonicalDisposition === "no_answer";
+      const connected = !isVoicemail && !isNoAnswer;
+
+      const queueItemIdForAttempt = queueItem && queueItem._queueTable === "campaign_queue"
+        ? queueItem.id
+        : null;
+
+      const [callAttempt] = await db
+        .insert(dialerCallAttempts)
+        .values({
+          dialerRunId: run.id,
+          campaignId,
+          contactId,
+          queueItemId: queueItemIdForAttempt,
+          agentType: "human",
+          humanAgentId: agentId,
+          phoneDialed: dialedNumber,
+          attemptNumber: queueItem?.attemptNumber || 1,
+          callStartedAt,
+          callEndedAt,
+          callDurationSeconds: Number.isFinite(callDurationSeconds) ? callDurationSeconds : null,
+          connected,
+          voicemailDetected: isVoicemail,
+          disposition: canonicalDisposition,
+          dispositionSubmittedAt: new Date(),
+          dispositionSubmittedBy: agentId,
+          notes: req.body.notes || null,
+          recordingUrl: req.body.recordingUrl || null,
+          telnyxCallId: req.body.callControlId || req.body.telnyxCallId || null,
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      const result = await processDisposition(callAttempt.id, canonicalDisposition, agentId);
+      if (!result.success) {
+        console.error("[DISPOSITION] Disposition engine errors:", result.errors);
+      }
+
+      if (canonicalDisposition === "not_interested" && contact && contactId && campaignId) {
         try {
-          console.log(`[DISPOSITION] DNC request for contact ${contactId}`);
-          console.log(`[DISPOSITION] Contact: ${contact.firstName} ${contact.lastName} (${contact.email})`);
-          console.log(`[DISPOSITION] Company: ${account?.name || 'N/A'}`);
-
-          // Add CONTACT to global DNC list (not phone numbers!)
-          const { globalDnc } = await import('@shared/schema');
-
-          await db.insert(globalDnc)
-            .values({
-              contactId: contactId,
-              phoneE164: contact.directPhoneE164 || contact.mobilePhoneE164 || account?.mainPhoneE164 || null,
-              reason: 'DNC request from agent',
-              source: `Agent Console - ${agentId}`,
-              createdBy: agentId,
-            })
-            .onConflictDoNothing(); // Ignore if already in DNC
-
-          console.log(`[DISPOSITION] ✅ Contact ${contactId} added to global DNC - will NEVER be called again`);
-        } catch (error) {
-          console.error('[DISPOSITION] ❌ Error adding contact to DNC:', error);
-        }
-      }
-
-      // 2. NOT INTERESTED - Add to campaign-specific suppression (not global)
-      if (disposition === 'not_interested') {
-        if (contact && contactId && campaignId) {
-          try {
-            console.log(`[DISPOSITION] Not Interested - adding to campaign suppression for contact ${contactId} in campaign ${campaignId}`);
-
-            // Add contact to THIS campaign's suppression list (prevents re-calling in this campaign only)
-            const { campaignSuppressionContacts } = await import('@shared/schema');
-
-            await db.insert(campaignSuppressionContacts)
-              .values({
-                campaignId,
-                contactId,
-                reason: 'Not Interested',
-                addedBy: agentId,
-              })
-              .onConflictDoNothing(); // Ignore if already suppressed
-
-            console.log(`[DISPOSITION] ✅ Contact added to campaign suppression - will not be called again in THIS campaign`);
-          } catch (error) {
-            console.error('[DISPOSITION] Error adding Not Interested to campaign suppression:', error);
-          }
-        } else {
-          console.error(`[DISPOSITION] ⚠️ Cannot add to campaign suppression - Missing required data: contactId=${contactId}, campaignId=${campaignId}, contact=${!!contact}`);
-        }
-      }
-
-      // 3. QUALIFIED/LEAD DISPOSITION - Add to campaign-level suppression
-      // Check if this disposition represents a qualified lead (by name or system action)
-      const qualifyingDispositions = ['qualified', 'lead'];
-      let isQualified = qualifyingDispositions.includes(disposition);
-
-      // Also check if disposition has systemAction === 'converted_qualified'
-      if (!isQualified) {
-        try {
-          const { dispositions: dispositionsTable } = await import('@shared/schema');
-          const [dispositionRecord] = await db
-            .select({ systemAction: dispositionsTable.systemAction })
-            .from(dispositionsTable)
-            .where(eq(dispositionsTable.label, disposition))
-            .limit(1);
-
-          if (dispositionRecord?.systemAction === 'converted_qualified') {
-            isQualified = true;
-          }
-        } catch (error) {
-          console.error('[DISPOSITION] Error checking disposition system action:', error);
-        }
-      }
-
-      if (isQualified && contact && contactId && campaignId) {
-        try {
-          console.log(`[DISPOSITION] Qualified/Lead call - adding to campaign suppression for contact ${contactId}`);
-
-          // Add contact to campaign suppression list (prevents re-calling in this campaign)
-          const { campaignSuppressionContacts } = await import('@shared/schema');
-
+          const { campaignSuppressionContacts } = await import("@shared/schema");
           await db.insert(campaignSuppressionContacts)
             .values({
               campaignId,
               contactId,
-              reason: `Qualified - ${disposition}`,
+              reason: "Not Interested",
               addedBy: agentId,
             })
-            .onConflictDoNothing(); // Ignore if already suppressed
+            .onConflictDoNothing();
+        } catch (error) {
+          console.error("[DISPOSITION] Error adding Not Interested to campaign suppression:", error);
+        }
+      }
 
-          console.log(`[DISPOSITION] Contact added to campaign suppression list`);
+      if (canonicalDisposition === "qualified_lead" && contact && contactId && campaignId) {
+        try {
+          const { campaignSuppressionContacts } = await import("@shared/schema");
+          await db.insert(campaignSuppressionContacts)
+            .values({
+              campaignId,
+              contactId,
+              reason: `Qualified - ${rawDisposition}`,
+              addedBy: agentId,
+            })
+            .onConflictDoNothing();
 
-          // Check per-account cap and auto-suppress if reached
           if (contact.accountId) {
             const [campaign] = await db
               .select({
@@ -7860,26 +7866,14 @@ export function registerRoutes(app: Express) {
               .limit(1);
 
             if (campaign?.accountCapEnabled && campaign.accountCapValue) {
-              console.log(`[DISPOSITION] Checking per-account cap for account ${contact.accountId} (mode: ${campaign.accountCapMode}, cap: ${campaign.accountCapValue})`);
-
-              // Use the new batch account cap checking logic
-              const { batchCheckAccountCaps } = await import('./lib/campaign-suppression');
+              const { batchCheckAccountCaps } = await import("./lib/campaign-suppression");
               const capResults = await batchCheckAccountCaps(campaignId, [contact.accountId]);
               const capStatus = capResults.get(contact.accountId);
-
-              // Log current status
-              console.log(`[DISPOSITION] Account has ${capStatus?.currentCount || 0} counted items (mode: ${campaign.accountCapMode}), cap is ${campaign.accountCapValue}`);
-
-              // Check if this disposition pushes the account over the cap
-              const qualifiedCount = (capStatus?.currentCount || 0) + 1; // Include this current call
+              const qualifiedCount = (capStatus?.currentCount || 0) + 1;
               const reachedCap = qualifiedCount >= campaign.accountCapValue;
 
-              // If cap is reached or exceeded, auto-suppress the entire account from this campaign
               if (reachedCap) {
-                console.log(`[DISPOSITION] ⚠️ Account cap reached! Auto-suppressing account ${contact.accountId} from campaign ${campaignId}`);
-
-                const { campaignSuppressionAccounts } = await import('@shared/schema');
-
+                const { campaignSuppressionAccounts } = await import("@shared/schema");
                 await db.insert(campaignSuppressionAccounts)
                   .values({
                     campaignId,
@@ -7887,75 +7881,61 @@ export function registerRoutes(app: Express) {
                     reason: `Account cap reached (${qualifiedCount}/${campaign.accountCapValue} qualified calls)`,
                     addedBy: agentId,
                   })
-                  .onConflictDoNothing(); // Ignore if already suppressed
+                  .onConflictDoNothing();
 
-                // Remove all contacts from this account from ALL agents' queues in this campaign
-                const removedFromQueues = await db.delete(agentQueue)
+                await db.delete(agentQueue)
                   .where(
                     and(
                       eq(agentQueue.campaignId, campaignId),
                       eq(agentQueue.accountId, contact.accountId)
                     )
-                  )
-                  .returning({ contactId: agentQueue.contactId });
-
-                console.log(`[DISPOSITION] ✅ Account suppressed. Removed ${removedFromQueues.length} contacts from queues`);
+                  );
               }
             }
           }
         } catch (error) {
-          console.error('[DISPOSITION] Error handling qualified disposition suppression:', error);
+          console.error("[DISPOSITION] Error handling qualified disposition suppression:", error);
         }
       }
 
-      // 4. QUEUE MANAGEMENT - Intelligent next actions based on disposition
-      // CRITICAL: Queue cleanup must succeed or whole request fails
+      if (canonicalDisposition === "invalid_data" && contactId) {
+        try {
+          await db.update(contactsTable)
+            .set({
+              isInvalid: true,
+              invalidReason: `Agent marked as ${rawDisposition}`,
+              invalidatedAt: new Date(),
+              invalidatedBy: agentId,
+            })
+            .where(eq(contactsTable.id, contactId));
+        } catch (error) {
+          console.error("[DISPOSITION] Error marking contact invalid:", error);
+        }
+      }
+
       if (contactId && campaignId) {
-        // Define final dispositions (contact should be removed from campaign immediately)
-        const finalDispositions = ['qualified', 'lead', 'not_interested', 'dnc-request', 'callback-requested'];
+        const finalDispositions: CanonicalDisposition[] = ["qualified_lead", "not_interested", "do_not_call"];
+        const retryDispositions: CanonicalDisposition[] = ["voicemail", "no_answer"];
 
-        // Define retry dispositions (contact should be requeued after delay for ALL agents)
-        // IMPORTANT: Voicemail contacts get LOW priority (0) to ensure fresh contacts are dialed first
-        const retryDispositions = ['no-answer', 'busy', 'voicemail'];
-
-        // Define invalid dispositions (contact should be marked invalid and removed)
-        const invalidDispositions = ['wrong_number', 'invalid_data'];
-
-        if (finalDispositions.includes(disposition)) {
-          // Remove from ALL agents' queues (final disposition - contact is done)
-          console.log(`[DISPOSITION] Final disposition "${disposition}" - removing contact ${contactId} from ALL queues in campaign ${campaignId}`);
-
-          const removed = await db.delete(agentQueue)
+        if (finalDispositions.includes(canonicalDisposition)) {
+          await db.delete(agentQueue)
             .where(
               and(
                 eq(agentQueue.contactId, contactId),
                 eq(agentQueue.campaignId, campaignId)
               )
-            )
-            .returning({ agentId: agentQueue.agentId, queueState: agentQueue.queueState });
-
-          if (removed.length > 0) {
-            console.log(`[DISPOSITION] ✅ Successfully removed from ${removed.length} agents' queues`);
-          }
-        } else if (retryDispositions.includes(disposition)) {
-          // Requeue with appropriate delay for ALL agents
-          // Voicemail: 7 days (1 week), No-answer/Busy: 3 days
-          const retryDays = disposition === 'voicemail' ? 7 : 3;
-          console.log(`[DISPOSITION] Retry disposition "${disposition}" - requeuing contact ${contactId} with ${retryDays}-day delay for ALL agents`);
-
+            );
+        } else if (retryDispositions.includes(canonicalDisposition)) {
+          const retryDays = canonicalDisposition === "voicemail" ? 7 : 3;
           const retryDate = new Date();
           retryDate.setDate(retryDate.getDate() + retryDays);
+          const retryPriority = canonicalDisposition === "voicemail" ? 0 : 50;
 
-          // FIRST-PASS PRIORITY LOGIC: Voicemail gets priority=0 (lowest), other retries get priority=50
-          // This ensures fresh contacts (priority=100) are always dialed before voicemail retries
-          const retryPriority = disposition === 'voicemail' ? 0 : 50;
-
-          // Update queue items for ALL agents (remove agentId filter to prevent reappearing to other agents)
-          const updated = await db.update(agentQueue)
+          await db.update(agentQueue)
             .set({
-              queueState: 'queued',
+              queueState: "queued",
               scheduledFor: retryDate,
-              priority: retryPriority, // Set low priority for retries, especially voicemail
+              priority: retryPriority,
               lockedBy: null,
               lockedAt: null,
               updatedAt: new Date(),
@@ -7964,29 +7944,9 @@ export function registerRoutes(app: Express) {
               and(
                 eq(agentQueue.contactId, contactId),
                 eq(agentQueue.campaignId, campaignId)
-                // REMOVED: eq(agentQueue.agentId, agentId) - This was causing contacts to reappear to other agents!
               )
-            )
-            .returning({ agentId: agentQueue.agentId });
-
-          console.log(`[DISPOSITION] ✅ Contact requeued for ${updated.length} agents at ${retryDate.toISOString()} (${retryDays} days) with priority ${retryPriority}`);
-        } else if (invalidDispositions.includes(disposition)) {
-          // Mark contact as invalid and remove from campaign
-          console.log(`[DISPOSITION] Invalid disposition "${disposition}" - marking contact ${contactId} as invalid`);
-
-          // Mark contact as invalid
-          if (contact) {
-            await db.update(contactsTable)
-              .set({
-                isInvalid: true,
-                invalidReason: `Agent marked as ${disposition}`,
-                invalidatedAt: new Date(),
-                invalidatedBy: agentId,
-              })
-              .where(eq(contactsTable.id, contactId));
-          }
-
-          // Remove from ALL queues
+            );
+        } else if (canonicalDisposition === "invalid_data") {
           await db.delete(agentQueue)
             .where(
               and(
@@ -7994,26 +7954,18 @@ export function registerRoutes(app: Express) {
                 eq(agentQueue.campaignId, campaignId)
               )
             );
-
-          console.log(`[DISPOSITION] ✅ Contact marked invalid and removed from campaign`);
-        } else {
-          // Default behavior for other dispositions - remove from current agent's queue only
-          console.log(`[DISPOSITION] Standard disposition "${disposition}" - removing from current agent's queue`);
-
-          await db.delete(agentQueue)
-            .where(
-              and(
-                eq(agentQueue.contactId, contactId),
-                eq(agentQueue.campaignId, campaignId),
-                eq(agentQueue.agentId, agentId)
-              )
-            );
-
-          console.log(`[DISPOSITION] ✅ Removed from queue`);
         }
       }
 
-      res.status(201).json(call);
+      res.status(201).json({
+        success: true,
+        callAttemptId: callAttempt.id,
+        disposition: canonicalDisposition,
+        actions: result.actions,
+        leadId: result.leadId,
+        nextAttemptAt: result.nextAttemptAt,
+        errors: result.errors,
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         console.error('[DISPOSITION VALIDATION ERROR]', error.errors);

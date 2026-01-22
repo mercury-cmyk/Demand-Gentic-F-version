@@ -43,6 +43,10 @@ const REDIS_URL = getRedisUrl();
 // Global connection state
 let redisConnection: IORedis | undefined;
 
+function shouldLogQueueWarnings(): boolean {
+  return process.env.NODE_ENV === 'production' || process.env.LOG_QUEUE_WARNINGS === 'true';
+}
+
 /**
  * Initialize Redis connection asynchronously
  * This ensures we know if Redis is available before successful startup
@@ -174,7 +178,9 @@ export function createQueue<T = any>(
   const connection = getRedisConnection();
   
   if (!connection) {
-    console.warn(`[Queue] Queue "${queueName}" created without Redis - jobs will not persist`);
+    if (shouldLogQueueWarnings()) {
+      console.warn(`[Queue] Queue "${queueName}" created without Redis - jobs will not persist`);
+    }
     // Return a mock queue that logs warnings
     return null;
   }
@@ -216,7 +222,9 @@ export function createWorker<T = any>(
 ): Worker<T> | null {
   const redisUrl = getRedisUrl();
   if (!isRedisConfigured() || !redisUrl) {
-    console.warn(`[Queue] Worker for "${queueName}" not started - no Redis connection`);
+    if (shouldLogQueueWarnings()) {
+      console.warn(`[Queue] Worker for "${queueName}" not started - no Redis connection`);
+    }
     return null;
   }
 

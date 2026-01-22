@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { eq, or, and, sql } from "drizzle-orm";
 import { mapTelnyxHangupCause, shouldTriggerSuppression } from "../lib/contact-suppression";
 import { updateContactSuppression } from "../services/disposition-engine";
+import { setAmdResultForSession } from "../services/voice-dialer";
 
 const router = Router();
 
@@ -327,9 +328,18 @@ router.post("/telnyx", async (req, res) => {
       case 'call.machine.detection.ended': {
         // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
         const amdResult = payload?.result || payload?.machine_detection_result;
-        const amdConfidence = payload?.confidence || payload?.machine_detection_confidence;
+        const amdConfidence = payload?.confidence || payload?.machine_detection_confidence || 0;
         console.log(`[Telnyx Webhook] Machine detection result: ${amdResult} (confidence: ${amdConfidence}) for call ${payload.call_control_id}`);
-        
+
+        // PHASE 1: Notify voice-dialer of AMD result to bridge webhook and WebSocket session
+        // This ensures the voice-dialer session receives AMD detection even if it fires before session starts
+        try {
+          setAmdResultForSession(payload.call_control_id, amdResult, amdConfidence);
+          console.log(`[Telnyx Webhook] AMD result forwarded to voice-dialer for call ${payload.call_control_id}`);
+        } catch (amdErr) {
+          console.error(`[Telnyx Webhook] Failed to forward AMD result to voice-dialer:`, amdErr);
+        }
+
         if (amdResult === 'machine' || amdResult === 'machine_end_beep' || amdResult === 'machine_end_silence' || amdResult === 'machine_end_other') {
           // Machine/voicemail detected - hang up immediately and record disposition
           try {

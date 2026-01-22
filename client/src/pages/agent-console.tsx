@@ -50,6 +50,7 @@ import { CONTACT_FIELD_LABELS, ACCOUNT_FIELD_LABELS } from '@shared/field-labels
 import { QueueControls } from "@/components/queue-controls";
 import { ContactMismatchDialog } from "@/components/contact-mismatch-dialog";
 import { LeadVerificationModal } from "@/components/lead-verification-modal";
+import { AudioDeviceSettings } from "@/components/audio-device-settings";
 import { useCallControl } from "@/hooks/useCallControl";
 import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
 
@@ -393,6 +394,9 @@ export default function AgentConsolePage() {
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationLeadId, setVerificationLeadId] = useState<string | null>(null);
 
+  // Audio Device Settings state
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
+
   // Fetch agent's active campaign assignment
   const { data: activeCampaign } = useQuery<{
     campaignId: string;
@@ -472,17 +476,14 @@ export default function AgentConsolePage() {
   // WebRTC SIP connection for browser-based audio
   const {
     isConnected: webrtcConnected,
-    callStatus: webrtcCallStatus,
+    callState: webrtcCallState,
     callDuration: webrtcCallDuration,
     makeCall: webrtcMakeCall,
     hangup: webrtcHangup,
-    hold: webrtcHold,
-    unhold: webrtcUnhold,
-    mute: webrtcMute,
-    unmute: webrtcUnmute,
+    toggleMute: webrtcToggleMute,
+    toggleHold: webrtcToggleHold,
     isMuted: webrtcIsMuted,
-    isOnHold,
-    error: webrtcError,
+    lastError: webrtcError,
   } = useSIPWebRTC({
     sipUri: sipTrunkConfig?.sipUsername,
     sipPassword: sipTrunkConfig?.sipPassword,
@@ -492,20 +493,20 @@ export default function AgentConsolePage() {
   useEffect(() => {
     console.log('[AGENT CONSOLE] WebRTC status:', {
       webrtcConnected,
-      webrtcCallStatus,
+      webrtcCallState,
       webrtcError,
       sipUsername: sipTrunkConfig?.sipUsername,
       hasSipPassword: !!sipTrunkConfig?.sipPassword,
     });
-  }, [webrtcConnected, webrtcCallStatus, webrtcError, sipTrunkConfig]);
+  }, [webrtcConnected, webrtcCallState, webrtcError, sipTrunkConfig]);
 
   // Sync WebRTC call status with component callStatus
   // When using WebRTC for calls, update the component's callStatus state
   useEffect(() => {
-    if (webrtcConnected && webrtcCallStatus) {
-      console.log('[AGENT CONSOLE] Syncing WebRTC status to callStatus:', webrtcCallStatus);
+    if (webrtcConnected && webrtcCallState) {
+      console.log('[AGENT CONSOLE] Syncing WebRTC status to callStatus:', webrtcCallState);
       // Map WebRTC statuses to our CallStatus type
-      switch (webrtcCallStatus) {
+      switch (webrtcCallState) {
         case 'connecting':
         case 'ringing':
           setCallStatus('connecting');
@@ -524,7 +525,7 @@ export default function AgentConsolePage() {
           break;
       }
     }
-  }, [webrtcConnected, webrtcCallStatus]);
+  }, [webrtcConnected, webrtcCallState]);
 
   // Additional UI state
   const [isHeld, setIsHeld] = useState(false);
@@ -580,7 +581,7 @@ export default function AgentConsolePage() {
   const hangup = async () => {
     console.log('[AGENT CONSOLE] Hanging up call', {
       webrtcConnected,
-      webrtcCallStatus,
+      webrtcCallState,
       callControlId,
       callState,
     });
@@ -589,7 +590,7 @@ export default function AgentConsolePage() {
     const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
 
     // Use WebRTC hangup only if WebRTC is active AND we don't have a Call Control call
-    if (webrtcConnected && webrtcHangup && webrtcCallStatus !== 'idle' && !hasActiveCallControlCall) {
+    if (webrtcConnected && webrtcHangup && webrtcCallState !== 'idle' && !hasActiveCallControlCall) {
       console.log('[AGENT CONSOLE] Using WebRTC hangup');
       webrtcHangup();
     } else if (hasActiveCallControlCall) {
@@ -599,7 +600,7 @@ export default function AgentConsolePage() {
     } else {
       // Fallback - try both just in case
       console.log('[AGENT CONSOLE] Fallback hangup - trying both methods');
-      if (webrtcHangup && webrtcCallStatus !== 'idle') {
+      if (webrtcHangup && webrtcCallState !== 'idle') {
         webrtcHangup();
       }
       await apiHangup();
@@ -619,21 +620,17 @@ export default function AgentConsolePage() {
 
     console.log('[AGENT CONSOLE] Toggling mute', {
       webrtcConnected,
-      webrtcCallStatus,
+      webrtcCallState,
       callControlId,
       callState,
       hasActiveCallControlCall,
     });
 
     // Use WebRTC mute only if WebRTC is active AND we don't have a Call Control call
-    if (webrtcConnected && webrtcCallStatus === 'active' && !hasActiveCallControlCall) {
+    if (webrtcConnected && webrtcCallState === 'active' && !hasActiveCallControlCall) {
       // Use WebRTC mute/unmute
       console.log('[AGENT CONSOLE] Using WebRTC mute/unmute');
-      if (webrtcIsMuted) {
-        webrtcUnmute();
-      } else {
-        webrtcMute();
-      }
+      webrtcToggleMute();
     } else if (hasActiveCallControlCall) {
       // Fall back to API-based mute for Call Control calls
       console.log('[AGENT CONSOLE] Using Call Control API mute for:', callControlId);
@@ -647,20 +644,14 @@ export default function AgentConsolePage() {
 
   // Unified mute state - prefer Call Control state when we have a call control ID, else WebRTC
   const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
-  const isCurrentlyMuted = hasActiveCallControlCall ? isMuted : (webrtcConnected && webrtcCallStatus === 'active' ? webrtcIsMuted : isMuted);
+  const isCurrentlyMuted = hasActiveCallControlCall ? isMuted : (webrtcConnected && webrtcCallState === 'active' ? webrtcIsMuted : isMuted);
 
   // Unified hold handler - uses WebRTC when active, falls back to Call Control API
   const handleToggleHold = async () => {
-    console.log('[AGENT CONSOLE] Toggling hold, WebRTC connected:', webrtcConnected, 'WebRTC status:', webrtcCallStatus);
-    if (webrtcConnected && (webrtcCallStatus === 'active' || webrtcCallStatus === 'held')) {
+    console.log('[AGENT CONSOLE] Toggling hold, WebRTC connected:', webrtcConnected, 'WebRTC status:', webrtcCallState);
+    if (webrtcConnected && (webrtcCallState === 'active' || webrtcCallState === 'held')) {
       // Use WebRTC hold/unhold
-      if (isOnHold) {
-        webrtcUnhold();
-        setIsHeld(false);
-      } else {
-        webrtcHold();
-        setIsHeld(true);
-      }
+      webrtcToggleHold();
     } else {
       // Fall back to API-based hold
       await toggleHold();
@@ -668,7 +659,7 @@ export default function AgentConsolePage() {
   };
 
   // Unified hold state - prefer WebRTC state when connected
-  const isCurrentlyHeld = webrtcConnected && (webrtcCallStatus === 'active' || webrtcCallStatus === 'held') ? isOnHold : isHeld;
+  const isCurrentlyHeld = webrtcConnected && (webrtcCallState === 'active' || webrtcCallState === 'held') ? (webrtcCallState === 'held') : isHeld;
 
   // Fetch agent queue data
   const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching, isPlaceholderData } = useQuery<QueueItem[]>({
@@ -1473,6 +1464,15 @@ export default function AgentConsolePage() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
+      {/* Hidden remote audio element for WebRTC calls - CRITICAL for audio playback */}
+      <audio 
+        id="remoteAudio"
+        autoPlay={true}
+        style={{ display: 'none' }}
+        playsInline
+        controls={false}
+      />
+
       {/* TOP FIXED HEADER - Premium Gradient Design - IMPROVED RESPONSIVE */}
       <div className="border-b shadow-2xl relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f766e 0%, #0ea5a4 50%, #38bdf8 100%)' }}>
         {/* Decorative overlay */}
@@ -1631,6 +1631,17 @@ export default function AgentConsolePage() {
               data-testid="button-refresh"
             >
               <RefreshCw className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowAudioSettings(true)}
+              className="text-white hover:bg-white/10"
+              data-testid="button-audio-settings"
+              title="Audio Device Settings"
+            >
+              <Settings className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -2527,6 +2538,16 @@ export default function AgentConsolePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Audio Device Settings Dialog */}
+      <AudioDeviceSettings 
+        open={showAudioSettings}
+        onOpenChange={setShowAudioSettings}
+        onDevicesSelected={(micId, speakerId) => {
+          console.log('[AUDIO SETTINGS] Devices selected:', { micId, speakerId });
+          // Devices are automatically saved to localStorage by AudioDeviceSettings component
+        }}
+      />
     </div>
   );
 }

@@ -14,6 +14,7 @@
 
 import { EventEmitter } from "events";
 import WebSocket from "ws";
+import { Agent } from "undici";
 import { AiVoiceAgent, AiAgentSettings, CallContext, createAiVoiceAgent } from "./ai-voice-agent";
 import { storage } from "../storage";
 import { uploadToS3, getPresignedDownloadUrl } from "../lib/s3";
@@ -21,6 +22,8 @@ import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./v
 import { db } from "../db";
 import { dialerCallAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
+// Use dynamic import to avoid async module initialization issue with voice-dialer
+// import { setAmdResultForSession } from "./voice-dialer";
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 
 /**
@@ -198,6 +201,7 @@ export class TelnyxAiBridge extends EventEmitter {
   private activeCalls: Map<string, ActiveAiCall> = new Map();
   private telnyxApiKey: string;
   private webhookUrl: string;
+  private telnyxHttp: Agent;
   
   // Track client_state by call_control_id for AMD webhook lookups
   // AMD webhook fires before WebSocket connection, so we need to track state separately
@@ -220,7 +224,26 @@ export class TelnyxAiBridge extends EventEmitter {
     super();
     this.telnyxApiKey = process.env.TELNYX_API_KEY || "";
     this.webhookUrl = process.env.TELNYX_WEBHOOK_URL || "";
+    this.telnyxHttp = new Agent({
+      connections: 50,
+      keepAliveTimeout: 10_000,
+      keepAliveMaxTimeout: 60_000,
+      pipelining: 1,
+    });
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
+  }
+
+  private async telnyxFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${this.telnyxApiKey}`);
+    }
+
+    return fetch(url, {
+      ...init,
+      headers,
+      dispatcher: this.telnyxHttp,
+    });
   }
   
   // Format phone number to E.164 format (required by Telnyx)
@@ -441,9 +464,9 @@ export class TelnyxAiBridge extends EventEmitter {
         campaign_id: metadata.campaignId,
         queue_item_id: metadata.queueItemId,
         call_attempt_id: fallbackCallAttemptId,
-        contact_id: metadata.contactId || '',
+        contact_id: metadata.contactId || null,
         called_number: phoneNumber,
-        virtual_agent_id: metadata.virtualAgentId || '',
+        virtual_agent_id: metadata.virtualAgentId || null,
         provider: provider,
         // Include agent configuration for WebSocket session
         // system_prompt is built by Gemini Live Dialer from agent_settings
@@ -480,11 +503,10 @@ export class TelnyxAiBridge extends EventEmitter {
 
         // Use the path-based TeXML endpoint (same as test calls)
         // POST /v2/texml/calls/{application_id}
-        response = await fetch(`https://api.telnyx.com/v2/texml/calls/${texmlAppId}`, {
+        response = await this.telnyxFetch(`https://api.telnyx.com/v2/texml/calls/${texmlAppId}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.telnyxApiKey}`,
           },
           body: JSON.stringify({
             To: phoneNumber,
@@ -519,11 +541,10 @@ export class TelnyxAiBridge extends EventEmitter {
   - To: ${phoneNumber}
   - Provider: ${provider}`);
         
-        response = await fetch("https://api.telnyx.com/v2/calls", {
+        response = await this.telnyxFetch("https://api.telnyx.com/v2/calls", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${this.telnyxApiKey}`,
           },
           body: JSON.stringify({
             connection_id: callControlAppId,
@@ -677,8 +698,27 @@ export class TelnyxAiBridge extends EventEmitter {
   private async pollCallStatus(callId: string, callControlId: string, agent: AiVoiceAgent): Promise<void> {
     let attempts = 0;
     const maxAttempts = 20; // Poll for up to 20 seconds
-    const pollInterval = 1000; // 1 second
+    const basePollInterval = 1000; // 1 second
+    const mediaPollInterval = 5000; // Reduce polling when media is connected
+    const maxPollInterval = 10000;
+    const pollTimeoutMs = 5000;
+    const jitterMs = 250;
     let hasSpoken = false;
+    let consecutiveErrors = 0;
+
+    const getPollDelay = (hasMediaConnection: boolean, isAnswered: boolean): number => {
+      const baseInterval = hasMediaConnection && isAnswered ? mediaPollInterval : basePollInterval;
+      if (consecutiveErrors === 0) {
+        return baseInterval;
+      }
+
+      const backoff = Math.min(
+        maxPollInterval,
+        baseInterval * Math.pow(2, Math.min(consecutiveErrors, 4))
+      );
+      const jitter = Math.floor(Math.random() * jitterMs);
+      return backoff + jitter;
+    };
 
     const poll = async () => {
       attempts++;
@@ -695,11 +735,11 @@ export class TelnyxAiBridge extends EventEmitter {
       }
 
       try {
-        const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}`, {
-          headers: {
-            Authorization: `Bearer ${this.telnyxApiKey}`,
-          },
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), pollTimeoutMs);
+        const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}`, {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -717,10 +757,15 @@ export class TelnyxAiBridge extends EventEmitter {
             return;
           }
           console.log(`[TelnyxAiBridge] Poll error: ${response.status}`);
-          setTimeout(poll, pollInterval);
+          consecutiveErrors++;
+          const activeCall = this.activeCalls.get(callId);
+          const hasMediaConnection = activeCall?.mediaWs !== null;
+          const isAnsweredViaWebhook = activeCall?.isAnswered === true;
+          setTimeout(poll, getPollDelay(hasMediaConnection, isAnsweredViaWebhook));
           return;
         }
 
+        consecutiveErrors = 0;
         const data = await response.json();
         const callData = data.data || data;
         // For TeXML calls, is_alive might not be returned - treat undefined as alive
@@ -777,10 +822,14 @@ export class TelnyxAiBridge extends EventEmitter {
         }
 
         // Continue polling to track call end
-        setTimeout(poll, pollInterval);
+        setTimeout(poll, getPollDelay(hasMediaConnection, isAnswered));
       } catch (error) {
         console.error(`[TelnyxAiBridge] Poll error for call ${callId}:`, error);
-        setTimeout(poll, pollInterval);
+        consecutiveErrors++;
+        const activeCall = this.activeCalls.get(callId);
+        const hasMediaConnection = activeCall?.mediaWs !== null;
+        const isAnsweredViaWebhook = activeCall?.isAnswered === true;
+        setTimeout(poll, getPollDelay(hasMediaConnection, isAnsweredViaWebhook));
       }
     };
 
@@ -876,11 +925,10 @@ export class TelnyxAiBridge extends EventEmitter {
     console.log(`[TelnyxAiBridge] Playing Google TTS audio from S3: ${audioUrl.split("?")[0]}... (${audioBuffer.byteLength} bytes)`);
 
     // Telnyx Playback
-    const telnyxResponse = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {
+    const telnyxResponse = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
       },
       body: JSON.stringify({
         audio_url: audioUrl,
@@ -937,11 +985,10 @@ export class TelnyxAiBridge extends EventEmitter {
     console.log(`[TelnyxAiBridge] Playing OpenAI TTS audio from S3: ${audioUrl.substring(0, 100)}... (${audioBuffer.byteLength} bytes)`);
     
     // Play the audio via Telnyx
-    const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {
+    const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/playback_start`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
       },
       body: JSON.stringify({
         audio_url: audioUrl,
@@ -969,11 +1016,10 @@ export class TelnyxAiBridge extends EventEmitter {
 
     const selectedVoice = voice && voiceGenderMap[voice] ? voiceGenderMap[voice] : "female";
     
-    const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/speak`, {
+    const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/speak`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
       },
       body: JSON.stringify({
         payload: text,
@@ -992,13 +1038,30 @@ export class TelnyxAiBridge extends EventEmitter {
 
   private async handleAmdResult(callId: string, call: ActiveAiCall, data: any): Promise<void> {
     const amdResult = data.result;
-    console.log(`[TelnyxAiBridge] AMD result for ${callId}: ${amdResult}`);
+    const amdConfidence = data.confidence || 0;
+    console.log(`[TelnyxAiBridge] AMD result for ${callId}: ${amdResult} (confidence: ${amdConfidence})`);
 
-    if (amdResult === "machine") {
+    // Store AMD result in call state
+    call.amdResult = amdResult;
+    call.amdConfidence = amdConfidence;
+
+    // PHASE 1: Notify voice-dialer of AMD result to sync between TelnyxAiBridge and voice-dialer sessions
+    try {
+      if (call.callControlId) {
+        // Dynamic import to avoid circular async dependency
+        const { setAmdResultForSession } = await import("./voice-dialer");
+        setAmdResultForSession(call.callControlId, amdResult, amdConfidence);
+        console.log(`[TelnyxAiBridge] AMD result forwarded to voice-dialer for ${callId}`);
+      }
+    } catch (e) {
+      console.error(`[TelnyxAiBridge] Failed to forward AMD result to voice-dialer:`, e);
+    }
+
+    if (amdResult === "machine" || amdResult?.startsWith('machine_end') || amdResult === "fax") {
       call.disposition = "voicemail";
       await this.hangupCall(call.callControlId);
       this.emit("call:voicemail", { callId });
-    } else if (amdResult === "human") {
+    } else if (amdResult === "human" || amdResult === "human_residence" || amdResult === "human_business") {
       this.emit("call:human_detected", { callId });
     }
   }
@@ -1028,7 +1091,7 @@ export class TelnyxAiBridge extends EventEmitter {
           (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
            contact?.firstName || contact?.lastName || 'Unknown');
         
-        const shouldCreateLead = disposition === "qualified";
+        const shouldCreateLead = disposition === "qualified" || disposition === "callback_requested" || disposition === "handoff" || disposition === "meeting_booked";
         if (!shouldCreateLead) {
           console.log(
             `[TelnyxAiBridge] Skipping lead creation for AI call ${callId} (disposition=${disposition})`
@@ -1200,11 +1263,10 @@ export class TelnyxAiBridge extends EventEmitter {
     activeCall.disposition = "handoff";
 
     try {
-      await fetch(`https://api.telnyx.com/v2/calls/${activeCall.callControlId}/actions/transfer`, {
+      await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${activeCall.callControlId}/actions/transfer`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${this.telnyxApiKey}`,
         },
         body: JSON.stringify({
           to: transferNumber,
@@ -1221,11 +1283,10 @@ export class TelnyxAiBridge extends EventEmitter {
   // startMediaStreaming() removed - TeXML handles streaming automatically via <Stream bidirectionalMode="rtp" />
 
   private async hangupCall(callControlId: string): Promise<void> {
-    await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+    await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
       },
     });
   }
@@ -1369,11 +1430,10 @@ export class TelnyxAiBridge extends EventEmitter {
     }
     console.log(`[TelnyxAiBridge] Starting gather on call: ${callControlId}`);
     
-    const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/gather`, {
+    const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/gather`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${this.telnyxApiKey}`,
       },
       body: JSON.stringify({
         input_type: "speech",

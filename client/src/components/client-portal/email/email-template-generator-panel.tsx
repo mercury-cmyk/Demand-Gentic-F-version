@@ -33,6 +33,15 @@ interface GeneratedEmail {
   preheader?: string;
   body: string;
   cta?: string;
+  // Structured fields from DeepSeek
+  heroTitle?: string;
+  heroSubtitle?: string;
+  intro?: string;
+  valueBullets?: string[];
+  ctaLabel?: string;
+  closingLine?: string;
+  // Pre-built HTML from server
+  html?: string;
 }
 
 interface EmailAnalysis {
@@ -103,6 +112,7 @@ export function EmailTemplateGeneratorPanel({
   const [emailType, setEmailType] = useState('cold_outreach');
   const [tone, setTone] = useState('professional');
   const [variants, setVariants] = useState(1);
+  const [brandPalette, setBrandPalette] = useState<'indigo' | 'emerald' | 'slate'>('indigo');
   
   // Sequence form state
   const [sequenceLength, setSequenceLength] = useState(5);
@@ -167,6 +177,7 @@ export function EmailTemplateGeneratorPanel({
           emailType,
           tone,
           variants,
+          brandPalette,
         }),
       });
       if (!res.ok) {
@@ -268,8 +279,8 @@ export function EmailTemplateGeneratorPanel({
   // Send test email mutation
   const sendTestEmailMutation = useMutation({
     mutationFn: async (email: GeneratedEmail) => {
-      // Build simple, professional HTML email with campaign context
-      const htmlContent = buildSimpleEmailHtml(email, activeCampaignName);
+      // Use server-provided branded HTML if available, otherwise build simple version
+      const htmlContent = email.html || buildSimpleEmailHtml(email, activeCampaignName);
       
       const res = await fetch('/api/client-portal/agentic/emails/send-test', {
         method: 'POST',
@@ -499,18 +510,49 @@ export function EmailTemplateGeneratorPanel({
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>Variants</Label>
-                    <Select value={variants.toString()} onValueChange={(v) => setVariants(parseInt(v))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">1 version</SelectItem>
-                        <SelectItem value="2">2 versions</SelectItem>
-                        <SelectItem value="3">3 versions</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Variants</Label>
+                      <Select value={variants.toString()} onValueChange={(v) => setVariants(parseInt(v))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 version</SelectItem>
+                          <SelectItem value="2">2 versions</SelectItem>
+                          <SelectItem value="3">3 versions</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Brand Style</Label>
+                      <Select value={brandPalette} onValueChange={(v) => setBrandPalette(v as 'indigo' | 'emerald' | 'slate')}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="indigo">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-indigo-500" />
+                              Indigo (Professional)
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="emerald">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                              Emerald (Growth)
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="slate">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full bg-slate-700" />
+                              Slate (Modern)
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
                   <Button
@@ -567,7 +609,7 @@ export function EmailTemplateGeneratorPanel({
                           </div>
                         </CardHeader>
                         <CardContent>
-                          <div className="space-y-2">
+                          <div className="space-y-3">
                             <div>
                               <Label className="text-xs text-muted-foreground">Subject Line</Label>
                               <p className="font-medium">{email.subject}</p>
@@ -578,12 +620,55 @@ export function EmailTemplateGeneratorPanel({
                                 <p className="text-sm text-muted-foreground">{email.preheader}</p>
                               </div>
                             )}
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Body</Label>
-                              <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border">
-                                {email.body}
+                            {email.heroTitle && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Hero Title</Label>
+                                <p className="font-semibold text-primary">{email.heroTitle}</p>
                               </div>
-                            </div>
+                            )}
+                            {email.heroSubtitle && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Hero Subtitle</Label>
+                                <p className="text-sm">{email.heroSubtitle}</p>
+                              </div>
+                            )}
+                            {email.intro && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Introduction</Label>
+                                <p className="text-sm bg-white p-2 rounded border">{email.intro}</p>
+                              </div>
+                            )}
+                            {email.valueBullets && email.valueBullets.length > 0 && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Key Value Points</Label>
+                                <ul className="text-sm list-disc list-inside space-y-1 bg-white p-2 rounded border">
+                                  {email.valueBullets.map((bullet, i) => (
+                                    <li key={i}>{bullet}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {email.ctaLabel && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Call to Action</Label>
+                                <Badge className="mt-1">{email.ctaLabel}</Badge>
+                              </div>
+                            )}
+                            {email.closingLine && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Closing</Label>
+                                <p className="text-sm text-muted-foreground italic">{email.closingLine}</p>
+                              </div>
+                            )}
+                            {/* Fallback to body if no structured content */}
+                            {!email.heroTitle && email.body && (
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Body</Label>
+                                <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border">
+                                  {email.body}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </CardContent>
                       </Card>

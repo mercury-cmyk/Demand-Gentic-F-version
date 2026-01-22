@@ -3,6 +3,13 @@
  * 
  * This service manages the bidirectional streaming between Telnyx (PSTN) 
  * and Google Gemini Multimodal Live API.
+ * 
+ * AUDIO QUALITY FIXES:
+ * - Connection keepalive with ping/pong heartbeats
+ * - Buffer backpressure detection and handling
+ * - Audio quality monitoring and metrics
+ * - Automatic reconnection with exponential backoff
+ * - Audio timing and buffer validation
  */
 
 import { WebSocket } from 'ws';
@@ -11,11 +18,20 @@ import { Buffer } from 'buffer';
 import { db } from "../db";
 import { contacts, campaigns } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
+import { audioQualityMonitor } from "./audio-quality-monitor";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
 const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+
+// Audio quality constants
+const AUDIO_KEEPALIVE_INTERVAL = 30000; // 30 second ping/pong for connection health
+const AUDIO_TIMEOUT = 60000; // 60 second timeout for no audio activity
+const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer before backpressure
+const RECONNECT_BASE_DELAY = 1000; // 1 second base reconnect delay
+const MAX_RECONNECT_DELAY = 30000; // 30 second max reconnect delay
+const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
 
 // ==================== PLACEHOLDER SUBSTITUTION ====================
 
@@ -27,6 +43,21 @@ interface CallContext {
   organizationName?: string;
   campaignName?: string;
   campaignPurpose?: string;
+}
+
+/**
+ * Audio quality metrics for monitoring call health
+ */
+interface AudioMetrics {
+  startTime: number;
+  audioChunksSent: number;
+  audioChunksReceived: number;
+  totalBytesSent: number;
+  totalBytesReceived: number;
+  bufferBackpressureEvents: number;
+  lastAudioSentTime: number;
+  lastAudioReceivedTime: number;
+  connectionDrops: number;
 }
 
 /**
@@ -157,6 +188,40 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let aiTranscript: string = "";
   let callContext: CallContext = {};
 
+  // Audio quality tracking
+  const metrics: AudioMetrics = {
+    startTime: Date.now(),
+    audioChunksSent: 0,
+    audioChunksReceived: 0,
+    totalBytesSent: 0,
+    totalBytesReceived: 0,
+    bufferBackpressureEvents: 0,
+    lastAudioSentTime: Date.now(),
+    lastAudioReceivedTime: Date.now(),
+    connectionDrops: 0,
+  };
+
+  // Initialize audio quality monitoring
+  if (callId) {
+    audioQualityMonitor.startCall(callId);
+  }
+
+  // Keepalive and reconnection state
+  let keepaliveInterval: NodeJS.Timeout | null = null;
+  let audioTimeoutTimer: NodeJS.Timeout | null = null;
+  let reconnectAttempts = 0;
+  let geminiConnected = false;
+
+  // Cleanup function for graceful shutdown
+  function cleanup() {
+    if (keepaliveInterval) clearInterval(keepaliveInterval);
+    if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
+    if (geminiWs) {
+      geminiWs.close();
+      geminiWs = null;
+    }
+  }
+
   // 1. Handle messages from Telnyx (Inbound from PSTN)
   ws.on('message', async (data: any) => {
     try {
@@ -173,9 +238,6 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
           if (clientStateB64) {
             try {
               const config = JSON.parse(Buffer.from(clientStateB64, 'base64').toString());
-              // AUTOMATIC SYNCHRONIZATION: We use the voice name string directly from config.
-              // This ensures that as soon as Google releases a new voice (e.g., "Jade"), 
-              // you can use it by simply updating your Virtual Agent settings without code changes.
               voiceName = config.voice || voiceName;
               
               // Extract call context for placeholder substitution
@@ -228,6 +290,28 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
         case 'media':
           if (geminiWs?.readyState === WebSocket.OPEN) {
+            // Update audio metrics
+            metrics.audioChunksSent++;
+            metrics.totalBytesSent += msg.media.payload?.length || 0;
+            metrics.lastAudioSentTime = Date.now();
+
+            // Record in monitor
+            if (callId) {
+              audioQualityMonitor.recordAudioSent(callId, msg.media.payload?.length || 0);
+            }
+
+            // Check buffer backpressure
+            const bufferSize = geminiWs.bufferedAmount;
+            if (bufferSize > MAX_BUFFER_SIZE) {
+              metrics.bufferBackpressureEvents++;
+              if (callId) {
+                audioQualityMonitor.recordBackpressure(callId);
+              }
+              console.warn(`[Gemini Live] ⚠️ Buffer backpressure detected (${bufferSize} bytes), may affect audio quality`);
+              // Drop frame to prevent buffer overflow
+              break;
+            }
+
             // Telnyx sends G.711 PCMU (8kHz). 
             // Gemini Multimodal Live API can handle various formats if specified in the mime_type.
             geminiWs.send(JSON.stringify({
@@ -238,11 +322,41 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
                 }]
               }
             }));
+
+            // Reset audio timeout on successful send
+            if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
+            audioTimeoutTimer = setTimeout(() => {
+              console.error('[Gemini Live] ❌ No audio activity for 60 seconds - connection may be stalled');
+              metrics.connectionDrops++;
+              if (callId) {
+                audioQualityMonitor.recordAudioTimeout(callId);
+              }
+              if (geminiWs) {
+                geminiWs.close(1000, 'Audio timeout');
+              }
+            }, AUDIO_TIMEOUT);
           }
           break;
 
         case 'stop':
           console.log('[Gemini Live] ⏹️ Telnyx stream stopped');
+          console.log('[Gemini Live] 📊 Call metrics:', {
+            duration: Math.round((Date.now() - metrics.startTime) / 1000) + 's',
+            audioChunks: metrics.audioChunksSent,
+            totalData: (metrics.totalBytesSent / 1024).toFixed(2) + 'KB',
+            backpressureEvents: metrics.bufferBackpressureEvents,
+          });
+          
+          // End quality monitoring
+          if (callId) {
+            const finalMetrics = audioQualityMonitor.endCall(callId);
+            if (finalMetrics) {
+              const alert = audioQualityMonitor.checkAndAlert(callId);
+              if (alert) console.warn(alert);
+            }
+          }
+          
+          cleanup();
           geminiWs?.close();
           break;
       }
@@ -254,9 +368,36 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   // 2. Connect to Gemini Multimodal Live API
   function connectToGemini() {
     geminiWs = new WebSocket(GEMINI_WS_URL);
+    geminiConnected = false;
+    reconnectAttempts = 0;
+
+    // Set connection timeout
+    const connectionTimeout = setTimeout(() => {
+      if (!geminiConnected) {
+        console.error('[Gemini Live] Connection timeout - Gemini not responding');
+        geminiWs?.close();
+        attemptReconnect();
+      }
+    }, 15000);
 
     geminiWs.on('open', () => {
+      clearTimeout(connectionTimeout);
+      geminiConnected = true;
+      reconnectAttempts = 0;
       console.log('[Gemini Live] ✅ Connected to Google Gemini API');
+      
+      // Start keepalive heartbeat
+      if (keepaliveInterval) clearInterval(keepaliveInterval);
+      keepaliveInterval = setInterval(() => {
+        if (geminiWs?.readyState === WebSocket.OPEN) {
+          // Send empty turn complete to maintain connection
+          try {
+            geminiWs.send(JSON.stringify({ client_content: { turn_complete: false } }));
+          } catch (e) {
+            console.warn('[Gemini Live] Keepalive ping failed:', e);
+          }
+        }
+      }, AUDIO_KEEPALIVE_INTERVAL);
       
       // Send Setup Message
       const setupMessage = {
@@ -313,6 +454,23 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     geminiWs.on('message', async (data: any) => {
       try {
         const response = JSON.parse(data.toString());
+        
+        // Track audio received
+        if (response.serverContent?.modelTurn?.parts?.some((p: any) => p.inlineData)) {
+          metrics.audioChunksReceived++;
+          metrics.lastAudioReceivedTime = Date.now();
+          
+          // Record in monitor
+          if (callId) {
+            for (const part of response.serverContent.modelTurn.parts) {
+              if (part.inlineData?.data) {
+                const audioBytes = Buffer.byteLength(part.inlineData.data, 'base64');
+                audioQualityMonitor.recordAudioReceived(callId, audioBytes);
+              }
+            }
+          }
+        }
+
         console.log('[Gemini Live] 📥 Message received:', JSON.stringify(response).substring(0, 200));
 
         // Handle Audio Output from Gemini
@@ -323,14 +481,27 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
             }
 
             if (part.inlineData?.data) {
-              // Send audio back to Telnyx
-              ws.send(JSON.stringify({
-                event: 'media',
-                stream_id: streamSid,
-                media: {
-                  payload: part.inlineData.data
+              // Calculate bytes received
+              const audioBytes = Buffer.byteLength(part.inlineData.data, 'base64');
+              metrics.totalBytesReceived += audioBytes;
+
+              // Send audio back to Telnyx with backpressure check
+              if (ws.readyState === WebSocket.OPEN) {
+                const wsBufferSize = ws.bufferedAmount;
+                if (wsBufferSize > MAX_BUFFER_SIZE) {
+                  metrics.bufferBackpressureEvents++;
+                  console.warn(`[Gemini Live] ⚠️ Telnyx buffer backpressure (${wsBufferSize} bytes), dropping frame`);
+                  break; // Skip this audio chunk
                 }
-              }));
+
+                ws.send(JSON.stringify({
+                  event: 'media',
+                  stream_id: streamSid,
+                  media: {
+                    payload: part.inlineData.data
+                  }
+                }));
+              }
             }
           }
         }
@@ -469,16 +640,67 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
     geminiWs.on('close', () => {
       console.log('[Gemini Live] 🔌 Gemini connection closed');
-      ws.close();
+      geminiConnected = false;
+      clearTimeout(connectionTimeout);
+      
+      // Record connection drop
+      metrics.connectionDrops++;
+      if (callId) {
+        audioQualityMonitor.recordConnectionDrop(callId);
+      }
+      
+      // Log final metrics
+      const duration = (Date.now() - metrics.startTime) / 1000;
+      console.log('[Gemini Live] 📊 Final audio metrics:', {
+        duration: duration.toFixed(1) + 's',
+        chunksSent: metrics.audioChunksSent,
+        chunksReceived: metrics.audioChunksReceived,
+        bytesSent: (metrics.totalBytesSent / 1024).toFixed(2) + 'KB',
+        bytesReceived: (metrics.totalBytesReceived / 1024).toFixed(2) + 'KB',
+        backpressureEvents: metrics.bufferBackpressureEvents,
+        connectionDrops: metrics.connectionDrops,
+      });
+
+      // Attempt reconnect if Telnyx is still connected
+      if (ws.readyState === WebSocket.OPEN) {
+        attemptReconnect();
+      } else {
+        cleanup();
+      }
     });
 
     geminiWs.on('error', (err) => {
       console.error('[Gemini Live] ❌ Gemini WebSocket error:', err);
+      geminiConnected = false;
+      metrics.connectionDrops++;
     });
+  }
+
+  /**
+   * Attempt to reconnect to Gemini with exponential backoff
+   */
+  function attemptReconnect() {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.error(`[Gemini Live] ❌ Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+      ws.close(1011, 'Gemini connection failed - max retries exceeded');
+      cleanup();
+      return;
+    }
+
+    const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+    reconnectAttempts++;
+    console.log(`[Gemini Live] 🔄 Reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+    
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN && !geminiConnected) {
+        connectToGemini();
+      }
+    }, delay);
   }
 
   ws.on('close', () => {
     console.log('[Gemini Live] 🔌 Telnyx connection closed');
+    cleanup();
     geminiWs?.close();
   });
 }

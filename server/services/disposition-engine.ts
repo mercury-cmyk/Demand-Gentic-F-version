@@ -34,6 +34,7 @@ import {
 } from "../lib/contact-suppression";
 import { transcribeLeadCall } from "./telnyx-transcription";
 import { analyzeCall } from "./call-quality-analyzer";
+import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -134,6 +135,9 @@ export async function processDisposition(
         break;
       case 'invalid_data':
         await processInvalidData(callAttempt, result);
+        break;
+      case 'needs_review':
+        await processNeedsReview(callAttempt, rules, result);
         break;
       default:
         result.errors.push(`Unknown disposition: ${disposition}`);
@@ -319,24 +323,44 @@ async function processQualifiedLead(
   });
   result.actions.push(`Added to QC queue${isShortDurationCall ? ' (high priority - short duration)' : ''}`);
 
-  // AUTO-TRIGGER: Transcription and Quality Analysis
+  // AUTO-TRIGGER: GCS Storage, Transcription and Quality Analysis
   // Run in background (non-blocking) to not delay disposition processing
   if (result.leadId && callAttempt.recordingUrl) {
+    const leadIdForAsync = result.leadId;
+    const recordingUrlForAsync = callAttempt.recordingUrl;
+
     setImmediate(async () => {
       try {
-        console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${result.leadId}`);
-        const transcribed = await transcribeLeadCall(result.leadId!);
+        // Step 1: Download recording to GCS IMMEDIATELY to prevent URL expiration
+        // Telnyx presigned URLs expire in ~10 minutes
+        if (isRecordingStorageEnabled()) {
+          console.log(`[DispositionEngine] 📥 Downloading recording to GCS for lead ${leadIdForAsync}...`);
+          const s3Key = await downloadAndStoreRecording(recordingUrlForAsync, leadIdForAsync);
+
+          if (s3Key) {
+            await db.update(leads)
+              .set({ recordingS3Key: s3Key })
+              .where(eq(leads.id, leadIdForAsync));
+            console.log(`[DispositionEngine] ✅ Recording stored in GCS: ${s3Key}`);
+          } else {
+            console.log(`[DispositionEngine] ⚠️ Failed to store recording in GCS for lead ${leadIdForAsync}`);
+          }
+        }
+
+        // Step 2: Transcribe the call
+        console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
+        const transcribed = await transcribeLeadCall(leadIdForAsync);
 
         if (transcribed) {
-          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${result.leadId}`);
-          await analyzeCall(result.leadId!);
-          console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${result.leadId}`);
+          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
+          await analyzeCall(leadIdForAsync);
+          console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
         }
       } catch (err) {
-        console.error(`[DispositionEngine] Failed to auto-transcribe/analyze lead ${result.leadId}:`, err);
+        console.error(`[DispositionEngine] Failed to auto-process lead ${leadIdForAsync}:`, err);
       }
     });
-    result.actions.push('Queued automatic transcription and quality analysis');
+    result.actions.push('Queued automatic GCS storage, transcription and quality analysis');
   }
 
   result.queueState = 'qualified';
@@ -456,11 +480,33 @@ async function processDoNotCall(
 }
 
 /**
+ * PHASE 4: Count prior AI attempts with no_answer or voicemail disposition
+ * Used for channel escalation - after 2+ AI attempts, escalate to human agent
+ */
+async function countPriorAiNoAnswerAttempts(
+  campaignId: string,
+  contactId: string
+): Promise<number> {
+  const result = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(dialerCallAttempts)
+    .where(and(
+      eq(dialerCallAttempts.campaignId, campaignId),
+      eq(dialerCallAttempts.contactId, contactId),
+      eq(dialerCallAttempts.agentType, 'ai'),
+      inArray(dialerCallAttempts.disposition, ['no_answer', 'voicemail', 'needs_review'])
+    ));
+
+  return result[0]?.count || 0;
+}
+
+/**
  * VOICEMAIL / NO_ANSWER processing
  * - Update queue state to WAITING_RETRY
  * - Schedule next attempt (3-7 days)
  * - Increment attempts count
  * - Respect max attempts
+ * - PHASE 4: Escalate to human agent after 2+ AI no_answer attempts
  */
 async function processVoicemailOrNoAnswer(
   callAttempt: typeof dialerCallAttempts.$inferSelect,
@@ -470,13 +516,28 @@ async function processVoicemailOrNoAnswer(
 ): Promise<void> {
   // Check attempt count
   const currentAttempts = callAttempt.attemptNumber;
-  
+
+  // PHASE 4: Count prior AI no_answer/voicemail attempts for channel escalation
+  const priorAiAttempts = await countPriorAiNoAnswerAttempts(
+    callAttempt.campaignId,
+    callAttempt.contactId
+  );
+
+  // Determine target agent type for retry
+  // Escalate to human after 2+ AI no_answer/voicemail attempts
+  const shouldEscalateToHuman = priorAiAttempts >= 2 && callAttempt.agentType === 'ai';
+  const targetAgentType = shouldEscalateToHuman ? 'human' : 'any';
+
+  if (shouldEscalateToHuman) {
+    console.log(`[DispositionEngine] 🔄 ESCALATING TO HUMAN: Contact ${callAttempt.contactId} has ${priorAiAttempts} prior AI ${type} attempts - routing next attempt to human agent`);
+  }
+
   if (currentAttempts >= rules.maxAttemptsPerContact) {
     // Max attempts reached, remove from queue and clear lock
     if (callAttempt.queueItemId) {
       await db
         .update(campaignQueue)
-        .set({ 
+        .set({
           status: 'removed',
           removedReason: `max_attempts_${type}`,
           agentId: null,
@@ -500,23 +561,24 @@ async function processVoicemailOrNoAnswer(
   const nextAttemptAt = new Date();
   nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
 
-  // Update queue item with retry scheduling and release lock
+  // Update queue item with retry scheduling, target agent type, and release lock
   if (callAttempt.queueItemId) {
     await db
       .update(campaignQueue)
-      .set({ 
+      .set({
         status: 'queued',
         nextAttemptAt,
+        targetAgentType, // PHASE 4: Set target agent type for escalation
         agentId: null,
         virtualAgentId: null,
         lockExpiresAt: null,
         updatedAt: new Date()
       })
       .where(eq(campaignQueue.id, callAttempt.queueItemId));
-    result.actions.push(`Scheduled retry for ${nextAttemptAt.toISOString()} (${type})`);
+    result.actions.push(`Scheduled retry for ${nextAttemptAt.toISOString()} (${type}) - target: ${targetAgentType}`);
   }
 
-  // Create recycle job for tracking
+  // Create recycle job for tracking with target agent type
   await db.insert(recycleJobs).values({
     campaignId: callAttempt.campaignId,
     contactId: callAttempt.contactId,
@@ -526,9 +588,9 @@ async function processVoicemailOrNoAnswer(
     maxAttempts: rules.maxAttemptsPerContact,
     scheduledAt: new Date(),
     eligibleAt: nextAttemptAt,
-    targetAgentType: 'any'
+    targetAgentType // PHASE 4: Include target agent type in recycle job
   });
-  result.actions.push('Created recycle job');
+  result.actions.push(`Created recycle job (target: ${targetAgentType})`);
 
   // Log voicemail/no_answer for monitoring
   const eventType = type === 'voicemail' ? 'disposition_voicemail' : 'disposition_no_answer';
@@ -619,6 +681,127 @@ async function processInvalidData(
 }
 
 /**
+ * NEEDS_REVIEW processing (Phase 3)
+ * - Schedule quick retry (1-2 days instead of 3-7)
+ * - Flag for human review after max AI attempts
+ * - Don't suppress contact - may still be viable
+ *
+ * This disposition is for ambiguous calls where:
+ * - Identity wasn't confirmed
+ * - Gatekeeper interaction
+ * - Technical issues
+ * - Call ended before meaningful conversation
+ */
+async function processNeedsReview(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult
+): Promise<void> {
+  const currentAttempts = callAttempt.attemptNumber;
+
+  // Log the needs_review disposition
+  console.log(`[DispositionEngine] 🔍 NEEDS_REVIEW: Contact ${callAttempt.contactId} | Attempt ${currentAttempts}/${rules.maxAttemptsPerContact} | Campaign: ${callAttempt.campaignId}`);
+
+  if (currentAttempts >= rules.maxAttemptsPerContact) {
+    // Max attempts reached - flag for human agent instead of removing
+    if (callAttempt.queueItemId) {
+      await db
+        .update(campaignQueue)
+        .set({
+          status: 'queued',
+          // Flag for human agent by setting targetAgentType
+          targetAgentType: 'human',
+          agentId: null,
+          virtualAgentId: null,
+          lockExpiresAt: null,
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, callAttempt.queueItemId));
+      result.actions.push(`Flagged for human review after max AI attempts (${currentAttempts})`);
+    }
+    result.queueState = 'waiting_retry';
+
+    // Insert activity log
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'contact',
+        entityId: callAttempt.contactId,
+        eventType: 'disposition_needs_review',
+        payload: {
+          callAttemptId: callAttempt.id,
+          campaignId: callAttempt.campaignId,
+          attemptNumber: currentAttempts,
+          maxAttempts: rules.maxAttemptsPerContact,
+          escalatedToHuman: true,
+          reason: 'Max AI attempts reached - escalated to human review',
+        },
+        createdBy: callAttempt.humanAgentId || null,
+      });
+    } catch (logErr) {
+      console.error('[DispositionEngine] Failed to log disposition_needs_review activity:', logErr);
+    }
+    return;
+  }
+
+  // Schedule quick retry (1-2 days instead of 3-7 for voicemail/no_answer)
+  const retryDays = 1 + Math.floor(Math.random() * 2); // 1-2 days
+  const nextAttemptAt = new Date();
+  nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'queued',
+        nextAttemptAt,
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push(`Scheduled quick retry for ${nextAttemptAt.toISOString()} (needs_review - ${retryDays} days)`);
+  }
+
+  // Create recycle job for this retry
+  await db.insert(recycleJobs).values({
+    campaignId: callAttempt.campaignId,
+    contactId: callAttempt.contactId,
+    originalCallSessionId: callAttempt.callSessionId,
+    status: 'scheduled',
+    attemptNumber: currentAttempts + 1,
+    maxAttempts: rules.maxAttemptsPerContact,
+    scheduledAt: new Date(),
+    eligibleAt: nextAttemptAt,
+    targetAgentType: 'any', // Allow either AI or human to retry
+    notes: 'Ambiguous call outcome - scheduled for quick review retry'
+  });
+
+  // Insert activity log
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_needs_review',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        attemptNumber: currentAttempts,
+        nextAttemptAt: nextAttemptAt.toISOString(),
+        retryDays,
+        reason: 'Ambiguous outcome - quick retry scheduled',
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_needs_review activity:', logErr);
+  }
+
+  result.nextAttemptAt = nextAttemptAt;
+  result.queueState = 'waiting_retry';
+}
+
+/**
  * Update dialer run statistics based on disposition
  */
 async function updateDialerRunStats(
@@ -647,7 +830,8 @@ function dispositionToStatField(disposition: CanonicalDisposition): string {
     'do_not_call': 'dnc_requests',
     'voicemail': 'voicemails',
     'no_answer': 'no_answers',
-    'invalid_data': 'invalid_data'
+    'invalid_data': 'invalid_data',
+    'needs_review': 'needs_review' // Track separately for reporting
   };
   return mapping[disposition];
 }
@@ -662,7 +846,8 @@ function dispositionToActionType(disposition: CanonicalDisposition): 'qc_review'
     'do_not_call': 'global_dnc',
     'voicemail': 'recycle',
     'no_answer': 'recycle',
-    'invalid_data': 'data_quality_flag'
+    'invalid_data': 'data_quality_flag',
+    'needs_review': 'recycle' // Quick retry for ambiguous calls
   };
   return mapping[disposition];
 }

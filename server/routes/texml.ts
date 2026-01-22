@@ -5,15 +5,22 @@ const router = Router();
 /**
  * TeXML endpoint for AI voice calls
  * This returns the XML instructions Telnyx needs to bridge the call to our AI WebSocket
+ * 
+ * Supports both GET and POST for flexibility with different TeXML invocation methods:
+ * - GET: Used when Telnyx fetches instructions from URL directly
+ * - POST: Used when Telnyx sends form-encoded data with call details
  */
-router.post("/ai-call", (req, res) => {
-  console.log("[TeXML] Received request:", req.body);
+const aiCallHandler = (req: any, res: any) => {
+  console.log("[TeXML] Received request:", req.method, req.body, req.query);
+  
+  // Extract parameters from either body (POST) or query (GET)
+  const params = req.method === 'GET' ? req.query : req.body;
   
   // Extract parameters from the request
   // Telnyx sends parameters as form-encoded by default in TeXML
-  const callId = req.body.call_id || req.body.CallSid;
+  const callId = params.call_id || params.CallSid;
   // client_state comes from URL query param (since TeXML doesn't forward it from API call)
-  const clientState = req.query.client_state as string || req.body.client_state || req.body.ClientState;
+  const clientState = req.query.client_state as string || params.client_state || params.ClientState;
   
   console.log("[TeXML] Client state from query:", req.query.client_state ? "present" : "missing");
   
@@ -54,7 +61,11 @@ router.post("/ai-call", (req, res) => {
         <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" />
     </Connect>
 </Response>`);
-});
+};
+
+// Register handler for both GET and POST
+router.get("/ai-call", aiCallHandler);
+router.post("/ai-call", aiCallHandler);
 
 /**
  * Incoming call handler for TeXML Application

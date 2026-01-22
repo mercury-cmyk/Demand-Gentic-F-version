@@ -535,9 +535,10 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
             companyName: item.companyName || account?.name || "your company",
             phoneNumber,
             campaignId,
+            contactId: contactId || undefined,
             queueItemId: item.id,
             agentFullName: aiSettings.persona?.name || "your representative",
-            virtualAgentId: (item as any).virtualAgentId || undefined, // Important for lock validation
+            virtualAgentId: (item as any).virtualAgentId || undefined,
           };
 
         // PRE-LOCK: Lock the queue item before initiating the call to prevent race conditions

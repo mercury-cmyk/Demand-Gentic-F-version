@@ -171,7 +171,8 @@ export const canonicalDispositionEnum = pgEnum('canonical_disposition', [
   'do_not_call',      // DNC request, global suppression
   'voicemail',        // Left voicemail, schedule retry
   'no_answer',        // No answer, schedule retry
-  'invalid_data'      // Wrong number, disconnected, etc.
+  'invalid_data',     // Wrong number, disconnected, etc.
+  'needs_review'      // Ambiguous call outcome, schedule quick retry and flag for human review
 ]);
 
 // Campaign Contact State - Audience state machine
@@ -1682,8 +1683,9 @@ export const leads = pgTable("leads", {
   contactName: text("contact_name"),
   contactEmail: text("contact_email"),
   campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
-  // Link to call recording (if lead came from telephony campaign)
-  callAttemptId: varchar("call_attempt_id").references(() => callAttempts.id, { onDelete: 'set null' }),
+  // Link to call recording (if lead came from dialer campaign)
+  // NOTE: References dialer_call_attempts (new dialer system), not call_attempts (legacy)
+  callAttemptId: varchar("call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'set null' }),
   recordingUrl: text("recording_url"), // Original Telnyx URL (may expire after 10 min)
   recordingS3Key: text("recording_s3_key"), // Permanent S3 storage key for recordings
   callDuration: integer("call_duration"), // Duration in seconds
@@ -2611,7 +2613,7 @@ export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
 export const leadsRelations = relations(leads, ({ one }) => ({
   contact: one(contacts, { fields: [leads.contactId], references: [contacts.id] }),
   campaign: one(campaigns, { fields: [leads.campaignId], references: [campaigns.id] }),
-  callAttempt: one(callAttempts, { fields: [leads.callAttemptId], references: [callAttempts.id] }),
+  callAttempt: one(dialerCallAttempts, { fields: [leads.callAttemptId], references: [dialerCallAttempts.id] }),
   agent: one(users, { fields: [leads.agentId], references: [users.id] }),
   approvedBy: one(users, { fields: [leads.approvedById], references: [users.id] }),
   rejectedBy: one(users, { fields: [leads.rejectedById], references: [users.id] }),

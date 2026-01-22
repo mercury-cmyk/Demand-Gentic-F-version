@@ -39,6 +39,13 @@ import {
 } from "../services/vertex-ai/vertex-client-agentic-hub";
 import { GeminiLiveProvider } from "../services/voice-providers/gemini-live-provider";
 import { chat as vertexChat, streamChat, generateJSON } from "../services/vertex-ai";
+import {
+  generateClientEmailContent,
+  generateClientEmailSequence,
+  analyzeClientEmail,
+  type GeneratedEmailContent,
+} from "../lib/deepseek-client-email-service";
+import { buildBrandedEmailHtml, type BrandPaletteKey } from "../../client/src/components/email-builder/ai-email-template";
 
 const router = Router();
 
@@ -263,7 +270,8 @@ router.get("/simulations/scenarios", async (req: Request, res: Response) => {
 // ==================== EMAIL GENERATION ENDPOINTS ====================
 
 /**
- * Generate marketing emails
+ * Generate marketing emails using DeepSeek AI
+ * Uses the same pattern as admin email templates with branded HTML output
  */
 router.post("/emails/generate", async (req: Request, res: Response) => {
   try {
@@ -273,32 +281,42 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, message: "Authentication required" });
     }
 
-    console.log("[Client Agentic] Generating emails for client:", clientUser.email);
-    
-    const context = getClientContext(req);
-    const hub = createClientAgenticHub(context);
+    console.log("[Client Agentic] Generating emails with DeepSeek for client:", clientUser.email);
 
-    const { campaignId } = req.body;
+    const { campaignId, emailType, tone, variants, brandPalette } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ success: false, message: "Campaign is required" });
     }
 
-    const emailRequest: EmailGenerationRequest = {
-      campaignId,
-      emailType: req.body.emailType || "cold_outreach",
-      tone: req.body.tone || "professional",
-      personalizationLevel: req.body.personalizationLevel || 2,
-      generateVariants: req.body.variants || 1,
-    };
+    const numVariants = Math.min(Math.max(parseInt(variants) || 1, 1), 3);
+    const palette: BrandPaletteKey = brandPalette || 'indigo';
 
-    console.log("[Client Agentic] Email request:", JSON.stringify(emailRequest, null, 2));
+    const emails = [];
+    for (let i = 0; i < numVariants; i++) {
+      const content = await generateClientEmailContent({
+        campaignId,
+        clientAccountId: clientUser.clientAccountId,
+        emailType: emailType || 'cold_outreach',
+        tone: tone || 'professional',
+      });
 
-    const result = await hub.generateEmails(emailRequest);
-    
-    console.log("[Client Agentic] Email generation result:", JSON.stringify(result, null, 2));
-    
-    res.json(result);
+      // Build HTML using the branded template (same as admin templates)
+      const html = buildBrandedEmailHtml({
+        copy: content,
+        brandPalette: palette,
+      });
+
+      emails.push({
+        ...content,
+        html,
+        body: content.intro, // For backwards compatibility with simple body field
+      });
+    }
+
+    console.log("[Client Agentic] Generated", emails.length, "emails with DeepSeek");
+
+    res.json({ success: true, data: emails });
   } catch (error: any) {
     console.error("[Client Agentic] Email generation error:", error);
     console.error("[Client Agentic] Error stack:", error.stack);
@@ -307,26 +325,44 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
 });
 
 /**
- * Generate complete email sequence
+ * Generate complete email sequence using DeepSeek AI
  */
 router.post("/emails/sequence", async (req: Request, res: Response) => {
   try {
-    const context = getClientContext(req);
-    const hub = createClientAgenticHub(context);
+    const clientUser = (req as any).clientUser;
+    if (!clientUser) {
+      return res.status(401).json({ success: false, message: "Authentication required" });
+    }
 
-    const { campaignId, sequenceLength, sequenceType } = req.body;
+    const { campaignId, sequenceLength, sequenceType, brandPalette } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ success: false, message: "Campaign is required" });
     }
 
-    const result = await hub.generateEmailSequence(
-      campaignId,
-      sequenceLength || 5,
-      sequenceType || "cold"
-    );
+    const palette: BrandPaletteKey = brandPalette || 'indigo';
 
-    res.json(result);
+    const sequence = await generateClientEmailSequence({
+      campaignId,
+      clientAccountId: clientUser.clientAccountId,
+      sequenceLength: sequenceLength || 5,
+      sequenceType: sequenceType || 'cold',
+    });
+
+    // Add HTML to each email in the sequence
+    const sequenceWithHtml = sequence.map(email => {
+      const html = buildBrandedEmailHtml({
+        copy: email,
+        brandPalette: palette,
+      });
+      return {
+        ...email,
+        html,
+        body: email.intro, // For backwards compatibility
+      };
+    });
+
+    res.json({ success: true, data: { sequence: sequenceWithHtml } });
   } catch (error: any) {
     console.error("[Client Agentic] Email sequence error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -334,57 +370,17 @@ router.post("/emails/sequence", async (req: Request, res: Response) => {
 });
 
 /**
- * Analyze and score an email
+ * Analyze and score an email using DeepSeek AI
  */
 router.post("/emails/analyze", async (req: Request, res: Response) => {
   try {
-    const { subject, body, targetPersona } = req.body;
+    const { subject, body } = req.body;
 
-    const analysisPrompt = `Analyze this B2B sales email and provide detailed feedback.
-
-SUBJECT: ${subject}
-BODY: ${body}
-TARGET: ${targetPersona || "B2B Decision Maker"}
-
-Analyze for:
-1. Subject line effectiveness
-2. Personalization opportunities
-3. Value proposition clarity
-4. Call-to-action strength
-5. Spam risk factors
-6. Mobile readability
-7. Overall effectiveness score
-
-Return JSON:
-{
-  "scores": {
-    "subjectLine": 0-100,
-    "personalization": 0-100,
-    "valueProposition": 0-100,
-    "callToAction": 0-100,
-    "overall": 0-100
-  },
-  "spamRisk": {
-    "score": 0-10,
-    "triggers": ["trigger1"]
-  },
-  "improvements": [
-    {
-      "area": "area name",
-      "current": "what's there now",
-      "suggested": "improvement suggestion",
-      "impact": "high|medium|low"
+    if (!subject || !body) {
+      return res.status(400).json({ success: false, message: "Subject and body are required" });
     }
-  ],
-  "rewrittenSubject": "improved subject line",
-  "keyStrengths": ["strength1"],
-  "readability": {
-    "gradeLevel": number,
-    "readTime": "X seconds"
-  }
-}`;
 
-    const result = await generateJSON(analysisPrompt, { temperature: 0.3 });
+    const result = await analyzeClientEmail({ subject, body });
     res.json({ success: true, data: result });
   } catch (error: any) {
     console.error("[Client Agentic] Email analysis error:", error);

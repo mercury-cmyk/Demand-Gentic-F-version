@@ -15,14 +15,15 @@
 import WebSocket, { WebSocketServer } from "ws";
 import { Server as HttpServer } from "http";
 import { db } from "../db";
-import { campaignQueue, contacts, accounts, campaigns, virtualAgents } from "@shared/schema";
-import { eq, and, sql, inArray, or, isNull, lte } from "drizzle-orm";
+import { campaignQueue, contacts, accounts, campaigns, virtualAgents, dialerRuns, dialerCallAttempts, type CanonicalDisposition } from "@shared/schema";
+import { eq, and, sql, inArray, or, isNull, lte, count, desc } from "drizzle-orm";
 import { getBestPhoneForContact } from "../lib/phone-utils";
 import { 
   detectContactTimezone, 
   isWithinBusinessHours, 
   getBusinessHoursForCountry 
 } from "../utils/business-hours";
+import { processDisposition } from "./disposition-engine";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
 
@@ -132,6 +133,7 @@ export interface CampaignTask {
   // Caller ID
   fromNumber: string;
   // Virtual agent info
+  virtualAgentId?: string | null;
   agentName: string;
   agentFullName: string;
 }
@@ -331,23 +333,135 @@ class CampaignRunnerService {
 
     console.log(`${LOG_PREFIX} Task completed: ${message.taskId} disposition: ${message.disposition}`);
 
-    // Update queue item in database
-    if (runner.currentTask) {
-      try {
-        // Map disposition to valid queue status
-        const queueStatus: 'done' | 'removed' = 
-          message.disposition === 'do_not_call' ? 'removed' : 'done';
+    const task = runner.currentTask;
+    if (task) {
+      const rawDisposition = typeof message.disposition === "string"
+        ? message.disposition.trim()
+        : "no_answer";
 
-        await db.update(campaignQueue)
-          .set({
-            status: queueStatus,
-            removedReason: message.disposition || 'completed',
+      const mapToCanonicalDisposition = (value: string): CanonicalDisposition => {
+        const d = value.toLowerCase().trim();
+
+        if (["qualified", "lead", "qualified_lead", "meeting_booked", "callback_requested", "callback-requested", "callback"].includes(d)) {
+          return "qualified_lead";
+        }
+        if (["voicemail", "voicemail_left", "machine"].includes(d)) {
+          return "voicemail";
+        }
+        if (["no_answer", "no-answer", "busy", "failed", "connected", "completed", "needs_review", "hung_up"].includes(d)) {
+          return "no_answer";
+        }
+        if (["not_interested", "not interested"].includes(d)) {
+          return "not_interested";
+        }
+        if (["dnc", "dnc_request", "dnc-request", "do_not_call", "do not call"].includes(d)) {
+          return "do_not_call";
+        }
+        if (["wrong_number", "invalid", "invalid_data", "invalid-data"].includes(d)) {
+          return "invalid_data";
+        }
+        return "no_answer";
+      };
+
+      const canonicalDisposition = mapToCanonicalDisposition(rawDisposition);
+      const callDurationSeconds = Number(message.callDurationSeconds) || 0;
+      const callEndedAt = new Date();
+      const callStartedAt = callDurationSeconds > 0
+        ? new Date(callEndedAt.getTime() - callDurationSeconds * 1000)
+        : null;
+      const isVoicemail = canonicalDisposition === "voicemail";
+      const isNoAnswer = canonicalDisposition === "no_answer";
+      const connected = !isVoicemail && !isNoAnswer;
+
+      try {
+        let virtualAgentId = task.virtualAgentId || null;
+        if (!virtualAgentId) {
+          const [campaign] = await db
+            .select({ virtualAgentId: campaigns.virtualAgentId })
+            .from(campaigns)
+            .where(eq(campaigns.id, task.campaignId))
+            .limit(1);
+          virtualAgentId = campaign?.virtualAgentId || null;
+        }
+
+        const [existingRun] = await db
+          .select()
+          .from(dialerRuns)
+          .where(and(
+            eq(dialerRuns.campaignId, task.campaignId),
+            eq(dialerRuns.agentType, "ai"),
+            inArray(dialerRuns.status, ["active", "pending", "paused"]),
+            virtualAgentId
+              ? eq(dialerRuns.virtualAgentId, virtualAgentId)
+              : sql`${dialerRuns.virtualAgentId} IS NULL`
+          ))
+          .orderBy(desc(dialerRuns.createdAt))
+          .limit(1);
+
+        const run = existingRun || (await db.insert(dialerRuns).values({
+          campaignId: task.campaignId,
+          runType: "power_dial",
+          agentType: "ai",
+          virtualAgentId,
+          status: "active",
+          maxConcurrentCalls: runner.maxConcurrent || 1,
+          callTimeoutSeconds: 30,
+          startedAt: new Date(),
+        }).returning())[0];
+
+        const [attemptCount] = await db
+          .select({ count: count() })
+          .from(dialerCallAttempts)
+          .where(and(
+            eq(dialerCallAttempts.campaignId, task.campaignId),
+            eq(dialerCallAttempts.contactId, task.contactId)
+          ));
+
+        const attemptNumber = (Number(attemptCount?.count) || 0) + 1;
+
+        const [callAttempt] = await db
+          .insert(dialerCallAttempts)
+          .values({
+            dialerRunId: run.id,
+            campaignId: task.campaignId,
+            contactId: task.contactId,
+            queueItemId: task.queueItemId,
+            agentType: "ai",
+            virtualAgentId,
+            phoneDialed: task.phoneNumber,
+            attemptNumber,
+            callStartedAt,
+            callEndedAt,
+            callDurationSeconds: Number.isFinite(callDurationSeconds) ? callDurationSeconds : null,
+            connected,
+            voicemailDetected: isVoicemail,
+            disposition: canonicalDisposition,
+            dispositionSubmittedAt: new Date(),
+            dispositionSubmittedBy: runner.userId,
+            notes: rawDisposition ? `CampaignRunner disposition: ${rawDisposition}` : null,
+            recordingUrl: message.recordingUrl || null,
             updatedAt: new Date(),
           })
-          .where(eq(campaignQueue.id, runner.currentTask.queueItemId));
+          .returning();
 
+        const result = await processDisposition(callAttempt.id, canonicalDisposition, "campaign_runner");
+        if (!result.success) {
+          console.error(`${LOG_PREFIX} Disposition engine errors:`, result.errors);
+        }
       } catch (error) {
-        console.error(`${LOG_PREFIX} Failed to update task completion:`, error);
+        console.error(`${LOG_PREFIX} Failed to process task disposition:`, error);
+        try {
+          await db.update(campaignQueue)
+            .set({
+              status: "queued",
+              removedReason: "disposition_processing_failed",
+              nextAttemptAt: new Date(Date.now() + 60000),
+              updatedAt: new Date(),
+            })
+            .where(eq(campaignQueue.id, task.queueItemId));
+        } catch (queueError) {
+          console.error(`${LOG_PREFIX} Failed to release queue item after error:`, queueError);
+        }
       }
     }
 
@@ -447,6 +561,12 @@ class CampaignRunnerService {
       .where(and(
         eq(campaignQueue.campaignId, campaignId),
         eq(campaignQueue.status, 'queued'),
+        // PHASE 4: AI dialer only pulls items with targetAgentType 'any' or 'ai'
+        // Items marked for 'human' escalation will be skipped by AI dialer
+        or(
+          eq(campaignQueue.targetAgentType, 'any'),
+          eq(campaignQueue.targetAgentType, 'ai')
+        ),
         // Contact-level suppression check: only include contacts that are eligible
         or(
           isNull(contacts.nextCallEligibleAt),
@@ -577,6 +697,7 @@ class CampaignRunnerService {
             },
           },
           fromNumber: campaignExt.fromNumber || process.env.TELNYX_FROM_NUMBER || '',
+          virtualAgentId: agent?.id || null,
           agentName: agent?.name || 'AI Agent',
           agentFullName: agent?.name || 'AI Sales Agent',
         };

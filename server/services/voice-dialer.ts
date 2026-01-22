@@ -210,6 +210,13 @@ interface OpenAIRealtimeSession {
     ivrMenuRepeatCount: number; // Track repeated IVR menu patterns
     lastIvrMenuHash: string | null; // Hash of last IVR menu heard
   };
+  // AMD (Answering Machine Detection) result from Telnyx webhook
+  amdResult: {
+    detected: boolean;
+    result: 'human' | 'machine' | 'machine_end_beep' | 'machine_end_silence' | 'machine_end_other' | 'fax' | 'unknown' | null;
+    confidence: number | null;
+    receivedAt: Date | null;
+  };
 }
 
 interface DispositionFunctionResult {
@@ -317,6 +324,71 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
 
 const activeSessions = new Map<string, OpenAIRealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
+
+// AMD result channel - populated by webhook, consumed by sessions
+// This bridges the HTTP webhook (AMD detection) with WebSocket sessions (voice-dialer)
+const amdResultsByCallControlId = new Map<string, {
+  result: string;
+  confidence: number;
+  receivedAt: Date;
+}>();
+
+/**
+ * Set AMD result for a session - called by webhook when Telnyx detects machine/human
+ * This allows the voice-dialer WebSocket session to receive AMD results from HTTP webhooks
+ */
+export function setAmdResultForSession(callControlId: string, result: string, confidence: number): void {
+  console.log(`${LOG_PREFIX} 📠 AMD result received for ${callControlId}: ${result} (confidence: ${confidence})`);
+
+  // Store in pending map for sessions that haven't started yet
+  amdResultsByCallControlId.set(callControlId, {
+    result,
+    confidence,
+    receivedAt: new Date()
+  });
+
+  // Also try to find and update any active session by callControlId
+  for (const [sessionId, session] of activeSessions.entries()) {
+    if (session.telnyxCallControlId === callControlId) {
+      session.amdResult = {
+        detected: true,
+        result: result as any,
+        confidence,
+        receivedAt: new Date()
+      };
+
+      // If machine detected, mark session for voicemail disposition
+      if (result === 'machine' || result.startsWith('machine_end') || result === 'fax') {
+        console.log(`${LOG_PREFIX} 📠 Machine detected via AMD for active session ${sessionId} - setting voicemail disposition`);
+        session.detectedDisposition = 'voicemail';
+        session.callOutcome = 'voicemail';
+      }
+      break;
+    }
+  }
+
+  // Clean up old entries (older than 5 minutes) to prevent memory leaks
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  for (const [ctrlId, data] of amdResultsByCallControlId.entries()) {
+    if (data.receivedAt < fiveMinutesAgo) {
+      amdResultsByCallControlId.delete(ctrlId);
+    }
+  }
+}
+
+/**
+ * Get pending AMD result for a call control ID - used when session starts
+ * to check if AMD webhook already fired before WebSocket connection
+ */
+export function getPendingAmdResult(callControlId: string): { result: string; confidence: number } | null {
+  const pending = amdResultsByCallControlId.get(callControlId);
+  if (pending) {
+    // Remove from pending map once consumed
+    amdResultsByCallControlId.delete(callControlId);
+    return { result: pending.result, confidence: pending.confidence };
+  }
+  return null;
+}
 
 function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' | null {
   if (!value) return null;
@@ -861,6 +933,13 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               realtimeQualityTimer: null,
               realtimeQualityInFlight: false,
               lastRealtimeQualityAt: null,
+              // AMD result from Telnyx webhook (will be populated if AMD fires before session)
+              amdResult: {
+                detected: false,
+                result: null,
+                confidence: null,
+                receivedAt: null,
+              },
             };
           } else {
             console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
@@ -944,6 +1023,17 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
+              // Real-time quality monitoring (test sessions don't need this)
+              realtimeQualityTimer: null,
+              realtimeQualityInFlight: false,
+              lastRealtimeQualityAt: null,
+              // AMD result from Telnyx webhook
+              amdResult: {
+                detected: false,
+                result: null,
+                confidence: null,
+                receivedAt: null,
+              },
             };
           }
 
@@ -4469,6 +4559,34 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             (t: { role: string; text: string }) => t.role === "user" && t.text.trim().length > 0
           );
 
+          // PHASE 2: Check for soft timeout - indicates AI had processing delays
+          // If soft timeout was triggered AND minimal interaction, treat as no_answer for retry
+          // This prevents false "not_interested" when there were connection/audio issues
+          if (session.softTimeoutTriggered) {
+            const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+
+            // Soft timeout + short call = likely connection/audio issue, not rejection
+            if (callDurationSeconds < 45 && !session.conversationState?.identityConfirmed) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with soft timeout triggered (${callDurationSeconds}s, no identity) - marking as no_answer for retry`);
+              return 'no_answer';
+            }
+
+            // Soft timeout + minimal interaction = ambiguous call, use no_answer
+            if (isMinimalHumanInteraction(session.transcripts)) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with soft timeout and minimal interaction - marking as no_answer for retry`);
+              return 'no_answer';
+            }
+          }
+
+          // Check for AMD-detected voicemail that wasn't caught earlier
+          if (session.amdResult?.detected &&
+              (session.amdResult.result === 'machine' ||
+               session.amdResult.result?.startsWith('machine_end') ||
+               session.amdResult.result === 'fax')) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' but AMD detected machine (${session.amdResult.result}) - marking as voicemail`);
+            return 'voicemail';
+          }
+
           if ((session.audioDetection?.humanDetected || hasUserTranscripts) && isMinimalHumanInteraction(session.transcripts)) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with minimal human interaction - marking as no_answer`);
             return 'no_answer';
@@ -4508,15 +4626,23 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             );
             
             if (isGatekeeperInteraction) {
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' with gatekeeper interaction (identity not confirmed) - marking as no_answer for retry`);
-              return 'no_answer';
+              // PHASE 3: Gatekeeper interaction = ambiguous, use needs_review for quick retry
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with gatekeeper interaction (identity not confirmed) - marking as needs_review for quick retry`);
+              return 'needs_review';
             }
-            
-            // Short call without identity confirmation - could be quick hangup
+
+            // Short call without identity confirmation - ambiguous, use needs_review
             const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
             if (callDurationSeconds < 30) {
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' - short call (${callDurationSeconds}s) without identity confirmation - marking as no_answer`);
-              return 'no_answer';
+              // PHASE 3: Short call without identity = ambiguous, use needs_review
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' - short call (${callDurationSeconds}s) without identity confirmation - marking as needs_review`);
+              return 'needs_review';
+            }
+
+            // PHASE 3: Has transcripts but no identity confirmation = ambiguous
+            if (hasUserTranscripts) {
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with transcripts but no identity confirmation - marking as needs_review`);
+              return 'needs_review';
             }
           }
 
@@ -4531,13 +4657,14 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts and identity confirmed - marking as not_interested (likely user hangup)`);
             return 'not_interested';
           }
-          
+
           // If we have transcripts but no identity confirmation, check for explicit decline
           if (hasUserTranscripts && hasExplicitDecline(session.transcripts)) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with explicit decline - marking as not_interested`);
             return 'not_interested';
           }
         }
+        // PHASE 3: Default to no_answer for unknowns (no transcripts, no interaction)
         return 'no_answer';
     }
   }
@@ -5787,36 +5914,35 @@ Use this to navigate IVR systems by sending DTMF tones (keypad digits).
 ## submit_disposition
 Call this when you determine the call outcome. REQUIRED at end of every call.
 
-**QUALIFICATION CRITERIA (STRICT - All must be met for qualified_lead):**
-1. ✅ Identity CONFIRMED - you verified you're speaking to the right person
-2. ✅ Meaningful conversation - at least 30+ seconds of actual dialogue (not just greetings)
-3. ✅ Clear interest signals - ONE OR MORE of:
-   - Asked specific questions about the offer/product/service
-   - Explicitly requested follow-up materials, demo, or meeting
-   - Shared relevant business challenges or pain points
-   - Asked about pricing, timeline, or next steps
+**QUALIFICATION CRITERIA (FLEXIBLE - Consider ANY of these signals for qualified_lead):**
+1. ✅ Acknowledged a problem or pain point (e.g., "We don't have a good ABM strategy", "Current solution isn't working")
+2. ✅ Asked any meaningful questions (e.g., "How does this work?", "What would the process look like?", "How much would it cost?")
+3. ✅ Expressed interest or curiosity (e.g., "That sounds interesting", "Tell me more", "I'd like to learn more")
+4. ✅ Engaged in conversation for 15+ seconds with back-and-forth dialogue
+5. ✅ Explicitly requested follow-up (e.g., "Send me info", "Schedule a call", "I'd like a demo")
+6. ✅ Requested callback at a specific time
 
 **NOT qualified_lead if:**
-- ❌ Only said "yes", "sure", "okay" without elaboration
-- ❌ Call was under 30 seconds
-- ❌ No questions asked by prospect
-- ❌ Identity was never confirmed
-- ❌ Conversation was entirely one-sided (you talking, them just listening)
+- ❌ Prospect explicitly said "not interested", "not a fit", "not looking", "don't call back"
+- ❌ Only one-word responses with no elaboration or follow-up questions
+- ❌ Conversation was entirely one-sided (you talking, them silent)
+- ❌ Call ended with prospect hanging up abruptly (indicates rejection)
 
 **Disposition codes:**
-- qualified_lead: All 3 criteria above met. Prospect engaged and interested.
-- not_interested: Prospect explicitly declined or engaged but showed no interest. If only brief greetings or clarity questions with no engagement, use no_answer.
-- do_not_call: Prospect explicitly asked not to be called again
+- qualified_lead: Prospect showed at least ONE clear signal of interest, engagement, or openness to learning more.
+- not_interested: Prospect explicitly declined, rejected, or disengaged. Showed no interest signals.
+- callback_requested: Prospect specifically asked to be called back at a given time (use this if they provided a callback time).
+- do_not_call: Prospect explicitly asked not to be called again or said "remove from list"
 - voicemail: Reached voicemail or answering machine
-- no_answer: Call connected but no meaningful human interaction (silence, repeated greetings, or short clarity-only responses)
-- callback_requested: Prospect asked to be called back
-- invalid_data: ONLY use when phone number is CONFIRMED wrong ("wrong number", "no one by that name") or line is disconnected/out of service. NEVER use for completed conversations.
+- no_answer: Call connected but no meaningful human interaction (silence, repeated greetings, or IVR-only)
+- invalid_data: ONLY use when phone number is CONFIRMED wrong ("wrong number", "no one by that name") or line is disconnected/out of service.
 
-**CRITICAL: invalid_data vs not_interested**
-- If you had a meaningful conversation with a human, use not_interested or qualified_lead - NOT invalid_data
-- If the only response was a brief greeting or "who is this?" with no engagement, use no_answer
-- invalid_data means the phone number itself is bad - not that the call didn't go well
-- When in doubt between invalid_data and not_interested, choose not_interested
+**CRITICAL DECISION TREE:**
+1. Did they explicitly decline or say "not interested"? → use not_interested
+2. Did they show ANY interest signal (question, acknowledgment, curiosity, request)? → use qualified_lead
+3. Did they hang up silently or only respond with one-word answers? → use no_answer
+4. Is this a callback request at a specific time? → use callback_requested
+5. Otherwise, use not_interested (they didn't engage positively)
 
 ## end_call
 Use this to explicitly hang up the call. Call flow:

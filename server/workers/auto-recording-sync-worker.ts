@@ -7,6 +7,7 @@ import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue'
 import axios from 'axios';
 import { submitTranscription, submitStructuredTranscription } from '../services/assemblyai-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
+import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 
 const connection = new Redis(getRedisUrl(), {
   ...getRedisConnectionOptions(),
@@ -214,6 +215,23 @@ export const autoRecordingSyncWorker = new Worker<AutoRecordingSyncJobData>(
       }
 
       console.log(`[AutoRecordingSyncWorker] Recording URL saved for ${targetLabel}`);
+
+      // Step 1.5: Download recording to GCS for permanent storage
+      // This prevents loss when Telnyx presigned URLs expire (10 minutes)
+      let recordingS3Key: string | null = null;
+      if (leadId && isRecordingStorageEnabled()) {
+        console.log(`[AutoRecordingSyncWorker] 📥 Downloading recording to GCS for ${targetLabel}...`);
+        recordingS3Key = await downloadAndStoreRecording(recordingUrl, leadId);
+
+        if (recordingS3Key) {
+          await db.update(leads)
+            .set({ recordingS3Key })
+            .where(eq(leads.id, leadId));
+          console.log(`[AutoRecordingSyncWorker] ✅ Recording stored in GCS: ${recordingS3Key}`);
+        } else {
+          console.log(`[AutoRecordingSyncWorker] ⚠️ Failed to store recording in GCS (will use Telnyx URL)`);
+        }
+      }
 
       // Step 2: Transcribe with speaker diarization
       if (leadId) {

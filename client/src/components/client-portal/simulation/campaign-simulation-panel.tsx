@@ -74,6 +74,11 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
 
+  // Refs for state tracking to prevent stale closures in callbacks
+  const isSpeakingRef = useRef<boolean>(false);
+  const isListeningRef = useRef<boolean>(false);
+  const isWaitingForResponseRef = useRef<boolean>(false);
+
   const getToken = () => localStorage.getItem('clientPortalToken');
 
   // Fetch client's campaigns
@@ -89,22 +94,29 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
     enabled: open,
   });
 
-  // Initialize speech recognition
+  // Initialize speech recognition with continuous mode and echo prevention
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
-        recognition.continuous = false;
+        recognition.continuous = true;  // Keep listening for multiple phrases
         recognition.interimResults = true;
         recognition.lang = 'en-US';
 
         recognition.onresult = (event: any) => {
+          // ECHO PREVENTION: Ignore input while TTS is speaking
+          if (isSpeakingRef.current) {
+            console.log('[CampaignSim] Ignoring recognition - TTS speaking');
+            return;
+          }
+
           const result = event.results[event.resultIndex];
           const text = result[0].transcript;
           setInput(text);
-          
+
           if (result.isFinal) {
+            isWaitingForResponseRef.current = true;
             handleSend(text);
           }
         };
@@ -112,16 +124,45 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
         recognition.onerror = (event: any) => {
           console.error('Speech recognition error:', event.error);
           setIsListening(false);
+
+          // Show user-visible error for permission issues
+          if (event.error === 'not-allowed') {
+            setMessages(prev => [...prev, {
+              role: 'system',
+              content: 'Microphone access denied. Please allow microphone access to use voice mode.',
+              timestamp: new Date(),
+            }]);
+          }
         };
 
+        // AUTO-RESTART LOGIC
         recognition.onend = () => {
-          setIsListening(false);
+          console.log('[CampaignSim] Recognition ended. isSpeaking:', isSpeakingRef.current, 'waiting:', isWaitingForResponseRef.current);
+
+          // Don't restart if TTS is speaking or waiting for AI response
+          if (isSpeakingRef.current || isWaitingForResponseRef.current) {
+            console.log('[CampaignSim] Not restarting - speaking or waiting');
+            return;
+          }
+
+          // Auto-restart if still in voice mode and simulation is active
+          if (mode === 'voice' && simulationStarted && !isSpeakingRef.current) {
+            try {
+              recognition.start();
+              console.log('[CampaignSim] Auto-restarted recognition');
+            } catch (e) {
+              console.log('[CampaignSim] Auto-restart failed:', e);
+              setIsListening(false);
+            }
+          } else {
+            setIsListening(false);
+          }
         };
 
         recognitionRef.current = recognition;
       }
     }
-  }, []);
+  }, [mode, simulationStarted]);
 
   // Auto-scroll
   useEffect(() => {
@@ -129,6 +170,10 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Keep refs in sync with state to avoid stale closures in callbacks
+  useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
 
   // Chat mutation
   const chatMutation = useMutation({
@@ -237,18 +282,44 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
 
   const speak = (text: string) => {
     if (!window.speechSynthesis) return;
-    
+
+    // Stop recognition to prevent echo
+    if (recognitionRef.current && isListeningRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) { /* ignore */ }
+    }
+    isSpeakingRef.current = true;
+
     // Stop any current speech
     window.speechSynthesis.cancel();
-    
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
-    
+
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      isWaitingForResponseRef.current = false;
+
+      // Restart recognition after TTS with delay to prevent echo
+      setTimeout(() => {
+        if (mode === 'voice' && simulationStarted && recognitionRef.current && !isSpeakingRef.current) {
+          try {
+            recognitionRef.current.start();
+            setIsListening(true);
+            console.log('[CampaignSim] Restarted recognition after TTS');
+          } catch (e) {
+            console.log('[CampaignSim] Failed to restart after TTS:', e);
+          }
+        }
+      }, 300);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
+    };
+
     synthRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   };
@@ -260,14 +331,25 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
     }
   };
 
-  const startListening = () => {
+  const startListening = async () => {
     if (recognitionRef.current && !isListening) {
       try {
+        // Request microphone permission first
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+
         recognitionRef.current.start();
         setIsListening(true);
         setInput('');
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to start recognition:', err);
+        // Show user-visible error
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: err.name === 'NotAllowedError'
+            ? 'Microphone access denied. Please allow microphone access in your browser settings.'
+            : 'Failed to start voice recognition. Please try again.',
+          timestamp: new Date(),
+        }]);
       }
     }
   };
@@ -302,6 +384,14 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
   };
 
   const handleReset = () => {
+    // Stop recognition cleanly
+    if (recognitionRef.current && isListening) {
+      try { recognitionRef.current.stop(); } catch (e) { /* ignore */ }
+    }
+    setIsListening(false);
+    isSpeakingRef.current = false;
+    isWaitingForResponseRef.current = false;
+
     setMessages([]);
     setSessionId(null);
     setContext(null);

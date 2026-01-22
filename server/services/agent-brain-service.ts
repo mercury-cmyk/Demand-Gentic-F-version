@@ -34,8 +34,6 @@ import {
  * Core B2B calling knowledge that every voice agent should have
  */
 export const AGENT_DEFAULT_KNOWLEDGE = {
-  voiceAgentControl: DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE,
-
   b2bCallingRules: `
 ## B2B CALLING FUNDAMENTALS
 

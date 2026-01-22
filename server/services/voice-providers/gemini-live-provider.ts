@@ -329,6 +329,14 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
+    // Check for backpressure before sending
+    const bufferSize = this.ws.bufferedAmount;
+    const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB
+    if (bufferSize > MAX_BUFFER_SIZE) {
+      console.warn(`${LOG_PREFIX} ⚠️ Audio backpressure detected (${bufferSize} bytes). Dropping frame to prevent buffer overflow.`);
+      return; // Drop frame to prevent audio quality degradation
+    }
+
     // Transcode G.711 to PCM 16kHz for Gemini
     const pcmBuffer = this.transcoder.telnyxToGemini(audioBuffer);
     const base64Audio = pcmBuffer.toString('base64');
