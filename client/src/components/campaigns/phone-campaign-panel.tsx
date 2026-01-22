@@ -68,7 +68,7 @@ export function PhoneCampaignPanel({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const isAiAgent = campaign.dialMode === 'ai_agent';
+  const isAiAgent = campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql';
 
   // AI Calls mutation
   const startAiCallsMutation = useMutation({
