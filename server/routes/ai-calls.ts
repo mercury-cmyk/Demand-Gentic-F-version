@@ -1085,7 +1085,15 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     console.log(`[OpenAI Realtime Test] Custom parameters in client_state:`, customParams);
 
     // Use the same host (public if provided) for Telnyx webhook callbacks
-    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    // Resolve webhook host robustly to avoid localhost in production
+    let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+      try {
+        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        webhookHost = u.host;
+      } catch {}
+    }
+    webhookHost = webhookHost || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
@@ -1255,22 +1263,31 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     };
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
-    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    // Resolve webhook host robustly to avoid localhost in production
+    let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+      try {
+        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        webhookHost = u.host;
+      } catch {}
+    }
+    webhookHost = webhookHost || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
-    const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
+    // Prefer path-based TeXML endpoint to avoid app defaults; include StatusCallback explicitly
+    const response = await fetch(`https://api.telnyx.com/v2/texml/calls/${connectionId}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${telnyxApiKey}`,
       },
       body: JSON.stringify({
-        texml_application_id: connectionId,
-        to: normalizedPhone,
-        from: fromNumber,
-        url: texmlUrl,
-        client_state: clientStateB64,
+        To: normalizedPhone,
+        From: fromNumber,
+        Url: texmlUrl,
+        ClientState: clientStateB64,
+        StatusCallback: process.env.TELNYX_WEBHOOK_URL || `${webhookProtocol}://${webhookHost}/api/webhooks/telnyx`,
       }),
     });
 

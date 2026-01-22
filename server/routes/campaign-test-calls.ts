@@ -256,7 +256,15 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
     // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
-    const webhookHost = env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    // Resolve webhook host with robust fallbacks to avoid 'localhost' in production
+    let webhookHost = env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+      try {
+        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        webhookHost = u.host; // demandgentic.ai
+      } catch {}
+    }
+    webhookHost = webhookHost || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
@@ -288,7 +296,8 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         To: payload.to,
         From: payload.from,
         Url: payload.url,
-        StatusCallback: `https://${env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+        // Prefer explicit webhook URL secret if provided; fallback to resolved host
+        StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
       }),
     });
 

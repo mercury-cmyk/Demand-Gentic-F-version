@@ -24,5 +24,7 @@ GEMINI_LIVE_MODEL: "gemini-live-2.5-flash-native-audio"
 # URLs
 BASE_URL: "https://demandgentic.ai"
 TELNYX_WEBHOOK_URL: "https://demandgentic.ai/api/webhooks/telnyx"
-PUBLIC_WEBSOCKET_URL: "wss://demandgentic.ai/openai-realtime-dialer"
-PUBLIC_WEBHOOK_HOST: "https://demandgentic.ai"
+# Use the unified voice dialer path (matches server configuration)
+PUBLIC_WEBSOCKET_URL: "wss://demandgentic.ai/voice-dialer"
+# Provide only the host (no protocol)
+PUBLIC_WEBHOOK_HOST: "demandgentic.ai"

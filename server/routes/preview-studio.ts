@@ -1171,7 +1171,15 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
     // Prepare webhook URL
-    const webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
+    // Resolve webhook host robustly to avoid localhost in production
+    let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+      try {
+        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        webhookHost = u.host;
+      } catch {}
+    }
+    webhookHost = webhookHost || 'localhost:5000';
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
 
@@ -1189,7 +1197,8 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
         To: normalizedPhone,
         From: fromNumber,
         Url: texmlUrl,
-        StatusCallback: `https://${process.env.PUBLIC_WEBHOOK_HOST || 'localhost'}/api/webhooks/telnyx`,
+        // Prefer explicit webhook URL secret if available, else fallback to resolved host
+        StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
       }),
     });
 
