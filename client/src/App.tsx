@@ -34,7 +34,6 @@ import SimpleEmailCampaignEditPage from "@/pages/simple-email-campaign-edit";
 import EmailCampaignReportsPage from "@/pages/email-campaign-reports";
 import EmailTemplatesPage from "@/pages/email-templates";
 import TelemarketingCreatePage from "@/pages/telemarketing-create";
-import PhoneCampaignsPage from "@/pages/phone-campaigns";
 import PhoneCampaignEditPage from "@/pages/phone-campaign-edit";
 import CampaignQueuePage from "@/pages/campaign-queue";
 import CampaignConfigPage from "@/pages/campaign-config";
@@ -248,21 +247,25 @@ function AuthenticatedApp() {
               <Route path="/email-templates" component={EmailTemplatesPage} />
               <Route path="/email-sequences" component={EmailSequencesPage} />
               
-              {/* Phone Campaigns - consolidated under /phone-campaigns */}
-              <Route path="/phone-campaigns" component={PhoneCampaignsPage} />
+              {/* Phone Campaigns - redirects to main campaigns page */}
+              <Route path="/phone-campaigns">
+                {() => { window.location.href = '/campaigns'; return null; }}
+              </Route>
               <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
               <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
-              {/* Legacy redirects for /campaigns/telemarketing - now redirects to /phone-campaigns */}
+              {/* Legacy redirects for /campaigns/telemarketing */}
               <Route path="/campaigns/telemarketing">
-                {() => { window.location.href = '/phone-campaigns'; return null; }}
+                {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
               <Route path="/campaigns/telemarketing/create">
-                {() => { window.location.href = '/phone-campaigns/create'; return null; }}
+                {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
               {/* Intelligent Campaign Creation with AI */}
               <Route path="/campaigns/create/intelligent" component={IntelligentCampaignCreatePage} />
               {/* Added explicit routes for /campaigns/phone path used in navigations */}
-              <Route path="/campaigns/phone" component={PhoneCampaignsPage} />
+              <Route path="/campaigns/phone">
+                {() => { window.location.href = '/campaigns'; return null; }}
+              </Route>
               <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />
               {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern */}
