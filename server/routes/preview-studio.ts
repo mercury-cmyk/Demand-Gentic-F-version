@@ -1172,7 +1172,8 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
 
     // Prepare webhook URL
     // Resolve webhook host robustly to avoid localhost in production
-    let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    // Prefer explicit TeXML host override if provided
+    let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
     if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
       try {
         const u = new URL(process.env.TELNYX_WEBHOOK_URL);
@@ -1198,6 +1199,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
         From: fromNumber,
         Url: texmlUrl,
         // Prefer explicit webhook URL secret if available, else fallback to resolved host
+        // Prefer explicit webhook URL override if available, else fallback to TeXML host
         StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
       }),
     });

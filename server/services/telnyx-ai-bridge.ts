@@ -405,7 +405,8 @@ export class TelnyxAiBridge extends EventEmitter {
       
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
       // Extract just the hostname from TELNYX_WEBHOOK_URL (e.g., "demandgentic.ai" from "https://demandgentic.ai/api/webhooks/telnyx")
-      let webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
+      // Prefer explicit TeXML host override if provided
+      let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST;
       if (!webhookHost && this.webhookUrl) {
         try {
           const url = new URL(this.webhookUrl);
@@ -512,7 +513,8 @@ export class TelnyxAiBridge extends EventEmitter {
             To: phoneNumber,
             From: fromNumber,
             Url: texmlUrlWithState,
-            StatusCallback: `https://${webhookHost}/api/webhooks/telnyx`,
+            // Prefer explicit webhook URL override for TeXML if provided
+            StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
             // Include client_state so AMD webhook receives call context
             ClientState: clientStateB64,
             // Enable call recording (all calls recorded for transcription and QA)
@@ -551,7 +553,8 @@ export class TelnyxAiBridge extends EventEmitter {
             to: phoneNumber,
             from: fromNumber,
             client_state: clientStateB64,
-            webhook_url: `https://${webhookHost}/api/webhooks/telnyx`,
+            // Prefer explicit webhook URL override for TeXML if provided
+            webhook_url: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
             // Enable call recording (all calls recorded for transcription and QA)
             record_type: "all",
             recording_channels: "dual",

@@ -257,7 +257,8 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 
     // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
     // Resolve webhook host with robust fallbacks to avoid 'localhost' in production
-    let webhookHost = env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
+    // Prefer explicit TeXML host override if provided
+    let webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
     if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
       try {
         const u = new URL(process.env.TELNYX_WEBHOOK_URL);
@@ -297,6 +298,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         From: payload.from,
         Url: payload.url,
         // Prefer explicit webhook URL secret if provided; fallback to resolved host
+        // Prefer explicit webhook URL override if available, else fallback to TeXML host
         StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
       }),
     });

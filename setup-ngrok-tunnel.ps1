@@ -20,12 +20,12 @@ Write-Host "✅ ngrok is installed" -ForegroundColor Green
 Write-Host ""
 
 # Start ngrok tunnel
-Write-Host "🚀 Starting ngrok tunnel on port 5000..." -ForegroundColor Cyan
+Write-Host "🚀 Starting ngrok tunnel on port 5100..." -ForegroundColor Cyan
 Write-Host "Keep this window open while testing audio." -ForegroundColor Yellow
 Write-Host ""
 
 # Run ngrok with verbose output
-ngrok http 5000 --log=stdout --log-level=info
+ngrok http 5100 --log=stdout --log-level=info
 
 Write-Host ""
 Write-Host "⚠️  Tunnel stopped" -ForegroundColor Yellow
