@@ -191,6 +191,8 @@ interface OpenAIRealtimeSession {
   };
   // Campaign-level max call duration (enforced strictly)
   campaignMaxCallDurationSeconds: number | null;
+  // Track if wrap-up warning has been sent (to avoid repeating)
+  wrapUpWarningSent: boolean;
   // Real-time quality monitoring
   realtimeQualityTimer: ReturnType<typeof setTimeout> | null;
   realtimeQualityInFlight: boolean;
@@ -929,6 +931,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
+              // Track if wrap-up warning has been sent
+              wrapUpWarningSent: false,
               // Real-time quality monitoring
               realtimeQualityTimer: null,
               realtimeQualityInFlight: false,
@@ -1028,6 +1032,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
+              // Track if wrap-up warning has been sent
+              wrapUpWarningSent: false,
               // Real-time quality monitoring (test sessions don't need this)
               realtimeQualityTimer: null,
               realtimeQualityInFlight: false,
@@ -2124,6 +2130,9 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Store provider for Telnyx audio routing
     (session as any).geminiProvider = provider;
+
+    // Start audio health monitoring (enforces max call duration, silence detection, etc.)
+    startAudioHealthMonitor(session);
 
     // Prepare opening message
     let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
@@ -6301,11 +6310,81 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
       return;
     }
 
-    if (effectiveMaxDuration >= 0 && elapsedSeconds > effectiveMaxDuration) {
-      const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds <= agentMaxDurationSeconds ? 'campaign' : 'agent';
-      console.warn(`${LOG_PREFIX} MAX DURATION EXCEEDED - Ending call ${session.callId} after ${elapsedSeconds}s (limit: ${effectiveMaxDuration}s, ${source} limit)`);
-      endCall(session.callId, 'completed');
-      return;
+    // TIME LIMIT ENFORCEMENT with graceful wrap-up
+    // - Warn AI 30 seconds before limit to start wrapping up
+    // - Force terminate 30 seconds after limit (absolute max for valuable conversations)
+    const WRAP_UP_WARNING_SECONDS = 30; // Warn AI to wrap up 30s before limit
+    const ABSOLUTE_MAX_GRACE_SECONDS = 30; // Absolute max is limit + 30s grace
+
+    if (effectiveMaxDuration >= 0) {
+      const warnThreshold = effectiveMaxDuration - WRAP_UP_WARNING_SECONDS;
+      const absoluteMax = effectiveMaxDuration + ABSOLUTE_MAX_GRACE_SECONDS;
+
+      // ABSOLUTE HARD LIMIT: Force terminate after grace period (no exceptions)
+      if (elapsedSeconds > absoluteMax) {
+        console.warn(`${LOG_PREFIX} ⛔ ABSOLUTE MAX EXCEEDED - Force ending call ${session.callId} after ${elapsedSeconds}s (absolute limit: ${absoluteMax}s)`);
+        endCall(session.callId, 'completed');
+        return;
+      }
+
+      // SOFT LIMIT: Send wrap-up warning to AI when approaching limit
+      if (elapsedSeconds >= warnThreshold && !session.wrapUpWarningSent) {
+        session.wrapUpWarningSent = true;
+        const remainingSeconds = absoluteMax - elapsedSeconds;
+        console.log(`${LOG_PREFIX} ⏰ TIME WARNING - Call ${session.callId} approaching limit. Sending wrap-up instruction. Remaining: ${remainingSeconds}s`);
+
+        // Inject wrap-up instruction to AI (OpenAI provider)
+        if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+          try {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "system",
+                content: [{
+                  type: "input_text",
+                  text: `[URGENT TIME LIMIT] You have approximately ${remainingSeconds} seconds remaining on this call.
+
+IMMEDIATELY begin wrapping up the conversation:
+1. If there's valuable information to capture, summarize it quickly
+2. Thank the prospect for their time
+3. Confirm any next steps or follow-up if applicable
+4. Say goodbye professionally and end the call using the hangup tool
+
+Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on closing gracefully.`
+                }]
+              }
+            }));
+
+            // Trigger AI response to the wrap-up instruction
+            session.openaiWs.send(JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["text", "audio"],
+                instructions: "Acknowledge the time constraint internally and immediately begin wrapping up the conversation naturally. Do not mention the time limit to the prospect."
+              }
+            }));
+          } catch (e) {
+            console.error(`${LOG_PREFIX} Error sending wrap-up instruction:`, e);
+          }
+        }
+
+        // For Gemini provider, send text message to wrap up
+        const geminiProvider = (session as any).geminiProvider;
+        if (geminiProvider && geminiProvider.isConnected) {
+          try {
+            geminiProvider.sendTextMessage(`[URGENT] You have ${remainingSeconds} seconds remaining. Wrap up the conversation immediately - thank the prospect, confirm any next steps, and end the call gracefully. Do not mention the time limit.`);
+          } catch (e) {
+            console.error(`${LOG_PREFIX} Error sending Gemini wrap-up:`, e);
+          }
+        }
+      }
+
+      // Original limit exceeded (now serves as logging only, actual termination at absolute max)
+      if (elapsedSeconds > effectiveMaxDuration) {
+        const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds <= agentMaxDurationSeconds ? 'campaign' : 'agent';
+        console.warn(`${LOG_PREFIX} ⚠️ MAX DURATION EXCEEDED - Call ${session.callId} at ${elapsedSeconds}s (limit: ${effectiveMaxDuration}s, ${source} limit). Grace period active until ${absoluteMax}s.`);
+      }
     }
 
     // FAST VOICEMAIL TERMINATION: If voicemail was detected, end after 10s (to capture greeting but not leave message)
