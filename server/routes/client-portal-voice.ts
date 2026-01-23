@@ -626,7 +626,7 @@ router.get('/config', async (req: Request, res: Response) => {
 // Update voice config
 const updateConfigSchema = z.object({
   voiceEnabled: z.boolean().optional(),
-  preferredVoice: z.enum(['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer']).optional(),
+  preferredVoice: z.enum(['marin', 'cedar', 'nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer', 'ash', 'coral', 'sage', 'verse', 'ballad']).optional(),
   responseSpeed: z.number().min(0.5).max(2.0).optional(),
 });
 

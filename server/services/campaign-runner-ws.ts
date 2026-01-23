@@ -680,7 +680,7 @@ class CampaignRunnerService {
               name: agent?.name || campaign.name,
               companyName: agentExt?.companyRepresented || 'Our Company',
               systemPrompt: agent?.systemPrompt || campaignExt.aiAgentPrompt || '',
-              voice: agent?.voice || 'alloy',
+              voice: agent?.voice || 'marin',
             },
             objective: {
               type: agentExt?.primaryGoal || 'qualify',

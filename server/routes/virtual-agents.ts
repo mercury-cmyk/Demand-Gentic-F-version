@@ -284,7 +284,7 @@ const createSmartAgentSchema = z.object({
   firstMessage: z.string().min(5, "First message must be at least 5 characters"),
   agentType: z.enum(["voice", "text", "research", "qa"]).optional().default("voice"),
   additionalContext: z.string().optional(),
-  voice: z.enum(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]).optional().default("alloy"),
+  voice: z.enum(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar", "nova", "fable", "onyx"]).optional().default("marin"),
   autoGeneratePrompt: z.boolean().optional().default(true),
 });
 

@@ -39,7 +39,8 @@ export interface AiAgentSettings {
     name: string;
     companyName: string;
     role: string;
-    voice: "alloy" | "ash" | "ballad" | "coral" | "echo" | "sage" | "shimmer" | "verse";
+    // marin & cedar are highest quality, most natural voices (recommended)
+    voice: "alloy" | "ash" | "ballad" | "coral" | "echo" | "sage" | "shimmer" | "verse" | "marin" | "cedar" | "nova" | "fable" | "onyx";
   };
   scripts: {
     opening: string;

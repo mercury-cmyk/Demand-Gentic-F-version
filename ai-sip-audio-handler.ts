@@ -78,7 +78,7 @@ wss.on('connection', (ws) => {
       console.log('[AI Agent] Streaming TTS audio to client... Text:', text);
       const response = await openai.audio.speech.create({
         model: 'tts-1',
-        voice: 'alloy',
+        voice: 'marin',
         input: text,
         response_format: 'mp3',
       });

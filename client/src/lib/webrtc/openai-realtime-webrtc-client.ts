@@ -292,7 +292,7 @@ export class OpenAIRealtimeWebRTCClient {
 
     const sessionConfig: OpenAISessionConfig = {
       model: this.config.model || this.DEFAULT_MODEL,
-      voice: this.config.voice || 'alloy',
+      voice: this.config.voice || 'marin',
       instructions: this.config.instructions || 'You are a helpful assistant.',
       input_audio_format: 'pcm16',
       output_audio_format: 'pcm16',

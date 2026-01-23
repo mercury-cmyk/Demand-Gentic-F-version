@@ -23,16 +23,24 @@ interface Step2bDialModeConfigProps {
 }
 
 type DialMode = 'manual' | 'hybrid' | 'ai_agent';
-type AiVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+// marin & cedar are highest quality, most natural voices
+type AiVoice = 'marin' | 'cedar' | 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'ash' | 'ballad' | 'coral' | 'sage' | 'verse';
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
 
 const AI_VOICES: { value: AiVoice; label: string; description: string }[] = [
+  { value: 'marin', label: 'Marin', description: 'Calm, professional, natural (Recommended)' },
+  { value: 'cedar', label: 'Cedar', description: 'Warm, confident, engaging (Recommended)' },
   { value: 'alloy', label: 'Alloy', description: 'Balanced and versatile' },
   { value: 'echo', label: 'Echo', description: 'Warm and engaging' },
   { value: 'fable', label: 'Fable', description: 'Expressive and dynamic' },
   { value: 'onyx', label: 'Onyx', description: 'Deep and authoritative' },
   { value: 'nova', label: 'Nova', description: 'Friendly and upbeat' },
   { value: 'shimmer', label: 'Shimmer', description: 'Clear and professional' },
+  { value: 'ash', label: 'Ash', description: 'Natural conversational' },
+  { value: 'coral', label: 'Coral', description: 'Bright and clear' },
+  { value: 'sage', label: 'Sage', description: 'Thoughtful and calm' },
+  { value: 'verse', label: 'Verse', description: 'Articulate and precise' },
+  { value: 'ballad', label: 'Ballad', description: 'Smooth and melodic' },
 ];
 
 const HANDOFF_TRIGGERS: { value: HandoffTrigger; label: string }[] = [

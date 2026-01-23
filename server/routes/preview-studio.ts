@@ -1096,7 +1096,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       voice = (voiceOverride || agentConfig?.voice || 'Puck').toString().trim();
     } else {
       // OpenAI voices - strict validation
-      const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse']);
+      const supportedVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar']);
       const rawVoice = (voiceOverride || agentConfig?.voice || '').toString().trim().toLowerCase();
       voice = supportedVoices.has(rawVoice) ? rawVoice : 'marin';
     }

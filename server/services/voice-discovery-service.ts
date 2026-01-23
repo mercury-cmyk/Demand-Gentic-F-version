@@ -299,7 +299,7 @@ function mapGeminiToOpenAIVoice(geminiVoice: string): string {
     'Eclipse': 'onyx',   // Bold distinctive -> Onyx
   };
 
-  return mapping[geminiVoice] || 'alloy';
+  return mapping[geminiVoice] || 'marin';
 }
 
 /**

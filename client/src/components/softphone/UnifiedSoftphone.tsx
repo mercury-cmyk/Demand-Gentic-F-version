@@ -103,7 +103,7 @@ export function UnifiedSoftphone({
   callerIdNumber,
   openaiEphemeralEndpoint,
   openaiModel,
-  openaiVoice = 'alloy',
+  openaiVoice = 'marin',
   openaiInstructions,
   initialMode = 'human',
   showModeToggle = true,

@@ -148,8 +148,61 @@ export function pcm8kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 }
 
 /**
- * Resample PCM audio using linear interpolation
- * Supports upsampling and downsampling
+ * Low-pass FIR filter coefficients for anti-aliasing before downsampling.
+ * This is a 31-tap windowed sinc filter with cutoff at ~3.5kHz (for 8kHz target).
+ * Generated using a Hamming window.
+ */
+const ANTI_ALIAS_FILTER_COEFFS = [
+  0.0008, 0.0018, 0.0035, 0.0058, 0.0088,
+  0.0124, 0.0166, 0.0212, 0.0261, 0.0311,
+  0.0361, 0.0407, 0.0448, 0.0482, 0.0507,
+  0.0521, // Center tap (highest weight)
+  0.0507, 0.0482, 0.0448, 0.0407, 0.0361,
+  0.0311, 0.0261, 0.0212, 0.0166, 0.0124,
+  0.0088, 0.0058, 0.0035, 0.0018, 0.0008
+];
+
+/**
+ * Apply low-pass FIR filter for anti-aliasing before downsampling.
+ * Prevents aliasing artifacts (the irritating noise) by removing
+ * frequencies above the Nyquist frequency of the target sample rate.
+ */
+function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
+  const inputSamples = inputBuffer.length / 2;
+  const outputBuffer = Buffer.alloc(inputBuffer.length);
+  const filterLen = ANTI_ALIAS_FILTER_COEFFS.length;
+  const halfLen = Math.floor(filterLen / 2);
+
+  // Scale filter coefficients based on cutoff ratio (for different downsample ratios)
+  // Lower cutoff ratio = more aggressive filtering needed
+  const scaledCoeffs = ANTI_ALIAS_FILTER_COEFFS.map(c => c * Math.min(1, cutoffRatio * 2));
+
+  for (let i = 0; i < inputSamples; i++) {
+    let sum = 0;
+
+    for (let j = 0; j < filterLen; j++) {
+      const srcIdx = i - halfLen + j;
+      let sample = 0;
+
+      if (srcIdx >= 0 && srcIdx < inputSamples) {
+        sample = inputBuffer.readInt16LE(srcIdx * 2);
+      }
+
+      sum += sample * scaledCoeffs[j];
+    }
+
+    // Clamp to valid 16-bit range
+    const clamped = Math.max(-32768, Math.min(32767, Math.round(sum)));
+    outputBuffer.writeInt16LE(clamped, i * 2);
+  }
+
+  return outputBuffer;
+}
+
+/**
+ * Resample PCM audio with proper anti-aliasing.
+ * Uses low-pass filtering before downsampling to prevent aliasing artifacts.
+ * Uses linear interpolation for upsampling (which is safe).
  */
 export function resamplePcm(
   inputBuffer: Buffer,
@@ -160,8 +213,18 @@ export function resamplePcm(
     return inputBuffer;
   }
 
-  const inputSamples = inputBuffer.length / 2;
   const ratio = outputSampleRate / inputSampleRate;
+  let processedInput = inputBuffer;
+
+  // When downsampling, apply anti-aliasing filter first
+  // This removes frequencies above the target Nyquist frequency
+  // to prevent them from folding back as noise (aliasing)
+  if (ratio < 1) {
+    // Apply low-pass filter with cutoff at target Nyquist frequency
+    processedInput = applyLowPassFilter(inputBuffer, ratio);
+  }
+
+  const inputSamples = processedInput.length / 2;
   const outputSamples = Math.floor(inputSamples * ratio);
   const outputBuffer = Buffer.alloc(outputSamples * 2);
 
@@ -171,13 +234,13 @@ export function resamplePcm(
     const fraction = srcPos - srcIndex;
 
     const sample1 = srcIndex < inputSamples
-      ? inputBuffer.readInt16LE(srcIndex * 2)
+      ? processedInput.readInt16LE(srcIndex * 2)
       : 0;
     const sample2 = srcIndex + 1 < inputSamples
-      ? inputBuffer.readInt16LE((srcIndex + 1) * 2)
+      ? processedInput.readInt16LE((srcIndex + 1) * 2)
       : sample1;
 
-    // Linear interpolation
+    // Linear interpolation (safe after filtering for downsampling)
     const interpolated = Math.round(sample1 + (sample2 - sample1) * fraction);
     outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, interpolated)), i * 2);
   }

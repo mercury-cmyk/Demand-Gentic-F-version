@@ -1585,11 +1585,13 @@ openaiWs.on("open", async () => {
         voiceTemplateValues
       );
       
-      const VALID_VOICES = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse"];
-      let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "alloy";
+      // OpenAI Realtime voices - marin & cedar are highest quality, most natural sounding
+      const VALID_VOICES = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse", "marin", "cedar", "nova", "fable", "onyx"];
+      // Default to marin for best audio quality (warm, confident, natural speech)
+      let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
       if (!VALID_VOICES.includes(voice)) {
-        console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'alloy'.`);
-        voice = "alloy";
+        console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'marin'.`);
+        voice = "marin";
       }
 
       const modalities = ["text", "audio"];
@@ -5283,7 +5285,7 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     return {
       id: campaign.id,
       script: campaign.callScript,
-      voice: aiSettings?.persona?.voice || 'alloy',
+      voice: aiSettings?.persona?.voice || 'marin',
       openingScript: aiSettings?.scripts?.opening,
       qualificationCriteria: campaign.qualificationQuestions,
       // Organization name - explicitly extract for prompt building
