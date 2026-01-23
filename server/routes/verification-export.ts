@@ -8,7 +8,7 @@ import { db } from "../db";
 import { verificationContacts, verificationCampaigns, accounts } from "@shared/schema";
 import { eq, and, sql, inArray, not } from "drizzle-orm";
 import { requireAuth } from "../auth";
-import { uploadToS3, getPresignedDownloadUrl } from "../lib/s3";
+import { uploadToS3, getPresignedDownloadUrl } from "../lib/storage";
 import { z } from "zod";
 
 const router = Router();

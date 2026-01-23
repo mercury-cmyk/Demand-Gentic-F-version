@@ -4,7 +4,7 @@
  * Provides long-lived URLs for customer sharing
  */
 
-import { uploadToS3, getPresignedDownloadUrl, s3ObjectExists, isS3Configured, BUCKET } from '../lib/s3';
+import { uploadToS3, getPresignedDownloadUrl, s3ObjectExists, isS3Configured, BUCKET } from '../lib/storage';
 import { db } from '../db';
 import { leads } from '../../shared/schema';
 import { eq } from 'drizzle-orm';

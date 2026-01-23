@@ -27,7 +27,7 @@ import verificationJobRecoveryRouter from './routes/verification-job-recovery';
 import verificationAccountCapsRouter from './routes/verification-account-caps';
 import verificationPriorityConfigRouter from './routes/verification-priority-config';
 import suppressionRouter from './routes/suppression-routes';
-import s3FilesRouter from './routes/s3-files';
+import storageFilesRouter from './routes/storage-files';
 import csvImportJobsRouter from './routes/csv-import-jobs';
 import contactsCSVImportRouter from './routes/contacts-csv-import';
 import emailValidationTestRouter from './routes/email-validation-test';
@@ -106,7 +106,7 @@ import {
 import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
-import { uploadToS3, getPublicUrl } from "./lib/s3";
+import { uploadToS3, getPublicUrl } from "./lib/storage";
 import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, pipelineOpportunities, filterFieldCategoryEnum, campaignOrganizations, type CanonicalDisposition, type FilterField, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
@@ -10926,8 +10926,8 @@ export function registerRoutes(app: Express) {
       };
       const leadsData = await storage.getLeads(qaStatusFilter);
       
-      // Import S3 utilities to generate fresh presigned URLs for recordings
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
+      // Import storage utilities to generate fresh presigned URLs for recordings
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
 
       // Generate fresh presigned URLs for recordings stored in S3 (7-day validity)
       const csvData = await Promise.all(leadsData.map(async (lead) => {
@@ -11067,8 +11067,8 @@ export function registerRoutes(app: Express) {
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
         .where(inArray(leads.id, validLeadIds));
 
-      // Import S3 utilities for fresh presigned URLs
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
+      // Import storage utilities for fresh presigned URLs
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
       
       // Convert to CSV format with fresh presigned URLs for recordings
       const PapaModule = await import('papaparse');
@@ -13773,12 +13773,12 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get fresh recording URL for a lead (serves from S3 with 7-day presigned URLs)
+  // Get fresh recording URL for a lead (serves from GCS with 7-day presigned URLs)
   app.get("/api/leads/:id/recording-url", requireAuth, async (req, res) => {
     try {
       const { leads } = await import('@shared/schema');
       const { getRecordingUrl, isRecordingStorageEnabled } = await import('./services/recording-storage');
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
       
       const [lead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
       
@@ -13786,33 +13786,33 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
       
-      // Check if recording exists in S3 first (permanent storage)
+      // Check if recording exists in GCS first (permanent storage)
       if (lead.recordingS3Key) {
         try {
           const exists = await s3ObjectExists(lead.recordingS3Key);
           if (exists) {
-            // Generate 7-day presigned URL for S3 recording
+            // Generate 7-day presigned URL for GCS recording
             const url = await getPresignedDownloadUrl(lead.recordingS3Key, 7 * 24 * 60 * 60);
-            console.log(`[Recording URL] Serving from S3: ${lead.recordingS3Key}`);
+            console.log(`[Recording URL] Serving from GCS: ${lead.recordingS3Key}`);
             return res.json({ url, source: 'local', expiresIn: '7 days' });
           }
         } catch (s3Error) {
-          console.error(`[Recording URL] S3 check failed for lead ${lead.id}:`, s3Error);
+          console.error(`[Recording URL] GCS check failed for lead ${lead.id}:`, s3Error);
         }
       }
       
-      // No S3 recording - try to use the recording storage service
+      // No GCS recording - try to use the recording storage service
       if (lead.recordingUrl && isRecordingStorageEnabled()) {
-        console.log(`[Recording URL] Attempting to store recording in S3 for lead ${lead.id}...`);
+        console.log(`[Recording URL] Attempting to store recording in GCS for lead ${lead.id}...`);
         const result = await getRecordingUrl(lead.id, lead.recordingUrl);
         
         if (result.url && result.source === 'local') {
-          console.log(`[Recording URL] Successfully stored and serving from S3 for lead ${lead.id}`);
+          console.log(`[Recording URL] Successfully stored and serving from GCS for lead ${lead.id}`);
           return res.json({ url: result.url, source: 'local', expiresIn: '7 days' });
         }
       }
       
-      // Fall back to original Telnyx URL if S3 storage failed or not configured
+      // Fall back to original Telnyx URL if GCS storage failed or not configured
       if (!lead.recordingUrl) {
         return res.status(404).json({ message: "No recording URL available for this lead" });
       }
@@ -14892,8 +14892,8 @@ Provide JSON response with:
   // ==================== TELEMARKETING SUPPRESSION LISTS ====================
   app.use('/api/telemarketing/suppressions', requireAuth, telemarketingSuppressionRouter);
 
-  // ==================== S3 FILE OPERATIONS ====================
-  app.use(s3FilesRouter);
+  // ==================== STORAGE FILE OPERATIONS ====================
+  app.use(storageFilesRouter);
 
   // ==================== CSV IMPORT JOBS (BullMQ) ====================
   app.use(csvImportJobsRouter);

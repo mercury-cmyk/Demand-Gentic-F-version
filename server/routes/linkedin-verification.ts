@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../auth';
-import { getPresignedUploadUrl, generateS3Key, getPublicUrl } from '../lib/s3';
+import { getPresignedUploadUrl, generateStorageKey, getPublicUrl } from '../lib/storage';
 import { z } from 'zod';
 import { db } from '../db';
 import { leads } from '@shared/schema';

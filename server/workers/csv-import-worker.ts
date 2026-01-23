@@ -10,7 +10,7 @@ import { parse } from 'fast-csv';
 import { Readable } from 'stream';
 import { db } from '../db';
 import { verificationContacts, verificationCampaigns, accounts } from '../../shared/schema';
-import { streamFromS3 } from '../lib/s3';
+import { streamFromS3 } from '../lib/storage';
 import { eq, and, sql } from 'drizzle-orm';
 import { normalizeName } from '../normalization';
 

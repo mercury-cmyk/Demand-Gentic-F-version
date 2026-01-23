@@ -6,7 +6,7 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import multer from 'multer';
-import { uploadToS3, uploadStreamToS3 } from '../lib/s3';
+import { uploadToS3, uploadStreamToS3 } from '../lib/storage';
 import { addContactsCSVImportJob, getContactsCSVImportJobStatus, contactsCSVImportQueue } from '../lib/contacts-csv-import-queue';
 import { ContactsCSVImportJobData } from '../workers/contacts-csv-import-worker';
 

@@ -17,7 +17,7 @@ import WebSocket from "ws";
 import { Agent } from "undici";
 import { AiVoiceAgent, AiAgentSettings, CallContext, createAiVoiceAgent } from "./ai-voice-agent";
 import { storage } from "../storage";
-import { uploadToS3, getPresignedDownloadUrl } from "../lib/s3";
+import { uploadToS3, getPresignedDownloadUrl } from "../lib/storage";
 import { preflightVoiceVariableContract, VoiceVariablePreflightError } from "./voice-variable-contract";
 import { db } from "../db";
 import { dialerCallAttempts } from "@shared/schema";

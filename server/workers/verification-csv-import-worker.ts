@@ -12,7 +12,7 @@ import { Readable, Transform } from 'stream';
 import { createGunzip } from 'zlib';
 import { workerDb } from '../db';
 import { verificationContacts, accounts, verificationCampaigns } from '../../shared/schema';
-import { streamFromS3 } from '../lib/s3';
+import { streamFromS3 } from '../lib/storage';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { from as copyFrom } from 'pg-copy-streams';
 import { pipeline } from 'stream/promises';

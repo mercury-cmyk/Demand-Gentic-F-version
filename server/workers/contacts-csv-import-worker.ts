@@ -11,7 +11,7 @@ import { Readable, Transform } from 'stream';
 import { createGunzip } from 'zlib';
 import { workerDb } from '../db'; // Use dedicated worker pool
 import { contacts, accounts } from '../../shared/schema';
-import { streamFromS3 } from '../lib/s3';
+import { streamFromS3 } from '../lib/storage';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { normalizeName } from '../normalization';
 import { from as copyFrom } from 'pg-copy-streams';

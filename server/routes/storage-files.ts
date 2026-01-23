@@ -1,6 +1,6 @@
 /**
- * S3 File Operations API
- * Handles presigned URLs for direct browser-to-S3 uploads and downloads
+ * Storage File Operations API
+ * Handles presigned URLs for direct browser-to-GCS uploads and downloads
  */
 
 import express from 'express';
@@ -8,14 +8,14 @@ import { z } from 'zod';
 import { 
   getPresignedUploadUrl, 
   getPresignedDownloadUrl, 
-  generateS3Key,
+  generateStorageKey,
   isS3Configured 
-} from '../lib/s3';
+} from '../lib/storage';
 
 const router = express.Router();
 
 /**
- * Approved S3 folder prefixes
+ * Approved folder prefixes
  * Only these folders are allowed for uploads to prevent unauthorized file placement
  */
 const APPROVED_FOLDERS = [
@@ -57,8 +57,8 @@ router.post('/api/s3/upload-url', async (req, res) => {
 
     const { filename, contentType, folder } = uploadUrlSchema.parse(req.body);
 
-    // Generate S3 key with folder structure and timestamp
-    const key = generateS3Key(folder, filename);
+    // Generate storage key with folder structure and timestamp
+    const key = generateStorageKey(folder, filename);
 
     // Generate presigned URL (15 minute expiry)
     const uploadUrl = await getPresignedUploadUrl(key, contentType, 900);

@@ -197,6 +197,9 @@ export function generateS3Key(type: string, filename: string): string {
   return `${type}/${timestamp}-${sanitized}`;
 }
 
+// Alias for cleaner naming
+export const generateStorageKey = generateS3Key;
+
 /**
  * Get public URL for an object (if bucket is public or using CDN)
  * Falls back to generating a presigned URL if no CDN is configured
