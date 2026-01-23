@@ -110,6 +110,7 @@ import UsersSettingsPage from "@/pages/settings/users";
 import TelephonySettingsPage from "@/pages/settings/telephony";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
+import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -320,6 +321,7 @@ function AuthenticatedApp() {
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
+              <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
               
               {/* Settings Hub */}
               <Route path="/settings" component={SettingsIndexPage} />

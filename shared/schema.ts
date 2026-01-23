@@ -1367,6 +1367,132 @@ export const agentDefaults = pgTable("agent_defaults", {
 
 export type AgentDefaults = typeof agentDefaults.$inferSelect;
 
+// ==================== UNIFIED KNOWLEDGE HUB ====================
+// SINGLE SOURCE OF TRUTH for all AI agent knowledge
+// All agents—voice, email, compliance, or otherwise—MUST consume
+// knowledge from this centralized hub only.
+
+/**
+ * Knowledge Section Category Enum
+ * Defines the categories of knowledge in the unified hub
+ */
+export const knowledgeCategoryEnum = pgEnum('knowledge_category', [
+  'compliance',
+  'gatekeeper_handling',
+  'voicemail_detection',
+  'call_dispositioning',
+  'call_quality',
+  'conversation_flow',
+  'dos_and_donts',
+  'objection_handling',
+  'tone_and_pacing',
+  'identity_verification',
+  'call_control',
+  'learning_rules'
+]);
+
+/**
+ * Unified Knowledge Hub - Main table storing the current and historical knowledge
+ * Each row represents a version of the complete knowledge base
+ */
+export const unifiedKnowledgeHub = pgTable("unified_knowledge_hub", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  version: integer("version").notNull().default(1),
+  
+  // Complete knowledge stored as structured JSON
+  // Array of KnowledgeSection objects with id, category, title, content, priority, isActive, tags
+  sections: jsonb("sections").notNull().$type<{
+    id: string;
+    category: string;
+    title: string;
+    content: string;
+    priority: number;
+    isActive: boolean;
+    tags: string[];
+  }[]>(),
+  
+  // Change tracking
+  changeDescription: text("change_description"),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  versionIdx: uniqueIndex("unified_knowledge_hub_version_idx").on(table.version),
+  updatedAtIdx: index("unified_knowledge_hub_updated_at_idx").on(table.updatedAt),
+}));
+
+export const insertUnifiedKnowledgeHubSchema = createInsertSchema(unifiedKnowledgeHub);
+export type UnifiedKnowledgeHub = typeof unifiedKnowledgeHub.$inferSelect;
+
+/**
+ * Unified Knowledge Versions - Stores full snapshots for diff comparison
+ */
+export const unifiedKnowledgeVersions = pgTable("unified_knowledge_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  knowledgeId: varchar("knowledge_id").references(() => unifiedKnowledgeHub.id, { onDelete: 'cascade' }).notNull(),
+  version: integer("version").notNull(),
+  
+  // Full section snapshots for diff comparison
+  sections: jsonb("sections").notNull(),
+  previousSections: jsonb("previous_sections"), // Null for first version
+  
+  // Metadata
+  changeDescription: text("change_description"),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  knowledgeIdIdx: index("unified_knowledge_versions_knowledge_id_idx").on(table.knowledgeId),
+  versionIdx: index("unified_knowledge_versions_version_idx").on(table.version),
+}));
+
+export const insertUnifiedKnowledgeVersionSchema = createInsertSchema(unifiedKnowledgeVersions);
+export type UnifiedKnowledgeVersion = typeof unifiedKnowledgeVersions.$inferSelect;
+
+/**
+ * Agent Simulation Records - Stores simulation/preview results
+ * Used for testing and evaluating agent behavior before deployment
+ */
+export const agentSimulations = pgTable("agent_simulations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Context for simulation
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  virtualAgentId: varchar("virtual_agent_id").references(() => virtualAgents.id, { onDelete: 'set null' }),
+  
+  // Simulation type and mode
+  simulationType: text("simulation_type").notNull(), // 'voice', 'email', 'text'
+  simulationMode: text("simulation_mode").notNull(), // 'preview', 'test_call', 'dry_run'
+  
+  // Input/Output
+  inputScenario: jsonb("input_scenario"), // User-defined test scenario
+  generatedPrompt: text("generated_prompt"), // The exact runtime prompt used
+  knowledgeVersion: integer("knowledge_version"), // Which knowledge version was used
+  
+  // Results
+  outputResponse: text("output_response"), // AI's response
+  evaluationScore: real("evaluation_score"), // 0-100 quality score
+  evaluationNotes: text("evaluation_notes"), // Human evaluator notes
+  
+  // Metadata
+  runBy: varchar("run_by").references(() => users.id, { onDelete: 'set null' }),
+  runAt: timestamp("run_at").notNull().defaultNow(),
+  durationMs: integer("duration_ms"),
+  
+  // Status
+  status: text("status").notNull().default('pending'), // pending, running, completed, failed
+  errorMessage: text("error_message"),
+}, (table) => ({
+  campaignIdx: index("agent_simulations_campaign_idx").on(table.campaignId),
+  agentIdx: index("agent_simulations_agent_idx").on(table.virtualAgentId),
+  statusIdx: index("agent_simulations_status_idx").on(table.status),
+  runAtIdx: index("agent_simulations_run_at_idx").on(table.runAt),
+}));
+
+export const insertAgentSimulationSchema = createInsertSchema(agentSimulations);
+export type AgentSimulation = typeof agentSimulations.$inferSelect;
+
 // Campaign Agent Assignments table (enforces one-campaign-per-agent rule)
 // Virtual Agents - AI agent personas that can be assigned to campaigns like human agents
 export const virtualAgents = pgTable("virtual_agents", {

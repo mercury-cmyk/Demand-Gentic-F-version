@@ -64,6 +64,7 @@ import virtualAgentsRouter from './routes/virtual-agents';
 import voiceProviderRouter from './routes/voice-provider-routes';
 import voiceInsightsRouter from './routes/voice-insights';
 import agentDefaultsRouter from './routes/agent-defaults';
+import knowledgeHubRouter from './routes/knowledge-hub';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
@@ -14587,6 +14588,11 @@ Provide JSON response with:
   // Centralized API for all voice call insights, dispositions, quality tracking
   // Gemini Live exclusive - no OpenAI Realtime fallback
   app.use("/api/voice-insights", voiceInsightsRouter);
+
+  // ==================== UNIFIED KNOWLEDGE HUB (SINGLE SOURCE OF TRUTH) ====================
+  // All AI agents consume knowledge from this centralized hub only
+  // No other routes, documents, or hidden configurations are permitted
+  app.use("/api/knowledge-hub", knowledgeHubRouter);
 
   // ==================== AGENT DEFAULTS (Global Agent Configuration) ====================
 

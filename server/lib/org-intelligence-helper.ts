@@ -1,13 +1,15 @@
 /**
  * Organization Intelligence Helper
  * Provides AI agents with access to organization profile and prompt optimization settings
+ * 
+ * IMPORTANT: All foundational knowledge is now sourced from the UNIFIED KNOWLEDGE HUB.
+ * Organization-specific settings are supplementary context only.
  */
 
 import { db } from "../db";
 import { accountIntelligence, callAttempts, emailEvents, leads } from "@shared/schema";
 import { desc, gte, sql } from "drizzle-orm";
-import { ZAHID_PROFESSIONAL_CALLING_STRATEGY } from "../services/voice-agent-control-defaults";
-import { TRAINING_RULES_FOR_PROMPT } from "../training/taxonomy";
+import { buildUnifiedKnowledgePrompt } from "../services/unified-knowledge-hub";
 
 // ==================== DEFAULT ORGANIZATION INTELLIGENCE ====================
 // This is used when no organization-specific intelligence is configured in the database.
@@ -452,6 +454,11 @@ export async function getOrganizationProfile(): Promise<OrganizationProfile | nu
 /**
  * Builds a system prompt with organization context and behavioral guidelines
  * Use this in AI agent prompts to ensure consistent behavior
+ * 
+ * ARCHITECTURE: Uses UNIFIED KNOWLEDGE HUB as the single source of truth.
+ * All foundational knowledge (compliance, gatekeeper handling, voicemail,
+ * dispositioning, etc.) comes from one centralized location.
+ * Organization-specific settings are supplementary context only.
  */
 export async function buildAgentSystemPrompt(basePrompt: string): Promise<string> {
   const settings = await getOrganizationPromptSettings();
@@ -460,9 +467,32 @@ export async function buildAgentSystemPrompt(basePrompt: string): Promise<string
 
   const promptParts = [basePrompt];
 
+  // ==================== UNIFIED KNOWLEDGE HUB (SINGLE SOURCE OF TRUTH) ====================
+  // All foundational agent knowledge comes from the unified knowledge hub.
+  // This is the ONLY source for: compliance, gatekeeper handling, voicemail detection,
+  // dispositioning, call quality, conversation flow, objection handling, etc.
+  try {
+    const unifiedKnowledge = await buildUnifiedKnowledgePrompt();
+    promptParts.push(unifiedKnowledge);
+  } catch (error) {
+    console.error('[OrgIntelligence] Failed to load unified knowledge hub, using fallback:', error);
+    // Minimal fallback if unified knowledge hub is unavailable
+    promptParts.push(`
+## Core Agent Guidelines (Fallback)
+- Always verify identity before proceeding
+- Honor all DNC requests immediately
+- Be professional and respectful
+- End calls gracefully when requested
+`);
+  }
+
+  // ==================== ORGANIZATION-SPECIFIC CONTEXT (SUPPLEMENTARY) ====================
+  // These are supplementary additions specific to this organization.
+  // They do NOT override the unified knowledge hub rules.
+
   // Add organization intelligence
   if (settings.orgIntelligence) {
-    promptParts.push('\n## Organization Intelligence\n' + settings.orgIntelligence);
+    promptParts.push('\n## Organization Context\n' + settings.orgIntelligence);
   }
 
   // Add profile context if available
@@ -479,9 +509,9 @@ export async function buildAgentSystemPrompt(basePrompt: string): Promise<string
     promptParts.push('\n## Campaign & Engagement Learnings\n' + learningSummary);
   }
 
-  // Add compliance policy
+  // Add organization-specific compliance policy (supplements unified hub, does not replace)
   if (settings.compliancePolicy) {
-    promptParts.push('\n## Compliance Policy\n' + settings.compliancePolicy);
+    promptParts.push('\n## Additional Organization Compliance Requirements\n' + settings.compliancePolicy);
   }
 
   // Add platform policies
@@ -492,36 +522,6 @@ export async function buildAgentSystemPrompt(basePrompt: string): Promise<string
   // Add voice defaults
   if (settings.agentVoiceDefaults) {
     promptParts.push('\n## Agent Voice Defaults\n' + settings.agentVoiceDefaults);
-  }
-
-  // Check if basePrompt already follows the canonical structure
-  // (has Personality/Environment/Tone/Goal/Call Flow sections)
-  // If so, do NOT append ZAHID_PROFESSIONAL_CALLING_STRATEGY to avoid duplication and confusion
-  const isCanonicalStructure =
-    basePrompt.includes('# Personality') &&
-    basePrompt.includes('# Goal') &&
-    basePrompt.includes('## Call Flow Logic');
-
-  if (!isCanonicalStructure) {
-    // Add Zahid Professional Calling Strategy as training data
-    // Only for prompts that don't already follow the canonical structure
-    promptParts.push('\n## Professional B2B Calling Methodology\n' + ZAHID_PROFESSIONAL_CALLING_STRATEGY);
-
-    // Add training rules and taxonomy (CRITICAL for consistency)
-    // This layer ensures all agents follow canonical call flow and classification logic
-    // Includes: hard constraints, learning rules, preflight requirements, voicemail detection
-    promptParts.push(TRAINING_RULES_FOR_PROMPT);
-  } else {
-    // For canonical prompts, only add the compact training rules (not the full methodology)
-    // This prevents duplication while still ensuring hard constraints are enforced
-    promptParts.push(`
-## Hard Constraints (MUST OBEY)
-- Once identity is confirmed, NEVER re-ask or re-verify identity
-- If contact says "I don't know" or hesitates, treat as uncertainty about the TOPIC, not the PERSON
-- Forward-only state progression: never return to earlier conversation states
-- Maximum 2 gatekeeper attempts; then thank and end call
-- Keep voicemail ≤18 seconds
-- Acknowledge time pressure immediately if expressed`);
   }
 
   return promptParts.join('\n');
