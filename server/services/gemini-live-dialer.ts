@@ -208,6 +208,9 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let systemPrompt: string = 'You are a helpful AI assistant.';
   let aiTranscript: string = "";
   let callContext: CallContext = {};
+  
+  // CRITICAL: Track setup completion - don't send/receive audio until Gemini is ready
+  let setupComplete: boolean = false;
 
   // Audio quality tracking
   const metrics: AudioMetrics = {
@@ -310,6 +313,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
           break;
 
         case 'media':
+          // CRITICAL: Don't process audio until Gemini setup is complete
+          if (!setupComplete) {
+            // Silently drop audio frames until setup is done
+            return;
+          }
+          
           if (geminiWs?.readyState === WebSocket.OPEN) {
             // Update audio metrics
             metrics.audioChunksSent++;
@@ -480,6 +489,36 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     geminiWs.on('message', async (data: any) => {
       try {
         const response = JSON.parse(data.toString());
+        
+        // CRITICAL: Handle setupComplete - Gemini is now ready to receive audio and respond
+        if (response.setupComplete !== undefined) {
+          setupComplete = true;
+          console.log('[Gemini Live] ✅ Setup complete - Gemini is ready');
+          
+          // CRITICAL: Send opening message to trigger the AI to speak first
+          // Without this, Gemini will just listen silently forever
+          const contactName = callContext.contactName || 'there';
+          const openingMessage = `Say ONLY this exact message now: "Hello, may I speak with ${contactName} please?"
+
+CRITICAL RULES:
+- Do NOT add anything before or after this message
+- After speaking, STOP and WAIT in silence for their response
+- Do NOT assume they confirmed identity - wait for explicit "yes" or name confirmation
+- Do NOT proceed to pitch until you HEAR explicit confirmation
+- Listen carefully - the next words must come from THEM`;
+          
+          geminiWs?.send(JSON.stringify({
+            client_content: {
+              turns: [{
+                role: 'user',
+                parts: [{ text: openingMessage }],
+              }],
+              turn_complete: true,
+            },
+          }));
+          console.log(`[Gemini Live] 📢 Opening message sent: "Hello, may I speak with ${contactName} please?"`);
+          return;
+        }
         
         // Track audio received
         if (response.serverContent?.modelTurn?.parts?.some((p: any) => p.inlineData)) {
