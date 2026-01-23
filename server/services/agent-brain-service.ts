@@ -2,9 +2,11 @@
  * Agent Brain Service
  *
  * Provides AI Agents with:
- * - Default Knowledge: B2B calling rules, disposition handling, compliance
- * - Brain: Organization Intelligence integration for context
+ * - Organization Intelligence integration for context
  * - Memory: Learning from campaign performance and past interactions
+ *
+ * NOTE: Default knowledge is now centralized in the Unified Knowledge Hub.
+ * All agents get their foundational knowledge from unified-knowledge-hub.ts.
  *
  * When creating a new agent, users only need to provide:
  * 1. Task Description - What the agent should accomplish
@@ -17,20 +19,27 @@
 import { db } from "../db";
 import { accountIntelligence } from "@shared/schema";
 import { desc } from "drizzle-orm";
+import { buildUnifiedKnowledgePrompt } from "./unified-knowledge-hub";
+
+// NOTE: DEMAND_*_KNOWLEDGE constants are deprecated - use unified knowledge hub
+// These imports are kept for backward compatibility with existing code
 import {
+  buildDemandAgentKnowledgePrompt,
   DEMAND_INTEL_KNOWLEDGE,
   DEMAND_QUAL_KNOWLEDGE,
   DEMAND_ENGAGE_KNOWLEDGE,
-  buildDemandAgentKnowledgePrompt,
 } from "./demand-agent-knowledge";
 import {
-  DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE,
   ensureVoiceAgentControlLayer,
 } from "./voice-agent-control-defaults";
 
 // ==================== DEFAULT AGENT KNOWLEDGE ====================
+// DEPRECATED: These constants are now sourced from the Unified Knowledge Hub.
+// They are kept here for backward compatibility but should not be used directly.
+// Use buildUnifiedKnowledgePrompt() from unified-knowledge-hub.ts instead.
 
 /**
+ * @deprecated Use buildUnifiedKnowledgePrompt() from unified-knowledge-hub.ts
  * Core B2B calling knowledge that every voice agent should have
  */
 export const AGENT_DEFAULT_KNOWLEDGE = {
@@ -744,33 +753,14 @@ ${JSON.stringify(input.specializationConfig, null, 2)}
     }
   }
 
-  // Add default knowledge (more relevant for voice/qual agents)
-  if (agentType === 'voice' || agentType === 'demand_qual') {
-    context += `
-## Default Agent Knowledge
-
-${AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl}
-
-${AGENT_DEFAULT_KNOWLEDGE.b2bCallingRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines}
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.conversationTechniques}
-
-${AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl}
+  // Add default knowledge from Unified Knowledge Hub (source of truth)
+  // This replaces the deprecated AGENT_DEFAULT_KNOWLEDGE constants
+  context += `
+## Unified Agent Knowledge (Source of Truth)
+Note: Complete agent knowledge is provided by the Unified Knowledge Hub at runtime.
+This includes: compliance rules, gatekeeper handling, voicemail detection, dispositioning,
+call quality standards, conversation flow, objection handling, and more.
 `;
-  } else if (agentType !== 'demand_engage') {
-    // Non-email agents still get compliance and conversation basics
-    context += `
-## Core Agent Knowledge
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.conversationTechniques}
-`;
-  }
 
   if (orgBrain) {
     context += `
@@ -933,11 +923,12 @@ ${orgBrain.icp.commonObjections}
 `;
   }
 
-  masterPrompt += `${AGENT_DEFAULT_KNOWLEDGE.b2bCallingRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines}
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
+  // Note: In the fallback, we add a placeholder indicating unified knowledge is loaded at runtime
+  masterPrompt += `
+## Core Agent Knowledge
+All foundational agent knowledge (compliance, gatekeeper handling, voicemail detection,
+call dispositioning, conversation flow, objection handling) is provided by the Unified
+Knowledge Hub at runtime. This ensures consistent, centrally-managed agent behavior.
 
 ${typeKnowledge.additionalRules}
 `;

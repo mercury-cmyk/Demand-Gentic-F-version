@@ -39,7 +39,7 @@ import {
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { createHash } from "crypto";
-import { AGENT_DEFAULT_KNOWLEDGE, AGENT_TYPE_KNOWLEDGE } from "./agent-brain-service";
+import { buildUnifiedKnowledgePrompt } from "./unified-knowledge-hub";
 import { stripVoiceAgentControlLayer } from "./voice-agent-control-defaults";
 import {
   getCampaignIntelligencePackage,
@@ -430,32 +430,21 @@ export async function assembleAgentPrompt(input: AssemblyInput): Promise<Assembl
     throw new Error(`Agent not found: ${input.agentId}`);
   }
 
-  const agentType = (agent.demandAgentType || 'voice') as keyof typeof AGENT_TYPE_KNOWLEDGE;
+  const agentType = (agent.demandAgentType || 'voice') as string;
 
-  // ========== LAYER 1: Universal Knowledge (Always On) ==========
-  if (agentType === 'voice' || agentType === 'demand_qual') {
-    promptParts.push(AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl);
-    layers.push('voice_agent_control');
-  }
-
-  promptParts.push(UNIVERSAL_AGENT_KNOWLEDGE);
-  layers.push('universal_knowledge');
-
-  // Add agent-type-specific knowledge if requested
-  if (input.includeAgentTypeKnowledge !== false) {
-    const typeKnowledge = AGENT_TYPE_KNOWLEDGE[agentType];
-    if (typeKnowledge) {
-      promptParts.push(`\n# ${typeKnowledge.name} Guidelines\n${typeKnowledge.additionalRules}`);
-      layers.push(`agent_type_${agentType}`);
-    }
-
-    // Add default B2B knowledge for voice agents
-    if (agentType === 'voice' || agentType === 'demand_qual') {
-      promptParts.push(AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines);
-      promptParts.push(AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl);
-      layers.push('disposition_guidelines');
-      layers.push('voice_agent_control');
-    }
+  // ========== LAYER 1: UNIFIED KNOWLEDGE HUB (SINGLE SOURCE OF TRUTH) ==========
+  // All foundational agent knowledge comes from the unified knowledge hub.
+  // This is the ONLY source for: compliance, gatekeeper handling, voicemail detection,
+  // dispositioning, call quality, conversation flow, objection handling, etc.
+  try {
+    const unifiedKnowledge = await buildUnifiedKnowledgePrompt();
+    promptParts.push(unifiedKnowledge);
+    layers.push('unified_knowledge_hub');
+  } catch (error) {
+    console.error('[AgentAssembly] Failed to load unified knowledge hub:', error);
+    // Fallback to minimal universal knowledge
+    promptParts.push(UNIVERSAL_AGENT_KNOWLEDGE);
+    layers.push('universal_knowledge_fallback');
   }
 
   // ========== LAYER 2: Organization Intelligence (Campaign-Scoped) ==========

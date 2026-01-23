@@ -16,7 +16,7 @@ import { db } from "../db";
 import { leads, dialerCallAttempts, contacts, accounts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { DEMAND_QUAL_KNOWLEDGE } from "./demand-agent-knowledge";
+// DEMAND_QUAL_KNOWLEDGE moved to unified knowledge hub - accessed via buildAgentSystemPrompt
 
 // ==================== INTERFACES ====================
 
@@ -193,7 +193,11 @@ async function analyzeTranscriptForBANT(
   const systemPrompt = await buildAgentSystemPrompt(`
 You are a B2B sales qualification analyst. Analyze call transcripts and extract BANT qualification signals.
 
-${DEMAND_QUAL_KNOWLEDGE.bantFramework}
+## BANT Framework (Budget, Authority, Need, Timeframe)
+- Budget: Look for budget discussions, price sensitivity, funding mentions
+- Authority: Identify decision-maker signals, approval processes mentioned
+- Need: Detect pain points, challenges, requirements expressed
+- Timeframe: Note urgency indicators, timeline mentions, project deadlines
 
 Analyze the transcript and provide:
 1. BANT scores (0-100 for each dimension)

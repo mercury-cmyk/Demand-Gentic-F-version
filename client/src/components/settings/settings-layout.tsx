@@ -19,6 +19,7 @@ import {
   Settings,
   ChevronRight,
   Crown,
+  Brain,
 } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
 
@@ -95,6 +96,14 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     href: ROUTES.SETTINGS_AGENT_DEFAULTS,
     icon: Settings,
     description: 'Global agent configuration',
+    category: 'infrastructure',
+  },
+  {
+    id: 'knowledge-hub',
+    label: 'Knowledge Hub',
+    href: ROUTES.SETTINGS_KNOWLEDGE_HUB,
+    icon: Brain,
+    description: 'Unified AI knowledge source',
     category: 'infrastructure',
   },
   {

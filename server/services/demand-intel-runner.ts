@@ -20,7 +20,7 @@ import {
   buildAgentSystemPrompt,
   getOrganizationProfile,
 } from "../lib/org-intelligence-helper";
-import { DEMAND_INTEL_KNOWLEDGE } from "./demand-agent-knowledge";
+// Knowledge moved to unified knowledge hub - accessed via buildAgentSystemPrompt
 
 // ==================== INTERFACES ====================
 
@@ -373,7 +373,12 @@ async function analyzeResearchWithAI(data: any): Promise<any> {
   const systemPrompt = await buildAgentSystemPrompt(`
 You are a Demand Intelligence analyst. Analyze the research data and generate a comprehensive intelligence report.
 
-${DEMAND_INTEL_KNOWLEDGE.outputFormat}
+## Intelligence Report Format
+- Executive Summary: 2-3 sentences on key findings
+- Buying Signals: List detected signals with source and strength
+- Pain Hypotheses: Evidence-based pain points with our solution mapping
+- Competitive Context: Key competitors and our positioning
+- Engagement Recommendation: Suggested approach and talking points
 
 Focus on:
 1. Identifying buying signals (leadership changes, funding, expansion, tech adoption)

@@ -85,6 +85,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { KnowledgeDiffViewer } from '@/components/knowledge-hub/knowledge-diff-viewer';
 
 // ==================== TYPES ====================
 
@@ -179,8 +180,8 @@ export default function UnifiedKnowledgeHubPage() {
   const [showPromptPreview, setShowPromptPreview] = useState(false);
   const [compareVersions, setCompareVersions] = useState<{ a: number; b: number } | null>(null);
 
-  // Only allow admins/managers
-  if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
+  // Only allow admins/campaign_managers
+  if (!user || (user.role !== 'admin' && user.role !== 'campaign_manager')) {
     return <Redirect to="/" />;
   }
 
@@ -223,6 +224,21 @@ export default function UnifiedKnowledgeHubPage() {
       return res.json();
     },
     enabled: showPromptPreview,
+  });
+
+  // Diff comparison query
+  const { data: diffResult, isLoading: isLoadingDiff } = useQuery<DiffResult>({
+    queryKey: ['/api/knowledge-hub/compare', compareVersions?.a, compareVersions?.b],
+    queryFn: async () => {
+      if (!compareVersions) return null;
+      const res = await apiRequest('POST', '/api/knowledge-hub/compare', {
+        versionA: compareVersions.a,
+        versionB: compareVersions.b,
+      });
+      const data = await res.json();
+      return data.diff;
+    },
+    enabled: !!compareVersions,
   });
 
   // ==================== MUTATIONS ====================
@@ -721,52 +737,82 @@ export default function UnifiedKnowledgeHubPage() {
                     Track changes and compare versions with visual diffs
                   </CardDescription>
                 </div>
+                {compareVersions && (
+                  <Button variant="outline" onClick={() => setCompareVersions(null)}>
+                    Back to History
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              {versionHistory?.versions && versionHistory.versions.length > 0 ? (
-                <div className="space-y-3">
-                  {versionHistory.versions.map((version, index) => (
-                    <div
-                      key={version.version}
-                      className={`flex items-center justify-between p-4 rounded-lg border ${
-                        index === 0 ? 'border-primary bg-primary/5' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <Badge variant={index === 0 ? 'default' : 'secondary'}>
-                          v{version.version}
-                        </Badge>
-                        <div>
-                          <div className="font-medium">
-                            {version.changeDescription || 'No description'}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {new Date(version.updatedAt).toLocaleString()}
+              {/* Show Diff Viewer when comparing */}
+              {compareVersions ? (
+                isLoadingDiff ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    <span className="ml-2 text-muted-foreground">Loading comparison...</span>
+                  </div>
+                ) : diffResult ? (
+                  <KnowledgeDiffViewer
+                    diff={diffResult}
+                    versionA={compareVersions.a}
+                    versionB={compareVersions.b}
+                    onClose={() => setCompareVersions(null)}
+                  />
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>Unable to load comparison data</p>
+                    <Button variant="outline" className="mt-4" onClick={() => setCompareVersions(null)}>
+                      Back to History
+                    </Button>
+                  </div>
+                )
+              ) : (
+                /* Version List */
+                versionHistory?.versions && versionHistory.versions.length > 0 ? (
+                  <div className="space-y-3">
+                    {versionHistory.versions.map((version, index) => (
+                      <div
+                        key={version.version}
+                        className={`flex items-center justify-between p-4 rounded-lg border ${
+                          index === 0 ? 'border-primary bg-primary/5' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <Badge variant={index === 0 ? 'default' : 'secondary'}>
+                            v{version.version}
+                          </Badge>
+                          <div>
+                            <div className="font-medium">
+                              {version.changeDescription || 'No description'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {new Date(version.updatedAt).toLocaleString()}
+                            </div>
                           </div>
                         </div>
+                        {index === 0 && (
+                          <Badge variant="outline">Current</Badge>
+                        )}
+                        {index > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCompareVersions({ a: version.version, b: versionHistory.versions[0].version })}
+                          >
+                            <GitCompare className="h-4 w-4 mr-1" />
+                            Compare with Current
+                          </Button>
+                        )}
                       </div>
-                      {index === 0 && (
-                        <Badge variant="outline">Current</Badge>
-                      )}
-                      {index > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCompareVersions({ a: version.version, b: versionHistory.versions[0].version })}
-                        >
-                          <GitCompare className="h-4 w-4 mr-1" />
-                          Compare with Current
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <History className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No version history yet</p>
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <History className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No version history yet</p>
+                  </div>
+                )
               )}
             </CardContent>
           </Card>

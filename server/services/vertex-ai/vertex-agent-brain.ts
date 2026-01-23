@@ -7,6 +7,8 @@
  * - Organization intelligence integration
  * - Multi-agent orchestration for demand generation
  * - Learning and memory management
+ * 
+ * NOTE: Foundational knowledge is now sourced from the Unified Knowledge Hub.
  */
 
 import {
@@ -23,16 +25,13 @@ import { db } from "../../db";
 import { accountIntelligence } from "@shared/schema";
 import { desc } from "drizzle-orm";
 import {
-  DEMAND_INTEL_KNOWLEDGE,
-  DEMAND_QUAL_KNOWLEDGE,
-  DEMAND_ENGAGE_KNOWLEDGE,
   buildDemandAgentKnowledgePrompt,
 } from "../demand-agent-knowledge";
 import {
-  DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE,
   ensureVoiceAgentControlLayer,
 } from "../voice-agent-control-defaults";
-import { AGENT_DEFAULT_KNOWLEDGE, AGENT_TYPE_KNOWLEDGE, type OrganizationBrain, getOrganizationBrain } from "../agent-brain-service";
+import { AGENT_TYPE_KNOWLEDGE, type OrganizationBrain, getOrganizationBrain } from "../agent-brain-service";
+import { buildUnifiedKnowledgePrompt } from "../unified-knowledge-hub";
 
 // ==================== TYPES ====================
 
@@ -105,30 +104,13 @@ ${JSON.stringify(input.specializationConfig, null, 2)}
     }
   }
 
-  // Add default knowledge for voice agents
-  if (agentType === 'voice' || agentType === 'demand_qual') {
-    context += `
-## Default Agent Knowledge
-
-${AGENT_DEFAULT_KNOWLEDGE.voiceAgentControl}
-
-${AGENT_DEFAULT_KNOWLEDGE.b2bCallingRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines}
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.conversationTechniques}
+  // All foundational knowledge now comes from Unified Knowledge Hub at runtime
+  context += `
+## Unified Agent Knowledge (Source of Truth)
+All foundational agent knowledge is provided by the Unified Knowledge Hub at runtime.
+This includes: compliance rules, gatekeeper handling, voicemail detection, dispositioning,
+call quality standards, conversation flow, objection handling, tone and pacing guidelines.
 `;
-  } else if (agentType !== 'demand_engage') {
-    context += `
-## Core Agent Knowledge
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.conversationTechniques}
-`;
-  }
 
   if (orgBrain) {
     context += `
@@ -303,11 +285,12 @@ ${orgBrain.icp.commonObjections}
 `;
   }
 
-  masterPrompt += `${AGENT_DEFAULT_KNOWLEDGE.b2bCallingRules}
-
-${AGENT_DEFAULT_KNOWLEDGE.dispositionGuidelines}
-
-${AGENT_DEFAULT_KNOWLEDGE.complianceRules}
+  // Note: All foundational knowledge is now provided by Unified Knowledge Hub at runtime
+  masterPrompt += `
+## Core Agent Knowledge
+All foundational agent knowledge (compliance, gatekeeper handling, voicemail detection,
+call dispositioning, conversation flow, objection handling) is provided by the Unified
+Knowledge Hub at runtime. This ensures consistent, centrally-managed agent behavior.
 
 ${typeKnowledge.additionalRules}
 `;

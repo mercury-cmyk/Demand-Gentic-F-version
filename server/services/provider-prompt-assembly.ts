@@ -30,11 +30,7 @@ import {
   estimateTokens,
   areKnowledgeBlocksInitialized,
 } from "./knowledge-block-service";
-import {
-  CONDENSED_VOICE_AGENT_CONTROL,
-  DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE,
-} from "./voice-agent-control-defaults";
-import { UNIVERSAL_AGENT_KNOWLEDGE } from "./agent-runtime-assembly";
+import { buildUnifiedKnowledgePrompt } from "./unified-knowledge-hub";
 
 // ==================== TYPES ====================
 
@@ -217,7 +213,7 @@ export async function assembleProviderPrompt(
   if (!blocksInitialized) {
     // Fall back to legacy constants
     console.log(`[ProviderPromptAssembly] Knowledge blocks not initialized, using legacy constants for ${provider}`);
-    return assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
+    return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
   }
 
   try {
@@ -226,7 +222,7 @@ export async function assembleProviderPrompt(
 
     if (!allBlocks || allBlocks.length === 0) {
       console.log(`[ProviderPromptAssembly] No active blocks found, using legacy constants for ${provider}`);
-      return assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
+      return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
     }
 
     // Get campaign-specific overrides if campaignId provided
@@ -280,26 +276,31 @@ export async function assembleProviderPrompt(
     };
   } catch (error) {
     console.error(`[ProviderPromptAssembly] Error assembling from blocks:`, error);
-    return assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
+    return await assembleLegacyPrompt(provider, useCondensedPrompt, assembledAt);
   }
 }
 
 /**
- * Assemble prompt using legacy hardcoded constants
+ * Assemble prompt using unified knowledge hub
  * Used as fallback when knowledge blocks are not available
  */
-function assembleLegacyPrompt(
+async function assembleLegacyPrompt(
   provider: VoiceProvider,
   useCondensedPrompt: boolean,
   assembledAt: string
-): AssembledProviderPrompt {
-  // Use the appropriate voice control based on condensed setting
-  const voiceControl = useCondensedPrompt
-    ? CONDENSED_VOICE_AGENT_CONTROL
-    : DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE;
-
-  // Combine universal knowledge + voice control
-  let prompt = `${UNIVERSAL_AGENT_KNOWLEDGE}\n\n${voiceControl}`;
+): Promise<AssembledProviderPrompt> {
+  // Get unified knowledge from the single source of truth
+  let prompt: string;
+  try {
+    prompt = await buildUnifiedKnowledgePrompt();
+  } catch (error) {
+    console.warn('[ProviderPromptAssembly] Failed to load unified knowledge, using minimal fallback:', error);
+    prompt = `## Core Agent Guidelines
+- Always verify identity before proceeding
+- Honor all DNC requests immediately
+- Be professional and respectful
+- End calls gracefully when requested`;
+  }
 
   // Apply provider-specific formatting for legacy prompts
   if (provider === "google") {

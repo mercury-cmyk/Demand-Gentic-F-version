@@ -16,7 +16,7 @@ import { db } from "../db";
 import { contacts, accounts, emailEvents, emailTemplates, campaignContentLinks, campaigns } from "@shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
-import { DEMAND_ENGAGE_KNOWLEDGE } from "./demand-agent-knowledge";
+// Knowledge moved to unified knowledge hub - accessed via buildAgentSystemPrompt
 import { accountAssetFitReasoner } from "../../email_generation/accountAssetFitReasoner";
 import { contentEmailGenerator } from "../../email_generation/contentEmailGenerator";
 import { enforceGuardrails } from "../../email_generation/guardrails";
@@ -592,7 +592,13 @@ Non-negotiable rules:
 - If account confidence < 0.7, ask a thoughtful question and avoid asserting a problem.
 - Every email must include: opening observation, problem hypothesis, insight, soft CTA.
 
-${DEMAND_ENGAGE_KNOWLEDGE.emailBestPractices}
+## Email Best Practices
+- Subject lines: 5-7 words, specific and curiosity-inducing
+- Opening: Reference something relevant to them (news, content, role)
+- Body: One clear idea, maximum 100 words
+- CTA: Soft, non-assumptive ("Would it be worth a conversation?")
+- Tone: Professional peer, not salesperson
+- No exclamation marks, no urgency language, no "touching base"
 
 Personalization Level: ${personalizationLevel}
 - Level 1: Use name, company, title, industry

@@ -1,4 +1,5 @@
-import { DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE } from "./voice-agent-control-defaults";
+// Knowledge is now sourced from unified-knowledge-hub.ts
+// This file defines skill templates that are layered on top of unified knowledge
 
 /**
  * Skill-Based Voice Agent Framework
@@ -246,11 +247,16 @@ This Layer 0 feeds constraints into:
 
 /**
  * Universal baseline intelligence that EVERY voice agent must have.
- * This layer cannot be disabled and is automatically included.
+ * NOTE: This is now sourced from the Unified Knowledge Hub at runtime.
+ * This constant is kept for backward compatibility but should be replaced
+ * with buildUnifiedKnowledgePrompt() from unified-knowledge-hub.ts.
  */
-export const UNIVERSAL_VOICE_AGENT_BRAIN = `${DEFAULT_VOICE_AGENT_CONTROL_INTELLIGENCE}
-
+export const UNIVERSAL_VOICE_AGENT_BRAIN = `
 # UNIVERSAL VOICE AGENT INTELLIGENCE
+
+## Note
+The universal voice agent brain is now sourced from the Unified Knowledge Hub.
+This ensures all agents receive consistent, centrally-managed knowledge.
 
 ## Core Principles
 You are a professional B2B voice agent representing a reputable organization.
