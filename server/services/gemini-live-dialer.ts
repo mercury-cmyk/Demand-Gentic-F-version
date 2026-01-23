@@ -10,6 +10,7 @@
  * - Audio quality monitoring and metrics
  * - Automatic reconnection with exponential backoff
  * - Audio timing and buffer validation
+ * - CRITICAL: Proper audio transcoding between G.711 (Telnyx) and PCM (Gemini)
  */
 
 import { WebSocket } from 'ws';
@@ -19,6 +20,7 @@ import { db } from "../db";
 import { contacts, campaigns } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
 import { audioQualityMonitor } from "./audio-quality-monitor";
+import { AudioTranscoder, g711ToPcm16k, pcm24kToG711 } from "./voice-providers/audio-transcoder";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -331,13 +333,18 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
               break;
             }
 
-            // Telnyx sends G.711 PCMU (8kHz). 
-            // Gemini Multimodal Live API can handle various formats if specified in the mime_type.
+            // CRITICAL FIX: Telnyx sends G.711 PCMU (8kHz, ulaw-encoded).
+            // Gemini expects LINEAR PCM audio, NOT ulaw-encoded.
+            // We must decode G.711 to PCM and upsample from 8kHz to 16kHz.
+            const g711Buffer = Buffer.from(msg.media.payload, 'base64');
+            const pcm16kBuffer = g711ToPcm16k(g711Buffer, 'ulaw');
+            const pcm16kBase64 = pcm16kBuffer.toString('base64');
+            
             geminiWs.send(JSON.stringify({
               realtime_input: {
                 media_chunks: [{
-                  data: msg.media.payload,
-                  mime_type: 'audio/pcm;rate=8000' 
+                  data: pcm16kBase64,
+                  mime_type: 'audio/pcm;rate=16000' 
                 }]
               }
             }));
@@ -513,11 +520,18 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
                   break; // Skip this audio chunk
                 }
 
+                // CRITICAL FIX: Gemini sends PCM 24kHz audio.
+                // Telnyx expects G.711 ulaw (8kHz).
+                // We must downsample from 24kHz to 8kHz and encode to G.711.
+                const pcm24kBuffer = Buffer.from(part.inlineData.data, 'base64');
+                const g711Buffer = pcm24kToG711(pcm24kBuffer, 'ulaw');
+                const g711Base64 = g711Buffer.toString('base64');
+
                 ws.send(JSON.stringify({
                   event: 'media',
                   stream_id: streamSid,
                   media: {
-                    payload: part.inlineData.data
+                    payload: g711Base64
                   }
                 }));
               }
