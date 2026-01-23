@@ -212,28 +212,77 @@ router.post("/telnyx", async (req, res) => {
     let eventType = eventData.event_type || req.body.event_type;
     const payload = eventData.payload || eventData;
     const callbackSource = payload.CallbackSource || payload.callback_source;
+    const callStatus = payload.CallStatus || payload.call_status;
+
+    // Normalize call control id for TeXML/Twilio-style callbacks
+    if (!payload.call_control_id) {
+      payload.call_control_id = payload.CallSid || payload.CallSidLegacy || payload.call_control_id;
+    }
 
     if (!eventType && callbackSource === 'call-progress-events') {
-      payload.call_control_id = payload.call_control_id || payload.CallSid || payload.CallSidLegacy;
       payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
-      payload.status = payload.CallStatus;
+      payload.status = payload.status || callStatus;
 
       // Map CallStatus to appropriate event type
-      if (payload.CallStatus === 'in-progress') {
+      if (callStatus === 'in-progress') {
         eventType = 'call.answered';
-      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(payload.CallStatus)) {
+      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
         eventType = 'call.hangup';
       } else {
         // For ringing, queued, etc. - just log and ignore
-        console.log(`[Telnyx Webhook] call-progress event (CallStatus=${payload.CallStatus}) - ignoring`);
-        return res.json({ status: "ignored", reason: `call_status_${payload.CallStatus}` });
+        console.log(`[Telnyx Webhook] call-progress event (CallStatus=${callStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `call_status_${callStatus}` });
       }
-      console.log(`[Telnyx Webhook] call-progress event (CallStatus=${payload.CallStatus}) -> ${eventType}`);
+      console.log(`[Telnyx Webhook] call-progress event (CallStatus=${callStatus}) -> ${eventType}`);
     }
 
     // Handle Cost/Billing events (no event_type)
     if (!eventType && payload.CallbackSource === 'call-cost-events') {
       return res.json({ status: "ignored", reason: "cost_event" });
+    }
+
+    // Handle TeXML status callbacks without callbackSource
+    if (!eventType && callStatus) {
+      payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
+      payload.status = payload.status || callStatus;
+
+      if (callStatus === 'in-progress') {
+        eventType = 'call.answered';
+      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+        eventType = 'call.hangup';
+      } else {
+        console.log(`[Telnyx Webhook] call-status event (CallStatus=${callStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `call_status_${callStatus}` });
+      }
+      console.log(`[Telnyx Webhook] call-status event (CallStatus=${callStatus}) -> ${eventType}`);
+    }
+
+    // Handle TeXML recording callbacks without event_type
+    const recordingStatusRaw = payload.RecordingStatus || payload.recording_status;
+    if (!eventType && recordingStatusRaw) {
+      const recordingStatus = String(recordingStatusRaw).toLowerCase();
+      if (recordingStatus === 'completed') {
+        eventType = 'recording.completed';
+
+        const directRecordingUrl = payload.RecordingUrl || payload.RecordingURL || payload.recording_url;
+        if (!payload.recording_urls && directRecordingUrl) {
+          const urlLower = typeof directRecordingUrl === 'string' ? directRecordingUrl.toLowerCase() : '';
+          const recordingUrls: { mp3?: string; wav?: string } = {};
+
+          if (urlLower.endsWith('.wav')) {
+            recordingUrls.wav = directRecordingUrl;
+          } else if (urlLower.endsWith('.mp3')) {
+            recordingUrls.mp3 = directRecordingUrl;
+          } else if (typeof directRecordingUrl === 'string') {
+            recordingUrls.mp3 = directRecordingUrl;
+          }
+
+          payload.recording_urls = recordingUrls;
+        }
+      } else {
+        console.log(`[Telnyx Webhook] recording status (${recordingStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `recording_status_${recordingStatus}` });
+      }
     }
 
     if (!eventType) {

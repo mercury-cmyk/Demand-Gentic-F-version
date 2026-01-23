@@ -287,7 +287,9 @@ export async function initiateOpenAISipCall(params: {
 
   // Get Telnyx configuration
   const telnyxApiKey = process.env.TELNYX_API_KEY;
-  const connectionId = process.env.TELNYX_SIP_CONNECTION_ID || process.env.TELNYX_CONNECTION_ID;
+  // Use Call Control App ID for /v2/calls connection_id
+  // Prefer explicit TELNYX_CALL_CONTROL_APP_ID; fall back to TELNYX_CONNECTION_ID for backward compatibility
+  const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_SIP_CONNECTION_ID || process.env.TELNYX_CONNECTION_ID;
 
   if (!telnyxApiKey) {
     throw new Error("TELNYX_API_KEY is required");
@@ -376,7 +378,10 @@ export async function initiateOpenAISipCall(params: {
 
   // Initiate outbound call via Telnyx
   // The call will be routed to OpenAI's SIP endpoint
-  const webhookUrl = process.env.TELNYX_WEBHOOK_URL || process.env.PUBLIC_WEBHOOK_HOST;
+  const webhookUrl = process.env.TELNYX_WEBHOOK_URL || (process.env.PUBLIC_WEBHOOK_HOST ? `https://${process.env.PUBLIC_WEBHOOK_HOST}` : undefined);
+  if (!webhookUrl) {
+    console.warn(`${LOG_PREFIX} ⚠️ No TELNYX_WEBHOOK_URL configured; using host fallback may fail validation.`);
+  }
 
   const telnyxResponse = await fetch("https://api.telnyx.com/v2/calls", {
     method: "POST",
@@ -416,7 +421,7 @@ export async function initiateOpenAISipCall(params: {
   const telnyxCallControlId = telnyxResult.data.call_control_id;
   const telnyxCallSessionId = telnyxResult.data.call_session_id;
 
-  console.log(`${LOG_PREFIX} Telnyx call initiated: ${telnyxCallControlId}`);
+  console.log(`${LOG_PREFIX} Telnyx call initiated: ${telnyxCallControlId} (connection_id=${connectionId})`);
 
   // Update session with Telnyx call control ID
   session.telnyxCallControlId = telnyxCallControlId;
