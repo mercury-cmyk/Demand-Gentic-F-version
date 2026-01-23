@@ -1085,10 +1085,18 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             console.error(`${LOG_PREFIX} ❌ Failed to notify bridge of answered call:`, err);
           }
 
-          const initialStreamId = message.stream_id || message.start?.stream_id;
+          // ROBUST stream_id extraction - Telnyx may send it in different formats
+          const initialStreamId =
+            message.stream_id ||
+            message.start?.stream_id ||
+            message.start?.streamSid ||
+            message.streamSid ||
+            message.media?.stream_id;
+
           if (initialStreamId) {
             session!.streamSid = initialStreamId;
             streamIdToCallId.set(initialStreamId, sessionId!);
+            console.log(`${LOG_PREFIX} stream_id set from start event: ${initialStreamId}`);
             if (session!.audioFrameBuffer.length > 0) {
               console.log(`${LOG_PREFIX} dY" Flushing ${session!.audioFrameBuffer.length} buffered audio frames after initial stream_id`);
               flushAudioBuffer(session!);
