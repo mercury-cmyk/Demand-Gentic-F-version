@@ -735,4 +735,120 @@ router.post("/sync-telnyx-recordings", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Telnyx Webhook Failover Endpoint
+ * 
+ * This endpoint receives webhooks when the primary webhook URL fails.
+ * It logs all incoming payloads for debugging and monitoring purposes.
+ * 
+ * Configure in Telnyx Dashboard:
+ * - Webhook Failover URL: https://your-domain/api/webhooks/telnyx-failover
+ */
+router.post("/telnyx-failover", async (req, res) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const eventData = req.body.data || req.body;
+    const eventType = eventData.event_type || req.body.event_type || 'unknown';
+    const payload = eventData.payload || eventData;
+    
+    // Log the failover event
+    console.log(`[Telnyx Failover] ⚠️ Received failover webhook at ${timestamp}`);
+    console.log(`[Telnyx Failover] Event Type: ${eventType}`);
+    console.log(`[Telnyx Failover] Call Control ID: ${payload.call_control_id || payload.CallSid || 'N/A'}`);
+    console.log(`[Telnyx Failover] Payload:`, JSON.stringify(req.body).substring(0, 1000));
+    
+    // Log headers for debugging
+    const relevantHeaders = {
+      'telnyx-signature-ed25519': req.headers['telnyx-signature-ed25519'],
+      'telnyx-timestamp-ed25519': req.headers['telnyx-timestamp-ed25519'],
+      'content-type': req.headers['content-type'],
+      'x-forwarded-for': req.headers['x-forwarded-for'],
+    };
+    console.log(`[Telnyx Failover] Headers:`, JSON.stringify(relevantHeaders));
+    
+    // Store in activity log for later analysis
+    try {
+      await db.insert(activityLog).values({
+        id: crypto.randomUUID(),
+        type: 'webhook_failover',
+        description: `Telnyx failover: ${eventType}`,
+        metadata: {
+          eventType,
+          callControlId: payload.call_control_id || payload.CallSid,
+          timestamp,
+          payload: req.body,
+          headers: relevantHeaders,
+        },
+        createdAt: new Date(),
+      });
+    } catch (dbError) {
+      console.error('[Telnyx Failover] Failed to log to DB:', dbError);
+    }
+    
+    // Always return 200 to prevent Telnyx from retrying
+    return res.json({ 
+      status: "received",
+      message: "Failover webhook received and logged",
+      timestamp,
+      eventType,
+    });
+  } catch (error: any) {
+    console.error('[Telnyx Failover] Error processing webhook:', error);
+    // Still return 200 to prevent retries
+    return res.json({ 
+      status: "error",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * TeXML AI Call Failover Endpoint
+ * 
+ * Failover for the TeXML application webhook.
+ * Returns a simple voice response to inform the caller.
+ */
+router.post("/texml/ai-call-failover", async (req, res) => {
+  try {
+    const timestamp = new Date().toISOString();
+    
+    console.log(`[TeXML Failover] ⚠️ Received failover at ${timestamp}`);
+    console.log(`[TeXML Failover] Payload:`, JSON.stringify(req.body).substring(0, 1000));
+    
+    // Log to activity log
+    try {
+      await db.insert(activityLog).values({
+        id: crypto.randomUUID(),
+        type: 'texml_failover',
+        description: `TeXML failover received`,
+        metadata: {
+          timestamp,
+          payload: req.body,
+          callSid: req.body.CallSid,
+          from: req.body.From,
+          to: req.body.To,
+        },
+        createdAt: new Date(),
+      });
+    } catch (dbError) {
+      console.error('[TeXML Failover] Failed to log to DB:', dbError);
+    }
+    
+    // Return TeXML response that gracefully handles the failover
+    res.set('Content-Type', 'application/xml');
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Amy-Neural">We're experiencing technical difficulties. Please try again later.</Say>
+  <Hangup />
+</Response>`);
+  } catch (error: any) {
+    console.error('[TeXML Failover] Error:', error);
+    res.set('Content-Type', 'application/xml');
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup />
+</Response>`);
+  }
+});
+
 export default router;
