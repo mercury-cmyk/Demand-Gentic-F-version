@@ -158,7 +158,9 @@ export default function CampaignsPage() {
   });
 
   // Fetch queue stats for phone campaigns
-  const phoneCampaigns = campaigns.filter((c: any) => c.type === 'call' || c.type === 'telemarketing');
+  const phoneCampaigns = campaigns.filter((c: any) =>
+    c.type === 'call' || c.type === 'telemarketing' || c.type === 'sql'
+  );
   const { data: queueStats = {} } = useQuery<Record<string, QueueStats>>({
     queryKey: ["/api/campaigns/queue-stats", phoneCampaigns.map((c: any) => c.id).join(',')],
     queryFn: async () => {
@@ -286,7 +288,8 @@ export default function CampaignsPage() {
     setAssignAgentsDialogOpen(true);
   };
 
-  const isPhoneCampaign = (campaign: any) => campaign.type === 'call' || campaign.type === 'telemarketing';
+  const isPhoneCampaign = (campaign: any) =>
+    campaign.type === 'call' || campaign.type === 'telemarketing' || campaign.type === 'sql';
   const isEmailCampaign = (campaign: any) => campaign.type === 'email';
 
   const filteredCampaigns = campaigns.filter((c: any) => {
@@ -381,7 +384,10 @@ export default function CampaignsPage() {
         />
         <StatCard
           title="Active Phone"
-          value={campaigns.filter((c: any) => c.type === "call" && c.status === "active").length}
+          value={campaigns.filter((c: any) =>
+            (c.type === "call" || c.type === "telemarketing" || c.type === "sql") &&
+            c.status === "active"
+          ).length}
           icon={Phone}
           trend={{ value: 2, isPositive: true }}
         />

@@ -275,6 +275,7 @@ function AuthenticatedApp() {
               <Route path="/campaigns/follow_up/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/event_registration/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/reactivation/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/sql/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
               

@@ -58,10 +58,10 @@ export default defineConfig({
       usePolling: false,
       interval: 1000,
     },
-    hmr: {
-      // Keep HMR enabled but make it more stable
-      overlay: true,
-      port: 5000,
-    },
+    // Disable Vite's built-in HMR WebSocket to avoid
+    // conflicts with the custom WebSocket upgrade
+    // handling in the Express server. Full page
+    // reloads will still work in dev.
+    hmr: false,
   },
 });
