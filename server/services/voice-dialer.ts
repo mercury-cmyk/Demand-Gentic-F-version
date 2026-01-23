@@ -6289,22 +6289,25 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
     const agentMaxDurationRaw = Number(session.agentSettings?.advanced.conversational.maxConversationDurationSeconds);
     const campaignMaxDurationRaw = Number(session.campaignMaxCallDurationSeconds);
     const endAfterSilenceSeconds = Number.isFinite(endAfterSilenceRaw) ? endAfterSilenceRaw : -1;
-    const agentMaxDurationSeconds = Number.isFinite(agentMaxDurationRaw) ? agentMaxDurationRaw : -1;
-    const campaignMaxDurationSeconds = Number.isFinite(campaignMaxDurationRaw) ? campaignMaxDurationRaw : -1;
+    // CRITICAL FIX: Treat 0 as "no limit" (unlimited) rather than 0-second limit
+    // Values <= 0 should disable max duration enforcement
+    const agentMaxDurationSeconds = Number.isFinite(agentMaxDurationRaw) && agentMaxDurationRaw > 0 ? agentMaxDurationRaw : -1;
+    const campaignMaxDurationSeconds = Number.isFinite(campaignMaxDurationRaw) && campaignMaxDurationRaw > 0 ? campaignMaxDurationRaw : -1;
 
     // Use the more restrictive (minimum) of agent and campaign max durations
     // Campaign max duration takes priority for strict enforcement
+    // Only apply limits if they are positive (> 0)
     let effectiveMaxDuration = -1;
-    if (campaignMaxDurationSeconds >= 0 && agentMaxDurationSeconds >= 0) {
+    if (campaignMaxDurationSeconds > 0 && agentMaxDurationSeconds > 0) {
       effectiveMaxDuration = Math.min(campaignMaxDurationSeconds, agentMaxDurationSeconds);
-    } else if (campaignMaxDurationSeconds >= 0) {
+    } else if (campaignMaxDurationSeconds > 0) {
       effectiveMaxDuration = campaignMaxDurationSeconds;
-    } else if (agentMaxDurationSeconds >= 0) {
+    } else if (agentMaxDurationSeconds > 0) {
       effectiveMaxDuration = agentMaxDurationSeconds;
     }
 
-    // Enhanced logging for max duration debugging
-    if (effectiveMaxDuration >= 0) {
+    // Enhanced logging for max duration debugging (only if limit is actually set)
+    if (effectiveMaxDuration > 0) {
       console.log(`${LOG_PREFIX} Max Duration Check [${session.callId}]: elapsed=${elapsedSeconds}s, limit=${effectiveMaxDuration}s, isActive=${session.isActive}, disposition=${session.detectedDisposition || 'none'}`);
     }
 
@@ -6324,7 +6327,8 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
     const WRAP_UP_WARNING_SECONDS = 30; // Warn AI to wrap up 30s before limit
     const ABSOLUTE_MAX_GRACE_SECONDS = 30; // Absolute max is limit + 30s grace
 
-    if (effectiveMaxDuration >= 0) {
+    // Only enforce time limits if effectiveMaxDuration is positive (> 0)
+    if (effectiveMaxDuration > 0) {
       const warnThreshold = effectiveMaxDuration - WRAP_UP_WARNING_SECONDS;
       const absoluteMax = effectiveMaxDuration + ABSOLUTE_MAX_GRACE_SECONDS;
 
