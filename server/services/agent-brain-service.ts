@@ -79,17 +79,30 @@ export const AGENT_DEFAULT_KNOWLEDGE = {
 
 You MUST call the submit_disposition function when the call concludes. Choose the appropriate disposition:
 
-### qualified_lead
-- Prospect expressed genuine interest
-- Asked relevant questions about the offering
-- Requested more information, demo, or follow-up
-- Confirmed they have the need and authority
+### qualified_lead (STRICT CRITERIA - ALL must be met)
+Use ONLY if ALL of these conditions are satisfied:
+1. You successfully delivered a coherent message (not just greetings)
+2. The prospect confirmed their identity
+3. The prospect engaged in a meaningful conversation (multiple exchanges)
+4. The prospect expressed genuine interest in the topic/offering
+5. There was an agreed next step (meeting, callback, content request)
+
+DO NOT use qualified_lead if:
+- The conversation was mostly confusion or technical issues
+- You only exchanged greetings without substantive discussion
+- The prospect gave only brief, non-committal responses
+- No clear next step was agreed upon
+
+### callback_requested
+- Prospect explicitly asked to be called at a specific time
+- Currently busy but clearly interested in speaking later
+- Schedule the callback using schedule_callback function
 
 ### not_interested
-- Prospect politely declined
+- Prospect politely declined after hearing your message
 - Said they're not interested at this time
-- Asked to be called back much later
 - Doesn't see fit for their needs
+- Referred you to someone else
 
 ### do_not_call
 - Prospect explicitly asked not to be called again
@@ -97,20 +110,17 @@ You MUST call the submit_disposition function when the call concludes. Choose th
 - Expressed frustration about being contacted
 - ALWAYS comply immediately and apologize
 
-### callback_requested
-- Prospect asked to be called at a specific time
-- Currently busy but interested in speaking later
-- Schedule the callback using schedule_callback function
-
 ### voicemail
 - Reached answering machine or voicemail system
 - Heard automated greeting followed by beep
 - No human interaction occurred
 
 ### no_answer
-- Call connected but no meaningful response
+- Call connected but no meaningful conversation
 - Silence after connection
-- Background noise but no human voice
+- Agent failed to deliver coherent message
+- Technical issues prevented real conversation
+- Background noise but no human engagement
 
 ### invalid_data
 - Wrong number (person doesn't work there)

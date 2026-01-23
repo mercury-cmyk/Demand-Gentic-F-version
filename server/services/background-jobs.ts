@@ -12,8 +12,12 @@ import { agentQueue, campaignQueue } from '@shared/schema';
 import { eq, lt, and, inArray, sql } from 'drizzle-orm';
 
 // Job intervals (in milliseconds) - reduced frequency to minimize connections
-const TRANSCRIPTION_JOB_INTERVAL = 60000; // Every 60 seconds (was 30s)
-const AI_ANALYSIS_JOB_INTERVAL = 90000; // Every 90 seconds (was 45s)
+// CRITICAL: These values were causing connection pool exhaustion
+// - Reduced from 60s to 120s for transcription (less aggressive)
+// - Reduced from 90s to 120s for analysis (batch smaller, run less often)
+// - This allows connection pool to recover between runs
+const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
+const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
 
 let transcriptionInterval: NodeJS.Timeout | null = null;
@@ -131,12 +135,17 @@ export function startBackgroundJobs() {
   if (ENABLE_AI_ANALYSIS) {
     analysisInterval = setInterval(async () => {
       if (isAnalysisRunning) {
+        console.warn('[Background Jobs] AI analysis job still running from previous cycle - skipping');
         return; // Skip if still running
       }
 
       isAnalysisRunning = true;
+      const startTime = Date.now();
       try {
+        console.log('[Background Jobs] Starting AI analysis job cycle...');
         await processUnanalyzedLeads();
+        const duration = Date.now() - startTime;
+        console.log(`[Background Jobs] AI analysis job completed in ${duration}ms`);
       } catch (error) {
         console.error('[Background Jobs] AI analysis job error:', error);
       } finally {

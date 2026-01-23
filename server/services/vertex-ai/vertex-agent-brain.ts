@@ -386,27 +386,38 @@ export async function determineDisposition(
   reasoning: string;
   nextAction?: string;
 }> {
-  const prompt = `Analyze this sales call transcript and determine the appropriate disposition.
+  const prompt = `Analyze this call transcript and determine the appropriate disposition.
 
 Contact: ${context.contactName} at ${context.companyName}
 
 Transcript:
 ${transcript}
 
+STRICT QUALIFICATION CRITERIA - A "qualified_lead" MUST meet ALL of these:
+1. The agent successfully delivered a coherent message (not just greetings/confusion)
+2. The prospect confirmed their identity
+3. The prospect engaged in a meaningful conversation (not just brief responses)
+4. The prospect expressed genuine interest in the topic/offering
+5. There was an agreed next step (meeting, callback, content request, etc.)
+
+If ANY of these are missing, the disposition CANNOT be "qualified_lead".
+
 Determine the disposition based on these criteria:
-- qualified_lead: Prospect expressed genuine interest, asked about offerings, requested follow-up
-- not_interested: Prospect politely declined, not interested at this time
-- do_not_call: Prospect explicitly asked not to be called again
+- qualified_lead: ALL 5 qualification criteria above are met
 - callback_requested: Prospect asked to be called at a specific time
+- not_interested: Prospect politely declined or showed no interest
+- do_not_call: Prospect explicitly asked not to be called again (DNC request)
 - voicemail: Reached answering machine or voicemail
-- no_answer: Call connected but no meaningful response
-- invalid_data: Wrong number or disconnected
+- no_answer: Call connected but no meaningful conversation occurred
+- invalid_data: Wrong number, disconnected, or wrong person reached
+
+IMPORTANT: If the agent failed to deliver a coherent message or there was no real conversation, use "no_answer" NOT "qualified_lead".
 
 Return JSON with:
 {
   "disposition": "one of the above dispositions",
   "confidence": 0.0 to 1.0,
-  "reasoning": "brief explanation",
+  "reasoning": "brief explanation of which criteria were met/not met",
   "nextAction": "recommended next step if applicable"
 }`;
 

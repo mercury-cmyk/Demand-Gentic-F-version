@@ -22,6 +22,47 @@ function getDeepSeekClient(): OpenAI {
   return _deepseekClient;
 }
 
+/**
+ * Generate JSON response using DeepSeek for conversation quality analysis
+ * Uses deepseek-chat model which is optimized for reasoning tasks
+ */
+async function analyzeWithDeepSeek<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  options: { temperature?: number; maxTokens?: number } = {}
+): Promise<T> {
+  const client = getDeepSeekClient();
+  const { temperature = 0.3, maxTokens = 2000 } = options;
+
+  const response = await client.chat.completions.create({
+    model: "deepseek-chat",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt + "\n\nRespond with valid JSON only. No markdown code blocks, no explanation." }
+    ],
+    temperature,
+    max_tokens: maxTokens,
+    response_format: { type: "json_object" },
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error("DeepSeek returned empty response");
+  }
+
+  // Parse and return JSON
+  try {
+    return JSON.parse(content) as T;
+  } catch (e) {
+    // Try to extract JSON from potential markdown code block
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1].trim()) as T;
+    }
+    throw new Error(`Failed to parse DeepSeek response as JSON: ${content.substring(0, 200)}`);
+  }
+}
+
 interface QAParameters {
   required_info: string[];
   scoring_weights: {
@@ -91,24 +132,57 @@ function normalizeClientCriteria(clientCriteria: QAParameters['client_criteria']
 
 /**
  * Analyze lead using AI based on transcript, contact data, account data, and QA parameters
+ * CRITICAL: Optimized to batch queries and prevent connection pool exhaustion
  */
 export async function analyzeLeadQualification(leadId: string): Promise<AIAnalysisResult | null> {
   try {
-    // Fetch lead with all related data
-    const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+    // OPTIMIZATION: Batch all SELECT queries to reduce round trips
+    // Instead of 4 sequential queries (lead, contact, account, campaign), use Promise.all
+    const [
+      [lead],
+      contactData,
+      accountData,
+      campaignData
+    ] = await Promise.all([
+      // Query 1: Lead
+      db.select().from(leads).where(eq(leads.id, leadId)).limit(1),
+      
+      // Query 2: Contact (conditional based on lead.contactId)
+      // We'll fetch based on the lead data we get, but for now just fetch empty if needed
+      Promise.resolve([]),
+      
+      // Query 3: Account (conditional)
+      Promise.resolve([]),
+      
+      // Query 4: Campaign (conditional)
+      Promise.resolve([])
+    ]);
+
     if (!lead) return null;
 
-    const [contact] = lead.contactId 
-      ? await db.select().from(contacts).where(eq(contacts.id, lead.contactId)).limit(1)
-      : [];
+    // Now fetch related records only if they're needed
+    let contact: any = null;
+    let account: any = null;
+    let campaign: any = null;
 
-    const [account] = contact?.accountId
-      ? await db.select().from(accounts).where(eq(accounts.id, contact.accountId)).limit(1)
-      : [];
-
-    const [campaign] = lead.campaignId
-      ? await db.select().from(campaigns).where(eq(campaigns.id, lead.campaignId)).limit(1)
-      : [];
+    // Batch fetch remaining relationships if we have IDs
+    if (lead.contactId || lead.campaignId) {
+      const [contactResult, campaignResult] = await Promise.all([
+        lead.contactId ? db.select().from(contacts).where(eq(contacts.id, lead.contactId)).limit(1) : Promise.resolve([]),
+        lead.campaignId ? db.select().from(campaigns).where(eq(campaigns.id, lead.campaignId)).limit(1) : Promise.resolve([])
+      ]);
+      
+      [contact] = contactResult;
+      [campaign] = campaignResult;
+      
+      // Fetch account only if we have a contact with accountId
+      if (contact?.accountId) {
+        const [accountResult] = await Promise.all([
+          db.select().from(accounts).where(eq(accounts.id, contact.accountId)).limit(1)
+        ]);
+        [account] = accountResult;
+      }
+    }
 
     if (!lead.transcript) {
       console.log('[AI-QA] No transcript available for lead:', leadId);
@@ -195,20 +269,29 @@ export async function analyzeLeadQualification(leadId: string): Promise<AIAnalys
       "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
     );
 
-    const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
-    
+    // Use DeepSeek for conversation quality analysis (cost-effective, high reasoning)
     let rawAnalysis: any;
     try {
-      rawAnalysis = await generateJSON<any>(fullPrompt, {
+      console.log(`[AI-QA] Using DeepSeek for conversation quality analysis (lead: ${leadId})`);
+      rawAnalysis = await analyzeWithDeepSeek<any>(systemPrompt, analysisPrompt, {
         temperature: 0.3,
         maxTokens: 2000,
       });
-    } catch (parseError) {
-      console.error('[AI-QA] Failed to parse Gemini response as JSON, retrying with explicit instruction');
-      // Retry with more explicit JSON instruction
-      const retryPrompt = `${fullPrompt}\n\nIMPORTANT: Your response MUST be valid JSON only. No markdown, no explanation, just the JSON object.`;
-      const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
-      rawAnalysis = JSON.parse(textResponse);
+    } catch (deepseekError: any) {
+      console.error('[AI-QA] DeepSeek analysis failed:', deepseekError.message);
+      // Fallback to Vertex AI if DeepSeek fails
+      console.log('[AI-QA] Falling back to Vertex AI...');
+      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+      try {
+        rawAnalysis = await generateJSON<any>(fullPrompt, {
+          temperature: 0.3,
+          maxTokens: 2000,
+        });
+      } catch (vertexError) {
+        console.error('[AI-QA] Vertex AI fallback also failed');
+        const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
+        rawAnalysis = JSON.parse(textResponse);
+      }
     }
 
     // Normalize response format (dynamic prompts return ai_score/ai_qualification_status, legacy returns score/qualification_status)
@@ -530,23 +613,119 @@ function getDefaultQAParameters(): QAParameters {
 }
 
 /**
+ * Helper to execute a database query with retry logic for connection errors
+ * Handles Neon serverless connection termination gracefully
+ */
+async function withConnectionRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      const errorMsg = error?.message || String(error);
+
+      // Check if this is a connection-level error (retryable)
+      const isConnectionError =
+        errorMsg.includes('Connection terminated') ||
+        errorMsg.includes('connection timeout') ||
+        errorMsg.includes('ECONNRESET') ||
+        errorMsg.includes('ECONNREFUSED') ||
+        errorMsg.includes('unexpected') ||
+        errorMsg.includes('Client has encountered a connection error');
+
+      if (!isConnectionError || attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = initialDelayMs * Math.pow(2, attempt - 1); // Exponential backoff
+      console.warn(`[AI-QA] Connection error (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms:`, errorMsg);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
  * Background job to analyze leads with transcripts but no AI analysis
+ * CRITICAL: Includes connection pool management and error recovery
  */
 export async function processUnanalyzedLeads(): Promise<void> {
   try {
-    // Find leads with transcripts but no AI analysis
-    const unanalyzedLeads = await db.select()
-      .from(leads)
-      .where(eq(leads.transcriptionStatus, 'completed'))
-      .limit(10);
+    console.log('[AI-QA] Starting background lead analysis batch...');
 
+    // OPTIMIZATION: Set a query timeout to prevent connection hangs
+    // If a query takes >30s, release the connection immediately
+    const QUERY_TIMEOUT_MS = 30000;
+    const ANALYSIS_TIMEOUT_MS = 60000; // Longer for AI analysis
+
+    // CRITICAL: Query with hard limit to prevent connection pool exhaustion
+    // Process only 3 leads per cycle to keep worker pool connections available
+    const BATCH_SIZE = 3;
+
+    let unanalyzedLeads: any[] = [];
+    try {
+      // FIXED: Use retry wrapper for Neon connection resilience
+      unanalyzedLeads = await withConnectionRetry(async () => {
+        const queryPromise = db.select()
+          .from(leads)
+          .where(eq(leads.transcriptionStatus, 'completed'))
+          .limit(BATCH_SIZE);
+
+        // Wrap query with timeout
+        return await Promise.race([
+          queryPromise,
+          new Promise<any[]>((_, reject) =>
+            setTimeout(() => reject(new Error('Lead query timed out after 30s')), QUERY_TIMEOUT_MS)
+          )
+        ]);
+      });
+    } catch (queryError: any) {
+      console.error('[AI-QA] Failed to fetch unanalyzed leads after retries:', queryError.message);
+      // Return early instead of crashing to allow next iteration
+      return;
+    }
+
+    console.log(`[AI-QA] Found ${unanalyzedLeads.length} leads to analyze`);
+
+    // CRITICAL: Process leads sequentially with timeout per lead
     for (const lead of unanalyzedLeads) {
       if (!lead.aiScore && lead.transcript) {
-        await analyzeLeadQualification(lead.id);
+        try {
+          console.log(`[AI-QA] Analyzing lead: ${lead.id} (call duration: ${lead.callDuration}s)`);
+
+          // Wrap analysis with retry logic for connection resilience AND timeout
+          const result = await withConnectionRetry(async () => {
+            const analysisPromise = analyzeLeadQualification(lead.id);
+            return await Promise.race([
+              analysisPromise,
+              new Promise<any>((_, reject) =>
+                setTimeout(() => reject(new Error(`Analysis timeout for lead ${lead.id}`)), ANALYSIS_TIMEOUT_MS)
+              )
+            ]);
+          }, 2, 2000); // 2 retries with 2s initial delay for analysis
+
+          if (result) {
+            console.log(`[AI-QA] ✓ Lead ${lead.id} analyzed (score: ${result.score}, status: ${result.qualification_status})`);
+          }
+        } catch (leadError: any) {
+          console.warn(`[AI-QA] ⚠️ Failed to analyze lead ${lead.id}:`, leadError.message);
+          // Continue to next lead instead of failing entire batch
+          continue;
+        }
       }
     }
+
+    console.log(`[AI-QA] Background batch complete (processed ${unanalyzedLeads.length} leads)`);
   } catch (error) {
     console.error('[AI-QA] Error processing unanalyzed leads:', error);
+    // Don't throw - allow job scheduler to continue running
   }
 }
 

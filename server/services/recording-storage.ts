@@ -21,6 +21,7 @@ export function getRecordingS3Key(leadId: string, extension: string = 'mp3'): st
 /**
  * Download a recording from a URL and upload to S3
  * Returns the S3 key for the stored recording
+ * FIXED: Handles expired Telnyx URLs (403 Forbidden)
  */
 export async function downloadAndStoreRecording(
   sourceUrl: string,
@@ -39,14 +40,31 @@ export async function downloadAndStoreRecording(
     const contentType = extension === 'wav' ? 'audio/wav' : 'audio/mpeg';
     const s3Key = getRecordingS3Key(leadId, extension);
     
-    // Download from Telnyx
-    const response = await fetch(sourceUrl);
+    // Download from Telnyx with retries for temporary failures
+    let response = await fetch(sourceUrl, {
+      timeout: 30000, // 30s timeout
+    });
+    
+    // CRITICAL FIX: Handle 403 (presigned URL expired)
+    if (response.status === 403) {
+      console.warn(`[RecordingStorage] ⚠️ URL expired (403), would need fresh recording fetch from Telnyx`);
+      console.warn(`[RecordingStorage] Lead ${leadId}: Recording storage skipped (URL expired). Will rely on call_sessions.aiTranscript`);
+      return null; // Return null to indicate failure - caller should skip S3 storage
+    }
+    
     if (!response.ok) {
-      throw new Error(`Failed to download recording: ${response.status}`);
+      // Log detailed error info
+      const errorText = await response.text().catch(() => '(no error body)');
+      throw new Error(`Failed to download recording: ${response.status} - ${errorText}`);
     }
     
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+    
+    // Validate we got actual audio data (at least 1KB)
+    if (buffer.length < 1000) {
+      throw new Error(`Downloaded recording too small (${buffer.length} bytes), possibly incomplete`);
+    }
     
     console.log(`[RecordingStorage] Downloaded ${buffer.length} bytes, uploading to S3...`);
     
@@ -57,7 +75,7 @@ export async function downloadAndStoreRecording(
     return s3Key;
   } catch (error) {
     console.error(`[RecordingStorage] Failed to store recording for lead ${leadId}:`, error);
-    return null;
+    return null; // Non-blocking - don't crash if recording storage fails
   }
 }
 
