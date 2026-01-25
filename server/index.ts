@@ -293,12 +293,13 @@ app.use((req, res, next) => {
         socket.destroy();
       }
     } else {
-      // Let Vite HMR handle its own WebSocket connections (protocol: vite-hmr)
-      // Don't intercept - just return and let Vite's internal handler process it
+      // Block ALL vite-hmr WebSocket connections - they cause frame corruption
       const protocol = req.headers['sec-websocket-protocol'];
+
       if (protocol === 'vite-hmr') {
-        console.log('[WebSocket Upgrade] Letting Vite handle HMR connection');
-        return; // Don't destroy socket - let Vite handle it
+        console.log('[WebSocket Upgrade] Blocking HMR connection (disabled)');
+        socket.destroy();
+        return;
       }
       console.log('[WebSocket Upgrade] Unknown path, destroying socket:', pathname);
       socket.destroy();

@@ -71,14 +71,18 @@ export class LogStreamingService {
    */
   private async createSink() {
     const sink = this.logging.sink(SINK_NAME);
-    const [exists] = await sink.exists();
 
-    if (exists) {
+    try {
+      await sink.getMetadata();
       console.log(`Sink ${SINK_NAME} already exists.`);
       return;
+    } catch (error: any) {
+      if (error.code !== 5) { // 5 = NOT_FOUND
+        throw error;
+      }
     }
 
-    const destination = this.pubsub.topic(TOPIC_NAME);
+    const destination = `pubsub.googleapis.com/projects/${PROJECT_ID}/topics/${TOPIC_NAME}`;
     const filter = `resource.type="cloud_run_revision" AND resource.labels.service_name="demandgentic-api"`;
 
     await this.logging.createSink(SINK_NAME, {

@@ -58,15 +58,7 @@ export default defineConfig({
       usePolling: false,
       interval: 1000,
     },
-    // Configure HMR for ngrok tunneling in development
-    // When behind ngrok, use the public host for HMR connection
-    hmr: process.env.PUBLIC_WEBSOCKET_URL 
-      ? {
-          protocol: 'wss',
-          host: process.env.PUBLIC_WEBSOCKET_URL.replace('wss://', '').replace('/voice-dialer', ''),
-          port: 443,
-          timeout: 60000,
-        }
-      : false,
+    // Disable HMR - WebSocket frames getting corrupted
+    hmr: false,
   },
 });
