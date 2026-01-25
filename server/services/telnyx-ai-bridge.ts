@@ -14,7 +14,6 @@
 
 import { EventEmitter } from "events";
 import WebSocket from "ws";
-import { Agent } from "undici";
 import { AiVoiceAgent, AiAgentSettings, CallContext, createAiVoiceAgent } from "./ai-voice-agent";
 import { storage } from "../storage";
 import { uploadToS3, getPresignedDownloadUrl } from "../lib/storage";
@@ -140,6 +139,8 @@ export interface ActiveAiCall {
   disposition?: string;
   isAnswered?: boolean;
   hasEnded?: boolean; // Prevent duplicate hangup processing
+  amdResult?: string;
+  amdConfidence?: number;
 }
 
 export interface QueuedCall {
@@ -201,14 +202,13 @@ export class TelnyxAiBridge extends EventEmitter {
   private activeCalls: Map<string, ActiveAiCall> = new Map();
   private telnyxApiKey: string;
   private webhookUrl: string;
-  private telnyxHttp: Agent;
   
   // Track client_state by call_control_id for AMD webhook lookups
   // AMD webhook fires before WebSocket connection, so we need to track state separately
   private callStateByControlId: Map<string, any> = new Map();
   
-  // Concurrency control - max 1 concurrent call for testing
-  private readonly MAX_CONCURRENT_CALLS = 1;
+  // Concurrency control - global guard to keep outbound channels under Telnyx limits
+  private readonly MAX_CONCURRENT_CALLS: number;
   private semaphore: Semaphore;
   private callQueue: QueuedCall[] = [];
   
@@ -223,13 +223,11 @@ export class TelnyxAiBridge extends EventEmitter {
   constructor() {
     super();
     this.telnyxApiKey = process.env.TELNYX_API_KEY || "";
-    this.webhookUrl = process.env.TELNYX_WEBHOOK_URL || "";
-    this.telnyxHttp = new Agent({
-      connections: 50,
-      keepAliveTimeout: 10_000,
-      keepAliveMaxTimeout: 60_000,
-      pipelining: 1,
-    });
+    this.webhookUrl = (process.env.TELNYX_WEBHOOK_URL || "").trim();
+
+    // Allow overriding via env; enforce minimum of 1 to avoid deadlock
+    const configuredMax = Number(process.env.TELNYX_MAX_CONCURRENT_CALLS || 8);
+    this.MAX_CONCURRENT_CALLS = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 8;
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
   }
 
@@ -239,10 +237,10 @@ export class TelnyxAiBridge extends EventEmitter {
       headers.set("Authorization", `Bearer ${this.telnyxApiKey}`);
     }
 
+    // Note: the standard RequestInit type doesn't include undici's dispatcher; omit for TS compatibility
     return fetch(url, {
       ...init,
       headers,
-      dispatcher: this.telnyxHttp,
     });
   }
   
@@ -307,7 +305,7 @@ export class TelnyxAiBridge extends EventEmitter {
   getQueueStatus(): { activeCalls: number; queuedCalls: number; availableSlots: number } {
     return {
       activeCalls: this.activeCalls.size,
-      queuedCalls: this.callQueue.length,
+      queuedCalls: this.semaphore.queueLength,
       availableSlots: this.semaphore.available,
     };
   }
@@ -343,61 +341,68 @@ export class TelnyxAiBridge extends EventEmitter {
     // OpenAI Realtime is completely disabled
     const provider = 'gemini_live';
 
-    // Format phone numbers to E.164 format (required by Telnyx)
-    phoneNumber = this.formatToE164(phoneNumber);
-    fromNumber = this.formatToE164(fromNumber);
-
-    console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
-    
-    const contactFullName = [context.contactFirstName, context.contactLastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-
-    const preflight = await preflightVoiceVariableContract({
-      agentName: context.agentFullName || settings.persona?.name || "",
-      orgName: settings.persona?.companyName || "",
-      account: { name: context.companyName },
-      contact: {
-        fullName: contactFullName,
-        firstName: context.contactFirstName,
-        lastName: context.contactLastName,
-        jobTitle: context.contactTitle,
-        email: context.contactEmail,
-      },
-      callerId: fromNumber,
-      calledNumber: phoneNumber,
-    });
-
-    if (!preflight.valid) {
-      throw new VoiceVariablePreflightError(preflight);
+    // Global channel guard: wait for available Telnyx outbound slot
+    const waitStart = Date.now();
+    await this.semaphore.acquire();
+    const waitedMs = Date.now() - waitStart;
+    if (waitedMs > 0) {
+      console.log(`[TelnyxAiBridge] ⏳ Queued call for ${phoneNumber} (${waitedMs}ms wait, max ${this.MAX_CONCURRENT_CALLS})`);
     }
 
-    const agent = createAiVoiceAgent(settings, context);
-    const callId = agent.getCallId();
-
-    agent.on("transcript:ai", (text) => {
-      this.emit("ai:speech", { callId, text });
-    });
-
-    agent.on("transcript:human", (text) => {
-      this.emit("human:speech", { callId, text });
-    });
-
-    agent.on("handoff:triggered", (reason) => {
-      this.handleHandoff(callId, reason, settings.handoff.transferNumber);
-    });
-
-    agent.on("conversation:phase", (phase) => {
-      this.emit("phase:change", { callId, phase });
-    });
-
-    agent.on("error", (error) => {
-      console.error(`[TelnyxAiBridge] AI agent error for call ${callId}:`, error);
-      this.emit("call:error", { callId, error });
-    });
-
     try {
+      // Format phone numbers to E.164 format (required by Telnyx)
+      phoneNumber = this.formatToE164(phoneNumber);
+      fromNumber = this.formatToE164(fromNumber);
+
+      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
+      
+      const contactFullName = [context.contactFirstName, context.contactLastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+
+      const preflight = await preflightVoiceVariableContract({
+        agentName: context.agentFullName || settings.persona?.name || "",
+        orgName: settings.persona?.companyName || "",
+        account: { name: context.companyName },
+        contact: {
+          fullName: contactFullName,
+          firstName: context.contactFirstName,
+          lastName: context.contactLastName,
+          jobTitle: context.contactTitle,
+          email: context.contactEmail,
+        },
+        callerId: fromNumber,
+        calledNumber: phoneNumber,
+      });
+
+      if (!preflight.valid) {
+        throw new VoiceVariablePreflightError(preflight);
+      }
+
+      const agent = createAiVoiceAgent(settings, context);
+      const callId = agent.getCallId();
+
+      agent.on("transcript:ai", (text) => {
+        this.emit("ai:speech", { callId, text });
+      });
+
+      agent.on("transcript:human", (text) => {
+        this.emit("human:speech", { callId, text });
+      });
+
+      agent.on("handoff:triggered", (reason) => {
+        this.handleHandoff(callId, reason, settings.handoff.transferNumber);
+      });
+
+      agent.on("conversation:phase", (phase) => {
+        this.emit("phase:change", { callId, phase });
+      });
+
+      agent.on("error", (error) => {
+        console.error(`[TelnyxAiBridge] AI agent error for call ${callId}:`, error);
+        this.emit("call:error", { callId, error });
+      });
       // For TeXML outbound calls, prioritize TeXML App ID but fall back to Call Control App ID
       // Note: TeXML requires a TeXML Application ID created in Telnyx Portal
       const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
@@ -488,7 +493,7 @@ export class TelnyxAiBridge extends EventEmitter {
       };
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
-      let response: Response;
+      let response: Response | undefined;
       let useTexml = !!texmlAppId;
       
       if (useTexml) {
@@ -514,7 +519,7 @@ export class TelnyxAiBridge extends EventEmitter {
             From: fromNumber,
             Url: texmlUrlWithState,
             // Prefer explicit webhook URL override for TeXML if provided
-            StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
+            StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
             // Include client_state so AMD webhook receives call context
             ClientState: clientStateB64,
             // Enable call recording (all calls recorded for transcription and QA)
@@ -554,7 +559,7 @@ export class TelnyxAiBridge extends EventEmitter {
             from: fromNumber,
             client_state: clientStateB64,
             // Prefer explicit webhook URL override for TeXML if provided
-            webhook_url: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
+            webhook_url: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
             // Enable call recording (all calls recorded for transcription and QA)
             record_type: "all",
             recording_channels: "dual",
@@ -573,6 +578,10 @@ export class TelnyxAiBridge extends EventEmitter {
             },
           }),
         });
+      }
+
+      if (!response) {
+        throw new Error("Telnyx API response missing");
       }
 
       if (!response.ok) {
@@ -639,6 +648,7 @@ export class TelnyxAiBridge extends EventEmitter {
       return { callId, callControlId };
     } catch (error) {
       console.error("[TelnyxAiBridge] Failed to initiate call:", error);
+      this.semaphore.release();
       throw error;
     }
   }
@@ -1109,7 +1119,7 @@ export class TelnyxAiBridge extends EventEmitter {
             contactId: queueItem.contactId,
             contactName: contactName,
             contactEmail: contact?.email || undefined,
-            companyName: contact?.companyName || undefined,
+            accountName: contact?.companyNorm || undefined,
             callAttemptId: call.callAttemptId || undefined,
             agentId: null,
             qaStatus: "new",

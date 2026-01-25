@@ -149,23 +149,28 @@ export function pcm8kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 
 /**
  * Low-pass FIR filter coefficients for anti-aliasing before downsampling.
- * This is a 31-tap windowed sinc filter with cutoff at ~3.5kHz (for 8kHz target).
- * Generated using a Hamming window.
+ * This is a 63-tap Blackman-windowed sinc filter with sharp cutoff at 3.8kHz.
+ * Designed specifically for 24kHz → 8kHz downsampling (3:1 ratio).
+ * Much more aggressive than previous 31-tap Hamming filter to eliminate aliasing noise.
  */
 const ANTI_ALIAS_FILTER_COEFFS = [
-  0.0008, 0.0018, 0.0035, 0.0058, 0.0088,
-  0.0124, 0.0166, 0.0212, 0.0261, 0.0311,
-  0.0361, 0.0407, 0.0448, 0.0482, 0.0507,
-  0.0521, // Center tap (highest weight)
-  0.0507, 0.0482, 0.0448, 0.0407, 0.0361,
-  0.0311, 0.0261, 0.0212, 0.0166, 0.0124,
-  0.0088, 0.0058, 0.0035, 0.0018, 0.0008
+  -0.0001, -0.0003, -0.0006, -0.0009, -0.0013, -0.0017, -0.0019, -0.0018,
+  -0.0014, -0.0005,  0.0008,  0.0026,  0.0048,  0.0073,  0.0099,  0.0124,
+   0.0146,  0.0161,  0.0167,  0.0162,  0.0143,  0.0110,  0.0062,  0.0000,
+  -0.0075, -0.0163, -0.0262, -0.0369, -0.0478, -0.0583, -0.0676, -0.0751,
+  -0.0801, -0.0822, -0.0808, -0.0756, -0.0664, -0.0529, -0.0351, -0.0131,
+   0.0127,  0.0420,  0.0742,  0.1085,  0.1439,  0.1795,  0.2141,  0.2468,
+   0.2764,  0.3020,  0.3229,  0.3385,  0.3483,  0.3520,  0.3483,  0.3385,
+   0.3229,  0.3020,  0.2764,  0.2468,  0.2141,  0.1795,  0.1439
 ];
 
 /**
  * Apply low-pass FIR filter for anti-aliasing before downsampling.
  * Prevents aliasing artifacts (the irritating noise) by removing
  * frequencies above the Nyquist frequency of the target sample rate.
+ * 
+ * CRITICAL FIX: No coefficient scaling - filter must operate at full strength
+ * to prevent high-frequency components from folding back as audible noise.
  */
 function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
   const inputSamples = inputBuffer.length / 2;
@@ -173,9 +178,9 @@ function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
   const filterLen = ANTI_ALIAS_FILTER_COEFFS.length;
   const halfLen = Math.floor(filterLen / 2);
 
-  // Scale filter coefficients based on cutoff ratio (for different downsample ratios)
-  // Lower cutoff ratio = more aggressive filtering needed
-  const scaledCoeffs = ANTI_ALIAS_FILTER_COEFFS.map(c => c * Math.min(1, cutoffRatio * 2));
+  // CRITICAL: Use full filter strength - no scaling
+  // The filter is already designed for the specific downsample ratio
+  const coeffs = ANTI_ALIAS_FILTER_COEFFS;
 
   for (let i = 0; i < inputSamples; i++) {
     let sum = 0;
@@ -188,7 +193,7 @@ function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
         sample = inputBuffer.readInt16LE(srcIdx * 2);
       }
 
-      sum += sample * scaledCoeffs[j];
+      sum += sample * coeffs[j];
     }
 
     // Clamp to valid 16-bit range

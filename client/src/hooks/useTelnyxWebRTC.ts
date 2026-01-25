@@ -500,7 +500,7 @@ export function useSIPWebRTC({
   }, []);
 
   // Make outbound call
-  const makeCall = useCallback((phoneNumber: string, callerIdNumber?: string) => {
+  const makeCall = useCallback(async (phoneNumber: string, callerIdNumber?: string) => {
     if (!client || !isConnected) {
       toast({
         variant: "destructive",
@@ -523,7 +523,7 @@ export function useSIPWebRTC({
     cleanupAudioElement();
 
     try {
-      console.log('Making call with params:', {
+      console.log('[AUDIO-TX] Preparing to make call with params:', {
         destinationNumber: phoneNumber,
         callerNumber: callerIdNumber,
         hasClient: !!client,
@@ -531,6 +531,53 @@ export function useSIPWebRTC({
         selectedMicId,
         selectedSpeakerId,
       });
+
+      // CRITICAL FIX: Explicitly request microphone permission before making call
+      // This ensures audio transmission works
+      console.log('[AUDIO-TX] Requesting microphone access...');
+      try {
+        const constraints: MediaStreamConstraints = {
+          audio: selectedMicId ? {
+            deviceId: { exact: selectedMicId },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } : {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('[AUDIO-TX] ✅ Microphone access granted:', {
+          tracks: stream.getAudioTracks().length,
+          enabled: stream.getAudioTracks()[0]?.enabled,
+          muted: stream.getAudioTracks()[0]?.muted,
+          readyState: stream.getAudioTracks()[0]?.readyState,
+        });
+
+        // Verify audio track is enabled and ready
+        const audioTrack = stream.getAudioTracks()[0];
+        if (!audioTrack || !audioTrack.enabled || audioTrack.muted || audioTrack.readyState !== 'live') {
+          console.error('[AUDIO-TX] ❌ Microphone track not ready:', audioTrack);
+          throw new Error('Microphone not ready for transmission');
+        }
+
+        // Stop the test stream - Telnyx SDK will create its own
+        stream.getTracks().forEach(track => track.stop());
+        console.log('[AUDIO-TX] Microphone verification complete');
+      } catch (micError: any) {
+        console.error('[AUDIO-TX] ❌ Microphone access denied:', micError);
+        toast({
+          variant: "destructive",
+          title: "Microphone Access Required",
+          description: "Please allow microphone access in your browser to make calls.",
+          duration: 10000,
+        });
+        return;
+      }
 
       // Build call options
       const callOptions: any = {
@@ -554,18 +601,55 @@ export function useSIPWebRTC({
           noiseSuppression: true,
           autoGainControl: true,
         };
-        console.log('Using selected microphone:', selectedMicId);
+        console.log('[AUDIO-TX] Using selected microphone:', selectedMicId);
+      } else {
+        callOptions.audio = {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        };
       }
 
+      console.log('[AUDIO-TX] Creating call with options:', callOptions);
       const call = client.newCall(callOptions);
 
-      console.log('Call object created - ID:', call?.id, 'State:', call?.state);
+      console.log('[AUDIO-TX] Call object created - ID:', call?.id, 'State:', call?.state);
 
       // Capture the Telnyx call ID for recording lookup
       if (call?.id) {
         setTelnyxCallId(call.id);
-        console.log('Captured Telnyx Call ID:', call.id);
+        console.log('[AUDIO-TX] Captured Telnyx Call ID:', call.id);
       }
+
+      // CRITICAL FIX: Monitor local audio track to ensure transmission
+      setTimeout(() => {
+        try {
+          const localStream = (call as any).localStream;
+          if (localStream) {
+            const audioTrack = localStream.getAudioTracks()[0];
+            console.log('[AUDIO-TX] Local audio track status:', {
+              enabled: audioTrack?.enabled,
+              muted: audioTrack?.muted,
+              readyState: audioTrack?.readyState,
+              label: audioTrack?.label,
+            });
+            if (!audioTrack?.enabled || audioTrack?.muted) {
+              console.error('[AUDIO-TX] ⚠️ WARNING: Local audio track is disabled or muted!');
+              toast({
+                variant: "destructive",
+                title: "Microphone Issue",
+                description: "Your microphone may be muted. The other party cannot hear you.",
+              });
+            } else {
+              console.log('[AUDIO-TX] ✅ Audio transmission active');
+            }
+          } else {
+            console.warn('[AUDIO-TX] ⚠️ No local stream found on call object');
+          }
+        } catch (e) {
+          console.error('[AUDIO-TX] Error checking audio track:', e);
+        }
+      }, 1000);
 
       setActiveCall(call);
       updateCallState('connecting');

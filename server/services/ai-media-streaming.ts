@@ -210,7 +210,17 @@ async function handleTelnyxMessage(
       streamIdToCallId.set(streamIdentifier, callId);
       onSessionStart(callId);
       
+      console.log(`[AiMediaStreaming] Session created. stream_id=${streamIdentifier} call=${callId}`);
+      
       await initializeOpenAISession(session);
+
+      // CRITICAL CHECK: Verify stream_id was set
+      if (!session.streamId) {
+        console.error(`[AiMediaStreaming] ❌ CRITICAL: No stream_id set after start event! call=${callId}`);
+        console.error(`[AiMediaStreaming] Audio transmission will FAIL without stream_id`);
+      } else {
+        console.log(`[AiMediaStreaming] ✅ stream_id confirmed: ${session.streamId}`);
+      }
 
       // Send a short test tone so the callee hears an immediate sound (debugging silence)
       sendTestToneToTelnyx(session);
@@ -493,6 +503,12 @@ function downsample16kTo8k(pcm16k: Buffer): Buffer {
 // With g711_ulaw end-to-end, audioPayload is already base64 μ-law from OpenAI
 function sendAudioToTelnyx(session: MediaSession, audioPayload: string): void {
   if (!session.telnyxWs || session.telnyxWs.readyState !== WebSocket.OPEN) {
+    console.warn(`[AiMediaStreaming] ⚠️ Cannot send audio - WebSocket not open. readyState=${session.telnyxWs?.readyState} call=${session.callId}`);
+    return;
+  }
+
+  if (!session.streamId) {
+    console.warn(`[AiMediaStreaming] ⚠️ Cannot send audio - no stream_id. call=${session.callId}`);
     return;
   }
 
@@ -504,10 +520,17 @@ function sendAudioToTelnyx(session: MediaSession, audioPayload: string): void {
     },
   };
 
-  session.telnyxWs.send(JSON.stringify(message));
-  session.sentFrames++;
-  if (session.sentFrames === 1 || session.sentFrames % 20 === 0) {
-    console.log(`[AiMediaStreaming] Media out frames=${session.sentFrames} call=${session.callId}`);
+  try {
+    session.telnyxWs.send(JSON.stringify(message));
+    session.sentFrames++;
+    if (session.sentFrames === 1) {
+      console.log(`[AiMediaStreaming] ✅ FIRST OUTBOUND AUDIO FRAME SENT to Telnyx! call=${session.callId} stream_id=${session.streamId}`);
+    }
+    if (session.sentFrames % 20 === 0) {
+      console.log(`[AiMediaStreaming] Media out frames=${session.sentFrames} call=${session.callId}`);
+    }
+  } catch (err) {
+    console.error(`[AiMediaStreaming] ❌ Failed to send audio to Telnyx:`, err, `call=${session.callId}`);
   }
 }
 

@@ -58,10 +58,15 @@ export default defineConfig({
       usePolling: false,
       interval: 1000,
     },
-    // Disable Vite's built-in HMR WebSocket to avoid
-    // conflicts with the custom WebSocket upgrade
-    // handling in the Express server. Full page
-    // reloads will still work in dev.
-    hmr: false,
+    // Configure HMR for ngrok tunneling in development
+    // When behind ngrok, use the public host for HMR connection
+    hmr: process.env.PUBLIC_WEBSOCKET_URL 
+      ? {
+          protocol: 'wss',
+          host: process.env.PUBLIC_WEBSOCKET_URL.replace('wss://', '').replace('/voice-dialer', ''),
+          port: 443,
+          timeout: 60000,
+        }
+      : false,
   },
 });

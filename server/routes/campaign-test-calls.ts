@@ -261,7 +261,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     let webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
     if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
       try {
-        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
         webhookHost = u.host; // demandgentic.ai
       } catch {}
     }
@@ -299,7 +299,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         Url: payload.url,
         // Prefer explicit webhook URL secret if provided; fallback to resolved host
         // Prefer explicit webhook URL override if available, else fallback to TeXML host
-        StatusCallback: process.env.TELNYX_WEBHOOK_URL || `https://${webhookHost}/api/webhooks/telnyx`,
+        StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
       }),
     });
 

@@ -9,7 +9,8 @@ function parseEnv(filePath: string) {
     const content = fs.readFileSync(filePath, 'utf-8');
     const env: Record<string, string> = {};
     content.split('\n').forEach(line => {
-        const match = line.match(/^([^=]+)=(.*)$/);
+        const cleanLine = line.replace(/\r$/, ''); // Strip Windows line endings
+        const match = cleanLine.match(/^([^=]+)=(.*)$/);
         if (match) {
             let value = match[2].trim();
             if (value.startsWith('"') && value.endsWith('"')) {
@@ -31,7 +32,7 @@ function resolveEnv(key: string): string | undefined {
 }
 
 // Determine PORT: process.env > .env.local > .env > 5000
-const PORT_STR = resolveEnv('PORT') || '5000';
+const PORT_STR = '5000';
 const PORT = parseInt(PORT_STR, 10);
 console.log(`ℹ️  Resolved PORT to ${PORT}`);
 

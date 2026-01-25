@@ -48,6 +48,7 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
+
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
 
@@ -72,6 +73,9 @@ export async function setupVite(app: Express, server: Server) {
       next(e);
     }
   });
+
+  // Return vite instance so server can access ws for HMR upgrades
+  return vite;
 }
 
 export function serveStatic(app: Express) {

@@ -1338,10 +1338,18 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
             // Re-adding stream_id as it is required for bidirectional streams in many cases
             if (session.streamSid) {
                 payload.stream_id = session.streamSid;
+            } else {
+              console.warn(`${LOG_PREFIX} ⚠️ Sending audio WITHOUT stream_id for call ${session.callId} - this may fail!`);
             }
+            
             session.telnyxWs.send(JSON.stringify(payload));
+            
+            // Log first successful outbound frame
+            if (session.telnyxOutboundFramesSent === 0) {
+              console.log(`${LOG_PREFIX} ✅ FIRST OUTBOUND AUDIO FRAME SENT to Telnyx! call=${session.callId} stream_id=${session.streamSid || 'MISSING'}`);
+            }
         } catch (e) {
-            console.error(`${LOG_PREFIX} Error sending to Telnyx WS`, e);
+            console.error(`${LOG_PREFIX} ❌ Error sending to Telnyx WS`, e);
         }
 
         session.telnyxOutboundFramesSent += 1;

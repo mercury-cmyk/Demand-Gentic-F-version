@@ -1089,7 +1089,7 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
     let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
     if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
       try {
-        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
         webhookHost = u.host;
       } catch {}
     }
@@ -1267,7 +1267,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
     if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
       try {
-        const u = new URL(process.env.TELNYX_WEBHOOK_URL);
+        const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
         webhookHost = u.host;
       } catch {}
     }
@@ -1287,7 +1287,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
         From: fromNumber,
         Url: texmlUrl,
         ClientState: clientStateB64,
-        StatusCallback: process.env.TELNYX_WEBHOOK_URL || `${webhookProtocol}://${webhookHost}/api/webhooks/telnyx`,
+        StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `${webhookProtocol}://${webhookHost}/api/webhooks/telnyx`,
       }),
     });
 

@@ -378,7 +378,7 @@ export async function initiateOpenAISipCall(params: {
 
   // Initiate outbound call via Telnyx
   // The call will be routed to OpenAI's SIP endpoint
-  const webhookUrl = process.env.TELNYX_WEBHOOK_URL || (process.env.PUBLIC_WEBHOOK_HOST ? `https://${process.env.PUBLIC_WEBHOOK_HOST}` : undefined);
+  const webhookUrl = (process.env.TELNYX_WEBHOOK_URL || "").trim() || (process.env.PUBLIC_WEBHOOK_HOST ? `https://${process.env.PUBLIC_WEBHOOK_HOST}` : undefined);
   if (!webhookUrl) {
     console.warn(`${LOG_PREFIX} ⚠️ No TELNYX_WEBHOOK_URL configured; using host fallback may fail validation.`);
   }
