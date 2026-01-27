@@ -31,7 +31,6 @@ wss.on('connection', (ws) => {
           encoding: 'LINEAR16',
           sampleRateHertz: 16000,
           languageCode: 'en-US',
-          interimResults: true,
         },
         interimResults: true,
       })
@@ -84,6 +83,11 @@ wss.on('connection', (ws) => {
       });
 
       const audioStream = response.body;
+
+      if (!audioStream) {
+        console.error('[AI Agent] No audio stream received from OpenAI TTS');
+        return;
+      }
 
       for await (const chunk of audioStream) {
         ws.send(chunk);

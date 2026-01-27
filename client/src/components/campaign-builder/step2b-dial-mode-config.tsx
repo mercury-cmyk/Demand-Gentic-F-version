@@ -1,16 +1,13 @@
 ﻿import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Phone, Zap, Settings, Volume2, Clock, Bot, User, MessageSquare, Shield, PhoneForwarded, Sparkles, Loader2, Globe, Calendar, Target, Package, ListChecks, Users, AlertCircle, Plus, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Zap, Settings, Clock, Bot, User, MessageSquare, Shield, PhoneForwarded, Sparkles, Loader2, Globe, Calendar, Target, Package, ListChecks, Users, AlertCircle, Plus, X, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -22,7 +19,7 @@ interface Step2bDialModeConfigProps {
   onBack: () => void;
 }
 
-type DialMode = 'manual' | 'hybrid' | 'ai_agent';
+type DialMode = 'ai_agent';
 // marin & cedar are highest quality, most natural voices
 type AiVoice = 'marin' | 'cedar' | 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'ash' | 'ballad' | 'coral' | 'sage' | 'verse';
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
@@ -54,24 +51,9 @@ const HANDOFF_TRIGGERS: { value: HandoffTrigger; label: string }[] = [
 
 export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeConfigProps) {
   const { toast } = useToast();
-  const [dialMode, setDialMode] = useState<DialMode>(data.dialMode || 'manual');
+  // AI Agent mode is the only supported dial mode
+  const dialMode: DialMode = 'ai_agent';
   const [campaignBrief, setCampaignBrief] = useState('');
-  const [amdEnabled, setAmdEnabled] = useState(data.hybridSettings?.amd?.enabled ?? true);
-  const [amdConfidenceThreshold, setAmdConfidenceThreshold] = useState(
-    data.hybridSettings?.amd?.confidenceThreshold ?? 0.70
-  );
-  const [amdTimeout, setAmdTimeout] = useState(data.hybridSettings?.amd?.timeout ?? 3000);
-  const [unknownAction, setUnknownAction] = useState<'route_to_agent' | 'drop_silent'>(
-    data.hybridSettings?.amd?.unknownAction || 'route_to_agent'
-  );
-  
-  const [vmEnabled, setVmEnabled] = useState(data.hybridSettings?.voicemailPolicy?.enabled ?? false);
-  const [vmAction, setVmAction] = useState<'leave_message' | 'schedule_callback' | 'drop_silent'>(
-    data.hybridSettings?.voicemailPolicy?.action || 'leave_message'
-  );
-  const [vmMessage, setVmMessage] = useState(data.hybridSettings?.voicemailPolicy?.message || '');
-  const [vmCampaignCap, setVmCampaignCap] = useState(data.hybridSettings?.voicemailPolicy?.campaign_daily_vm_cap || 100);
-  const [vmContactCap, setVmContactCap] = useState(data.hybridSettings?.voicemailPolicy?.contact_vm_cap || 1);
 
   // AI Agent Settings
   const [aiPersonaName, setAiPersonaName] = useState(data.aiAgentSettings?.persona?.name || '');
@@ -170,24 +152,8 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
   };
 
   const handleSubmit = () => {
-    const hybridSettings = dialMode === 'hybrid' ? {
-      amd: {
-        enabled: amdEnabled,
-        confidenceThreshold: amdConfidenceThreshold,
-        timeout: amdTimeout,
-        unknownAction: unknownAction,
-      },
-      voicemailPolicy: vmEnabled ? {
-        enabled: true,
-        action: vmAction,
-        message: vmMessage,
-        campaign_daily_vm_cap: vmCampaignCap,
-        contact_vm_cap: vmContactCap,
-        region_blacklist: [],
-      } : { enabled: false },
-    } : undefined;
-
-    const aiAgentSettings = dialMode === 'ai_agent' ? {
+    // AI Agent mode is always enabled
+    const aiAgentSettings = {
       persona: {
         name: aiPersonaName,
         companyName: aiCompanyName,
@@ -218,19 +184,18 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
         operatingDays: operatingDays,
       },
       maxConcurrentCalls,
-    } : undefined;
+    };
 
     onNext({
       dialMode,
-      hybridSettings,
       aiAgentSettings,
       // Campaign AI Context fields (Foundation + Campaign Layer Architecture)
-      campaignObjective: dialMode === 'ai_agent' ? campaignObjective : undefined,
-      productServiceInfo: dialMode === 'ai_agent' ? productServiceInfo : undefined,
-      talkingPoints: dialMode === 'ai_agent' && talkingPoints.length > 0 ? talkingPoints : undefined,
-      targetAudienceDescription: dialMode === 'ai_agent' ? targetAudienceDescription : undefined,
-      campaignObjections: dialMode === 'ai_agent' && campaignObjections.length > 0 ? campaignObjections : undefined,
-      successCriteria: dialMode === 'ai_agent' ? successCriteria : undefined,
+      campaignObjective,
+      productServiceInfo,
+      talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
+      targetAudienceDescription,
+      campaignObjections: campaignObjections.length > 0 ? campaignObjections : undefined,
+      successCriteria,
     });
   };
 
@@ -269,316 +234,23 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
 
   return (
     <div className="space-y-6">
-      {/* Dial Mode Selection */}
-      <div className="space-y-4">
-        <div>
-          <Label className="text-base font-semibold">Select Dial Mode</Label>
-          <p className="text-sm text-muted-foreground mt-1">
-            Choose how calls will be initiated to your contacts
-          </p>
-        </div>
-
-        <RadioGroup value={dialMode} onValueChange={(v) => setDialMode(v as DialMode)}>
-          <Card className={cn(dialMode === 'manual' && "border-primary")}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start gap-4">
-                <RadioGroupItem value="manual" id="manual" className="mt-1" data-testid="radio-dial-mode-manual" />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-5 h-5 text-primary" />
-                    <Label htmlFor="manual" className="text-base font-semibold cursor-pointer">
-                      Manual Dial Mode
-                    </Label>
-                  </div>
-                  <CardDescription className="mt-2">
-                    Agents pull contacts from their queue and manually initiate calls. Best for personalized outreach and complex sales cycles.
-                  </CardDescription>
-                  <div className="mt-3 space-y-1 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Agent-driven queue with pull/lock workflow
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Campaign-level collision prevention
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Filter-based audience selection
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-
-          <Card className={cn(dialMode === 'hybrid' && "border-primary")}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start gap-4">
-                <RadioGroupItem value="hybrid" id="hybrid" className="mt-1" data-testid="radio-dial-mode-hybrid" />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-primary" />
-                    <Label htmlFor="hybrid" className="text-base font-semibold cursor-pointer">
-                      Hybrid Mode (Humans + AI)
-                    </Label>
-                  </div>
-                  <CardDescription className="mt-2">
-                    Humans and AI agents share the same outbound queue with automated dialing and AMD detection. Perfect for scaling operations with both human and AI support.
-                  </CardDescription>
-                  <div className="mt-3 space-y-1 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Unified queue for humans and AI agents
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      AMD with human-only routing
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Pacing engine with abandon-rate feedback (3% target)
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-
-          <Card className={cn(dialMode === 'ai_agent' && "border-primary")}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start gap-4">
-                <RadioGroupItem value="ai_agent" id="ai_agent" className="mt-1" data-testid="radio-dial-mode-ai-agent" />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-5 h-5 text-primary" />
-                    <Label htmlFor="ai_agent" className="text-base font-semibold cursor-pointer">
-                      AI Voice Agent Mode
-                    </Label>
-                  </div>
-                  <CardDescription className="mt-2">
-                    Intelligent AI agents handle calls autonomously using natural voice. Navigate gatekeepers, deliver scripts, and hand off to human agents when needed.
-                  </CardDescription>
-                  <div className="mt-3 space-y-1 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      OpenAI-powered natural voice conversations
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Intelligent gatekeeper navigation
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Same lead/QA workflow as human agents
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                      Smart handoff to live agents
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-        </RadioGroup>
-      </div>
-
-      {/* Hybrid Mode Settings */}
-      {dialMode === 'hybrid' && (
-        <>
-          <Separator />
-
-          {/* AMD Configuration */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Settings className="w-5 h-5" />
-                <CardTitle>Answering Machine Detection (AMD)</CardTitle>
-              </div>
-              <CardDescription>
-                Configure how the system detects and handles answering machines
+      {/* AI Voice Agent Mode Header */}
+      <Card className="border-primary bg-primary/5">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-3">
+            <Bot className="w-6 h-6 text-primary" />
+            <div>
+              <CardTitle className="text-lg">AI Voice Agent Mode</CardTitle>
+              <CardDescription className="mt-1">
+                Intelligent AI agents handle calls autonomously using Gemini Live voice technology
               </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="amd-enabled" className="font-medium">Enable AMD</Label>
-                  <p className="text-sm text-muted-foreground">Automatically detect answering machines</p>
-                </div>
-                <Switch
-                  id="amd-enabled"
-                  checked={amdEnabled}
-                  onCheckedChange={setAmdEnabled}
-                  data-testid="switch-amd-enabled"
-                />
-              </div>
-
-              {amdEnabled && (
-                <>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label>Confidence Threshold: {(amdConfidenceThreshold * 100).toFixed(0)}%</Label>
-                      <span className="text-sm text-muted-foreground">
-                        {amdConfidenceThreshold >= 0.8 ? 'High' : amdConfidenceThreshold >= 0.6 ? 'Medium' : 'Low'}
-                      </span>
-                    </div>
-                    <Slider
-                      value={[amdConfidenceThreshold * 100]}
-                      onValueChange={([v]) => setAmdConfidenceThreshold(v / 100)}
-                      min={50}
-                      max={95}
-                      step={5}
-                      className="w-full"
-                      data-testid="slider-amd-confidence"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Higher threshold = more accurate but may miss some machines. Recommended: 70%
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <Label>AMD Timeout</Label>
-                    <Select value={amdTimeout.toString()} onValueChange={(v) => setAmdTimeout(parseInt(v))}>
-                      <SelectTrigger data-testid="select-amd-timeout">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="2000">2 seconds</SelectItem>
-                        <SelectItem value="3000">3 seconds (recommended)</SelectItem>
-                        <SelectItem value="4000">4 seconds</SelectItem>
-                        <SelectItem value="5000">5 seconds</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      How long to analyze the call before making a decision
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <Label>Unknown Result Action</Label>
-                    <Select value={unknownAction} onValueChange={(v: any) => setUnknownAction(v)}>
-                      <SelectTrigger data-testid="select-unknown-action">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="route_to_agent">Route to Agent (safer)</SelectItem>
-                        <SelectItem value="drop_silent">Drop Silent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      What to do when AMD confidence is below threshold
-                    </p>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Voicemail Policy */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-5 h-5" />
-                <CardTitle>Voicemail Policy</CardTitle>
-              </div>
-              <CardDescription>
-                Configure what happens when a machine is detected
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="vm-enabled" className="font-medium">Enable Voicemail Handling</Label>
-                  <p className="text-sm text-muted-foreground">Automatically handle detected voicemail</p>
-                </div>
-                <Switch
-                  id="vm-enabled"
-                  checked={vmEnabled}
-                  onCheckedChange={setVmEnabled}
-                  data-testid="switch-vm-enabled"
-                />
-              </div>
-
-              {vmEnabled && (
-                <>
-                  <div className="space-y-3">
-                    <Label>Voicemail Action</Label>
-                    <Select value={vmAction} onValueChange={(v: any) => setVmAction(v)}>
-                      <SelectTrigger data-testid="select-vm-action">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="leave_message">Leave Voice Message (TTS)</SelectItem>
-                        <SelectItem value="schedule_callback">Schedule Callback</SelectItem>
-                        <SelectItem value="drop_silent">Drop Silent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {vmAction === 'leave_message' && (
-                    <div className="space-y-3">
-                      <Label>Voicemail Message</Label>
-                      <Textarea
-                        placeholder="Enter your voicemail message. Use {{firstName}}, {{lastName}}, {{companyName}} for personalization."
-                        value={vmMessage}
-                        onChange={(e) => setVmMessage(e.target.value)}
-                        rows={4}
-                        data-testid="textarea-vm-message"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        This message will be converted to speech and left as a voicemail
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="vm-campaign-cap">
-                        <Clock className="w-4 h-4 inline mr-1" />
-                        Daily Campaign Cap
-                      </Label>
-                      <Input
-                        id="vm-campaign-cap"
-                        type="number"
-                        value={vmCampaignCap}
-                        onChange={(e) => setVmCampaignCap(parseInt(e.target.value))}
-                        min={1}
-                        data-testid="input-vm-campaign-cap"
-                      />
-                      <p className="text-xs text-muted-foreground">Max VMs per day for campaign</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="vm-contact-cap">
-                        <Clock className="w-4 h-4 inline mr-1" />
-                        Per-Contact Cap
-                      </Label>
-                      <Input
-                        id="vm-contact-cap"
-                        type="number"
-                        value={vmContactCap}
-                        onChange={(e) => setVmContactCap(parseInt(e.target.value))}
-                        min={1}
-                        max={5}
-                        data-testid="input-vm-contact-cap"
-                      />
-                      <p className="text-xs text-muted-foreground">Max VMs per contact</p>
-                    </div>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
 
       {/* AI Agent Mode Settings */}
-      {dialMode === 'ai_agent' && (
-        <>
-          <Separator />
-
-          {/* AI Persona Configuration */}
+      {/* AI Persona Configuration */}
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
@@ -1264,8 +936,6 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
               </div>
             </CardContent>
           </Card>
-        </>
-      )}
 
       {/* Navigation */}
       <div className="flex justify-end gap-3">

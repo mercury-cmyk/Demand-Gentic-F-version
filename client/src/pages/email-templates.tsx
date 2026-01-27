@@ -1,15 +1,27 @@
-import { useRef, useState } from "react";
+/**
+ * Email Templates Page
+ *
+ * IMPORTANT: Email templates are CAMPAIGN-BOUND.
+ *
+ * This page now requires a campaign context. Templates cannot be created
+ * as standalone/global assets - they must be associated with a specific campaign.
+ *
+ * If accessed without a campaign context, users are redirected to the campaigns hub.
+ */
+import { useRef, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Eye, Copy, Trash, Edit, Mail, Tag, Maximize2, Minimize2 } from "lucide-react";
+import { useLocation, useSearch } from "wouter";
+import { Plus, Eye, Copy, Trash, Edit, Mail, Tag, Maximize2, Minimize2, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +68,11 @@ type TemplateFormData = z.infer<typeof templateFormSchema>;
 
 export default function EmailTemplatesPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const campaignId = searchParams.get('campaignId');
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null);
@@ -70,9 +87,102 @@ export default function EmailTemplatesPage() {
     selectionEnd?: number;
   } | null>(null);
 
-  const { data: templates = [], isLoading } = useQuery<EmailTemplate[]>({
-    queryKey: ["/api/email-templates"],
+  // Fetch campaign details if campaignId is provided
+  const { data: campaign } = useQuery({
+    queryKey: ["/api/campaigns", campaignId],
+    queryFn: async () => {
+      if (!campaignId) return null;
+      const response = await fetch(`/api/campaigns/${campaignId}`);
+      if (!response.ok) return null;
+      return response.json();
+    },
+    enabled: !!campaignId,
   });
+
+  // Fetch templates - filter by campaign if provided
+  const { data: templates = [], isLoading } = useQuery<EmailTemplate[]>({
+    queryKey: ["/api/email-templates", campaignId],
+    queryFn: async () => {
+      const url = campaignId
+        ? `/api/email-templates?campaignId=${campaignId}`
+        : "/api/email-templates";
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Failed to fetch templates");
+      return response.json();
+    },
+  });
+
+  // If no campaign context, show a notice redirecting to campaigns
+  if (!campaignId) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-3xl mx-auto p-6 space-y-6">
+          <Alert variant="default" className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+            <AlertTitle className="text-amber-800 dark:text-amber-200">Campaign Context Required</AlertTitle>
+            <AlertDescription className="text-amber-700 dark:text-amber-300 mt-2">
+              <p className="mb-4">
+                Email templates are now <strong>campaign-bound</strong>. Templates must be created
+                within the context of a specific campaign to ensure messaging consistency and
+                strategic alignment.
+              </p>
+              <p className="mb-4">
+                This change ensures that:
+              </p>
+              <ul className="list-disc list-inside mb-4 space-y-1">
+                <li>Templates are tied to specific campaigns and clients</li>
+                <li>Email content aligns with campaign objectives</li>
+                <li>No orphaned or misaligned templates exist</li>
+                <li>All email generation uses the same strategic framework</li>
+              </ul>
+              <Button
+                onClick={() => setLocation("/campaigns")}
+                className="mt-2"
+              >
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Go to Campaigns
+              </Button>
+            </AlertDescription>
+          </Alert>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>How to Create Email Templates</CardTitle>
+              <CardDescription>
+                Follow these steps to create campaign-specific email templates
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start gap-3">
+                <Badge variant="outline" className="mt-0.5">1</Badge>
+                <div>
+                  <p className="font-medium">Navigate to Campaigns</p>
+                  <p className="text-sm text-muted-foreground">Go to the Campaigns hub to view all your campaigns</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Badge variant="outline" className="mt-0.5">2</Badge>
+                <div>
+                  <p className="font-medium">Select or Create a Campaign</p>
+                  <p className="text-sm text-muted-foreground">Choose an existing email campaign or create a new one</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Badge variant="outline" className="mt-0.5">3</Badge>
+                <div>
+                  <p className="font-medium">Create Templates Within Campaign</p>
+                  <p className="text-sm text-muted-foreground">
+                    Use the campaign editor to create and manage email templates that are
+                    automatically aligned with your campaign's objectives and strategy
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   const form = useForm<TemplateFormData>({
     resolver: zodResolver(templateFormSchema),

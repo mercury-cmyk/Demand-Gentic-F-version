@@ -718,9 +718,20 @@ CRITICAL RULES:
     try {
       const message = JSON.parse(data);
 
+      // Log incoming message type
+      if (message.setup_complete || message.setupComplete) {
+        console.log(`${LOG_PREFIX} 📬 Message received: SETUP_COMPLETE`);
+      } else if (message.server_content || message.serverContent) {
+        console.log(`${LOG_PREFIX} 📬 Message received: SERVER_CONTENT`);
+      } else if (message.tool_call || message.toolCall) {
+        console.log(`${LOG_PREFIX} 📬 Message received: TOOL_CALL`);
+      } else {
+        console.log(`${LOG_PREFIX} 📬 Message received: ${JSON.stringify(message).substring(0, 100)}`);
+      }
+
       // Check for errors
       if (isGeminiError(message)) {
-        console.error(`${LOG_PREFIX} API error:`, message.error);
+        console.error(`${LOG_PREFIX} 🚨 API error:`, message.error);
         this.emitError(
           message.error.status || 'api_error',
           message.error.message,
@@ -775,14 +786,19 @@ CRITICAL RULES:
   private handleServerContent(message: any): void {
     const content = message.server_content || message.serverContent;
 
+    console.log(`${LOG_PREFIX} 📨 handleServerContent - processing server message`);
+
     // Check for model turn with content
     if (content.model_turn?.parts || content.modelTurn?.parts) {
       const parts = content.model_turn?.parts || content.modelTurn?.parts;
+      console.log(`${LOG_PREFIX} 📦 Model turn received with ${parts.length} parts`);
 
       // Handle audio output
       if (hasAudioPart(parts)) {
+        console.log(`${LOG_PREFIX} 🎵 AUDIO PART DETECTED! Processing...`);
         const audioData = extractAudioData(parts);
         if (audioData) {
+          console.log(`${LOG_PREFIX} ✅ Audio data extracted: ${audioData.length} chars (base64)`);
           // DEBUG: Log first few audio chunks to verify Gemini is sending data
           if (this.audioPlaybackMs === 0) {
               console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO RECEIVED from Gemini. Chunk size: ${audioData.length} chars (base64)`);
@@ -791,12 +807,15 @@ CRITICAL RULES:
         } else {
              console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
         }
+      } else {
+        console.log(`${LOG_PREFIX} ⚠️ No audio part detected in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
       }
 
       // Handle text output (for transcription)
       if (hasTextPart(parts)) {
         const text = extractText(parts);
         if (text) {
+          console.log(`${LOG_PREFIX} 📝 Text output: ${text.substring(0, 100)}`);
           this.currentTranscript += text;
           this.emit('transcript:agent', {
             text,
@@ -808,6 +827,9 @@ CRITICAL RULES:
 
       // Handle function calls in content
       const functionCalls = extractFunctionCalls(parts);
+      if (functionCalls.length > 0) {
+        console.log(`${LOG_PREFIX} 🔧 Function calls: ${functionCalls.map(f => f.name).join(', ')}`);
+      }
       for (const fc of functionCalls) {
         const callId = fc.id || `fc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         this.pendingFunctionCalls.set(callId, { name: fc.name, args: fc.args });
@@ -817,11 +839,15 @@ CRITICAL RULES:
           args: fc.args,
         });
       }
+    } else {
+      console.log(`${LOG_PREFIX} ⚠️ Server content has no model_turn`);
     }
 
     // Turn complete
     if (content.turn_complete || content.turnComplete) {
+      console.log(`${LOG_PREFIX} ✋ Turn complete signal received`);
       if (this.currentTranscript) {
+        console.log(`${LOG_PREFIX} 📝 Final transcript: ${this.currentTranscript}`);
         this.emit('transcript:agent', {
           text: this.currentTranscript,
           isFinal: true,
@@ -836,7 +862,7 @@ CRITICAL RULES:
 
     // Interrupted
     if (content.interrupted) {
-      console.log(`${LOG_PREFIX} Response interrupted`);
+      console.log(`${LOG_PREFIX} 🛑 Response interrupted`);
       this.currentTranscript = '';
       if (this.currentResponseId) {
         this.emit('response:cancelled', { responseId: this.currentResponseId });
@@ -869,27 +895,36 @@ CRITICAL RULES:
       return;
     }
 
+    console.log(`${LOG_PREFIX} 🎵 handleAudioOutput called with ${base64Audio.length} chars of base64 audio`);
+
     // Start response if not already
     if (!this._isResponding) {
       this.currentResponseId = `resp-${Date.now()}`;
       this.setResponding(true, this.currentResponseId);
+      console.log(`${LOG_PREFIX} 🎬 Starting new response: ${this.currentResponseId}`);
     }
 
     // Decode PCM audio from Gemini (24kHz)
     const pcmBuffer = Buffer.from(base64Audio, 'base64');
+    console.log(`${LOG_PREFIX} 📦 Decoded PCM buffer: ${pcmBuffer.length} bytes (24kHz)`);
 
     // Transcode to G.711 for Telnyx
     const g711Buffer = this.transcoder.geminiToTelnyx(pcmBuffer, 24000);
+    console.log(`${LOG_PREFIX} 🔄 Transcoded to G.711: ${g711Buffer.length} bytes`);
 
-    // DEBUG: Log audio output from Gemini
+    // DEBUG: Log audio output from Gemini with quality metrics
     if (this.audioPlaybackMs === 0 || this.audioPlaybackMs % 1000 < 50) {
-      console.log(`${LOG_PREFIX} Received audio from Gemini: ${pcmBuffer.length} bytes PCM -> ${g711Buffer.length} bytes G.711`);
+      const compressionRatio = ((pcmBuffer.length / g711Buffer.length) * 100).toFixed(1);
+      const avgChunkSize = g711Buffer.length;
+      console.log(`${LOG_PREFIX} 📊 Audio: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${compressionRatio}% compression, avg chunk ${avgChunkSize}B)`);
     }
 
-    // Calculate duration (G.711: 8 bytes per ms)
+    // Calculate duration (G.711: 8 bytes per ms at 8kHz)
     const durationMs = g711Buffer.length / 8;
     this.audioPlaybackMs += durationMs;
+    console.log(`${LOG_PREFIX} ⏱️  Audio duration: ${durationMs.toFixed(0)}ms, total: ${this.audioPlaybackMs.toFixed(0)}ms`);
 
+    console.log(`${LOG_PREFIX} 📤 Emitting audio:delta event with ${g711Buffer.length} bytes`);
     this.emit('audio:delta', {
       audioBuffer: g711Buffer,
       format: this.config?.outputAudioFormat || 'g711_ulaw',

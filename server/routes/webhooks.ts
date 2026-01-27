@@ -389,7 +389,8 @@ router.post("/telnyx", async (req, res) => {
           console.error(`[Telnyx Webhook] Failed to forward AMD result to voice-dialer:`, amdErr);
         }
 
-        if (amdResult === 'machine' || amdResult === 'machine_end_beep' || amdResult === 'machine_end_silence' || amdResult === 'machine_end_other') {
+        // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
+        if (amdResult?.startsWith('machine') || amdResult === 'fax') {
           // Machine/voicemail detected - hang up immediately and record disposition
           try {
             const telnyxApiKey = process.env.TELNYX_API_KEY;

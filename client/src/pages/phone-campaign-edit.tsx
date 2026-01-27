@@ -21,7 +21,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PhoneCampaignSuppressionManager } from "@/components/phone-campaign-suppression-manager";
 import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowledge-config";
-import { SidebarFilters } from "@/components/filters/sidebar-filters";
+import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
+import { CampaignContextEditor } from "@/components/campaigns/CampaignContextEditor";
 
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
@@ -48,9 +49,9 @@ export default function PhoneCampaignEditPage() {
   const [campaignObjective, setCampaignObjective] = useState("");
   const [productServiceInfo, setProductServiceInfo] = useState("");
   const [talkingPoints, setTalkingPoints] = useState<string[]>([]);
-  const [newTalkingPoint, setNewTalkingPoint] = useState("");
   const [targetAudienceDescription, setTargetAudienceDescription] = useState("");
   const [successCriteria, setSuccessCriteria] = useState("");
+  const [campaignObjections, setCampaignObjections] = useState<any[]>([]);
 
   // Account Cap state
   const [capEnabled, setCapEnabled] = useState(false);
@@ -69,38 +70,18 @@ export default function PhoneCampaignEditPage() {
   // Organization selection state
   const [problemIntelligenceOrgId, setProblemIntelligenceOrgId] = useState<string | null>(null);
 
-  // Dial Mode state
-  const [dialMode, setDialMode] = useState<'manual' | 'power' | 'hybrid' | 'ai_agent'>('manual');
+  // Dial Mode state - AI Agent mode is the default and only supported mode
+  const [dialMode, setDialMode] = useState<'ai_agent'>('ai_agent');
 
   // AI Agent Concurrency state (for ai_agent dial mode)
   const [maxConcurrentCalls, setMaxConcurrentCalls] = useState<number>(50);
 
-  // Fetch campaign data
+  // Fetch campaign data - always refetch to ensure we have latest context fields
   const { data: campaign, isLoading: campaignLoading } = useQuery<any>({
     queryKey: [`/api/campaigns/${campaignId}`],
     enabled: !!campaignId,
-  });
-
-  // Fetch segments
-  const { data: segments = [] } = useQuery<any[]>({
-    queryKey: ['/api/segments'],
-  });
-
-  // Fetch lists
-  const { data: lists = [] } = useQuery<any[]>({
-    queryKey: ['/api/lists'],
-  });
-
-  // Fetch domain sets
-  const { data: domainSets = [] } = useQuery<any[]>({
-    queryKey: ['/api/domain-sets'],
-  });
-
-  // Live count for applied filters (when using Advanced Filters)
-  const { data: filterCountData } = useQuery<{ count: number}>({
-    queryKey: ["/api/filters/count/contact", JSON.stringify(appliedFilterGroup)],
-    enabled: audienceSource === "filters" && !!appliedFilterGroup && (appliedFilterGroup?.conditions?.length ?? 0) > 0,
-    refetchOnWindowFocus: false,
+    staleTime: 0, // Always consider data stale so it refetches
+    refetchOnMount: 'always', // Force refetch when component mounts
   });
 
   // Fetch export templates for lead delivery
@@ -124,6 +105,7 @@ export default function PhoneCampaignEditPage() {
       setTalkingPoints(campaign.talkingPoints || []);
       setTargetAudienceDescription(campaign.targetAudienceDescription || "");
       setSuccessCriteria(campaign.successCriteria || "");
+      setCampaignObjections(campaign.campaignObjections || []);
 
       // Initialize audience selections
       if (campaign.audienceRefs) {
@@ -166,8 +148,8 @@ export default function PhoneCampaignEditPage() {
       // Initialize organization
       setProblemIntelligenceOrgId(campaign.problemIntelligenceOrgId || null);
 
-      // Initialize dial mode
-      setDialMode(campaign.dialMode || 'manual');
+      // AI Agent mode is always used
+      // setDialMode is not needed as it's always 'ai_agent'
 
       // Initialize AI Agent settings
       if (campaign.aiAgentSettings?.maxConcurrentCalls) {
@@ -175,18 +157,6 @@ export default function PhoneCampaignEditPage() {
       }
     }
   }, [campaign]);
-
-  // Talking Points management
-  const addTalkingPoint = () => {
-    if (newTalkingPoint.trim()) {
-      setTalkingPoints(prev => [...prev, newTalkingPoint.trim()]);
-      setNewTalkingPoint('');
-    }
-  };
-
-  const removeTalkingPoint = (index: number) => {
-    setTalkingPoints(prev => prev.filter((_, i) => i !== index));
-  };
 
   // Update campaign mutation
   const updateMutation = useMutation({
@@ -268,10 +238,11 @@ export default function PhoneCampaignEditPage() {
     } : null;
 
     // Build AI Agent settings (merge with existing to preserve other settings)
-    const aiAgentSettings = dialMode === 'ai_agent' ? {
+    // AI Agent mode is always enabled
+    const aiAgentSettings = {
       ...(campaign?.aiAgentSettings || {}),
       maxConcurrentCalls,
-    } : campaign?.aiAgentSettings;
+    };
 
     updateMutation.mutate({
       name,
@@ -293,6 +264,7 @@ export default function PhoneCampaignEditPage() {
       talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
       targetAudienceDescription,
       successCriteria,
+      campaignObjections: campaignObjections.length > 0 ? campaignObjections : undefined,
     });
   };
 
@@ -447,137 +419,43 @@ export default function PhoneCampaignEditPage() {
           </Card>
 
           {/* Campaign Context Section */}
-          <Card className="border-primary/30 bg-primary/5">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Target className="w-5 h-5 text-primary" />
-                  <CardTitle>Campaign Context</CardTitle>
-                </div>
-                <CampaignContextRegenerate
-                  currentContext={{
-                    campaignObjective,
-                    productServiceInfo,
-                    talkingPoints,
-                    targetAudienceDescription,
-                    successCriteria,
-                  }}
-                  onApply={(generated) => {
-                    setCampaignObjective(generated.campaignObjective);
-                    setProductServiceInfo(generated.productServiceInfo);
-                    setTalkingPoints(generated.talkingPoints);
-                    setTargetAudienceDescription(generated.targetAudienceDescription);
-                    setSuccessCriteria(generated.successCriteria);
-                  }}
-                  campaignName={name}
-                />
-              </div>
-              <CardDescription>
-                Define the campaign goals and context. This information will be displayed to agents during calls
-                to help them understand the campaign objectives and have informed conversations.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Campaign Objective */}
-              <div className="space-y-2">
-                <Label htmlFor="campaign-objective">Campaign Objective</Label>
-                <Textarea
-                  id="campaign-objective"
-                  placeholder="e.g., Book qualified meetings with IT decision makers interested in cloud security solutions"
-                  value={campaignObjective}
-                  onChange={(e) => setCampaignObjective(e.target.value)}
-                  rows={2}
-                  data-testid="textarea-campaign-objective"
-                />
-                <p className="text-xs text-muted-foreground">What is the primary goal of each call?</p>
-              </div>
-
-              {/* Product/Service Info */}
-              <div className="space-y-2">
-                <Label htmlFor="product-service-info">
-                  <Package className="w-4 h-4 inline mr-1" />
-                  Product/Service Information
-                </Label>
-                <Textarea
-                  id="product-service-info"
-                  placeholder="Describe your product/service, key features, and value proposition..."
-                  value={productServiceInfo}
-                  onChange={(e) => setProductServiceInfo(e.target.value)}
-                  rows={4}
-                  data-testid="textarea-product-info"
-                />
-              </div>
-
-              {/* Key Talking Points */}
-              <div className="space-y-3">
-                <Label>
-                  <ListChecks className="w-4 h-4 inline mr-1" />
-                  Key Talking Points
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Add the main points agents should emphasize during conversations.
-                </p>
-                <div className="space-y-2">
-                  {talkingPoints.map((point, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-md">
-                      <span className="flex-1 text-sm">{point}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeTalkingPoint(index)}
-                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="e.g., Reduces security incidents by 40%"
-                      value={newTalkingPoint}
-                      onChange={(e) => setNewTalkingPoint(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTalkingPoint())}
-                      data-testid="input-new-talking-point"
-                    />
-                    <Button variant="outline" onClick={addTalkingPoint} data-testid="button-add-talking-point">
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Target Audience */}
-              <div className="space-y-2">
-                <Label htmlFor="target-audience">
-                  <Users className="w-4 h-4 inline mr-1" />
-                  Target Audience
-                </Label>
-                <Textarea
-                  id="target-audience"
-                  placeholder="e.g., CISOs and IT Directors at mid-market companies (500-5000 employees) in healthcare and finance"
-                  value={targetAudienceDescription}
-                  onChange={(e) => setTargetAudienceDescription(e.target.value)}
-                  rows={2}
-                  data-testid="textarea-target-audience"
-                />
-                <p className="text-xs text-muted-foreground">Who are you trying to reach?</p>
-              </div>
-
-              {/* Success Criteria */}
-              <div className="space-y-2">
-                <Label htmlFor="success-criteria">Success Criteria</Label>
-                <Textarea
-                  id="success-criteria"
-                  placeholder="e.g., Meeting booked with decision maker, or referral to correct contact"
-                  value={successCriteria}
-                  onChange={(e) => setSuccessCriteria(e.target.value)}
-                  rows={2}
-                  data-testid="textarea-success-criteria"
-                />
-                <p className="text-xs text-muted-foreground">What counts as a successful call outcome?</p>
-              </div>
-            </CardContent>
-          </Card>
+          <CampaignContextEditor
+            data={{
+              campaignObjective,
+              productServiceInfo,
+              talkingPoints,
+              targetAudienceDescription,
+              successCriteria,
+              campaignObjections,
+            }}
+            onChange={(newData) => {
+              setCampaignObjective(newData.campaignObjective);
+              setProductServiceInfo(newData.productServiceInfo);
+              setTalkingPoints(newData.talkingPoints);
+              setTargetAudienceDescription(newData.targetAudienceDescription);
+              setSuccessCriteria(newData.successCriteria);
+              setCampaignObjections(newData.campaignObjections || []);
+            }}
+            headerAction={
+              <CampaignContextRegenerate
+                currentContext={{
+                  campaignObjective,
+                  productServiceInfo,
+                  talkingPoints,
+                  targetAudienceDescription,
+                  successCriteria,
+                }}
+                onApply={(generated) => {
+                  setCampaignObjective(generated.campaignObjective);
+                  setProductServiceInfo(generated.productServiceInfo);
+                  setTalkingPoints(generated.talkingPoints);
+                  setTargetAudienceDescription(generated.targetAudienceDescription);
+                  setSuccessCriteria(generated.successCriteria);
+                }}
+                campaignName={name}
+              />
+            }
+          />
         </TabsContent>
 
         {/* Audience Tab */}
@@ -590,196 +468,28 @@ export default function PhoneCampaignEditPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Audience Source</Label>
-                <RadioGroup value={audienceSource} onValueChange={(value: any) => setAudienceSource(value)}>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="filters" id="filters" data-testid="radio-filters" />
-                    <Label htmlFor="filters">Advanced Filters</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="segment" id="segment" data-testid="radio-segment" />
-                    <Label htmlFor="segment">Segments</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="list" id="list" data-testid="radio-list" />
-                    <Label htmlFor="list">Lists</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="domain_set" id="domain_set" data-testid="radio-domain-set" />
-                    <Label htmlFor="domain_set">Domain Sets</Label>
-                  </div>
-                </RadioGroup>
-              </div>
-
-              {/* Advanced Filters */}
-              {audienceSource === "filters" && (
-                <div className="space-y-4">
-                  <Label>Advanced Audience Filters</Label>
-                  {/* SidebarFilters reused from create workflow */}
-                  {/* Avoid importing types; treat filterGroup as any for edit parity */}
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  {/**/}
-                  <SidebarFilters
-                    entityType="contact"
-                    onApplyFilter={(newFilter: any) => {
-                      setFilterGroup(newFilter);
-                      setAppliedFilterGroup(newFilter);
-                    }}
-                    initialFilter={filterGroup}
-                  />
-                  {filterGroup && (filterGroup.conditions?.length ?? 0) > 0 && (
-                    <div className="border rounded-lg p-3 bg-muted/30">
-                      <p className="text-sm">
-                        Active Filters: <strong>{filterGroup.logic}</strong> of {(filterGroup.conditions?.length ?? 0)} conditions
-                      </p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Estimated Audience Size: <strong>{(filterCountData?.count ?? 0).toLocaleString()}</strong> contacts
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Segments Selection */}
-              {audienceSource === "segment" && (
-                <div className="space-y-2">
-                  <Label>Select Segments</Label>
-                  <div className="border rounded-lg p-4 space-y-2 max-h-64 overflow-y-auto">
-                    {segments.map((segment: any) => (
-                      <div key={segment.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`segment-${segment.id}`}
-                          checked={selectedSegments.includes(segment.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedSegments([...selectedSegments, segment.id]);
-                            } else {
-                              setSelectedSegments(selectedSegments.filter(id => id !== segment.id));
-                            }
-                          }}
-                          data-testid={`checkbox-segment-${segment.id}`}
-                        />
-                        <Label htmlFor={`segment-${segment.id}`} className="cursor-pointer">
-                          {segment.name}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Lists Selection */}
-              {audienceSource === "list" && (
-                <div className="space-y-2">
-                  <Label>Select Lists</Label>
-                  <div className="border rounded-lg p-4 space-y-2 max-h-64 overflow-y-auto">
-                    {lists.map((list: any) => (
-                      <div key={list.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`list-${list.id}`}
-                          checked={selectedLists.includes(list.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedLists([...selectedLists, list.id]);
-                            } else {
-                              setSelectedLists(selectedLists.filter(id => id !== list.id));
-                            }
-                          }}
-                          data-testid={`checkbox-list-${list.id}`}
-                        />
-                        <Label htmlFor={`list-${list.id}`} className="cursor-pointer">
-                          {list.name}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Domain Sets Selection */}
-              {audienceSource === "domain_set" && (
-                <div className="space-y-2">
-                  <Label>Select Domain Sets</Label>
-                  <div className="border rounded-lg p-4 space-y-2 max-h-64 overflow-y-auto">
-                    {domainSets.map((domainSet: any) => (
-                      <div key={domainSet.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`domain-set-${domainSet.id}`}
-                          checked={selectedDomainSets.includes(domainSet.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedDomainSets([...selectedDomainSets, domainSet.id]);
-                            } else {
-                              setSelectedDomainSets(selectedDomainSets.filter(id => id !== domainSet.id));
-                            }
-                          }}
-                          data-testid={`checkbox-domain-set-${domainSet.id}`}
-                        />
-                        <Label htmlFor={`domain-set-${domainSet.id}`} className="cursor-pointer">
-                          {domainSet.name}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Exclusions (Segments/Lists) */}
-              <div className="space-y-2">
-                <Label>Exclusions</Label>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-sm">Exclude Segments</Label>
-                    <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
-                      {segments.map((segment: any) => (
-                        <div key={`ex-seg-${segment.id}`} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`ex-segment-${segment.id}`}
-                            checked={excludedSegments.includes(segment.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setExcludedSegments([...excludedSegments, segment.id]);
-                              } else {
-                                setExcludedSegments(excludedSegments.filter(id => id !== segment.id));
-                              }
-                            }}
-                          />
-                          <Label htmlFor={`ex-segment-${segment.id}`} className="cursor-pointer">
-                            {segment.name}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-sm">Exclude Lists</Label>
-                    <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
-                      {lists.map((list: any) => (
-                        <div key={`ex-list-${list.id}`} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`ex-list-${list.id}`}
-                            checked={excludedLists.includes(list.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setExcludedLists([...excludedLists, list.id]);
-                              } else {
-                                setExcludedLists(excludedLists.filter(id => id !== list.id));
-                              }
-                            }}
-                          />
-                          <Label htmlFor={`ex-list-${list.id}`} className="cursor-pointer">
-                            {list.name}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Exclusions apply regardless of selected source.
-                </p>
-              </div>
+              <CampaignAudienceSelector
+                value={{
+                  source: audienceSource,
+                  selectedSegments,
+                  selectedLists,
+                  selectedDomainSets,
+                  excludedSegments,
+                  excludedLists,
+                  filterGroup
+                }}
+                onChange={(newSelection) => {
+                  setAudienceSource(newSelection.source);
+                  setSelectedSegments(newSelection.selectedSegments || []);
+                  setSelectedLists(newSelection.selectedLists || []);
+                  setSelectedDomainSets(newSelection.selectedDomainSets || []);
+                  setExcludedSegments(newSelection.excludedSegments || []);
+                  setExcludedLists(newSelection.excludedLists || []);
+                  setFilterGroup(newSelection.filterGroup);
+                  setAppliedFilterGroup(newSelection.filterGroup);
+                }}
+                hideSummary={false}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -817,73 +527,34 @@ export default function PhoneCampaignEditPage() {
 
         {/* Settings Tab */}
         <TabsContent value="settings" className="space-y-4">
-          {/* Dial Mode Selection */}
-          <Card>
+          {/* AI Agent Mode */}
+          <Card className="border-primary/30 bg-primary/5">
             <CardHeader>
-              <CardTitle>Dialing Mode</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="w-5 h-5 text-primary" />
+                AI Voice Agent Mode
+              </CardTitle>
               <CardDescription>
-                Choose how calls are initiated for this campaign
+                AI voice agent handles calls autonomously using Gemini Live voice technology
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* AI Agent Concurrency Settings */}
               <div className="space-y-2">
-                <Label>Campaign Dialing Mode</Label>
-                <Select
-                  value={dialMode}
-                  onValueChange={(value: 'manual' | 'power' | 'hybrid' | 'ai_agent') => setDialMode(value)}
-                >
-                  <SelectTrigger data-testid="select-dial-mode">
-                    <SelectValue placeholder="Select dialing mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">
-                      <div className="flex flex-col">
-                        <span>Manual Dialing</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="power">
-                      <div className="flex flex-col">
-                        <span>Power Dialing</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="hybrid">
-                      <div className="flex flex-col">
-                        <span>Hybrid Mode</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="ai_agent">
-                      <div className="flex flex-col">
-                        <span>AI Agent</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="max-concurrent-calls">Max Concurrent Calls</Label>
+                <Input
+                  id="max-concurrent-calls"
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={maxConcurrentCalls}
+                  onChange={(e) => setMaxConcurrentCalls(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  data-testid="input-max-concurrent-calls"
+                />
                 <p className="text-sm text-muted-foreground">
-                  {dialMode === 'manual' && 'Agents manually dial each contact one at a time.'}
-                  {dialMode === 'power' && 'System automatically dials the next contact when an agent becomes available.'}
-                  {dialMode === 'hybrid' && 'Combines human agents with AI assistance for call handling.'}
-                  {dialMode === 'ai_agent' && 'AI voice agent handles calls autonomously using the assigned virtual agent.'}
+                  Maximum number of simultaneous AI calls for this campaign (1-100)
                 </p>
               </div>
-
-              {/* AI Agent Concurrency Settings */}
-              {dialMode === 'ai_agent' && (
-                <div className="space-y-2 pt-4 border-t">
-                  <Label htmlFor="max-concurrent-calls">Max Concurrent Calls</Label>
-                  <Input
-                    id="max-concurrent-calls"
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={maxConcurrentCalls}
-                    onChange={(e) => setMaxConcurrentCalls(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
-                    data-testid="input-max-concurrent-calls"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Maximum number of simultaneous AI calls for this campaign (1-100)
-                  </p>
-                </div>
-              )}
             </CardContent>
           </Card>
 

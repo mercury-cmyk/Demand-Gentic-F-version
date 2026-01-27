@@ -14,6 +14,7 @@ import {
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { env } from "../env";
+import { getOrganizationById } from "../services/problem-intelligence/organization-service";
 
 
 const router = Router();
@@ -70,6 +71,22 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
         dialMode: campaign.dialMode,
         requiredDialMode: "ai_agent or hybrid"
       });
+    }
+
+    // Fetch campaign organization for organization name
+    // Priority: campaignOrg.name > aiSettings.persona.companyName > fallback
+    let campaignOrganizationName: string | undefined;
+    const campaignOrgId = (campaign as any).problemIntelligenceOrgId;
+    if (campaignOrgId) {
+      try {
+        const campaignOrg = await getOrganizationById(campaignOrgId);
+        if (campaignOrg) {
+          campaignOrganizationName = campaignOrg.name;
+          console.log(`[Campaign Test Call] Using organization: ${campaignOrganizationName} (${campaignOrgId})`);
+        }
+      } catch (err) {
+        console.warn(`[Campaign Test Call] Failed to fetch organization ${campaignOrgId}:`, err);
+      }
     }
 
     // Get the virtual agent assigned to this campaign
@@ -154,16 +171,29 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       testedBy: userId,
     }).returning();
 
-    // Build WebSocket URL for Voice Dialer
-    const wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0] ||
+    // Determine provider FIRST (needed for WebSocket path)
+    // Determine provider - default to Google Gemini Live (same as production campaigns)
+    const defaultProvider = env.VOICE_PROVIDER?.toLowerCase() || 'google';
+    const isGoogleDefault = !defaultProvider.includes('openai');
+    const effectiveProvider = validatedData.voiceProvider || (isGoogleDefault ? 'google' : 'openai');
+
+    // Build WebSocket URL for the appropriate dialer
+    // CRITICAL: Use /gemini-live-dialer for Google, /voice-dialer for OpenAI
+    // This ensures test calls use the SAME workflow as actual campaign calls
+    const dialerPath = effectiveProvider === 'google' ? '/gemini-live-dialer' : '/voice-dialer';
+
+    let wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] ||
                    process.env.REPLIT_DEV_DOMAIN ||
                    req.get('X-Public-Host') ||
                    req.get('host') ||
                    'localhost:5000';
 
+    // Remove any trailing path from wsHost
+    wsHost = wsHost.replace(/\/(voice-dialer|gemini-live-dialer).*$/, '');
+
     const wsUrl = wsHost.startsWith('wss://') || wsHost.startsWith('ws://')
-      ? `${wsHost}/voice-dialer`
-      : `wss://${wsHost}/voice-dialer`;
+      ? `${wsHost}${dialerPath}`
+      : `wss://${wsHost}${dialerPath}`;
 
     // Prepare system prompt with test contact variables
     const agentSettings = assignment.settings as any || {};
@@ -186,12 +216,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
 
-    // Determine provider - default to Google Gemini Live
-    const defaultProvider = env.VOICE_PROVIDER?.toLowerCase() || 'google';
-    const isGoogleDefault = !defaultProvider.includes('openai');
-    const effectiveProvider = validatedData.voiceProvider || (isGoogleDefault ? 'google' : 'openai');
-
-    // Select appropriate voice based on provider
+    // Select appropriate voice based on provider (effectiveProvider determined above)
     let voice: string;
     if (effectiveProvider === 'google') {
       // Use Gemini voice if specified, otherwise default to 'Kore' (natural, friendly)
@@ -223,6 +248,21 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       first_message: assignment.firstMessage,
       voice,
       agent_name: assignment.agentName,
+      // CRITICAL: Include contact context for Gemini Live placeholder substitution
+      // These fields match what gemini-live-dialer.ts expects in CallContext
+      contact_name: validatedData.testContactName,
+      contact_first_name: validatedData.testContactName?.split(' ')[0] || validatedData.testContactName,
+      contact_job_title: validatedData.testJobTitle,
+      account_name: validatedData.testCompanyName,
+      // Priority: campaign organization > persona companyName > fallback
+      organization_name: campaignOrganizationName || (agentSettings as any)?.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+      system_prompt: systemPrompt, // Include full system prompt for Gemini
+      // Campaign context for AI agent behavior
+      campaign_objective: (campaign as any).campaignObjective || '',
+      success_criteria: (campaign as any).successCriteria || '',
+      target_audience_description: (campaign as any).targetAudienceDescription || '',
+      product_service_info: (campaign as any).productServiceInfo || '',
+      talking_points: (campaign as any).talkingPoints || [],
       test_contact: {
         name: validatedData.testContactName,
         company: validatedData.testCompanyName,
@@ -265,7 +305,10 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
         webhookHost = u.host; // demandgentic.ai
       } catch {}
     }
-    webhookHost = webhookHost || 'localhost:5000';
+    
+    // Ensure host doesn't have protocol
+    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
+    
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
@@ -785,7 +828,8 @@ router.post("/webhook", async (req, res) => {
         const amdResult = payload?.result || payload?.machine_detection_result;
         console.log(`[Test Call Webhook] Machine detection result for test call ${testCallId}: ${amdResult}`);
         
-        if (amdResult === 'machine' || amdResult === 'voicemail') {
+        // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
+        if (amdResult?.startsWith('machine') || amdResult === 'voicemail' || amdResult === 'fax') {
           // Mark as machine detected and hang up immediately
           await db.update(campaignTestCalls)
             .set({

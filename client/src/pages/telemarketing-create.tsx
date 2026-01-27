@@ -120,7 +120,7 @@ export default function TelemarketingCreatePage() {
         audienceRefs,
         callScript: data.content?.script,
         qualificationQuestions: data.content?.qualificationFields,
-        dialMode: data.dialMode || 'manual',
+        dialMode: 'ai_agent', // AI Agent mode is the default and only supported mode
         hybridSettings: data.hybridSettings || undefined,
         aiAgentSettings: data.aiAgentSettings || undefined,
         scheduleJson,
@@ -134,6 +134,13 @@ export default function TelemarketingCreatePage() {
         endDate: data.scheduling?.endDate || null,
         costPerLead: data.scheduling?.costPerLead ? parseFloat(data.scheduling.costPerLead) : null,
         qaParameters: data.qaParameters || null,
+        // Campaign Context fields (AI Agent Campaign Layer)
+        campaignObjective: data.campaignObjective || null,
+        productServiceInfo: data.productServiceInfo || null,
+        talkingPoints: data.talkingPoints?.length > 0 ? data.talkingPoints : null,
+        targetAudienceDescription: data.targetAudienceDescription || null,
+        successCriteria: data.successCriteria || null,
+        campaignObjections: data.campaignObjections?.length > 0 ? data.campaignObjections : null,
       };
 
       await apiRequest("POST", "/api/campaigns", campaignPayload);

@@ -412,14 +412,23 @@ export class TelnyxAiBridge extends EventEmitter {
       // Extract just the hostname from TELNYX_WEBHOOK_URL (e.g., "demandgentic.ai" from "https://demandgentic.ai/api/webhooks/telnyx")
       // Prefer explicit TeXML host override if provided
       let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST;
-      if (!webhookHost && this.webhookUrl) {
+
+      // Helper to extract just the hostname from a URL (strips protocol and path)
+      const extractHost = (urlString: string): string => {
         try {
-          const url = new URL(this.webhookUrl);
-          webhookHost = url.host; // Gets just "demandgentic.ai"
+          const url = new URL(urlString);
+          return url.host;
         } catch {
           // Fallback: strip protocol and path manually
-          webhookHost = this.webhookUrl.replace('https://', '').replace('http://', '').split('/')[0];
+          return urlString.replace('https://', '').replace('http://', '').split('/')[0];
         }
+      };
+
+      // Strip protocol from environment variable if it contains one
+      if (webhookHost) {
+        webhookHost = extractHost(webhookHost);
+      } else if (this.webhookUrl) {
+        webhookHost = extractHost(this.webhookUrl);
       }
       webhookHost = webhookHost || 'localhost';
       const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
@@ -477,19 +486,38 @@ export class TelnyxAiBridge extends EventEmitter {
         // Include agent configuration for WebSocket session
         // system_prompt is built by Gemini Live Dialer from agent_settings
         first_message: settings.scripts?.opening || '',
-        voice: settings.persona?.voice || 'nova',
+        voice: settings.persona?.voice || 'Puck', // Default to Gemini 2.5 compatible voice
         agent_name: settings.persona?.name || '',
         agent_settings: settings,
-        // Contact context for personalization (using canonical field names)
+        // CRITICAL: Field names must match what gemini-live-dialer.ts expects
+        // gemini-live-dialer looks for: contact_name, contact_first_name, contact_job_title, account_name, organization_name
+        contact_name: contactFullName || `${context.contactFirstName || ''} ${context.contactLastName || ''}`.trim(),
+        contact_first_name: context.contactFirstName || '',
+        contact_last_name: context.contactLastName || '',
+        contact_job_title: context.contactTitle || '',
+        account_name: context.companyName || '',
+        // CRITICAL: Use organization_name from context (set by orchestrator from persona.companyName)
+        // Do NOT use campaign.name - that's the campaign name, not the organization
+        organization_name: context.organizationName || settings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+        company_name: context.companyName || '',
+        // System prompt for the AI agent
+        system_prompt: settings.scripts?.systemPrompt || '',
+        // Campaign context for AI agent behavior
+        campaign_objective: context.campaignObjective || '',
+        success_criteria: context.successCriteria || '',
+        target_audience_description: context.targetAudienceDescription || '',
+        product_service_info: context.productServiceInfo || '',
+        talking_points: context.talkingPoints || [],
+        // Call flow configuration - state machine for AI agent execution
+        call_flow: (context as any).callFlow || undefined,
+        // Max call duration in seconds - auto-hangup after this time
+        max_call_duration_seconds: context.maxCallDurationSeconds || undefined,
+        // Also include canonical dot-notation fields for other consumers
         'contact.full_name': contactFullName || `${context.contactFirstName || ''} ${context.contactLastName || ''}`.trim(),
         'contact.first_name': context.contactFirstName || '',
         'contact.last_name': context.contactLastName || '',
         'contact.job_title': context.contactTitle || '',
         'account.name': context.companyName || '',
-        // Legacy field names for backward compatibility
-        contact_first_name: context.contactFirstName,
-        contact_last_name: context.contactLastName,
-        company_name: context.companyName,
       };
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
@@ -522,10 +550,9 @@ export class TelnyxAiBridge extends EventEmitter {
             StatusCallback: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
             // Include client_state so AMD webhook receives call context
             ClientState: clientStateB64,
-            // Enable call recording (all calls recorded for transcription and QA)
-            Record: "true",
-            RecordingChannels: "dual",
-            RecordingFileFormat: "wav",
+            // NOTE: Recording disabled to fix audio noise issue
+            // Recording was causing audio artifacts in the bidirectional stream
+            // If recording is needed, use Telnyx's recording webhook instead
           }),
         });
         
@@ -560,10 +587,8 @@ export class TelnyxAiBridge extends EventEmitter {
             client_state: clientStateB64,
             // Prefer explicit webhook URL override for TeXML if provided
             webhook_url: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
-            // Enable call recording (all calls recorded for transcription and QA)
-            record_type: "all",
-            recording_channels: "dual",
-            record_file_format: "wav",
+            // NOTE: Recording disabled to fix audio noise issue
+            // Recording was causing audio artifacts in the bidirectional stream
             // Enable AMD (Answering Machine Detection)
             answering_machine_detection: "detect_words",
             answering_machine_detection_config: {
@@ -1070,7 +1095,8 @@ export class TelnyxAiBridge extends EventEmitter {
       console.error(`[TelnyxAiBridge] Failed to forward AMD result to voice-dialer:`, e);
     }
 
-    if (amdResult === "machine" || amdResult?.startsWith('machine_end') || amdResult === "fax") {
+    // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
+    if (amdResult?.startsWith('machine') || amdResult === "fax") {
       call.disposition = "voicemail";
       await this.hangupCall(call.callControlId);
       this.emit("call:voicemail", { callId });

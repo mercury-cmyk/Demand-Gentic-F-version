@@ -37,7 +37,8 @@ export class LogStreamingService {
   constructor(server: any) {
     this.pubsub = new PubSub({ projectId: PROJECT_ID });
     this.logging = new Logging({ projectId: PROJECT_ID });
-    this.wss = new WebSocketServer({ server });
+    // Use noServer: true to avoid conflict with manual upgrade handling in index.ts
+    this.wss = new WebSocketServer({ noServer: true });
 
     this.setupWebSocketServer();
   }

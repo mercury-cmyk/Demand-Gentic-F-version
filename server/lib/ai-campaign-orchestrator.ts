@@ -10,6 +10,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import { createQueue, createWorker, isQueueAvailable } from './queue';
 import { storage } from '../storage';
 import { getTelnyxAiBridge } from '../services/telnyx-ai-bridge';
+import * as sipDialer from '../services/sip';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
@@ -19,17 +20,18 @@ import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
 import { toZonedTime, format } from 'date-fns-tz';
 import { getDay, getHours } from 'date-fns';
-import { 
-  isWithinBusinessHours as checkBusinessHours, 
-  detectContactTimezone, 
-  getBusinessHoursForCountry 
+import {
+  isWithinBusinessHours as checkBusinessHours,
+  detectContactTimezone,
+  getBusinessHoursForCountry
 } from '../utils/business-hours';
+import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 50; // Max 50 concurrent calls
+const DEFAULT_MAX_CONCURRENT_CALLS = 20; // Max 20 concurrent calls
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
-const STUCK_ITEM_TIMEOUT_MS = 600000; // 10 minutes - increased to allow long AI conversations without reset
+const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
 
 // Telnyx error codes that should pause the campaign (account-level issues)
 const TELNYX_ACCOUNT_DISABLED_CODE = 10010; // "Account is disabled D17"
@@ -486,30 +488,57 @@ async function startupResumeStuckCalls(): Promise<void> {
 }
 
 /**
- * WATCHDOG: Reset stuck in_progress items that haven't been updated for 3+ minutes
+ * WATCHDOG: Reset stuck in_progress items that haven't been updated for 5+ minutes
  * This self-heals when calls fail silently or webhooks never arrive
+ *
+ * IMPORTANT: The gemini-live-dialer now marks completed calls properly, so watchdog
+ * should only catch truly stuck items (e.g., server crash during call, network failure)
  */
 async function resetStuckItems(): Promise<number> {
   try {
     const cutoffTime = new Date(Date.now() - STUCK_ITEM_TIMEOUT_MS);
-    
+
+    // First, log stuck items for debugging (helps identify patterns)
+    const stuckItems = await db.execute(sql`
+      SELECT cq.id, cq.campaign_id, cq.contact_id, cq.updated_at, c.name as campaign_name
+      FROM campaign_queue cq
+      LEFT JOIN campaigns c ON c.id = cq.campaign_id
+      WHERE cq.status = 'in_progress'
+        AND cq.updated_at < ${cutoffTime}
+      LIMIT 20
+    `);
+
+    if (stuckItems.rows && stuckItems.rows.length > 0) {
+      console.log(`[AI Orchestrator] WATCHDOG: Found ${stuckItems.rows.length} stuck items (stale > ${STUCK_ITEM_TIMEOUT_MS / 60000}min):`);
+      for (const row of stuckItems.rows as any[]) {
+        const staleMinutes = Math.round((Date.now() - new Date(row.updated_at).getTime()) / 60000);
+        console.log(`  - Queue ${row.id} (campaign: ${row.campaign_name}, stale: ${staleMinutes}min)`);
+      }
+    }
+
     // Find and reset stuck items
     const result = await db.execute(sql`
-      UPDATE campaign_queue 
-      SET status = 'queued', 
+      UPDATE campaign_queue
+      SET status = 'queued',
           next_attempt_at = NOW() + INTERVAL '30 seconds',
           enqueued_reason = COALESCE(enqueued_reason, '') || '|watchdog_reset:' || to_char(NOW(), 'HH24:MI:SS'),
           updated_at = NOW()
       WHERE status = 'in_progress'
         AND updated_at < ${cutoffTime}
-      RETURNING id
+      RETURNING id, campaign_id
     `);
-    
+
     const resetCount = result.rows?.length || 0;
     if (resetCount > 0) {
-      console.log(`[AI Orchestrator] WATCHDOG: Reset ${resetCount} stuck in_progress items (stale > 3min)`);
+      console.log(`[AI Orchestrator] WATCHDOG: Reset ${resetCount} stuck in_progress items`);
+
+      // Log affected campaigns for monitoring
+      const affectedCampaigns = new Set((result.rows as any[]).map(r => r.campaign_id).filter(Boolean));
+      if (affectedCampaigns.size > 0) {
+        console.log(`[AI Orchestrator] WATCHDOG: Affected campaigns: ${[...affectedCampaigns].join(', ')}`);
+      }
     }
-    
+
     return resetCount;
   } catch (error) {
     console.error('[AI Orchestrator] WATCHDOG error:', error);
@@ -667,6 +696,22 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   const virtualAgent = await getCampaignVirtualAgent(campaignId);
   if (virtualAgent) {
     console.log(`[AI Orchestrator] Using virtual agent: ${virtualAgent.name} (${virtualAgent.externalAgentId || 'no external ID'})`);
+  }
+
+  // Fetch campaign organization for organization name
+  // Priority: campaignOrg.name > aiSettings.persona.companyName > fallback
+  let campaignOrganizationName: string | undefined;
+  const campaignOrgId = (campaign as any).problemIntelligenceOrgId;
+  if (campaignOrgId) {
+    try {
+      const campaignOrg = await getOrganizationById(campaignOrgId);
+      if (campaignOrg) {
+        campaignOrganizationName = campaignOrg.name;
+        console.log(`[AI Orchestrator] Using organization: ${campaignOrganizationName} (${campaignOrgId})`);
+      }
+    } catch (err) {
+      console.warn(`[AI Orchestrator] Failed to fetch organization ${campaignOrgId}:`, err);
+    }
   }
 
   const fromNumber = process.env.TELNYX_FROM_NUMBER;
@@ -943,7 +988,14 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   }
 
   // Initiate calls in parallel batches
-  const bridge = getTelnyxAiBridge();
+  // Use SIP dialer if enabled AND initialized, otherwise fall back to Telnyx API bridge
+  const useSip = sipDialer.isReady();
+  const bridge = useSip ? null : getTelnyxAiBridge();
+
+  if (useSip) {
+    console.log(`[AI Orchestrator] Using SIP-based calling for campaign ${campaignId}`);
+  }
+
   let initiated = 0;
 
   // Create or reuse a dialer run for this orchestration batch
@@ -1053,6 +1105,18 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
           virtualAgentId: virtualAgent?.id || undefined,
           runId: dialerRunId || undefined,
           callAttemptId: callAttemptId || undefined,
+          // Campaign context for AI agent behavior
+          // Priority: campaign organization > persona companyName > fallback
+          organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+          campaignObjective: (campaign as any).campaignObjective || undefined,
+          successCriteria: (campaign as any).successCriteria || undefined,
+          targetAudienceDescription: (campaign as any).targetAudienceDescription || undefined,
+          productServiceInfo: (campaign as any).productServiceInfo || undefined,
+          talkingPoints: (campaign as any).talkingPoints || undefined,
+          // Call flow configuration - state machine for AI agent execution
+          callFlow: (campaign as any).callFlow || undefined,
+          // Max call duration in seconds - auto-hangup after this time
+          maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || undefined,
         };
 
         // PRE-LOCK: Mark as in_progress BEFORE initiation to prevent race conditions
@@ -1070,8 +1134,44 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
         `);
         console.log(`[AI Orchestrator] PRE-LOCK: Queue item ${item.id} updated successfully`);
 
-        const callResult = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
-        const conversationId = callResult?.callControlId || callResult?.callId || '';
+        // Initiate call via SIP or Telnyx API based on configuration
+        let callResult: any;
+        let conversationId: string;
+
+        if (useSip) {
+          // Use SIP-based calling
+          const sipResult = await sipDialer.initiateAiCall({
+            toNumber: phoneNumber,
+            fromNumber,
+            campaignId,
+            contactId: contactId || '',
+            queueItemId: item.id,
+            // Use configured voice from persona settings, NOT the agent/persona name
+            // Gemini only supports: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr
+            voiceName: aiSettings.persona?.voice || 'Puck',
+            contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',
+            contactFirstName: item.contact_first_name || 'there',
+            contactJobTitle: item.contact_job_title || 'Decision Maker',
+            accountName: item.account_name || 'your company',
+            organizationName: campaignOrganizationName || aiSettings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
+            campaignName: campaign.name,
+            campaignObjective: (campaign as any).campaignObjective || undefined,
+            productServiceInfo: (campaign as any).productServiceInfo || undefined,
+            talkingPoints: (campaign as any).talkingPoints || undefined,
+            maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || undefined,
+          });
+
+          if (!sipResult.success) {
+            throw new Error(sipResult.error || 'SIP call initiation failed');
+          }
+
+          callResult = sipResult;
+          conversationId = sipResult.callId || '';
+        } else {
+          // Use Telnyx API-based calling (legacy)
+          callResult = await bridge!.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
+          conversationId = callResult?.callControlId || callResult?.callId || '';
+        }
 
         // POST-LOCK UPDATE: Add the actual conversation ID for webhook matching
         await db.execute(sql`

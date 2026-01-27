@@ -44,7 +44,7 @@ PUBLIC_WEBHOOK_HOST=steve-unbalking-guessingly.ngrok-free.dev
 ### Telephony (Telnyx)
 - `TELNYX_API_KEY` = KEY019BAF87FBC50E72BA2631B8EFEEE182_hXPCwJyx4zFUeNxXG3bCSn
 - `TELNYX_CONNECTION_ID` = 2845920641004078445
-- `TELNYX_FROM_NUMBER` = +15593366940
+- `TELNYX_FROM_NUMBER` = +12094571966
 - `TELNYX_WEBRTC_USERNAME` = gencred20sqoiCiQfm8IGokqswphdv6arwUzyfvhTpwd898ze
 - `TELNYX_WEBRTC_PASSWORD` = b7b521510b9c4b6685e8d20dd4107cdf
 - `TELNYX_CALL_CONTROL_APP_ID` = 2853482451592807572
@@ -153,7 +153,7 @@ Static environment variables are set in Cloud Run service spec:
 
 ### Telnyx Phone Number Discrepancy
 **Local (.env.local)**:
-- `TELNYX_FROM_NUMBER` = +15593366940
+- `TELNYX_FROM_NUMBER` = +12094571966
 
 **Cloud (env.yaml)**:
 - `TELNYX_FROM_NUMBER` = +13023601514 ⚠️ DIFFERENT

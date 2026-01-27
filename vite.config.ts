@@ -7,6 +7,17 @@ export default defineConfig({
   plugins: [
     react(),
     // runtimeErrorOverlay(), // Temporarily disabled to reduce noise
+    {
+      name: "disable-vite-client",
+      enforce: "post",
+      transformIndexHtml(html) {
+        // Remove Vite HMR client injection to prevent websocket attempts in dev
+        return html.replace(
+          /<script\s+type="module"\s+src="\/@vite\/client"><\/script>/g,
+          "",
+        );
+      },
+    },
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
@@ -60,5 +71,7 @@ export default defineConfig({
     },
     // Disable HMR - WebSocket frames getting corrupted
     hmr: false,
+    // Disable Vite websocket server entirely
+    ws: false,
   },
 });

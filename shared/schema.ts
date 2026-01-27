@@ -1,5 +1,7 @@
 // CRM Database Schema - referenced from blueprint:javascript_database
-import { sql } from "drizzle-orm";
+import { sql, relations } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
 import {
   pgTable,
   text,
@@ -22,90 +24,6 @@ import {
   vector,
   json // Import json type
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
-
-// Enums
-export const userRoleEnum = pgEnum('user_role', [
-  'admin',
-  'agent',
-  'quality_analyst',
-  'content_creator',
-  'campaign_manager'
-]);
-
-/**
- * Organization Type Enum
- * - super: The master organization (Pivotal B2B) - owns the platform
- * - client: Client organizations that use the platform services
- */
-export const organizationTypeEnum = pgEnum('organization_type', ['super', 'client']);
-
-/**
- * Organization Member Role Enum
- * Defines the role a user has within a specific organization
- * - owner: Full access to organization, can manage members and settings
- * - admin: Can manage organization settings but not member roles
- * - member: Standard access to organization resources
- */
-export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
-
-export const campaignTypeEnum = pgEnum('campaign_type', [
-  'email', 
-  'call', 
-  'combo',
-  'content_syndication',
-  'live_webinar',
-  'on_demand_webinar',
-  'high_quality_leads',
-  'executive_dinner',
-  'leadership_forum',
-  'conference',
-  'sql',
-  'appointment_generation',
-  'lead_qualification',
-  'data_validation',
-  'bant_leads'
-]);
-export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
-export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
-export const campaignStatusEnum = pgEnum('campaign_status', [
-  'draft',
-  'scheduled',
-  'active',
-  'paused',
-  'completed',
-  'cancelled'
-]);
-
-export const qaStatusEnum = pgEnum('qa_status', [
-  'new',
-  'under_review',
-  'approved',
-  'rejected',
-  'returned',
-  'published'
-]);
-
-export const leadDeliverySourceEnum = pgEnum('lead_delivery_source', [
-  'auto_webhook',
-  'manual'
-]);
-
-/**
- * Email Verification Status - Standardized 4-Status System
- * - valid: Verified deliverable emails (formerly: valid, safe_to_send, ok)
- * - acceptable: May deliver but has risk factors - catch-all, role accounts (formerly: accept_all, risky, send_with_caution)
- * - unknown: Cannot reliably determine (SMTP blocked, timeout, greylisting) (formerly: unknown)
- * - invalid: Hard failures - syntax errors, no MX, disabled, disposable, spam trap (formerly: invalid, disabled, disposable, spam_trap)
- */
-export const emailVerificationStatusEnum = pgEnum('email_verification_status', [
-  'valid',
-  'acceptable',
-  'unknown',
-  'invalid'
-]);
 
 export const orderStatusEnum = pgEnum('order_status', [
   'draft',
@@ -149,11 +67,57 @@ export const emailSuppressionReasonEnum = pgEnum('email_suppression_reason', [
   'manual'
 ]);
 
+// Organization and membership enums
+export const organizationTypeEnum = pgEnum('organization_type', ['super', 'client']);
+export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
+
+// Campaign enums
+export const campaignTypeEnum = pgEnum('campaign_type', [
+  'email',
+  'call',
+  'combo',
+  'content_syndication',
+  'live_webinar',
+  'on_demand_webinar',
+  'high_quality_leads',
+  'executive_dinner',
+  'leadership_forum',
+  'conference',
+  'sql',
+  'appointment_generation',
+  'lead_qualification',
+  'data_validation',
+  'bant_leads',
+  'webinar_invite'
+]);
+export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
+export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
+export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'scheduled', 'active', 'paused', 'completed', 'cancelled']);
+export const qaStatusEnum = pgEnum('qa_status', ['new', 'under_review', 'approved', 'rejected', 'returned', 'published']);
+export const leadDeliverySourceEnum = pgEnum('lead_delivery_source', ['auto_webhook', 'manual']);
+
 // Queue Target Agent Type - For routing queue items to specific agent types
 export const queueTargetAgentTypeEnum = pgEnum('queue_target_agent_type', ['human', 'ai', 'any']);
 
 // Dialer Run Type Enum - Execution modes for campaign dialing
 export const dialerRunTypeEnum = pgEnum('dialer_run_type', ['manual_dial', 'power_dial']);
+
+// Email Verification Status Enum
+export const emailVerificationStatusEnum = pgEnum('email_verification_status', [
+  'valid',
+  'acceptable',
+  'unknown',
+  'invalid'
+]);
+
+// User Role Enum (legacy roles aligned to existing type)
+export const userRoleEnum = pgEnum('user_role', [
+  'admin',
+  'agent',
+  'quality_analyst',
+  'content_creator',
+  'campaign_manager'
+]);
 
 // Dialer Run Status Enum
 export const dialerRunStatusEnum = pgEnum('dialer_run_status', [
@@ -638,6 +602,59 @@ export const activityEntityTypeEnum = pgEnum('activity_entity_type', [
   'lead',
   'user',
   'email_message'
+]);
+
+// ==================== MULTI-CHANNEL CAMPAIGN ENUMS ====================
+
+/** Channel type for multi-channel campaigns */
+export const channelTypeEnum = pgEnum('channel_type', ['email', 'voice']);
+
+/** Status of a channel variant */
+export const channelVariantStatusEnum = pgEnum('channel_variant_status', [
+  'draft',
+  'pending_review',
+  'approved',
+  'active',
+  'paused'
+]);
+
+/** Generation status for channel variants */
+export const channelGenerationStatusEnum = pgEnum('channel_generation_status', [
+  'not_configured',
+  'pending',
+  'generating',
+  'generated',
+  'approved',
+  'failed'
+]);
+
+/** Template scope for layered template system */
+export const templateScopeEnum = pgEnum('template_scope', [
+  'campaign',
+  'account',
+  'contact'
+]);
+
+/** Template types for voice channel */
+export const voiceTemplateTypeEnum = pgEnum('voice_template_type', [
+  'opening',
+  'gatekeeper',
+  'pitch',
+  'objection_handling',
+  'closing',
+  'voicemail'
+]);
+
+/** Template types for email channel */
+export const emailTemplateTypeEnum = pgEnum('email_template_type', [
+  'subject',
+  'preheader',
+  'greeting',
+  'body_intro',
+  'value_proposition',
+  'call_to_action',
+  'closing',
+  'signature'
 ]);
 
 // Users table
@@ -1247,7 +1264,7 @@ export const campaigns = pgTable("campaigns", {
   accountCapMode: accountCapModeEnum("account_cap_mode"),
 
   // Dial Mode (Manual, Hybrid, or AI Agent)
-  dialMode: dialModeEnum("dial_mode").notNull().default('manual'),
+  dialMode: dialModeEnum("dial_mode").notNull().default('ai_agent'),
 
   // Power Dialer Settings (AMD & Voicemail)
   powerSettings: jsonb("power_settings"), // { amd: { enabled, confidenceThreshold, timeout, unknownAction }, voicemailPolicy: { enabled, action, message, campaign_daily_vm_cap, contact_vm_cap, region_blacklist } }
@@ -1302,8 +1319,20 @@ export const campaigns = pgTable("campaigns", {
   successCriteria: text("success_criteria"), // e.g., "Meeting booked with decision maker"
   campaignContextBrief: text("campaign_context_brief"), // Short summary for AI context injection
 
+  // Call Flow Configuration - defines the state machine for AI agent call execution
+  // Structure: { steps: CallFlowStep[], defaultBehavior: string }
+  // CallFlowStep: { id, name, description, entryConditions, allowedUtterances, exitConditions, objectionHandling, nextSteps }
+  callFlow: jsonb("call_flow"), // Call flow state machine configuration
+
   // Account Intelligence Toggle - allows campaigns to work without intelligence generation delays
   requireAccountIntelligence: boolean("require_account_intelligence").default(false), // When false, skips intelligence lookup for immediate call start
+
+  // ==================== MULTI-CHANNEL CAMPAIGN FIELDS ====================
+  // Enabled channels for this campaign (e.g., ['email', 'voice'] for both)
+  enabledChannels: text("enabled_channels").array().default(sql`ARRAY['voice']::text[]`),
+
+  // Generation status per channel: { email: 'generated', voice: 'approved' }
+  channelGenerationStatus: jsonb("channel_generation_status"),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1352,6 +1381,252 @@ export const insertAccountMessagingBriefSchema = createInsertSchema(accountMessa
 export type AccountMessagingBrief = typeof accountMessagingBriefs.$inferSelect;
 export const insertAccountCallBriefSchema = createInsertSchema(accountCallBriefs);
 export type AccountCallBrief = typeof accountCallBriefs.$inferSelect;
+
+// ==================== MULTI-CHANNEL CAMPAIGN TABLES ====================
+
+/**
+ * Campaign Channel Variants
+ * Stores channel-specific configurations derived from the shared campaign context.
+ * Each campaign can have one variant per channel type (email, voice).
+ */
+export const campaignChannelVariants = pgTable("campaign_channel_variants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  channelType: channelTypeEnum("channel_type").notNull(),
+
+  // Status and approval
+  status: channelVariantStatusEnum("status").notNull().default('draft'),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+
+  // Generated flow (CallFlowConfig for voice, EmailSequenceFlow for email)
+  generatedFlow: jsonb("generated_flow"),
+
+  // User customizations that override the generated flow
+  flowOverride: jsonb("flow_override"),
+
+  // Channel-specific settings (voice: persona, provider; email: tone, sender)
+  channelSettings: jsonb("channel_settings"),
+
+  // Generated execution prompt for this channel
+  executionPrompt: text("execution_prompt"),
+  executionPromptVersion: integer("execution_prompt_version").default(1),
+  executionPromptGeneratedAt: timestamp("execution_prompt_generated_at"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  // Unique constraint: one variant per channel per campaign
+  campaignChannelUnique: uniqueIndex("campaign_channel_variants_campaign_channel_unique")
+    .on(table.campaignId, table.channelType),
+  campaignIdIdx: index("campaign_channel_variants_campaign_id_idx").on(table.campaignId),
+  statusIdx: index("campaign_channel_variants_status_idx").on(table.status),
+}));
+
+export const insertCampaignChannelVariantSchema = createInsertSchema(campaignChannelVariants).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CampaignChannelVariant = typeof campaignChannelVariants.$inferSelect;
+export type InsertCampaignChannelVariant = z.infer<typeof insertCampaignChannelVariantSchema>;
+
+/**
+ * Campaign Templates
+ * Layered template system supporting campaign, account, and contact level templates.
+ * Resolution priority: contact > account > campaign
+ */
+export const campaignTemplates = pgTable("campaign_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  channelType: channelTypeEnum("channel_type").notNull(),
+
+  // Template scope (campaign, account, or contact level)
+  scope: templateScopeEnum("scope").notNull(),
+
+  // Scope-specific references (nullable based on scope)
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }),
+
+  // Template content
+  name: varchar("name", { length: 255 }).notNull(),
+  templateType: varchar("template_type", { length: 50 }).notNull(), // opening, pitch, subject, etc.
+  content: text("content").notNull(),
+
+  // Variables available in this template
+  variables: jsonb("variables"),
+
+  // Priority for resolution (higher = preferred)
+  priority: integer("priority").default(0),
+
+  isActive: boolean("is_active").default(true),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdIdx: index("campaign_templates_campaign_id_idx").on(table.campaignId),
+  channelTypeIdx: index("campaign_templates_channel_type_idx").on(table.channelType),
+  scopeIdx: index("campaign_templates_scope_idx").on(table.scope),
+  accountIdIdx: index("campaign_templates_account_id_idx").on(table.accountId),
+  contactIdIdx: index("campaign_templates_contact_id_idx").on(table.contactId),
+  templateTypeIdx: index("campaign_templates_template_type_idx").on(table.templateType),
+  // Compound index for efficient template resolution
+  resolutionIdx: index("campaign_templates_resolution_idx")
+    .on(table.campaignId, table.channelType, table.templateType, table.scope),
+}));
+
+export const insertCampaignTemplateSchema = createInsertSchema(campaignTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type CampaignTemplate = typeof campaignTemplates.$inferSelect;
+export type InsertCampaignTemplate = z.infer<typeof insertCampaignTemplateSchema>;
+
+/**
+ * Campaign Execution Prompts
+ * Cached final execution-ready prompts for agents.
+ * These are assembled from shared context + channel flow + resolved templates + compliance.
+ */
+export const campaignExecutionPrompts = pgTable("campaign_execution_prompts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  channelType: channelTypeEnum("channel_type").notNull(),
+
+  // Context references for prompt generation (nullable for campaign-level prompts)
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }),
+
+  // Generated prompt components
+  basePrompt: text("base_prompt").notNull(),
+  channelAdditions: text("channel_additions"),
+  templateInsertions: jsonb("template_insertions"), // Resolved templates by type
+  complianceAdditions: text("compliance_additions"),
+
+  // Final assembled prompt
+  finalPrompt: text("final_prompt").notNull(),
+  promptHash: varchar("prompt_hash", { length: 64 }).notNull(), // SHA-256 hash for change detection
+
+  // Version tracking
+  version: integer("version").default(1),
+  contextVersion: integer("context_version"), // Links to campaign shared context version
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  // Unique constraint for prompt lookup
+  promptLookupUnique: uniqueIndex("campaign_execution_prompts_lookup_unique")
+    .on(table.campaignId, table.channelType, table.accountId, table.contactId),
+  campaignIdIdx: index("campaign_execution_prompts_campaign_id_idx").on(table.campaignId),
+  channelTypeIdx: index("campaign_execution_prompts_channel_type_idx").on(table.channelType),
+  promptHashIdx: index("campaign_execution_prompts_hash_idx").on(table.promptHash),
+}));
+
+export const insertCampaignExecutionPromptSchema = createInsertSchema(campaignExecutionPrompts).omit({
+  id: true,
+  createdAt: true,
+});
+export type CampaignExecutionPrompt = typeof campaignExecutionPrompts.$inferSelect;
+export type InsertCampaignExecutionPrompt = z.infer<typeof insertCampaignExecutionPromptSchema>;
+
+// ==================== PREVIEW STUDIO ENUMS ====================
+/**
+ * Preview Session Type Enum
+ * - context: Viewing assembled context (intelligence, briefs)
+ * - email: Previewing generated email content
+ * - call_plan: Previewing call brief and participant plan
+ * - simulation: Live voice simulation session
+ */
+export const previewSessionTypeEnum = pgEnum('preview_session_type', [
+  'context',
+  'email',
+  'call_plan',
+  'simulation'
+]);
+
+/**
+ * Preview Session Status Enum
+ */
+export const previewSessionStatusEnum = pgEnum('preview_session_status', [
+  'active',
+  'completed',
+  'error'
+]);
+
+/**
+ * Preview Transcript Role Enum
+ */
+export const previewTranscriptRoleEnum = pgEnum('preview_transcript_role', [
+  'user',
+  'assistant',
+  'system'
+]);
+
+/**
+ * Preview Content Type Enum
+ */
+export const previewContentTypeEnum = pgEnum('preview_content_type', [
+  'email',
+  'call_plan',
+  'prompt',
+  'call_brief',
+  'participant_plan'
+]);
+
+/**
+ * Preview Studio Sessions
+ * Stores simulation and preview sessions for both email and voice channels.
+ */
+export const previewStudioSessions = pgTable("preview_studio_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Legacy columns we must preserve (populated in production)
+  workspaceId: varchar("workspace_id"),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }).notNull(),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: 'set null' }),
+  virtualAgentId: varchar("virtual_agent_id").references(() => virtualAgents.id, { onDelete: 'set null' }),
+  sessionType: previewSessionTypeEnum("session_type").notNull().default('simulation'),
+  status: previewSessionStatusEnum("status").default('active'),
+  metadata: jsonb("metadata"),
+  endedAt: timestamp("ended_at"),
+
+  // New unified columns
+  channelType: channelTypeEnum("channel_type").notNull().default('voice'),
+  mode: varchar("mode", { length: 20 }).notNull().default('full'), // full, step_by_step, preview_only
+
+  // Session state
+  currentStepId: varchar("current_step_id", { length: 100 }),
+  currentStepIndex: integer("current_step_index").default(0),
+  isComplete: boolean("is_complete").default(false),
+
+  // Transcript and checkpoints
+  transcript: jsonb("transcript").default(sql`'[]'::jsonb`), // Array of SimulationMessage
+  checkpoints: jsonb("checkpoints").default(sql`'[]'::jsonb`), // Array of SimulationCheckpoint
+
+  // Resolved templates and prompt used
+  resolvedTemplates: jsonb("resolved_templates"),
+  executionPrompt: text("execution_prompt"),
+
+  // User who created the session
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  campaignIdIdx: index("preview_studio_sessions_campaign_id_idx").on(table.campaignId),
+  channelTypeIdx: index("preview_studio_sessions_channel_type_idx").on(table.channelType),
+  createdByIdx: index("preview_studio_sessions_created_by_idx").on(table.createdBy),
+  createdAtIdx: index("preview_studio_sessions_created_at_idx").on(table.createdAt),
+  sessionTypeIdx: index("preview_studio_sessions_session_type_idx").on(table.sessionType),
+  statusIdx: index("preview_studio_sessions_status_idx").on(table.status),
+}));
+
+export const insertPreviewStudioSessionSchema = createInsertSchema(previewStudioSessions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type PreviewStudioSession = typeof previewStudioSessions.$inferSelect;
+export type InsertPreviewStudioSession = z.infer<typeof insertPreviewStudioSessionSchema>;
 
 // Global Agent Defaults - centralized default configuration for all virtual agents
 export const agentDefaults = pgTable("agent_defaults", {
@@ -2149,6 +2424,77 @@ export const callSessions = pgTable("call_sessions", {
   campaignIdx: index("call_sessions_campaign_idx").on(table.campaignId),
   contactIdx: index("call_sessions_contact_idx").on(table.contactId),
   aiConversationIdx: index("call_sessions_ai_conversation_idx").on(table.aiConversationId),
+}));
+
+// Call Quality Records - Comprehensive logging of call quality analysis, conversation intelligence, issues, and recommendations
+export const callQualityRecords = pgTable("call_quality_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callSessionId: varchar("call_session_id").references(() => callSessions.id, { onDelete: 'cascade' }).notNull(),
+  dialerCallAttemptId: varchar("dialer_call_attempt_id").references(() => dialerCallAttempts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  
+  // Quality metrics
+  overallQualityScore: integer("overall_quality_score"), // 0-100
+  engagementScore: integer("engagement_score"), // 0-100
+  clarityScore: integer("clarity_score"), // 0-100
+  empathyScore: integer("empathy_score"), // 0-100
+  objectionHandlingScore: integer("objection_handling_score"), // 0-100
+  qualificationScore: integer("qualification_score"), // 0-100
+  closingScore: integer("closing_score"), // 0-100
+  
+  // Conversation intelligence
+  sentiment: text("sentiment"), // positive | neutral | negative
+  engagementLevel: text("engagement_level"), // high | medium | low
+  identityConfirmed: boolean("identity_confirmed"),
+  qualificationMet: boolean("qualification_met"),
+  
+  // Analysis results (stored as JSON for flexibility)
+  issues: jsonb("issues"), // Array of {type, severity, description, evidence, recommendation}
+  recommendations: jsonb("recommendations"), // Array of {category, currentBehavior, suggestedChange, expectedImpact}
+  breakdowns: jsonb("breakdowns"), // Array of {type, description, moment, recommendation}
+  promptUpdates: jsonb("prompt_updates"), // Array of {category, change, rationale, priority}
+  performanceGaps: jsonb("performance_gaps"), // Array of gap descriptions
+  nextBestActions: jsonb("next_best_actions"), // Array of recommended actions
+  
+  // Campaign alignment
+  campaignAlignmentScore: integer("campaign_alignment_score"),
+  contextUsageScore: integer("context_usage_score"),
+  talkingPointsCoverageScore: integer("talking_points_coverage_score"),
+  missedTalkingPoints: jsonb("missed_talking_points"), // Array of strings
+  
+  // Flow compliance
+  flowComplianceScore: integer("flow_compliance_score"),
+  missedSteps: jsonb("missed_steps"), // Array of strings
+  flowDeviations: jsonb("flow_deviations"), // Array of strings
+  
+  // Disposition accuracy
+  assignedDisposition: text("assigned_disposition"),
+  expectedDisposition: text("expected_disposition"),
+  dispositionAccurate: boolean("disposition_accurate"),
+  dispositionNotes: jsonb("disposition_notes"), // Array of notes
+  
+  // Transcript info
+  transcriptLength: integer("transcript_length"),
+  transcriptTruncated: boolean("transcript_truncated"),
+  fullTranscript: text("full_transcript"),
+  
+  // Analysis metadata
+  analysisModel: text("analysis_model"), // Model used for analysis
+  analysisStage: text("analysis_stage"), // realtime | post_call
+  interactionType: text("interaction_type"), // live_call | test_call | simulation
+  analyzedAt: timestamp("analyzed_at"),
+  
+  // Timestamps
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  callSessionIdx: index("call_quality_records_call_session_idx").on(table.callSessionId),
+  dialerAttemptIdx: index("call_quality_records_dialer_attempt_idx").on(table.dialerCallAttemptId),
+  campaignIdx: index("call_quality_records_campaign_idx").on(table.campaignId),
+  contactIdx: index("call_quality_records_contact_idx").on(table.contactId),
+  scoreIdx: index("call_quality_records_score_idx").on(table.overallQualityScore),
+  createdAtIdx: index("call_quality_records_created_at_idx").on(table.createdAt),
 }));
 
 // Call Dispositions - Links call sessions to dispositions with notes
@@ -8173,76 +8519,8 @@ export type TestCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 export type TestCallResult = 'success' | 'needs_improvement' | 'failed';
 
 // ==================== PREVIEW STUDIO - Preview and Test Campaign Content ====================
-
-/**
- * Preview Session Type Enum
- * - context: Viewing assembled context (intelligence, briefs)
- * - email: Previewing generated email content
- * - call_plan: Previewing call brief and participant plan
- * - simulation: Live voice simulation session
- */
-export const previewSessionTypeEnum = pgEnum('preview_session_type', [
-  'context',
-  'email',
-  'call_plan',
-  'simulation'
-]);
-
-/**
- * Preview Session Status Enum
- */
-export const previewSessionStatusEnum = pgEnum('preview_session_status', [
-  'active',
-  'completed',
-  'error'
-]);
-
-/**
- * Preview Transcript Role Enum
- */
-export const previewTranscriptRoleEnum = pgEnum('preview_transcript_role', [
-  'user',
-  'assistant',
-  'system'
-]);
-
-/**
- * Preview Content Type Enum
- */
-export const previewContentTypeEnum = pgEnum('preview_content_type', [
-  'email',
-  'call_plan',
-  'prompt',
-  'call_brief',
-  'participant_plan'
-]);
-
-/**
- * Preview Studio Sessions - Track all preview activity
- * Used for testing and validating campaign content before live execution
- */
-export const previewStudioSessions = pgTable('preview_studio_sessions', {
-  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
-  workspaceId: varchar('workspace_id'),
-  campaignId: varchar('campaign_id').references(() => campaigns.id, { onDelete: 'cascade' }),
-  accountId: varchar('account_id').references(() => accounts.id, { onDelete: 'cascade' }),
-  contactId: varchar('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
-  userId: varchar('user_id').references(() => users.id, { onDelete: 'set null' }),
-  virtualAgentId: varchar('virtual_agent_id').references(() => virtualAgents.id, { onDelete: 'set null' }),
-  sessionType: previewSessionTypeEnum('session_type').notNull(),
-  status: previewSessionStatusEnum('status').notNull().default('active'),
-  metadata: jsonb('metadata'), // Additional session metadata
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  endedAt: timestamp('ended_at'),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-}, (table) => ({
-  campaignIdx: index('preview_sessions_campaign_idx').on(table.campaignId),
-  accountIdx: index('preview_sessions_account_idx').on(table.accountId),
-  userIdx: index('preview_sessions_user_idx').on(table.userId),
-  typeIdx: index('preview_sessions_type_idx').on(table.sessionType),
-  statusIdx: index('preview_sessions_status_idx').on(table.status),
-  createdAtIdx: index('preview_sessions_created_at_idx').on(table.createdAt),
-}));
+// NOTE: Enums are defined near the previewStudioSessions table (earlier in file).
+// This section adds the related tables (transcripts and generated content).
 
 /**
  * Preview Simulation Transcripts - Store transcripts from voice simulations
@@ -8292,13 +8570,9 @@ export const previewStudioSessionsRelations = relations(previewStudioSessions, (
     fields: [previewStudioSessions.contactId],
     references: [contacts.id],
   }),
-  user: one(users, {
-    fields: [previewStudioSessions.userId],
+  createdByUser: one(users, {
+    fields: [previewStudioSessions.createdBy],
     references: [users.id],
-  }),
-  virtualAgent: one(virtualAgents, {
-    fields: [previewStudioSessions.virtualAgentId],
-    references: [virtualAgents.id],
   }),
   transcripts: many(previewSimulationTranscripts),
   generatedContent: many(previewGeneratedContent),
@@ -8318,13 +8592,7 @@ export const previewGeneratedContentRelations = relations(previewGeneratedConten
   }),
 }));
 
-// Insert schemas for Preview Studio
-export const insertPreviewStudioSessionSchema = createInsertSchema(previewStudioSessions).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
+// Insert schemas for Preview Studio related tables
 export const insertPreviewSimulationTranscriptSchema = createInsertSchema(previewSimulationTranscripts).omit({
   id: true,
   createdAt: true,
@@ -8335,10 +8603,7 @@ export const insertPreviewGeneratedContentSchema = createInsertSchema(previewGen
   createdAt: true,
 });
 
-// Types for Preview Studio
-export type PreviewStudioSession = typeof previewStudioSessions.$inferSelect;
-export type InsertPreviewStudioSession = z.infer<typeof insertPreviewStudioSessionSchema>;
-
+// Types for Preview Studio related tables
 export type PreviewSimulationTranscript = typeof previewSimulationTranscripts.$inferSelect;
 export type InsertPreviewSimulationTranscript = z.infer<typeof insertPreviewSimulationTranscriptSchema>;
 
@@ -9282,6 +9547,16 @@ export type InsertLearningInsight = z.infer<typeof insertLearningInsightSchema>;
 
 export type ContactPredictiveScore = typeof contactPredictiveScores.$inferSelect;
 export type InsertContactPredictiveScore = z.infer<typeof insertContactPredictiveScoreSchema>;
+
+// Call Quality Records Schema
+export const insertCallQualityRecordsSchema = createInsertSchema(callQualityRecords).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type CallQualityRecord = typeof callQualityRecords.$inferSelect;
+export type InsertCallQualityRecord = z.infer<typeof insertCallQualityRecordsSchema>;
 
 export type SmiAuditLog = typeof smiAuditLog.$inferSelect;
 export type InsertSmiAuditLog = z.infer<typeof insertSmiAuditLogSchema>;

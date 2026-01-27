@@ -77,7 +77,7 @@ User
 2025-12-23 17:42:40.84
 04af29ca
 User
-[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493760, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_7101kd5kpjxmfjx9s2dredwdw30p", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+15593366940", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493760, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_7101kd5kpjxmfjx9s2dredwdw30p", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
 2025-12-23 17:42:40.84
 04af29ca
 User
@@ -129,7 +129,7 @@ User
 2025-12-23 17:42:54.26
 04af29ca
 User
-[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493774, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_0701kd5kq5y9e7grepzrwfmtrcsn", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+15593366940", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493774, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_0701kd5kq5y9e7grepzrwfmtrcsn", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
 2025-12-23 17:42:54.26
 04af29ca
 User

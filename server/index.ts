@@ -32,7 +32,7 @@ import {
   sanitizeBody,
   PAYLOAD_LIMITS
 } from "./middleware/security";
-import type { WebSocket as WsWebSocket } from 'ws';
+import { WebSocketServer, type WebSocket as WsWebSocket } from 'ws';
 
 const app = express();
 
@@ -147,6 +147,15 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Database initialization failed (non-blocking):', err);
   }
 
+  // Initialize Unified Audio Configuration (must run before voice services)
+  // This ensures ALL call types (test/production) use identical audio settings
+  try {
+    const { initializeAudioConfiguration } = await import("./services/audio-configuration");
+    initializeAudioConfiguration();
+  } catch (err) {
+    console.error('[STARTUP] Audio configuration initialization failed (non-blocking):', err);
+  }
+
   // Initialize Agent Infrastructure (Core Email & Voice Agents, Governance)
   try {
     const { initializeAgentInfrastructure } = await import("./services/agents");
@@ -155,12 +164,47 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Agent infrastructure initialization failed (non-blocking):', err);
   }
 
+  // Initialize SIP Infrastructure & Gemini Live SIP Enforcement
+  // This ensures ALL calls (AI, campaign, agent console) use SIP exclusively
+  if (process.env.USE_SIP_CALLING === 'true') {
+    try {
+      const { drachtioServer } = await import("./services/sip/drachtio-server");
+      await drachtioServer.initialize();
+      log('[SIP] Drachtio server initialized');
+
+      const { initializeGeminiLiveSIPEnforcement } = await import("./services/gemini-live-sip-enforcement");
+      const enforced = await initializeGeminiLiveSIPEnforcement();
+      if (!enforced) {
+        console.error('[CRITICAL] Failed to enforce SIP-only for Gemini Live');
+      } else {
+        log('[SIP] Gemini Live SIP enforcement active - all AI calls will use SIP only');
+      }
+
+      // Initialize unified call router for ALL call types
+      const { initializeUnifiedCallRouter } = await import("./services/unified-call-router");
+      initializeUnifiedCallRouter();
+      log('[SIP] Unified call router initialized - all call types route through SIP');
+    } catch (err) {
+      console.error('[STARTUP] SIP infrastructure initialization failed:', err);
+    }
+  }
+
   // Initialize WebSocket servers for real-time communication
   // Wrapped in try-catch to ensure failures don't prevent server startup
   let mediaWss: any = null;
   let voiceDialerWss: any = null;
   let campaignRunnerWss: any = null;
+  let geminiWss: WebSocketServer | null = null;
+  let sipAgentWss: WebSocketServer | null = null;
   let handleGeminiLiveConnection: any = null;
+
+  try {
+    const { setupSIPAgentWebSocket } = await import("./routes/sip-agent-websocket");
+    sipAgentWss = setupSIPAgentWebSocket(server);
+    log('[SIP Agent WebSocket] Initialized for agent console calls');
+  } catch (err) {
+    console.error('[STARTUP] SIP Agent WebSocket initialization failed (non-blocking):', err);
+  }
 
   try {
     const { initializeAiMediaStreaming } = await import("./services/ai-media-streaming");
@@ -182,6 +226,7 @@ app.use((req, res, next) => {
   try {
     const geminiModule = await import("./services/gemini-live-dialer");
     handleGeminiLiveConnection = geminiModule.handleGeminiLiveConnection;
+    geminiWss = new WebSocketServer({ noServer: true });
   } catch (err) {
     console.error('[STARTUP] Gemini Live Dialer initialization failed (non-blocking):', err);
   }
@@ -220,8 +265,17 @@ app.use((req, res, next) => {
     console.log(`[WebSocket Upgrade] Headers:`, JSON.stringify(req.headers, null, 2));
     console.log(`[WebSocket Upgrade] Socket state: { readable: ${socket.readable}, writable: ${socket.writable}, destroyed: ${socket.destroyed} }`);
     
-    socket.on('error', (err) => {
-      console.error('[WebSocket Upgrade] Socket error:', err);
+    socket.on('error', (err: any) => {
+      // ECONNRESET is common when clients disconnect abruptly; treat as warn to reduce noise
+      if (err && (err.code === 'ECONNRESET' || err.errno === -4077)) {
+        console.warn('[WebSocket Upgrade] Socket error (ECONNRESET - client disconnected):', {
+          code: err.code,
+          errno: err.errno,
+          syscall: err.syscall,
+        });
+      } else {
+        console.error('[WebSocket Upgrade] Socket error:', err);
+      }
     });
 
     socket.on('close', (hadError: boolean) => {
@@ -248,13 +302,12 @@ app.use((req, res, next) => {
     } else if (pathname === '/gemini-live-dialer') {
       console.log('[WebSocket Upgrade] Handling Gemini Live Dialer connection');
 
-      if (!handleGeminiLiveConnection) {
+      if (!handleGeminiLiveConnection || !geminiWss) {
         console.warn('[WebSocket Upgrade] Gemini Live Dialer not initialized');
         socket.destroy();
         return;
       }
-      const { WebSocketServer } = require('ws');
-      const geminiWss = new WebSocketServer({ noServer: true });
+      
       geminiWss.handleUpgrade(req, socket as any, head, (ws: WsWebSocket) => {
         console.log('[WebSocket Upgrade] ✅ Gemini Live Dialer connection established');
         handleGeminiLiveConnection(ws, req);
@@ -297,7 +350,7 @@ app.use((req, res, next) => {
       const protocol = req.headers['sec-websocket-protocol'];
 
       if (protocol === 'vite-hmr') {
-        console.log('[WebSocket Upgrade] Blocking HMR connection (disabled)');
+        // Silently block HMR to prevent log spam and frame corruption
         socket.destroy();
         return;
       }
@@ -392,6 +445,23 @@ app.use((req, res, next) => {
   const { initializeAiCampaignOrchestrator } = await import("./lib/ai-campaign-orchestrator");
   if (hasRedis) {
     initializeAiCampaignOrchestrator();
+  }
+
+  // Initialize SIP Dialer if enabled (USE_SIP_CALLING=true)
+  if (process.env.USE_SIP_CALLING === 'true') {
+    const { initializeSipDialer } = await import("./services/sip");
+    try {
+      const sipReady = await initializeSipDialer();
+      if (sipReady) {
+        console.log("[SIP] SIP-based calling initialized - API-based calling will be bypassed");
+      } else {
+        console.warn("[SIP] SIP initialization failed - falling back to API-based calling");
+      }
+    } catch (error) {
+      console.error("[SIP] Failed to initialize SIP dialer:", error);
+    }
+  } else {
+    console.log("[SIP] SIP calling disabled - using Telnyx API-based calling");
   }
 
   // Initialize Vertex AI Agentic CRM Operator

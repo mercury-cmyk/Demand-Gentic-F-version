@@ -16,6 +16,7 @@ import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import LandingPage from "@/pages/landing";
+import AboutPage from "@/pages/about";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
@@ -27,6 +28,7 @@ import ListDetailPage from "@/pages/list-detail";
 import DomainSetsPage from "@/pages/domain-sets";
 import AccountsListDetail from "@/pages/accounts-list-detail";
 import CampaignsPage from "@/pages/campaigns";
+import CampaignCreatePage from "@/pages/campaign-create";
 import EmailCampaignsPage from "@/pages/email-campaigns";
 import EmailCampaignCreatePage from "@/pages/email-campaign-create";
 import SimpleEmailCampaignCreatePage from "@/pages/simple-email-campaign-create";
@@ -111,6 +113,7 @@ import TelephonySettingsPage from "@/pages/settings/telephony";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
+import PromptManagementPage from "@/pages/prompt-management";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -226,8 +229,9 @@ function AuthenticatedApp() {
               <Route path="/domain-sets" component={DomainSetsPage} />
               <Route path="/domain-sets/:id" component={AccountsListDetail} />
               
-              {/* Campaigns */}
+              {/* Campaigns - Unified Hub */}
               <Route path="/campaigns" component={CampaignsPage} />
+              <Route path="/campaigns/create" component={CampaignCreatePage} />
               <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />
@@ -277,6 +281,7 @@ function AuthenticatedApp() {
               <Route path="/campaigns/event_registration/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/reactivation/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/campaigns/sql/edit/:id" component={PhoneCampaignEditPage} />
+              <Route path="/campaigns/webinar_invite/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
               
@@ -322,7 +327,8 @@ function AuthenticatedApp() {
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
               <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
-              
+              <Route path="/settings/prompts" component={PromptManagementPage} />
+
               {/* Settings Hub */}
               <Route path="/settings" component={SettingsIndexPage} />
               <Route path="/settings/profile" component={ProfileSettingsPage} />
@@ -445,6 +451,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/welcome" component={LandingPage} />
+      <Route path="/about" component={AboutPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/client-portal/login" component={ClientPortalLogin} />

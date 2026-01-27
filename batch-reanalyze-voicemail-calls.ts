@@ -15,6 +15,7 @@ import { db } from './server/db.ts';
 import { dialerCallAttempts, leads } from './shared/schema.ts';
 import { eq, gte, and, inArray } from 'drizzle-orm';
 import OpenAI from 'openai';
+import fs from 'fs';
 
 config({ path: '.env' });
 
@@ -358,9 +359,7 @@ function generateReport() {
       correctionMade: r.correctionMade,
       error: r.error
     }))
-  };
 
-  const fs = require('fs');
   const reportPath = `voicemail-analysis-report-${new Date().toISOString().split('T')[0]}.json`;
   fs.writeFileSync(reportPath, JSON.stringify(exportData, null, 2));
   console.log(`\n💾 Detailed report exported to: ${reportPath}`);

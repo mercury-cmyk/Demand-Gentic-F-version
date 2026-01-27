@@ -62,6 +62,8 @@ export default function IntelligentCampaignCreatePage() {
   const [campaignType, setCampaignType] = useState<'telemarketing' | 'email'>('telemarketing');
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [showWizard, setShowWizard] = useState(false);
+  const [preloadedContext, setPreloadedContext] = useState<Partial<StructuredCampaignContext> | null>(null);
+  const [isLoadingContext, setIsLoadingContext] = useState(false);
 
   // Fetch organizations
   const { data: organizations = [] } = useQuery<Organization[]>({
@@ -71,6 +73,47 @@ export default function IntelligentCampaignCreatePage() {
       return res.json();
     },
   });
+
+  // Automatically fetch context when organization is selected
+  const fetchOrgContextMutation = useMutation({
+    mutationFn: async (orgId: string) => {
+      const res = await apiRequest('GET', `/api/org-intelligence/campaign-context/${orgId}`);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success && data.campaignContext) {
+        setPreloadedContext(data.campaignContext);
+        const orgName = data.organization?.name || 'organization';
+        toast({
+          title: 'Context Auto-Loaded',
+          description: `Campaign context from ${orgName} has been automatically loaded and ready to use.`,
+        });
+      }
+      setIsLoadingContext(false);
+    },
+    onError: (error: any) => {
+      setIsLoadingContext(false);
+      // Only show error if it's not a "no intelligence" error
+      if (!error.message?.includes('intelligence')) {
+        toast({
+          title: 'Context Load Failed',
+          description: error.message || 'Could not load organization context',
+          variant: 'destructive',
+        });
+      }
+    },
+  });
+
+  // Handle organization selection - auto-fetch context
+  const handleOrgChange = useCallback((orgId: string) => {
+    setSelectedOrgId(orgId);
+    if (orgId) {
+      setIsLoadingContext(true);
+      fetchOrgContextMutation.mutate(orgId);
+    } else {
+      setPreloadedContext(null);
+    }
+  }, [fetchOrgContextMutation]);
 
   // Create campaign mutation
   const createCampaignMutation = useMutation({
@@ -166,6 +209,7 @@ export default function IntelligentCampaignCreatePage() {
             organizationId={selectedOrgId}
             onComplete={handleWizardComplete}
             onCancel={handleCancel}
+            initialContext={preloadedContext || undefined}
           />
         </div>
       </div>
@@ -272,8 +316,8 @@ export default function IntelligentCampaignCreatePage() {
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-3">
-            <Select value={selectedOrgId} onValueChange={setSelectedOrgId}>
-              <SelectTrigger className="flex-1">
+            <Select value={selectedOrgId} onValueChange={handleOrgChange}>
+              <SelectTrigger className="flex-1" disabled={isLoadingContext}>
                 <SelectValue placeholder="Select organization (optional)" />
               </SelectTrigger>
               <SelectContent>
@@ -294,9 +338,40 @@ export default function IntelligentCampaignCreatePage() {
             </Select>
             
             <InlineOrgCreator
-              onOrgCreated={(orgId) => setSelectedOrgId(orgId)}
+              onOrgCreated={(orgId) => handleOrgChange(orgId)}
             />
           </div>
+          
+          {isLoadingContext && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+              <span>Loading organization intelligence...</span>
+            </div>
+          )}
+          
+          {preloadedContext && !isLoadingContext && (
+            <div className="mt-3 p-3 bg-primary/5 rounded-lg border border-primary/20">
+              <div className="flex items-start gap-2">
+                <Sparkles className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-primary">Context Auto-Loaded ✓</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Campaign context from organization intelligence has been automatically loaded with:
+                  </p>
+                  <ul className="text-xs text-muted-foreground mt-2 space-y-1">
+                    {preloadedContext.objectives && <li>• Campaign objectives and KPIs</li>}
+                    {preloadedContext.targetAudience && <li>• Target audience profile</li>}
+                    {preloadedContext.deliverables && <li>• Products/services deliverables</li>}
+                    {preloadedContext.coreMessage && <li>• Core messaging and positioning</li>}
+                    {preloadedContext.conversationFlow && <li>• Conversation flow and talking points</li>}
+                  </ul>
+                  <p className="text-xs text-primary font-medium mt-2">
+                    → Click "Start Intelligent Campaign Creator" below to review and customize
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

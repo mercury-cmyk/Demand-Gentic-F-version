@@ -52,7 +52,7 @@ async function main() {
   console.log(`Found ${queueItems.length} queue items`);
 
   const bridge = getTelnyxAiBridge();
-  const fromNumber = process.env.TELNYX_FROM_NUMBER || '+15593366940';
+  const fromNumber = process.env.TELNYX_FROM_NUMBER || '+12094571966';
   
   let initiated = 0;
   let failed = 0;

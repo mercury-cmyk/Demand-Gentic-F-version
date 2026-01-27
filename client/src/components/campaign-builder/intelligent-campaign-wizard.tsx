@@ -480,8 +480,26 @@ export function IntelligentCampaignWizard({ organizationId, onComplete, onCancel
   useEffect(() => {
     if (!sessionId && !initialContext) {
       createSessionMutation.mutate();
+    } else if (initialContext && Object.keys(initialContext).length > 0) {
+      // If initial context is provided, show it with a helpful message
+      console.log('[Campaign Wizard] Initial context loaded:', initialContext);
+      setMessages([{
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: "✨ Great! I've pre-loaded campaign context from your organization's intelligence.\n\nSwitch to the 'Campaign Structure' tab to review all the sections. Each section has been automatically populated based on your organization's profile. You can review, edit, and approve each section, or start a conversation to refine anything.\n\nWhen you're ready, approve each section and complete the campaign!",
+        timestamp: new Date().toISOString(),
+      }]);
+      // Auto-expand all sections with data
+      const sectionsWithData = SECTIONS.filter(s => {
+        const sectionData = (initialContext as any)[s.key];
+        return sectionData && Object.keys(sectionData).length > 0;
+      }).map(s => s.key);
+      console.log('[Campaign Wizard] Sections with data:', sectionsWithData);
+      setExpandedSections(new Set(sectionsWithData));
+      // Switch to structure tab to show the loaded context
+      setTimeout(() => setActiveTab('structure'), 100);
     }
-  }, []);
+  }, [initialContext]);
 
   // Converse mutation
   const converseMutation = useMutation({
@@ -739,6 +757,20 @@ export function IntelligentCampaignWizard({ organizationId, onComplete, onCancel
         </div>
 
         <ScrollArea className="flex-1 p-4">
+          {initialContext && Object.keys(initialContext).length > 0 && (
+            <div className="mb-3 p-3 bg-primary/10 border border-primary/20 rounded-lg">
+              <div className="flex items-start gap-2">
+                <Sparkles className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-primary">Pre-loaded from Organization</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Context has been automatically populated. Review and customize as needed.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="space-y-2">
             {SECTIONS.map((config) => (
               <SectionViewer

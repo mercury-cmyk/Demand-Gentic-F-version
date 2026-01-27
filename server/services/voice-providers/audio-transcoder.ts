@@ -6,10 +6,15 @@
  * - PCM (16kHz, 16-bit LE) - Used by Gemini Live API input
  * - PCM (24kHz, 16-bit LE) - Used by Gemini Live API output
  *
+ * Audio quality settings are configured in audio-configuration.ts (unified across all call paths)
+ * 
  * Reference:
  * - G.711 ulaw: ITU-T G.711 (PCMU)
  * - G.711 alaw: ITU-T G.711 (PCMA)
  */
+
+// Import unified audio config (applies to test and production equally)
+import { UNIFIED_AUDIO_CONFIG } from "../audio-configuration";
 
 const LOG_PREFIX = "[AudioTranscoder]";
 
@@ -148,39 +153,156 @@ export function pcm8kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 }
 
 /**
- * Low-pass FIR filter coefficients for anti-aliasing before downsampling.
- * This is a 63-tap Blackman-windowed sinc filter with sharp cutoff at 3.8kHz.
- * Designed specifically for 24kHz → 8kHz downsampling (3:1 ratio).
- * Much more aggressive than previous 31-tap Hamming filter to eliminate aliasing noise.
+ * Remove DC offset from audio buffer
+ * DC offset causes clicking and pops, especially at chunk boundaries
+ *
+ * @param pcmBuffer - Input PCM audio buffer (16-bit LE)
+ * @returns Buffer with DC offset removed
  */
-const ANTI_ALIAS_FILTER_COEFFS = [
-  -0.0001, -0.0003, -0.0006, -0.0009, -0.0013, -0.0017, -0.0019, -0.0018,
-  -0.0014, -0.0005,  0.0008,  0.0026,  0.0048,  0.0073,  0.0099,  0.0124,
-   0.0146,  0.0161,  0.0167,  0.0162,  0.0143,  0.0110,  0.0062,  0.0000,
-  -0.0075, -0.0163, -0.0262, -0.0369, -0.0478, -0.0583, -0.0676, -0.0751,
-  -0.0801, -0.0822, -0.0808, -0.0756, -0.0664, -0.0529, -0.0351, -0.0131,
-   0.0127,  0.0420,  0.0742,  0.1085,  0.1439,  0.1795,  0.2141,  0.2468,
-   0.2764,  0.3020,  0.3229,  0.3385,  0.3483,  0.3520,  0.3483,  0.3385,
-   0.3229,  0.3020,  0.2764,  0.2468,  0.2141,  0.1795,  0.1439
-];
+function removeDcOffset(pcmBuffer: Buffer): Buffer {
+  const samples = pcmBuffer.length / 2;
+  if (samples === 0) return pcmBuffer;
+
+  // Calculate mean (DC offset)
+  let sum = 0;
+  for (let i = 0; i < samples; i++) {
+    sum += pcmBuffer.readInt16LE(i * 2);
+  }
+  const dcOffset = Math.round(sum / samples);
+
+  // If DC offset is negligible, skip processing
+  if (Math.abs(dcOffset) < 10) {
+    return pcmBuffer;
+  }
+
+  // Remove DC offset
+  const output = Buffer.alloc(pcmBuffer.length);
+  for (let i = 0; i < samples; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2) - dcOffset;
+    output.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
+  }
+
+  return output;
+}
+
+/**
+ * Normalize audio to prevent clipping and ensure consistent levels
+ * Only applies normalization if audio is too hot (would clip)
+ *
+ * @param pcmBuffer - Input PCM audio buffer (16-bit LE)
+ * @param targetLevel - Target peak level as fraction of full scale (0-1, typically 0.85-0.95)
+ * @returns Normalized PCM buffer
+ */
+function normalizeAudio(pcmBuffer: Buffer, targetLevel: number = 0.9): Buffer {
+  const samples = pcmBuffer.length / 2;
+  if (samples === 0) return pcmBuffer;
+
+  // Find peak amplitude
+  let peak = 0;
+  for (let i = 0; i < samples; i++) {
+    const sample = Math.abs(pcmBuffer.readInt16LE(i * 2));
+    if (sample > peak) peak = sample;
+  }
+
+  // If no signal or very low, return as-is (don't amplify noise)
+  if (peak < 500) {
+    return pcmBuffer;
+  }
+
+  // Calculate scaling factor
+  const maxAllowed = Math.floor(32767 * targetLevel);
+
+  // Only normalize if we need to reduce (prevent clipping)
+  // Don't boost quiet audio - it amplifies noise
+  if (peak <= maxAllowed) {
+    return pcmBuffer;
+  }
+
+  const scale = maxAllowed / peak;
+
+  // Apply normalization
+  const normalized = Buffer.alloc(pcmBuffer.length);
+  for (let i = 0; i < samples; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2);
+    const scaled = Math.round(sample * scale);
+    normalized.writeInt16LE(Math.max(-32768, Math.min(32767, scaled)), i * 2);
+  }
+
+  return normalized;
+}
+
+/**
+ * Generate windowed sinc filter coefficients for anti-aliasing
+ * Uses Hamming window for good stopband attenuation with minimal ringing
+ *
+ * @param numTaps - Number of filter taps (must be odd)
+ * @param cutoffFreq - Normalized cutoff frequency (0 to 0.5, where 0.5 = Nyquist)
+ */
+function generateLowPassFilter(numTaps: number, cutoffFreq: number): number[] {
+  const coeffs: number[] = new Array(numTaps);
+  const center = (numTaps - 1) / 2;
+  let sum = 0;
+
+  for (let i = 0; i < numTaps; i++) {
+    const n = i - center;
+
+    // Sinc function
+    let sinc: number;
+    if (n === 0) {
+      sinc = 2 * cutoffFreq;
+    } else {
+      sinc = Math.sin(2 * Math.PI * cutoffFreq * n) / (Math.PI * n);
+    }
+
+    // Hamming window - provides good stopband attenuation
+    const window = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (numTaps - 1));
+
+    coeffs[i] = sinc * window;
+    sum += coeffs[i];
+  }
+
+  // Normalize for unity gain
+  for (let i = 0; i < numTaps; i++) {
+    coeffs[i] /= sum;
+  }
+
+  return coeffs;
+}
+
+// Pre-computed filter for 24kHz → 8kHz (3:1 ratio)
+// Input Nyquist = 12kHz, Output Nyquist = 4kHz
+// Cutoff at 3.4kHz (normalized: 3.4/12 = 0.283)
+const FILTER_24K_TO_8K = generateLowPassFilter(31, 0.28); // 31 taps, cutoff at ~3.4kHz
+
+// Pre-computed filter for 16kHz → 8kHz (2:1 ratio)
+// Input Nyquist = 8kHz, Output Nyquist = 4kHz
+// Cutoff at 3.5kHz (normalized: 3.5/8 = 0.44)
+const FILTER_16K_TO_8K = generateLowPassFilter(21, 0.42); // 21 taps, cutoff at ~3.4kHz
 
 /**
  * Apply low-pass FIR filter for anti-aliasing before downsampling.
  * Prevents aliasing artifacts (the irritating noise) by removing
  * frequencies above the Nyquist frequency of the target sample rate.
- * 
- * CRITICAL FIX: No coefficient scaling - filter must operate at full strength
- * to prevent high-frequency components from folding back as audible noise.
  */
 function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
   const inputSamples = inputBuffer.length / 2;
   const outputBuffer = Buffer.alloc(inputBuffer.length);
-  const filterLen = ANTI_ALIAS_FILTER_COEFFS.length;
-  const halfLen = Math.floor(filterLen / 2);
 
-  // CRITICAL: Use full filter strength - no scaling
-  // The filter is already designed for the specific downsample ratio
-  const coeffs = ANTI_ALIAS_FILTER_COEFFS;
+  // Select appropriate pre-computed filter based on downsample ratio
+  let coeffs: number[];
+  if (cutoffRatio <= 0.35) {
+    // 3:1 downsampling (24kHz → 8kHz)
+    coeffs = FILTER_24K_TO_8K;
+  } else if (cutoffRatio <= 0.55) {
+    // 2:1 downsampling (16kHz → 8kHz)
+    coeffs = FILTER_16K_TO_8K;
+  } else {
+    // Minor downsampling - use simple averaging
+    return inputBuffer;
+  }
+
+  const filterLen = coeffs.length;
+  const halfLen = Math.floor(filterLen / 2);
 
   for (let i = 0; i < inputSamples; i++) {
     let sum = 0;
@@ -256,33 +378,85 @@ export function resamplePcm(
 /**
  * Convert G.711 (8kHz) to PCM 16kHz for Gemini Live API input
  * This is the main function for Telnyx -> Gemini audio path
+ *
+ * Simplified processing - G.711 decode + upsample only
+ * Upsampling (increasing sample rate) doesn't cause aliasing,
+ * so no filtering needed. Keep processing minimal to avoid artifacts.
  */
 export function g711ToPcm16k(g711Buffer: Buffer, format: G711Format): Buffer {
-  // First convert G.711 to PCM 8kHz
+  // Step 1: Decode G.711 to PCM 8kHz
   const pcm8k = g711ToPcm8k(g711Buffer, format);
-  // Then upsample to 16kHz
-  return resamplePcm(pcm8k, 8000, 16000);
+
+  // Step 2: Upsample to 16kHz with linear interpolation
+  // No filtering needed for upsampling (no aliasing risk)
+  const pcm16k = resamplePcm(pcm8k, 8000, 16000);
+
+  return pcm16k;
+}
+
+/**
+ * Simple 3:1 decimation with averaging (no FIR filter)
+ * Takes every 3rd sample but averages the 3 input samples to reduce aliasing
+ * Much simpler and avoids filter edge artifacts
+ */
+function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
+  const inputSamples = inputBuffer.length / 2;
+  const outputSamples = Math.floor(inputSamples / 3);
+  const outputBuffer = Buffer.alloc(outputSamples * 2);
+
+  for (let i = 0; i < outputSamples; i++) {
+    const srcIdx = i * 3;
+    // Average 3 input samples to reduce aliasing
+    let sum = 0;
+    let count = 0;
+    for (let j = 0; j < 3 && srcIdx + j < inputSamples; j++) {
+      sum += inputBuffer.readInt16LE((srcIdx + j) * 2);
+      count++;
+    }
+    const avg = Math.round(sum / count);
+    outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, avg)), i * 2);
+  }
+
+  return outputBuffer;
 }
 
 /**
  * Convert PCM 24kHz (Gemini output) to G.711 (8kHz) for Telnyx
  * This is the main function for Gemini -> Telnyx audio path
+ *
+ * SIMPLIFIED: Uses simple decimation with averaging instead of FIR filter
+ * to avoid chunk boundary artifacts that cause noise
  */
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
-  // First downsample 24kHz to 8kHz
-  const pcm8k = resamplePcm(pcmBuffer, 24000, 8000);
-  // Then encode to G.711
+  // Step 1: Simple 3:1 decimation with averaging (24kHz → 8kHz)
+  // This avoids the FIR filter edge effects that cause noise
+  const pcm8k = simpleDecimate3to1(pcmBuffer);
+
+  // Step 2: Encode to G.711
   return pcm8kToG711(pcm8k, format);
 }
 
 /**
  * Convert PCM 16kHz to G.711 (8kHz) for Telnyx
  * Alternative if Gemini sends 16kHz output
+ *
+ * AUDIO QUALITY FIXES:
+ * 1. Remove DC offset (prevents clicking at chunk boundaries)
+ * 2. Normalize only if needed to prevent clipping
+ * 3. Downsample with anti-aliasing filter
+ * 4. Encode to G.711
  */
 export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
-  // First downsample 16kHz to 8kHz
-  const pcm8k = resamplePcm(pcmBuffer, 16000, 8000);
-  // Then encode to G.711
+  // Step 1: Remove DC offset
+  const dcCorrected = removeDcOffset(pcmBuffer);
+
+  // Step 2: Normalize only if peaks would clip
+  const normalizedInput = normalizeAudio(dcCorrected, 0.9);
+
+  // Step 3: Downsample 16kHz to 8kHz with anti-aliasing
+  const pcm8k = resamplePcm(normalizedInput, 16000, 8000);
+
+  // Step 4: Encode to G.711
   return pcm8kToG711(pcm8k, format);
 }
 

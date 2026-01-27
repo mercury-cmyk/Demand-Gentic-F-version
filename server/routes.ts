@@ -2,14 +2,11 @@ import type { Express } from "express";
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
-import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc } from "drizzle-orm";
+import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc } from "drizzle-orm";
 import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
-import { getBestPhoneForContact, normalizePhoneWithCountryCode } from "./lib/phone-utils";
-import { isWithinBusinessHours, getBusinessHoursForCountry, DEFAULT_BUSINESS_HOURS, type BusinessHoursConfig, type ContactTimezoneInfo } from "./utils/business-hours";
+import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
-import { generateTotpSecret, verifyTotpToken, verifyBackupCode, generateBackupCodes } from "./totp-mfa";
-import { processDisposition } from "./services/disposition-engine";
 import webhooksRouter from "./routes/webhooks";
 import queueRouter from "./routes/queue-routes";
 import filterOptionsRouter from "./routes/filter-options-routes";
@@ -27,7 +24,7 @@ import verificationJobRecoveryRouter from './routes/verification-job-recovery';
 import verificationAccountCapsRouter from './routes/verification-account-caps';
 import verificationPriorityConfigRouter from './routes/verification-priority-config';
 import suppressionRouter from './routes/suppression-routes';
-import storageFilesRouter from './routes/storage-files';
+import s3FilesRouter from './routes/s3-files';
 import csvImportJobsRouter from './routes/csv-import-jobs';
 import contactsCSVImportRouter from './routes/contacts-csv-import';
 import emailValidationTestRouter from './routes/email-validation-test';
@@ -35,8 +32,7 @@ import verificationExportRouter from './routes/verification-export';
 import exportTemplatesRouter from './routes/export-templates';
 import csvMappingTemplatesRouter from './routes/csv-mapping-templates';
 import aiCsvMappingRouter from './routes/ai-csv-mapping';
-// DISABLED: LinkedIn verification feature is no longer active
-// import linkedinVerificationRouter from './routes/linkedin-verification';
+import linkedinVerificationRouter from './routes/linkedin-verification';
 import agentReportsRouter from './routes/agent-reports';
 import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
@@ -52,19 +48,9 @@ import campaignEmailRouter from './routes/campaign-email-routes';
 import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
 import clientPortalRouter from './routes/client-portal';
-import clientAssignmentRouter from './routes/client-assignment';
-import qaGatedContentRouter from './routes/qa-gated-content';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
-import texmlRouter from './routes/texml';
-import openaiSipRouter from './routes/openai-sip';
-import openaiWebrtcRouter from './routes/openai-webrtc';
-import telnyxWebrtcRouter from './routes/telnyx-webrtc';
 import virtualAgentsRouter from './routes/virtual-agents';
-import voiceProviderRouter from './routes/voice-provider-routes';
-import voiceInsightsRouter from './routes/voice-insights';
-import agentDefaultsRouter from './routes/agent-defaults';
-import knowledgeHubRouter from './routes/knowledge-hub';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
@@ -72,21 +58,8 @@ import aiOperatorRouter from './routes/ai-operator';
 import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
-import problemIntelligenceRouter from './routes/problem-intelligence-routes';
-import smiAgentRouter from './routes/smi-agent-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
-import previewStudioRouter from './routes/preview-studio';
-import simulationsRouter from './routes/simulations';
 import healthRouter from './routes/health';
-import vertexAiRouter from './routes/vertex-ai';
-import knowledgeBlocksRouter from './routes/knowledge-blocks';
-import agentPromptVisibilityRouter from './routes/agent-prompt-visibility-routes';
-import superOrganizationRouter from './routes/super-organization-routes';
-import promptVariantsRouter from './routes/prompt-variants';
-import cloudLogsRouter from './routes/cloud-logs-routes';
-import campaignIngestionRouter from './routes/campaign-ingestion-routes';
-import campaignContextRouter from './routes/campaign-context-routes';
-import agentInfrastructureRouter from './routes/agent-infrastructure-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -107,8 +80,8 @@ import {
 import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
-import { uploadToS3, getPublicUrl } from "./lib/storage";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, campaignTestCalls, virtualAgents, emailSends, emailEvents, suppressionEmails, suppressionList, pipelineOpportunities, filterFieldCategoryEnum, campaignOrganizations, type CanonicalDisposition, type FilterField, type InsertMailboxAccount } from "@shared/schema";
+import { uploadToS3 } from "./lib/s3";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -161,7 +134,6 @@ import { encryptJson, decryptJson } from "./lib/encryption";
 import type { FilterValues } from "@shared/filterConfig";
 import type { FilterGroup, FilterCondition } from "@shared/filter-types";
 import { getOAuthStateStore, hasRedisConfigured as hasRedisForOAuth } from "./lib/oauth-state-store";
-import type { Request as ExpressRequest, Response, NextFunction } from "express";
 
 // Configure multer for memory storage (file uploads)
 const upload = multer({
@@ -651,13 +623,7 @@ export function registerRoutes(app: Express) {
 
   // Health Check Endpoint
   app.use('/api', healthRouter);
-
-  // Vertex AI Agentic CRM Operator
-  app.use('/api/vertex-ai', vertexAiRouter);
-
-  // Cloud Logging Dashboard
-  app.use('/api/cloud-logs', requireAuth, cloudLogsRouter);
-
+  
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes
   
@@ -780,93 +746,6 @@ export function registerRoutes(app: Express) {
       res.json({ message: "User deleted successfully" });
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to delete user" });
-    }
-  });
-
-  // ==================== USER TELEPHONY SETTINGS ====================
-
-  // Get current user's telephony settings
-  app.get("/api/users/me/telephony", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user?.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const [user] = await db
-        .select({
-          callbackPhone: users.callbackPhone,
-          sipExtension: users.sipExtension,
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      res.json({
-        callbackPhone: user.callbackPhone || null,
-        sipExtension: user.sipExtension || null,
-      });
-    } catch (error: any) {
-      console.error("[USER TELEPHONY GET] Error:", error);
-      res.status(500).json({ message: error.message || "Failed to get telephony settings" });
-    }
-  });
-
-  // Update current user's telephony settings
-  app.put("/api/users/me/telephony", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user?.userId;
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const { callbackPhone, sipExtension } = req.body as {
-        callbackPhone?: string | null;
-        sipExtension?: string | null;
-      };
-
-      // Validate phone number format if provided
-      if (callbackPhone && callbackPhone.trim()) {
-        // Basic E.164 validation
-        const phoneRegex = /^\+[1-9]\d{1,14}$/;
-        if (!phoneRegex.test(callbackPhone.replace(/\s/g, ''))) {
-          return res.status(400).json({
-            message: "Invalid phone number format. Please use E.164 format (e.g., +14155551234)"
-          });
-        }
-      }
-
-      const [updated] = await db
-        .update(users)
-        .set({
-          callbackPhone: callbackPhone?.trim() || null,
-          sipExtension: sipExtension?.trim() || null,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId))
-        .returning({
-          callbackPhone: users.callbackPhone,
-          sipExtension: users.sipExtension,
-        });
-
-      if (!updated) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      console.log(`[USER TELEPHONY] Updated for user ${userId}: callback=${updated.callbackPhone}`);
-
-      res.json({
-        success: true,
-        callbackPhone: updated.callbackPhone,
-        sipExtension: updated.sipExtension,
-      });
-    } catch (error: any) {
-      console.error("[USER TELEPHONY UPDATE] Error:", error);
-      res.status(500).json({ message: error.message || "Failed to update telephony settings" });
     }
   });
 
@@ -1009,11 +888,7 @@ export function registerRoutes(app: Express) {
   // Apply strict rate limiting to login endpoint (5 attempts per 15 minutes)
   app.post("/api/auth/login", authLimiter, validate({ body: loginSchema }), async (req, res) => {
     try {
-      const { username, password, rememberMe } = req.body as {
-        username: string;
-        password: string;
-        rememberMe?: boolean;
-      };
+      const { username, password } = req.body;
       console.log('[LOGIN DEBUG] Received username:', username);
 
       const user = await storage.getUserByUsername(username);
@@ -1032,16 +907,6 @@ export function registerRoutes(app: Express) {
       if (!isValid) {
         console.log('[LOGIN DEBUG] Invalid password, returning 401');
         return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      // Check if user has TOTP MFA enabled
-      if (user.mfaEnabled && user.totpSecret) {
-        console.log('[LOGIN DEBUG] TOTP MFA enabled for user');
-        return res.json({
-          requiresMFA: true,
-          mfaType: 'totp',
-          message: "Please enter your authentication code"
-        });
       }
 
       // Fetch user roles (multi-role support)
@@ -1069,7 +934,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Generate JWT token with roles
-      const token = generateToken(user, userRoles, rememberMe ? "30d" : undefined);
+      const token = generateToken(user, userRoles);
 
       // Return token and user info without password, including roles
       const { password: _, ...userWithoutPassword } = user;
@@ -1079,264 +944,6 @@ export function registerRoutes(app: Express) {
       });
     } catch (error) {
       res.status(500).json({ message: "Login failed" });
-    }
-  });
-
-  // TOTP MFA Verification Endpoint
-  app.post("/api/auth/mfa/verify", authLimiter, async (req, res) => {
-    try {
-      const { username, password, token, useBackupCode, rememberMe } = req.body as {
-        username: string;
-        password: string;
-        token: string;
-        useBackupCode?: boolean;
-        rememberMe?: boolean;
-      };
-
-      if (!username || !password || !token) {
-        return res.status(400).json({ message: "Username, password, and token required" });
-      }
-
-      // Verify user credentials first
-      const user = await storage.getUserByUsername(username);
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      const isValidPassword = await comparePassword(password, user.password);
-      if (!isValidPassword) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-
-      // Check if MFA is enabled
-      if (!user.mfaEnabled || !user.totpSecret) {
-        return res.status(400).json({ message: "MFA is not enabled for this account" });
-      }
-
-      let isValidToken = false;
-
-      if (useBackupCode) {
-        // Verify backup code
-        const usedCodes = (user.usedBackupCodes as string[]) || [];
-        const backupCodes = (user.backupCodes as string[]) || [];
-        isValidToken = verifyBackupCode(usedCodes, backupCodes, token);
-
-        if (isValidToken) {
-          // Mark backup code as used
-          await storage.updateUser(user.id, {
-            usedBackupCodes: [...usedCodes, token.toUpperCase().trim()],
-          });
-        }
-      } else {
-        // Verify TOTP token
-        isValidToken = verifyTotpToken(user.totpSecret, token);
-      }
-
-      if (!isValidToken) {
-        return res.status(401).json({ message: "Invalid authentication code" });
-      }
-
-      // Fetch user roles
-      let userRoles = await storage.getUserRoles(user.id);
-
-      if (userRoles.length === 0) {
-        const allUsersWithRoles = await storage.getAllUsersWithRoles();
-        const hasAdmin = allUsersWithRoles.some(u => u.roles.includes('admin'));
-
-        if (!hasAdmin) {
-          await storage.assignUserRole(user.id, 'admin', user.id);
-          userRoles = ['admin'];
-        } else {
-          userRoles = [user.role || 'agent'];
-        }
-      }
-
-      if (!Array.isArray(userRoles)) {
-        userRoles = [userRoles];
-      }
-
-      // Generate JWT token
-      const jwtToken = generateToken(user, userRoles, rememberMe ? "30d" : undefined);
-
-      const { password: _, totpSecret: __, backupCodes: ___, usedBackupCodes: ____, ...userWithoutSensitive } = user;
-      res.json({
-        token: jwtToken,
-        user: { ...userWithoutSensitive, roles: userRoles }
-      });
-    } catch (error) {
-      console.error('[MFA VERIFY] Error:', error);
-      res.status(500).json({ message: "MFA verification failed" });
-    }
-  });
-
-  // Enroll in TOTP MFA
-  app.post("/api/auth/mfa/enroll", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.userId;
-      const user = await storage.getUser(userId);
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      if (user.mfaEnabled) {
-        return res.status(400).json({ message: "MFA is already enabled" });
-      }
-
-      // Generate TOTP secret and QR code
-      const { secret, qrCode, backupCodes } = await generateTotpSecret(user.username);
-
-      // Store encrypted secret (in production, encrypt this!)
-      await storage.updateUser(userId, {
-        totpSecret: secret,
-        backupCodes: backupCodes,
-        usedBackupCodes: [],
-      });
-
-      res.json({
-        qrCode,
-        secret,
-        backupCodes,
-        message: "Scan the QR code with Google Authenticator or enter the secret manually"
-      });
-    } catch (error) {
-      console.error('[MFA ENROLL] Error:', error);
-      res.status(500).json({ message: "Failed to enroll in MFA" });
-    }
-  });
-
-  // Confirm TOTP MFA enrollment
-  app.post("/api/auth/mfa/confirm", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.userId;
-      const { token } = req.body;
-
-      if (!token) {
-        return res.status(400).json({ message: "Verification token required" });
-      }
-
-      const user = await storage.getUser(userId);
-      if (!user || !user.totpSecret) {
-        return res.status(400).json({ message: "MFA enrollment not initiated" });
-      }
-
-      // Verify the token
-      const isValid = verifyTotpToken(user.totpSecret, token);
-      if (!isValid) {
-        return res.status(401).json({ message: "Invalid verification code" });
-      }
-
-      // Enable MFA
-      await storage.updateUser(userId, {
-        mfaEnabled: true,
-        mfaEnrolledAt: new Date(),
-      });
-
-      res.json({ message: "MFA enabled successfully" });
-    } catch (error) {
-      console.error('[MFA CONFIRM] Error:', error);
-      res.status(500).json({ message: "Failed to confirm MFA enrollment" });
-    }
-  });
-
-  // Disable TOTP MFA
-  app.post("/api/auth/mfa/disable", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.userId;
-      const { password } = req.body;
-
-      if (!password) {
-        return res.status(400).json({ message: "Password required to disable MFA" });
-      }
-
-      const user = await storage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Verify password
-      const isValid = await comparePassword(password, user.password);
-      if (!isValid) {
-        return res.status(401).json({ message: "Invalid password" });
-      }
-
-      // Disable MFA
-      await storage.updateUser(userId, {
-        mfaEnabled: false,
-        totpSecret: null,
-        backupCodes: null,
-        usedBackupCodes: null,
-        mfaEnrolledAt: null,
-      });
-
-      res.json({ message: "MFA disabled successfully" });
-    } catch (error) {
-      console.error('[MFA DISABLE] Error:', error);
-      res.status(500).json({ message: "Failed to disable MFA" });
-    }
-  });
-
-  // Regenerate backup codes
-  app.post("/api/auth/mfa/regenerate-codes", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.userId;
-      const { password } = req.body;
-
-      if (!password) {
-        return res.status(400).json({ message: "Password required" });
-      }
-
-      const user = await storage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      if (!user.mfaEnabled) {
-        return res.status(400).json({ message: "MFA is not enabled" });
-      }
-
-      // Verify password
-      const isValid = await comparePassword(password, user.password);
-      if (!isValid) {
-        return res.status(401).json({ message: "Invalid password" });
-      }
-
-      // Generate new backup codes
-      const newBackupCodes = generateBackupCodes();
-
-      await storage.updateUser(userId, {
-        backupCodes: newBackupCodes,
-        usedBackupCodes: [],
-      });
-
-      res.json({ 
-        backupCodes: newBackupCodes,
-        message: "Backup codes regenerated successfully"
-      });
-    } catch (error) {
-      console.error('[MFA REGENERATE] Error:', error);
-      res.status(500).json({ message: "Failed to regenerate backup codes" });
-    }
-  });
-
-  // Get MFA status
-  app.get("/api/auth/mfa/status", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.userId;
-      const user = await storage.getUser(userId);
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      res.json({
-        mfaEnabled: user.mfaEnabled || false,
-        mfaEnrolledAt: user.mfaEnrolledAt,
-        hasBackupCodes: !!(user.backupCodes && Array.isArray(user.backupCodes) && user.backupCodes.length > 0),
-      });
-    } catch (error) {
-      console.error('[MFA STATUS] Error:', error);
-      res.status(500).json({ message: "Failed to get MFA status" });
     }
   });
 
@@ -1396,11 +1003,7 @@ export function registerRoutes(app: Express) {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = base64URLEncode(crypto.createHash("sha256").update(codeVerifier).digest());
 
-    const store = getOAuthStateStore();
-    if (!store) {
-      return res.status(503).json({ message: "OAuth state store not configured" });
-    }
-    await store.set(state, { codeVerifier, userId });
+    await oauthStateStore.set(state, { codeVerifier, userId });
 
     // Redis TTL automatically handles cleanup of stale entries
 
@@ -1617,9 +1220,9 @@ export function registerRoutes(app: Express) {
               const account = await storage.createAccount({
                 name: row.companyName,
                 nameNormalized: normalizedCompanyName,
-                industryStandardized: row.industry || null,
+                industry: row.industry || null,
                 description: row.companyDescription || null,
-                companyLocation: row.hqLocation || null,
+                hqLocation: row.hqLocation || null,
               });
               accountId = account.id;
               results.accountsCreated++;
@@ -2116,7 +1719,7 @@ export function registerRoutes(app: Express) {
       const toAddresses = Array.isArray(to) ? to.join(", ") : to;
       const ccAddresses = cc && Array.isArray(cc) ? cc.join(", ") : cc;
 
-      let externalMessageId: string = crypto.randomUUID();
+      let externalMessageId = crypto.randomUUID();
 
       if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
         const { gmailSyncService } = await import('./services/gmail-sync-service');
@@ -2240,11 +1843,7 @@ export function registerRoutes(app: Express) {
       const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
       // Store state and code_verifier in Redis (persists across server restarts)
-      const store1 = getOAuthStateStore();
-      if (!store1) {
-        return res.status(503).json({ message: "OAuth state store not configured" });
-      }
-      await store1.set(state, { codeVerifier, userId: req.user!.userId });
+      await oauthStateStore.set(state, { codeVerifier, userId: req.user!.userId });
 
       // Redis TTL automatically handles cleanup of stale entries
 
@@ -2286,11 +1885,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Verify state and retrieve code_verifier from Redis
-      const store2 = getOAuthStateStore();
-      if (!store2) {
-        return res.status(503).json({ message: "OAuth state store not configured" });
-      }
-      const pending = await store2.get(state);
+      const pending = await oauthStateStore.get(state);
       if (!pending) {
         console.error('[M365 OAuth] Invalid or expired state:', state);
         return res.send(`
@@ -2315,10 +1910,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Clean up the pending authorization from Redis
-      const store3 = getOAuthStateStore();
-      if (store3) {
-        await store3.delete(state);
-      }
+      await oauthStateStore.delete(state);
 
       const { codeVerifier, userId } = pending;
 
@@ -2519,11 +2111,7 @@ export function registerRoutes(app: Express) {
       const codeVerifier = generateCodeVerifier();
       const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
 
-      const store4 = getOAuthStateStore();
-      if (!store4) {
-        return res.status(503).json({ message: "OAuth state store not configured" });
-      }
-      await store4.set(state, { codeVerifier, userId: req.user!.userId });
+      await oauthStateStore.set(state, { codeVerifier, userId: req.user!.userId });
 
       const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
@@ -2558,11 +2146,7 @@ export function registerRoutes(app: Express) {
         return res.redirect("/?error=missing_code_or_state");
       }
 
-      const store5 = getOAuthStateStore();
-      if (!store5) {
-        return res.status(503).json({ message: "OAuth state store not configured" });
-      }
-      const pending = await store5.get(state);
+      const pending = await oauthStateStore.get(state);
       if (!pending) {
         console.error("[Google OAuth] Invalid or expired state:", state);
         return res.send(`
@@ -2586,10 +2170,7 @@ export function registerRoutes(app: Express) {
         `);
       }
 
-      const store6 = getOAuthStateStore();
-      if (store6) {
-        await store6.delete(state);
-      }
+      await oauthStateStore.delete(state);
 
       const { codeVerifier, userId } = pending;
       const tokenData = await exchangeGoogleAuthorizationCodeForTokens(code, codeVerifier);
@@ -2942,7 +2523,7 @@ export function registerRoutes(app: Express) {
 
       if (req.query.filterValues) {
         const filterValues = JSON.parse(req.query.filterValues as string);
-        filterGroup = convertFilterValuesToFilterGroup(filterValues);
+        filterGroup = convertFilterValuesToFilterGroup(filterValues, 'contacts');
       }
 
       const queryBuilder = db
@@ -2950,11 +2531,9 @@ export function registerRoutes(app: Express) {
         .from(contactsTable)
         .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id));
 
-      const contactFilterCondition = filterGroup
-        ? buildFilterQuery(filterGroup, contactsTable)
-        : undefined;
-      if (contactFilterCondition) {
-        queryBuilder.where(contactFilterCondition);
+      if (filterGroup) {
+        const filterCondition = buildFilterQuery(filterGroup, 'contacts');
+        if (filterCondition) queryBuilder.where(filterCondition);
       }
 
       const [contactResults, countResult] = await Promise.all([
@@ -2962,7 +2541,7 @@ export function registerRoutes(app: Express) {
         db
           .select({ count: sql<number>`count(*)` })
           .from(contactsTable)
-          .where(contactFilterCondition),
+          .where(filterGroup ? buildFilterQuery(filterGroup, 'contacts') : undefined),
       ]);
 
       const { toUnifiedContactRecord } = await import('@shared/unified-records');
@@ -2992,7 +2571,7 @@ export function registerRoutes(app: Express) {
 
       if (req.query.filterValues) {
         const filterValues = JSON.parse(req.query.filterValues as string);
-        filterGroup = convertFilterValuesToFilterGroup(filterValues);
+        filterGroup = convertFilterValuesToFilterGroup(filterValues, 'accounts');
       }
 
       const queryBuilder = db
@@ -3004,11 +2583,9 @@ export function registerRoutes(app: Express) {
         .leftJoin(contactsTable, eq(accountsTable.id, contactsTable.accountId))
         .groupBy(accountsTable.id);
 
-      const accountFilterCondition = filterGroup
-        ? buildFilterQuery(filterGroup, accountsTable)
-        : undefined;
-      if (accountFilterCondition) {
-        queryBuilder.where(accountFilterCondition);
+      if (filterGroup) {
+        const filterCondition = buildFilterQuery(filterGroup, 'accounts');
+        if (filterCondition) queryBuilder.where(filterCondition);
       }
 
       const [accountResults, countResult] = await Promise.all([
@@ -3016,7 +2593,7 @@ export function registerRoutes(app: Express) {
         db
           .select({ count: sql<number>`count(*)` })
           .from(accountsTable)
-          .where(accountFilterCondition),
+          .where(filterGroup ? buildFilterQuery(filterGroup, 'accounts') : undefined),
       ]);
 
       const { toUnifiedAccountRecord } = await import('@shared/unified-records');
@@ -3333,7 +2910,7 @@ export function registerRoutes(app: Express) {
       }
 
       // Check email suppression
-      if (validatedContact.email && await storage.isEmailSuppressed(validatedContact.email)) {
+      if (await storage.isEmailSuppressed(validatedContact.email)) {
         return res.status(400).json({ message: "Email is on suppression list" });
       }
 
@@ -3585,21 +3162,19 @@ export function registerRoutes(app: Express) {
       // Create definitions for new fields
       const created = [];
       for (const fieldKey of newFields) {
-        const label = fieldKey
-          .replace(/_/g, ' ')
-          .replace(/\b\w/g, (char: string) => char.toUpperCase());
         const [field] = await db.insert(customFieldDefinitions)
           .values({
             entityType: entityType as 'account' | 'contact',
             fieldKey,
-            displayLabel: label, // Convert snake_case to Title Case
+            displayLabel: fieldKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Convert snake_case to Title Case
             fieldType: 'text', // Default to text, can be changed later
-            helpText: 'Auto-discovered custom field from CSV upload',
+            description: `Auto-discovered custom field from CSV upload`,
+            placeholder: null,
             displayOrder: 999 + created.length, // Put new fields at the end
             active: true,
             createdBy: req.user?.userId || null,
           })
-          .returning() as (typeof customFieldDefinitions.$inferSelect)[];
+          .returning();
 
         created.push(field);
       }
@@ -3637,7 +3212,6 @@ export function registerRoutes(app: Express) {
       for (const contact of unlinkedContacts) {
         try {
           // Extract domain from email
-          if (!contact.email) continue;
           const emailDomain = contact.email.split('@')[1]?.toLowerCase();
           if (!emailDomain) continue;
 
@@ -4773,17 +4347,13 @@ export function registerRoutes(app: Express) {
       const typeFilter = req.query.type as string | undefined;
       let campaigns = await storage.getCampaigns();
 
-      console.log(`[GET /api/campaigns] Found ${campaigns.length} campaigns in database${typeFilter ? ` (filtering by type: ${typeFilter})` : ''}`);
-
       // Filter by type if specified
       if (typeFilter) {
         campaigns = campaigns.filter(c => c.type === typeFilter);
-        console.log(`[GET /api/campaigns] After filter: ${campaigns.length} campaigns`);
       }
 
       res.json(campaigns);
     } catch (error) {
-      console.error('[GET /api/campaigns] ERROR:', error);
       res.status(500).json({ message: "Failed to fetch campaigns" });
     }
   });
@@ -4863,8 +4433,8 @@ export function registerRoutes(app: Express) {
       
       // Get all email events for this campaign
       const events = await db.select()
-        .from(emailEvents)
-        .where(eq(emailEvents.campaignId, campaignId));
+        .from(schema.emailEvents)
+        .where(eq(schema.emailEvents.campaignId, campaignId));
 
       // Calculate metrics by grouping events
       const metrics = {
@@ -4906,20 +4476,11 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get call campaign snapshot stats (REAL-TIME - no caching)
+  // Get call campaign snapshot stats
   app.get("/api/campaigns/:id/call-stats", requireAuth, async (req, res) => {
     try {
-      // Disable caching for real-time stats
-      res.set({
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Surrogate-Control': 'no-store'
-      });
-      
       const campaignId = req.params.id;
       const queueStats = await storage.getCampaignQueueStats(campaignId);
-      const { dialerCallAttempts, callSessions } = await import('@shared/schema');
       const connectedDispositions = [
         'connected',
         'qualified',
@@ -4927,62 +4488,28 @@ export function registerRoutes(app: Express) {
         'not_interested',
         'dnc-request',
       ];
-      
-      // Legacy calls: count callsConnected only when identity is confirmed via aiAnalysis
-      const [legacyStats] = await db
+      const [callStats] = await db
         .select({
           callsMade: sql<number>`COUNT(*)::int`,
-          // Calls Connected = identity confirmed (in aiAnalysis.conversationState.identityConfirmed)
-          callsConnected: sql<number>`COUNT(CASE WHEN (
-            ${calls.disposition} IN (${sql.join(connectedDispositions.map((value) => sql`${value}`), sql`, `)})
-          ) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'qualified' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'dnc-request' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${calls.disposition} = 'not_interested' THEN 1 END)::int`,
+          callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IN (${sql.join(
+            connectedDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'qualified' THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'dnc-request' THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
         })
-        .from(calls)
-        .where(eq(calls.campaignId, campaignId));
-
-      // PRIMARY STATS SOURCE: dialer_call_attempts (single source of truth)
-      // CRITICAL FIX: Query ONLY from dialer_call_attempts where call_started_at IS NOT NULL
-      // This ensures we only count actual calls made, not queued items or duplicates
-      // Also filters out already-processed dispositions to prevent double counting
-      const [dialerStats] = await db
-        .select({
-          callsMade: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL THEN 1 END)::int`,
-          // Calls Connected = call was answered (connected = true) OR positive disposition
-          callsConnected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND (
-            ${dialerCallAttempts.connected} = true
-            OR ${dialerCallAttempts.disposition} IN ('qualified_lead', 'not_interested', 'do_not_call')
-          ) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
-          // FIXED: noAnswer and voicemail now come from dialer_call_attempts, not call_sessions
-          noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.callStartedAt} IS NOT NULL AND (
-            ${dialerCallAttempts.disposition} = 'voicemail' OR ${dialerCallAttempts.voicemailDetected} = true
-          ) THEN 1 END)::int`,
-        })
-        .from(dialerCallAttempts)
-        .where(eq(dialerCallAttempts.campaignId, campaignId));
-
-      // Calculate totals from the single source of truth (dialer_call_attempts)
-      // Legacy stats are only used if dialer stats are empty (backward compatibility)
-      const hasDialerStats = (dialerStats?.callsMade || 0) > 0;
+        .from(callAttempts)
+        .where(eq(callAttempts.campaignId, campaignId));
 
       res.json({
         campaignId,
         contactsInQueue: queueStats.queued,
-        callsMade: hasDialerStats ? dialerStats.callsMade : (legacyStats?.callsMade || 0),
-        callsConnected: hasDialerStats ? dialerStats.callsConnected : (legacyStats?.callsConnected || 0),
-        leadsQualified: (dialerStats?.leadsQualified || 0) + (legacyStats?.leadsQualified || 0),
-        dncRequests: (dialerStats?.dncRequests || 0) + (legacyStats?.dncRequests || 0),
-        notInterested: (dialerStats?.notInterested || 0) + (legacyStats?.notInterested || 0),
-        // FIXED: Use dialer_call_attempts as source of truth for noAnswer/voicemail
-        noAnswer: dialerStats?.noAnswer || 0,
-        voicemail: dialerStats?.voicemail || 0,
-        timestamp: Date.now(), // Real-time verification
+        callsMade: callStats?.callsMade || 0,
+        callsConnected: callStats?.callsConnected || 0,
+        leadsQualified: callStats?.leadsQualified || 0,
+        dncRequests: callStats?.dncRequests || 0,
+        notInterested: callStats?.notInterested || 0,
       });
     } catch (error) {
       console.error('[CALL STATS] Error:', error);
@@ -5000,37 +4527,37 @@ export function registerRoutes(app: Express) {
       const offset = (pageNum - 1) * limitNum;
 
       let query = db.select({
-        id: emailEvents.id,
-        recipient: emailEvents.recipient,
-        type: emailEvents.type,
-        bounceType: emailEvents.bounceType,
-        createdAt: emailEvents.createdAt,
-        contactId: emailEvents.contactId,
-        messageId: emailEvents.messageId,
+        id: schema.emailEvents.id,
+        recipient: schema.emailEvents.recipient,
+        type: schema.emailEvents.type,
+        bounceType: schema.emailEvents.bounceType,
+        createdAt: schema.emailEvents.createdAt,
+        contactId: schema.emailEvents.contactId,
+        messageId: schema.emailEvents.messageId,
       })
-      .from(emailEvents)
-      .where(eq(emailEvents.campaignId, campaignId))
-      .orderBy(desc(emailEvents.createdAt))
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.campaignId, campaignId))
+      .orderBy(desc(schema.emailEvents.createdAt))
       .limit(limitNum)
       .offset(offset);
 
       // Optional filter by event type
       if (eventType && typeof eventType === 'string') {
         query = db.select({
-          id: emailEvents.id,
-          recipient: emailEvents.recipient,
-          type: emailEvents.type,
-          bounceType: emailEvents.bounceType,
-          createdAt: emailEvents.createdAt,
-          contactId: emailEvents.contactId,
-          messageId: emailEvents.messageId,
+          id: schema.emailEvents.id,
+          recipient: schema.emailEvents.recipient,
+          type: schema.emailEvents.type,
+          bounceType: schema.emailEvents.bounceType,
+          createdAt: schema.emailEvents.createdAt,
+          contactId: schema.emailEvents.contactId,
+          messageId: schema.emailEvents.messageId,
         })
-        .from(emailEvents)
+        .from(schema.emailEvents)
         .where(and(
-          eq(emailEvents.campaignId, campaignId),
-          eq(emailEvents.type, eventType)
+          eq(schema.emailEvents.campaignId, campaignId),
+          eq(schema.emailEvents.type, eventType)
         ))
-        .orderBy(desc(emailEvents.createdAt))
+        .orderBy(desc(schema.emailEvents.createdAt))
         .limit(limitNum)
         .offset(offset);
       }
@@ -5039,8 +4566,8 @@ export function registerRoutes(app: Express) {
 
       // Get total count
       const countResult = await db.select({ count: sql<number>`count(*)::int` })
-        .from(emailEvents)
-        .where(eq(emailEvents.campaignId, campaignId));
+        .from(schema.emailEvents)
+        .where(eq(schema.emailEvents.campaignId, campaignId));
       
       const totalCount = countResult[0]?.count || 0;
 
@@ -5077,222 +4604,107 @@ export function registerRoutes(app: Express) {
       }
       
       const campaign = await storage.createCampaign(campaignData);
-      
-      // ===== ORGANIZATION NAME VALIDATION (PREVENT WRONG ORG IN CALLS) =====
-      // Check if AI calling campaigns have proper organization configuration
-      const createdCampaign = campaign as any;
-      const hasCompanyName = createdCampaign.aiAgentSettings?.persona?.companyName;
-      const hasOrgLink = createdCampaign.problemIntelligenceOrgId;
-      
-      if (!hasCompanyName && !hasOrgLink) {
-        console.warn(`⚠️ [Campaign Create] Campaign ${campaign.id} ("${createdCampaign.name}") has NO organization config!`);
-        console.warn(`   → Set aiAgentSettings.persona.companyName OR link a problemIntelligenceOrgId`);
-        console.warn(`   → Without this, AI calls may use wrong organization name`);
-      } else if (!hasCompanyName && hasOrgLink) {
-        // Verify the linked org exists
-        const [linkedOrg] = await db.select({ name: campaignOrganizations.name })
-          .from(campaignOrganizations)
-          .where(eq(campaignOrganizations.id, hasOrgLink))
-          .limit(1);
-        if (linkedOrg) {
-          console.log(`✅ [Campaign Create] Campaign ${campaign.id} will use org name: "${linkedOrg.name}" (from problemIntelligenceOrgId)`);
-        } else {
-          console.error(`❌ [Campaign Create] Campaign ${campaign.id} has invalid problemIntelligenceOrgId: ${hasOrgLink} (org not found!)`);
+
+      // Auto-populate queue from audience if defined
+      if (campaign.audienceRefs && campaign.type === 'call') {
+        const audienceRefs = campaign.audienceRefs as any;
+        let contacts: any[] = [];
+
+        // Resolve contacts from filterGroup (Advanced Filters)
+        if (audienceRefs.filterGroup) {
+          console.log(`[Campaign Creation] Resolving contacts from filterGroup for campaign ${campaign.id}`);
+          const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
+          contacts.push(...filterContacts);
+          console.log(`[Campaign Creation] Found ${filterContacts.length} contacts from filterGroup`);
         }
-      } else if (hasCompanyName) {
-        console.log(`✅ [Campaign Create] Campaign ${campaign.id} has explicit companyName: "${hasCompanyName}"`);
-      }
-      // ===== END ORGANIZATION NAME VALIDATION =====
 
-      // ===== AUTOMATIC PROMPT REGENERATION VIA VERTEX AI (ON CREATE) =====
-      // For AI campaigns, refine the prompt through Vertex AI with Gemini best practices
-      if (createdCampaign.dialMode === 'ai_agent') {
-        try {
-          const basePrompt = createdCampaign.aiAgentSettings?.systemPrompt ||
-                            createdCampaign.callScript ||
-                            '';
+        // Resolve contacts from segments
+        if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
+          for (const segmentId of audienceRefs.selectedSegments) {
+            const segment = await storage.getSegment(segmentId);
+            if (segment && segment.definitionJson) {
+              const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+              contacts.push(...segmentContacts);
+            }
+          }
+        }
 
-          if (basePrompt && basePrompt.trim().length > 0) {
-            console.log(`[Campaign Create] AI campaign detected - triggering Vertex AI refinement...`);
-
-            const { refineCampaignPrompt } = await import('./services/vertex-ai/vertex-prompt-refiner');
-
-            const refinedResult = await refineCampaignPrompt(
-              campaign.id,
-              basePrompt,
-              {
-                voiceProvider: 'gemini',
-                emotionalTone: 'consultative',
-                pacePreference: 'normal',
-                complianceLevel: 'strict',
-                enforceBrandVoice: true,
+        // Resolve contacts from lists (with batching for large lists)
+        const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+        if (Array.isArray(listIds) && listIds.length > 0) {
+          for (const listId of listIds) {
+            const list = await storage.getList(listId);
+            if (list && list.recordIds && list.recordIds.length > 0) {
+              // Batch large lists to avoid SQL query limits
+              const batchSize = 1000;
+              for (let i = 0; i < list.recordIds.length; i += batchSize) {
+                const batch = list.recordIds.slice(i, i + batchSize);
+                const listContacts = await storage.getContactsByIds(batch);
+                contacts.push(...listContacts);
               }
-            );
+            }
+          }
+        }
 
-            // Store refined prompt back to campaign
-            const refinedSettings = {
-              ...createdCampaign.aiAgentSettings,
-              refinedSystemPrompt: refinedResult.refinedPrompt,
-              voiceDirectives: refinedResult.voiceDirectives,
-              refinementMetadata: {
-                qualityScore: refinedResult.qualityScore,
-                refinedAt: refinedResult.metadata.refinedAt,
-                optimizations: refinedResult.optimizations,
-                warnings: refinedResult.warnings,
-              },
-            };
+        // Remove duplicates and filter contacts with accountId
+        const uniqueContacts = Array.from(
+          new Map(contacts.map(c => [c.id, c])).values()
+        );
+        const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
 
-            await storage.updateCampaign(campaign.id, {
-              aiAgentSettings: refinedSettings,
+        // PHONE VALIDATION: Filter contacts with callable phone numbers
+        // Fetch full contact data with account/HQ phone info if not already present
+        const contactIds = contactsWithAccount.map(c => c.id);
+        if (contactIds.length === 0) {
+          console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id}`);
+        } else {
+          // Batch to avoid PostgreSQL parameter limits
+          const fullContacts: any[] = [];
+          const batchSize = 500;
+          for (let i = 0; i < contactIds.length; i += batchSize) {
+            const batch = contactIds.slice(i, i + batchSize);
+            const batchResults = await db
+              .select()
+              .from(contactsTable)
+              .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+              .where(inArray(contactsTable.id, batch));
+            fullContacts.push(...batchResults);
+          }
+
+          const contactsWithCallablePhones = fullContacts.filter(row => {
+            const contact = row.contacts;
+            const account = row.accounts;
+
+            const bestPhone = getBestPhoneForContact({
+              directPhone: contact.directPhone,
+              directPhoneE164: contact.directPhoneE164,
+              mobilePhone: contact.mobilePhone,
+              mobilePhoneE164: contact.mobilePhoneE164,
+              country: contact.country,
+              hqPhone: account?.mainPhone,
+              hqPhoneE164: account?.mainPhoneE164,
+              hqCountry: account?.hqCountry,
             });
 
-            console.log(`[Campaign Create] ✅ Vertex AI refinement complete. Quality score: ${refinedResult.qualityScore}/100`);
-          }
-        } catch (refinementError) {
-          console.error(`[Campaign Create] ⚠️ Vertex AI refinement failed (non-blocking):`, refinementError);
+            return bestPhone.phone !== null;
+          });
+
+          console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
+
+          // Bulk enqueue all contacts with callable phones
+          const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
+            contactId: row.contacts.id,
+            accountId: row.contacts.accountId!,
+            priority: 0
+          }));
+
+          const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
+          console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
         }
       }
-      // ===== END AUTOMATIC PROMPT REGENERATION =====
 
-      // AUTO-CONFIGURE AGENTS based on Campaign Type
-      try {
-        const { configureCampaignAgents } = await import('./services/campaign-configuration');
-        // Cast type to string as it comes from DB/API and might match the enum
-        await configureCampaignAgents(campaign.id, campaign.type);
-      } catch (err) {
-        console.error('[Campaign Creation] Failed to auto-configure agents:', err);
-      }
-      
-      // Return campaign immediately - queue population happens in background
       invalidateDashboardCache();
-      res.status(201).json({ ...campaign, queuePopulationStatus: 'pending' });
-
-      // ASYNC: Auto-populate queue from audience if defined (runs in background)
-      if (campaign.audienceRefs && campaign.type === 'call') {
-        const startTime = Date.now();
-        console.log(`[Campaign Creation] Starting async queue population for campaign ${campaign.id}`);
-        
-        // Run queue population in background (don't await)
-        (async () => {
-          try {
-            const audienceRefs = campaign.audienceRefs as any;
-            let contacts: any[] = [];
-
-            // Resolve contacts from filterGroup (Advanced Filters)
-            if (audienceRefs.filterGroup) {
-              console.log(`[Campaign Creation] Resolving contacts from filterGroup for campaign ${campaign.id}`);
-              const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
-              contacts.push(...filterContacts);
-              console.log(`[Campaign Creation] Found ${filterContacts.length} contacts from filterGroup`);
-            }
-
-            // Resolve contacts from segments
-            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
-              for (const segmentId of audienceRefs.selectedSegments) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment && segment.definitionJson) {
-                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-                  contacts.push(...segmentContacts);
-                }
-              }
-            }
-
-            // Resolve contacts from lists (with batching for large lists)
-            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-            if (Array.isArray(listIds) && listIds.length > 0) {
-              for (const listId of listIds) {
-                const list = await storage.getList(listId);
-                if (list && list.recordIds && list.recordIds.length > 0) {
-                  // Batch large lists to avoid SQL query limits
-                  const batchSize = 1000;
-                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
-                    const batch = list.recordIds.slice(i, i + batchSize);
-                    const listContacts = await storage.getContactsByIds(batch);
-                    contacts.push(...listContacts);
-                  }
-                }
-              }
-            }
-
-            // Remove duplicates and log all contacts from lists
-            const uniqueContacts = Array.from(
-              new Map(contacts.map(c => [c.id, c])).values()
-            );
-            
-            console.log(`[Campaign Creation] Total unique contacts from lists/segments: ${uniqueContacts.length}`);
-            
-            // Separate contacts with and without accounts
-            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-            const contactsWithoutAccount = uniqueContacts.filter(c => !c.accountId);
-            
-            if (contactsWithoutAccount.length > 0) {
-              console.log(`[Campaign Creation] ⚠️ ${contactsWithoutAccount.length} contacts have no accountId - they will be skipped (DB constraint requires accountId)`);
-              // Log first 5 for debugging
-              const sample = contactsWithoutAccount.slice(0, 5);
-              for (const c of sample) {
-                console.log(`  - ${c.firstName} ${c.lastName} (${c.email}) - no account linked`);
-              }
-            }
-
-            // PHONE VALIDATION: Filter contacts with callable phone numbers
-            // Fetch full contact data with account/HQ phone info if not already present
-            const contactIds = contactsWithAccount.map(c => c.id);
-            if (contactIds.length === 0) {
-              console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id}`);
-            } else {
-              // Batch to avoid PostgreSQL parameter limits
-              const fullContacts: any[] = [];
-              const batchSize = 500;
-              for (let i = 0; i < contactIds.length; i += batchSize) {
-                const batch = contactIds.slice(i, i + batchSize);
-                const batchResults = await db
-                  .select()
-                  .from(contactsTable)
-                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-                  .where(inArray(contactsTable.id, batch));
-                fullContacts.push(...batchResults);
-              }
-
-              const contactsWithCallablePhones = fullContacts.filter(row => {
-                const contact = row.contacts;
-                const account = row.accounts;
-
-                const bestPhone = getBestPhoneForContact({
-                  directPhone: contact.directPhone,
-                  directPhoneE164: contact.directPhoneE164,
-                  mobilePhone: contact.mobilePhone,
-                  mobilePhoneE164: contact.mobilePhoneE164,
-                  country: contact.country,
-                  hqPhone: account?.mainPhone,
-                  hqPhoneE164: account?.mainPhoneE164,
-                  hqCountry: account?.hqCountry,
-                });
-
-                return bestPhone.phone !== null;
-              });
-
-              const skippedNoPhone = fullContacts.length - contactsWithCallablePhones.length;
-              console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
-              if (skippedNoPhone > 0) {
-                console.log(`[Campaign Creation] ⚠️ ${skippedNoPhone} contacts have no callable phone and will be skipped`);
-              }
-
-              // Bulk enqueue all contacts with callable phones
-              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
-                contactId: row.contacts.id,
-                accountId: row.contacts.accountId!,
-                priority: 0
-              }));
-
-              const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
-              const elapsed = Date.now() - startTime;
-              console.log(`[Campaign Creation] ✅ Async queue population complete: ${enqueued} contacts in ${elapsed}ms for campaign ${campaign.id}`);
-            }
-          } catch (bgError) {
-            console.error(`[Campaign Creation] ❌ Background queue population failed for campaign ${campaign.id}:`, bgError);
-          }
-        })();
-      }
+      res.status(201).json(campaign);
     } catch (error) {
       console.error('Campaign creation error:', error);
       res.status(400).json({ message: error instanceof Error ? error.message : "Failed to create campaign" });
@@ -5323,97 +4735,6 @@ export function registerRoutes(app: Express) {
       if (!campaign) {
         return res.status(404).json({ message: "Campaign not found" });
       }
-
-      // ===== AUTOMATIC PROMPT REGENERATION VIA VERTEX AI =====
-      // When AI agent settings are updated, regenerate the prompt through Vertex AI
-      const updatedCampaignData = campaign as any;
-      const isAiCampaign = updatedCampaignData.dialMode === 'ai_agent';
-      const hasPromptChanges = 'aiAgentSettings' in updateData ||
-                               'callScript' in updateData ||
-                               'talkingPoints' in updateData ||
-                               'problemIntelligenceOrgId' in updateData;
-
-      if (isAiCampaign && hasPromptChanges) {
-        try {
-          console.log(`[Campaign Update] AI campaign detected with prompt changes - triggering Vertex AI refinement...`);
-
-          const { refineCampaignPrompt } = await import('./services/vertex-ai/vertex-prompt-refiner');
-
-          // Get the base prompt from campaign settings
-          const basePrompt = updatedCampaignData.aiAgentSettings?.systemPrompt ||
-                            updatedCampaignData.callScript ||
-                            '';
-
-          if (basePrompt && basePrompt.trim().length > 0) {
-            // Refine through Vertex AI with Gemini best practices
-            const refinedResult = await refineCampaignPrompt(
-              req.params.id,
-              basePrompt,
-              {
-                voiceProvider: 'gemini',
-                emotionalTone: 'consultative',
-                pacePreference: 'normal',
-                complianceLevel: 'strict',
-                enforceBrandVoice: true,
-              }
-            );
-
-            // Store the refined prompt back to the campaign
-            const refinedSettings = {
-              ...updatedCampaignData.aiAgentSettings,
-              refinedSystemPrompt: refinedResult.refinedPrompt,
-              voiceDirectives: refinedResult.voiceDirectives,
-              refinementMetadata: {
-                qualityScore: refinedResult.qualityScore,
-                refinedAt: refinedResult.metadata.refinedAt,
-                optimizations: refinedResult.optimizations,
-                warnings: refinedResult.warnings,
-              },
-            };
-
-            // Update campaign with refined settings
-            await storage.updateCampaign(req.params.id, {
-              aiAgentSettings: refinedSettings,
-            });
-
-            console.log(`[Campaign Update] ✅ Vertex AI refinement complete. Quality score: ${refinedResult.qualityScore}/100`);
-            if (refinedResult.warnings.length > 0) {
-              console.log(`[Campaign Update] ⚠️ Warnings: ${refinedResult.warnings.join(', ')}`);
-            }
-          }
-        } catch (refinementError) {
-          // Don't fail the update if refinement fails - log and continue
-          console.error(`[Campaign Update] ⚠️ Vertex AI refinement failed (non-blocking):`, refinementError);
-        }
-      }
-      // ===== END AUTOMATIC PROMPT REGENERATION =====
-
-      // ===== ORGANIZATION NAME VALIDATION (PREVENT WRONG ORG IN CALLS) =====
-      // Check if AI calling campaigns have proper organization configuration
-      const updatedCampaign = campaign as any;
-      const hasCompanyName = updatedCampaign.aiAgentSettings?.persona?.companyName;
-      const hasOrgLink = updatedCampaign.problemIntelligenceOrgId;
-      
-      if (!hasCompanyName && !hasOrgLink) {
-        console.warn(`⚠️ [Campaign Update] Campaign ${req.params.id} ("${updatedCampaign.name}") has NO organization config!`);
-        console.warn(`   → Set aiAgentSettings.persona.companyName OR link a problemIntelligenceOrgId`);
-        console.warn(`   → Without this, AI calls may use wrong organization name`);
-      } else if (!hasCompanyName && hasOrgLink) {
-        // Verify the linked org exists
-        const [linkedOrg] = await db.select({ name: campaignOrganizations.name })
-          .from(campaignOrganizations)
-          .where(eq(campaignOrganizations.id, hasOrgLink))
-          .limit(1);
-        if (linkedOrg) {
-          console.log(`✅ [Campaign Update] Campaign ${req.params.id} will use org name: "${linkedOrg.name}" (from problemIntelligenceOrgId)`);
-        } else {
-          console.error(`❌ [Campaign Update] Campaign ${req.params.id} has invalid problemIntelligenceOrgId: ${hasOrgLink} (org not found!)`);
-        }
-      } else if (hasCompanyName) {
-        console.log(`✅ [Campaign Update] Campaign ${req.params.id} has explicit companyName: "${hasCompanyName}"`);
-      }
-      // ===== END ORGANIZATION NAME VALIDATION =====
-      
       invalidateDashboardCache();
       res.json(campaign);
     } catch (error) {
@@ -5467,11 +4788,9 @@ export function registerRoutes(app: Express) {
   });
 
   // Clone/Requeue campaign - creates a new draft copy of an existing campaign
-  // Supports optional body params: { name?: string, organizationId?: string }
   app.post("/api/campaigns/:id/clone", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const campaignId = req.params.id;
-      const { name: customName, organizationId: newOrganizationId } = req.body || {};
 
       // Get the original campaign
       const originalCampaign = await storage.getCampaign(campaignId);
@@ -5479,83 +4798,23 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      // Create a new campaign based on the original with ALL important fields
+      // Create a new campaign based on the original
       const newCampaign = await db.insert(campaigns)
         .values({
-          // Basic info
-          name: customName || `${originalCampaign.name} (Copy)`,
+          name: `${originalCampaign.name} (Copy)`,
           type: originalCampaign.type,
           status: 'draft', // Always create as draft
-
-          // Organization - use new one if provided, otherwise copy from original
-          problemIntelligenceOrgId: newOrganizationId || originalCampaign.problemIntelligenceOrgId,
-
-          // Audience & Email
           audienceRefs: originalCampaign.audienceRefs,
           emailSubject: originalCampaign.emailSubject,
           emailHtmlContent: originalCampaign.emailHtmlContent,
-
-          // Call Scripts & Qualification
-          callScript: originalCampaign.callScript,
-          scriptId: originalCampaign.scriptId,
-          qualificationQuestions: originalCampaign.qualificationQuestions,
-
-          // AI Agent Settings
-          dialMode: originalCampaign.dialMode,
-          aiAgentSettings: originalCampaign.aiAgentSettings,
-          voiceProvider: originalCampaign.voiceProvider,
-          voiceProviderFallback: originalCampaign.voiceProviderFallback,
-          maxCallDurationSeconds: originalCampaign.maxCallDurationSeconds,
-
-          // Campaign Context (Foundation + Campaign Layer)
-          campaignObjective: originalCampaign.campaignObjective,
-          productServiceInfo: originalCampaign.productServiceInfo,
-          talkingPoints: originalCampaign.talkingPoints,
-          targetAudienceDescription: originalCampaign.targetAudienceDescription,
-          campaignObjections: originalCampaign.campaignObjections,
-          successCriteria: originalCampaign.successCriteria,
-          campaignContextBrief: originalCampaign.campaignContextBrief,
-
-          // Power Dialer & Retry Settings
-          powerSettings: originalCampaign.powerSettings,
-          retryRules: originalCampaign.retryRules,
-          timezone: originalCampaign.timezone,
-          businessHoursConfig: originalCampaign.businessHoursConfig,
-
-          // QA Settings
-          qaParameters: originalCampaign.qaParameters,
-          customQaFields: originalCampaign.customQaFields,
-          customQaRules: originalCampaign.customQaRules,
-          parsedQaRules: originalCampaign.parsedQaRules,
-          clientSubmissionConfig: originalCampaign.clientSubmissionConfig,
-          recordingAutoSyncEnabled: originalCampaign.recordingAutoSyncEnabled,
-          companiesHouseValidation: originalCampaign.companiesHouseValidation,
-          deliveryTemplateId: originalCampaign.deliveryTemplateId,
-
-          // Account Cap Settings
-          accountCapEnabled: originalCampaign.accountCapEnabled,
-          accountCapValue: originalCampaign.accountCapValue,
-          accountCapMode: originalCampaign.accountCapMode,
-
-          // Goals (but clear schedule for requeue)
-          targetQualifiedLeads: originalCampaign.targetQualifiedLeads,
-          costPerLead: originalCampaign.costPerLead,
+          emailPreheader: originalCampaign.emailPreheader,
+          senderProfileId: originalCampaign.senderProfileId,
           scheduleJson: null, // Clear schedule for requeue
-          startDate: null, // Clear dates for requeue
-          endDate: null,
-
-          // Owner
-          ownerId: originalCampaign.ownerId,
-          brandId: originalCampaign.brandId,
-          throttlingConfig: originalCampaign.throttlingConfig,
-          assignedTeams: originalCampaign.assignedTeams,
+          mode: originalCampaign.mode,
         })
         .returning();
 
-      console.log(`[CLONE CAMPAIGN] Created new campaign ${newCampaign[0].id} from ${campaignId}`, {
-        newOrganizationId: newOrganizationId || 'same as original',
-        originalOrgId: originalCampaign.problemIntelligenceOrgId,
-      });
+      console.log(`[CLONE CAMPAIGN] Created new campaign ${newCampaign[0].id} from ${campaignId}`);
 
       invalidateDashboardCache();
       res.status(201).json(newCampaign[0]);
@@ -5577,8 +4836,11 @@ export function registerRoutes(app: Express) {
 
       console.log(`[LAUNCH CAMPAIGN] Found campaign: ${campaign.name}, type: ${campaign.type}`);
 
-      // Update status and launchedAt using direct database query
+      // TODO: Add pre-launch guards (audience validation, suppression checks, etc.)
+
       console.log(`[LAUNCH CAMPAIGN] Updating campaign status to active...`);
+
+      // Update status and launchedAt using direct database query
       const [updated] = await db
         .update(campaigns)
         .set({
@@ -5593,208 +4855,9 @@ export function registerRoutes(app: Express) {
         throw new Error('Failed to update campaign');
       }
 
-      // AUTO-POPULATE QUEUE: Populate campaign queue from audienceRefs (lists/segments) on activation
-      let queuePopulated = false;
-      let contactsEnqueued = 0;
-      let totalQueueItemsCreated = 0;
-      let contactsInBusinessHours = 0;
-      let contactsOutsideBusinessHours = 0;
-
-      const audienceRefs = campaign.audienceRefs as any;
-      if (audienceRefs) {
-        console.log(`[LAUNCH CAMPAIGN] Auto-populating queue from audienceRefs...`);
-        
-        let contacts: any[] = [];
-
-        // Resolve contacts from segments
-        if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
-          for (const segmentId of audienceRefs.segments) {
-            const segment = await storage.getSegment(segmentId);
-            if (segment && segment.definitionJson) {
-              const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-              contacts.push(...segmentContacts);
-              console.log(`[LAUNCH CAMPAIGN] Loaded ${segmentContacts.length} contacts from segment ${segmentId}`);
-            }
-          }
-        }
-
-        // Resolve contacts from lists (batched to handle large lists)
-        const BATCH_SIZE = 1000; // Batch size for DB queries to avoid parameter limits
-        if (audienceRefs.lists && Array.isArray(audienceRefs.lists)) {
-          for (const listId of audienceRefs.lists) {
-            const list = await storage.getList(listId);
-            if (list && list.recordIds && list.recordIds.length > 0) {
-              console.log(`[LAUNCH CAMPAIGN] Loading ${list.recordIds.length} contacts from list ${listId} (${list.name})...`);
-              let listContactsLoaded = 0;
-              for (let i = 0; i < list.recordIds.length; i += BATCH_SIZE) {
-                const batch = list.recordIds.slice(i, i + BATCH_SIZE);
-                const batchContacts = await storage.getContactsByIds(batch);
-                contacts.push(...batchContacts);
-                listContactsLoaded += batchContacts.length;
-              }
-              console.log(`[LAUNCH CAMPAIGN] Loaded ${listContactsLoaded} contacts from list ${listId}`);
-            }
-          }
-        }
-
-        // Resolve contacts from selectedLists (alternate field name, also batched)
-        if (audienceRefs.selectedLists && Array.isArray(audienceRefs.selectedLists)) {
-          for (const listId of audienceRefs.selectedLists) {
-            const list = await storage.getList(listId);
-            if (list && list.recordIds && list.recordIds.length > 0) {
-              console.log(`[LAUNCH CAMPAIGN] Loading ${list.recordIds.length} contacts from selectedList ${listId} (${list.name})...`);
-              let listContactsLoaded = 0;
-              for (let i = 0; i < list.recordIds.length; i += BATCH_SIZE) {
-                const batch = list.recordIds.slice(i, i + BATCH_SIZE);
-                const batchContacts = await storage.getContactsByIds(batch);
-                contacts.push(...batchContacts);
-                listContactsLoaded += batchContacts.length;
-              }
-              console.log(`[LAUNCH CAMPAIGN] Loaded ${listContactsLoaded} contacts from selectedList ${listId}`);
-            }
-          }
-        }
-
-        // Remove duplicates
-        const uniqueContacts = Array.from(
-          new Map(contacts.map(c => [c.id, c])).values()
-        );
-
-        // Filter contacts with accountId
-        const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-        console.log(`[LAUNCH CAMPAIGN] ${contactsWithAccount.length}/${uniqueContacts.length} contacts have valid accountId`);
-
-        if (contactsWithAccount.length > 0) {
-          // PHONE VALIDATION: Filter contacts with callable phone numbers (batch to avoid parameter limits)
-          const contactIds = contactsWithAccount.map(c => c.id);
-          const fullContacts: any[] = [];
-          const batchSize = 500;
-          for (let i = 0; i < contactIds.length; i += batchSize) {
-            const batch = contactIds.slice(i, i + batchSize);
-            const batchResults = await db
-              .select()
-              .from(contactsTable)
-              .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-              .where(inArray(contactsTable.id, batch));
-            fullContacts.push(...batchResults);
-          }
-
-          // Get campaign business hours config (or use default)
-          const campaignBusinessHours: BusinessHoursConfig = (campaign.businessHoursConfig as BusinessHoursConfig) || DEFAULT_BUSINESS_HOURS;
-          const now = new Date();
-
-          // Process contacts: validate phones, normalize, and calculate priority
-          const contactsWithPhones: Array<{
-            row: any;
-            normalizedPhone: string;
-            phoneType: string;
-            isInBusinessHours: boolean;
-            priority: number;
-          }> = [];
-
-          for (const row of fullContacts) {
-            const contact = row.contacts;
-            const account = row.accounts;
-
-            // Get best phone with country-aware normalization
-            const bestPhone = getBestPhoneForContact({
-              directPhone: contact.directPhone,
-              directPhoneE164: contact.directPhoneE164,
-              mobilePhone: contact.mobilePhone,
-              mobilePhoneE164: contact.mobilePhoneE164,
-              country: contact.country,
-              hqPhone: account?.mainPhone,
-              hqPhoneE164: account?.mainPhoneE164,
-              hqCountry: account?.hqCountry,
-            });
-
-            if (!bestPhone.phone) continue; // Skip contacts without valid phone
-
-            // Normalize phone number with contact's country
-            let normalizedPhone = bestPhone.phone;
-            if (!normalizedPhone.startsWith('+')) {
-              const normalized = normalizePhoneWithCountryCode(normalizedPhone, contact.country || account?.hqCountry);
-              if (normalized) {
-                normalizedPhone = normalized;
-              }
-            }
-
-            // Check business hours for contact's timezone
-            const contactTimezoneInfo: ContactTimezoneInfo = {
-              timezone: contact.timezone,
-              city: contact.city,
-              state: contact.state,
-              country: contact.country || account?.hqCountry,
-            };
-            
-            const isInBusinessHours = isWithinBusinessHours(campaignBusinessHours, contactTimezoneInfo, now);
-
-            // Priority calculation:
-            // 200 = In business hours (highest priority - call now)
-            // 100 = Outside business hours (call when their hours open)
-            // Lower values for retries, voicemails, etc.
-            const priority = isInBusinessHours ? 200 : 100;
-
-            contactsWithPhones.push({
-              row,
-              normalizedPhone,
-              phoneType: bestPhone.type || 'unknown',
-              isInBusinessHours,
-              priority,
-            });
-          }
-
-          console.log(`[LAUNCH CAMPAIGN] ${contactsWithPhones.length}/${fullContacts.length} contacts have valid phones`);
-
-          // Sort by priority (business hours contacts first)
-          contactsWithPhones.sort((a, b) => b.priority - a.priority);
-
-          const inBusinessHours = contactsWithPhones.filter(c => c.isInBusinessHours).length;
-          const outsideBusinessHours = contactsWithPhones.length - inBusinessHours;
-          contactsInBusinessHours = inBusinessHours;
-          contactsOutsideBusinessHours = outsideBusinessHours;
-          console.log(`[LAUNCH CAMPAIGN] Business hours: ${inBusinessHours} in-hours, ${outsideBusinessHours} outside-hours`);
-
-          // Enqueue contacts with priority
-          let alreadyQueued = 0;
-          for (const item of contactsWithPhones) {
-            try {
-              await storage.enqueueContact(
-                req.params.id,
-                item.row.contacts.id,
-                item.row.contacts.accountId!,
-                item.priority // Business hours prioritized (200 > 100)
-              );
-              totalQueueItemsCreated++;
-            } catch (error) {
-              alreadyQueued++;
-            }
-          }
-
-          contactsEnqueued = totalQueueItemsCreated;
-          queuePopulated = totalQueueItemsCreated > 0;
-          console.log(`[LAUNCH CAMPAIGN] Enqueued ${totalQueueItemsCreated} contacts (${alreadyQueued} already in queue)`);
-
-          // Auto-assign queue items to agents if agents are assigned
-          const campaignAgents = await storage.getCampaignAgents(req.params.id);
-          const agentIds = campaignAgents.map(a => a.agentId);
-          if (agentIds.length > 0 && totalQueueItemsCreated > 0) {
-            const assignResult = await storage.assignQueueToAgents(req.params.id, agentIds, 'round_robin');
-            console.log(`[LAUNCH CAMPAIGN] Assigned ${assignResult.assigned} queue items to ${agentIds.length} agents`);
-          }
-        }
-      }
-
       console.log(`[LAUNCH CAMPAIGN] Successfully launched campaign ${req.params.id}`);
       invalidateDashboardCache();
-      res.json({
-        ...updated,
-        queuePopulated,
-        contactsEnqueued,
-        totalQueueItemsCreated,
-        contactsInBusinessHours,
-        contactsOutsideBusinessHours
-      });
+      res.json(updated);
     } catch (error) {
       console.error(`[LAUNCH CAMPAIGN] Error launching campaign ${req.params.id}:`, error);
       res.status(500).json({ message: "Failed to launch campaign", error: error instanceof Error ? error.message : String(error) });
@@ -6327,19 +5390,13 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      // Resolve contacts from lists (batched to handle large lists)
-      const BATCH_SIZE = 1000;
+      // Resolve contacts from lists
       if (audienceRefs.lists && Array.isArray(audienceRefs.lists)) {
         for (const listId of audienceRefs.lists) {
           const list = await storage.getList(listId);
-          if (list && list.recordIds && list.recordIds.length > 0) {
-            console.log(`[Queue Populate] Loading ${list.recordIds.length} contacts from list ${listId} (${list.name})...`);
-            for (let i = 0; i < list.recordIds.length; i += BATCH_SIZE) {
-              const batch = list.recordIds.slice(i, i + BATCH_SIZE);
-              const batchContacts = await storage.getContactsByIds(batch);
-              contacts.push(...batchContacts);
-            }
-            console.log(`[Queue Populate] Loaded contacts from list ${listId}`);
+          if (list && list.recordIds) {
+            const listContacts = await storage.getContactsByIds(list.recordIds);
+            contacts.push(...listContacts);
           }
         }
       }
@@ -6810,10 +5867,6 @@ export function registerRoutes(app: Express) {
             )
             .orderBy(desc(agentQueue.priority), agentQueue.createdAt);
 
-          if (process.env.DEBUG_AGENT_QUEUE === 'true') {
-            console.log('[AGENT QUEUE] Raw manualQueue from DB:', JSON.stringify(manualQueue, null, 2));
-          }
-
           // Process each queue item to get best phone
           const processedQueue = manualQueue.map(item => {
             const bestPhone = getBestPhoneForContact({
@@ -6847,7 +5900,7 @@ export function registerRoutes(app: Express) {
 
           console.log(`[AGENT QUEUE] Manual queue returned ${processedQueue.length} items`);
           return res.json(processedQueue);
-        } else if (campaign?.dialMode === 'hybrid' || campaign?.dialMode === 'power') {
+        } else if (campaign?.dialMode === 'hybrid' || campaign?.dialMode === 'ai_agent') {
           // HYBRID MODE (humans + AI share queue) or AI_AGENT MODE: query campaign_queue (auto-assigned queue)
           const sharedQueue = await db
             .select({
@@ -6885,8 +5938,6 @@ export function registerRoutes(app: Express) {
               )
             )
             .orderBy(desc(campaignQueue.priority), campaignQueue.createdAt);
-
-          console.log('[AGENT QUEUE] Raw sharedQueue from DB:', JSON.stringify(sharedQueue, null, 2));
 
           // Process each queue item to get best phone
           const processedQueue = sharedQueue.map(item => {
@@ -6972,658 +6023,19 @@ export function registerRoutes(app: Express) {
 
   // ==================== CALL ATTEMPTS ====================
 
-  // In-memory store for active human agent calls (tracks call bridging state)
-  const activeHumanCalls = new Map<string, {
-    agentCallId: string;
-    prospectCallId?: string;
-    agentId: string;
-    prospectNumber: string;
-    status: 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'bridged' | 'ended';
-    startedAt: Date;
-    campaignId?: string;
-    contactId?: string;
-    queueItemId?: string;
-  }>();
-
-  // Start a human-agent call via Telnyx Call Control (click-to-call flow)
-  // Flow: 1) Call agent's callback phone, 2) When answered, bridge to prospect
-  app.post("/api/calls/start", requireAuth, async (req, res) => {
-    try {
-      const { to, campaignId, contactId, queueItemId, mode = 'callback' } = req.body as {
-        to?: string;
-        campaignId?: string;
-        contactId?: string;
-        queueItemId?: string;
-        mode?: 'callback' | 'direct'; // callback = call agent first, direct = legacy behavior
-      };
-
-      if (!to || typeof to !== "string") {
-        return res.status(400).json({ message: "Missing required field: to" });
-      }
-
-      const agentId = req.user?.userId;
-      if (!agentId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const connectionId =
-        process.env.TELNYX_CALL_CONTROL_APP_ID ||
-        process.env.TELNYX_CONNECTION_ID;
-      // Use dedicated human agent from number, fall back to default
-      const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
-
-      if (!connectionId) {
-        return res.status(500).json({ message: "TELNYX connection ID not configured" });
-      }
-      if (!fromNumber) {
-        return res.status(500).json({ message: "TELNYX_HUMAN_AGENT_FROM_NUMBER or TELNYX_FROM_NUMBER not configured" });
-      }
-
-      // Get agent's callback phone for click-to-call mode
-      let agentCallbackPhone: string | null = null;
-      if (mode === 'callback') {
-        const [agent] = await db
-          .select({ callbackPhone: users.callbackPhone })
-          .from(users)
-          .where(eq(users.id, agentId))
-          .limit(1);
-
-        agentCallbackPhone = agent?.callbackPhone || null;
-
-        if (!agentCallbackPhone) {
-          return res.status(400).json({
-            message: "No callback phone configured. Please set your callback phone in Settings > Telephony.",
-            code: "NO_CALLBACK_PHONE"
-          });
-        }
-      }
-
-      // For callback mode: Call the agent first
-      if (mode === 'callback' && agentCallbackPhone) {
-        console.log(`[CALL START] ========================================`);
-        console.log(`[CALL START] Callback mode - calling agent`);
-        console.log(`[CALL START] Agent Callback Phone: ${agentCallbackPhone}`);
-        console.log(`[CALL START] Prospect Number: ${to}`);
-
-        // Debug: Log webhook URL construction
-        const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
-        console.log(`[CALL START] Webhook URL: ${webhookUrl}`);
-        console.log(`[CALL START] PUBLIC_WEBHOOK_HOST: ${process.env.PUBLIC_WEBHOOK_HOST || 'NOT SET'}`);
-        console.log(`[CALL START] Connection ID: ${connectionId}`);
-        console.log(`[CALL START] From Number: ${fromNumber}`);
-        console.log(`[CALL START] ========================================`);
-
-        // Create client_state to track the call context
-        const clientState = Buffer.from(JSON.stringify({
-          type: 'human_agent_callback',
-          agentId,
-          prospectNumber: to,
-          campaignId,
-          contactId,
-          queueItemId,
-        })).toString('base64');
-
-        const response = await fetch("https://api.telnyx.com/v2/calls", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${telnyxApiKey}`,
-          },
-          body: JSON.stringify({
-            connection_id: connectionId,
-            to: agentCallbackPhone,
-            from: fromNumber,
-            client_state: clientState,
-            webhook_url: webhookUrl,
-            answering_machine_detection: "disabled", // No AMD for agent leg
-          }),
-        });
-
-        const responseText = await response.text();
-        console.log(`[CALL START] Telnyx API Response Status: ${response.status}`);
-        console.log(`[CALL START] Telnyx API Response: ${responseText}`);
-
-        if (!response.ok) {
-          console.error(`[CALL START] Telnyx API error: ${response.status} - ${responseText}`);
-          return res.status(502).json({
-            message: "Failed to call agent phone",
-            status: response.status,
-            details: responseText,
-          });
-        }
-
-        const result = JSON.parse(responseText);
-        const agentCallControlId = result.data?.call_control_id;
-
-        if (!agentCallControlId) {
-          return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
-        }
-
-        // Track this call session
-        activeHumanCalls.set(agentCallControlId, {
-          agentCallId: agentCallControlId,
-          agentId,
-          prospectNumber: to,
-          status: 'calling_agent',
-          startedAt: new Date(),
-          campaignId,
-          contactId,
-          queueItemId,
-        });
-
-        console.log(`[CALL START] Agent call initiated: ${agentCallControlId}, will bridge to ${to} when answered`);
-
-        res.json({
-          success: true,
-          callControlId: agentCallControlId,
-          mode: 'callback',
-          status: 'calling_agent',
-          from: fromNumber,
-          agentPhone: agentCallbackPhone,
-          prospectPhone: to,
-        });
-
-      } else {
-        // Direct mode - call prospect directly (audio via ngrok WebSocket streaming)
-        console.log(`[CALL START] ========================================`);
-        console.log(`[CALL START] Direct mode - calling prospect at ${to}`);
-        console.log(`[CALL START] From: ${fromNumber}`);
-        console.log(`[CALL START] Connection ID: ${connectionId}`);
-
-        // Debug: Log webhook URL construction for direct mode
-        const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
-        console.log(`[CALL START] Webhook URL: ${webhookUrl}`);
-        console.log(`[CALL START] ========================================`);
-
-        // Create client_state to track the direct call context
-        const clientState = Buffer.from(JSON.stringify({
-          type: 'human_agent_direct',
-          agentId,
-          prospectNumber: to,
-          campaignId,
-          contactId,
-          queueItemId,
-        })).toString('base64');
-
-        const response = await fetch("https://api.telnyx.com/v2/calls", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${telnyxApiKey}`,
-          },
-          body: JSON.stringify({
-            connection_id: connectionId,
-            to,
-            from: fromNumber,
-            client_state: clientState,
-            webhook_url: webhookUrl,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`[CALL START] Telnyx API error: ${response.status} - ${errorText}`);
-          return res.status(502).json({
-            message: "Failed to initiate Telnyx call",
-            status: response.status,
-          });
-        }
-
-        const result = await response.json();
-        const callControlId = result.data?.call_control_id;
-
-        if (!callControlId) {
-          return res.status(502).json({ message: "Telnyx call_control_id missing from response" });
-        }
-
-        // Track this direct call session for status polling
-        activeHumanCalls.set(callControlId, {
-          agentCallId: callControlId,
-          agentId,
-          prospectNumber: to,
-          status: 'calling_prospect',
-          startedAt: new Date(),
-          campaignId,
-          contactId,
-          queueItemId,
-        });
-
-        console.log(`[CALL START] Direct call initiated: ${callControlId} to ${to}`);
-
-        res.json({
-          success: true,
-          callControlId,
-          mode: 'direct',
-          from: fromNumber,
-          to,
-        });
-      }
-    } catch (error) {
-      console.error("[CALL START] Error:", error);
-      res.status(500).json({
-        message: "Failed to start call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Bridge agent call to prospect (called when agent answers callback)
-  app.post("/api/calls/bridge", requireAuth, async (req, res) => {
-    try {
-      const { agentCallControlId } = req.body as { agentCallControlId?: string };
-
-      if (!agentCallControlId) {
-        return res.status(400).json({ message: "Missing agentCallControlId" });
-      }
-
-      const callSession = activeHumanCalls.get(agentCallControlId);
-      if (!callSession) {
-        return res.status(404).json({ message: "Call session not found" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
-      const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
-
-      // Call the prospect
-      callSession.status = 'calling_prospect';
-
-      const response = await fetch("https://api.telnyx.com/v2/calls", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          connection_id: connectionId,
-          to: callSession.prospectNumber,
-          from: fromNumber,
-          answering_machine_detection: "detect_words",
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL BRIDGE] Failed to call prospect: ${errorText}`);
-        return res.status(502).json({ message: "Failed to call prospect" });
-      }
-
-      const result = await response.json();
-      const prospectCallId = result.data?.call_control_id;
-
-      callSession.prospectCallId = prospectCallId;
-
-      // Bridge the two calls together
-      const bridgeResponse = await fetch(`https://api.telnyx.com/v2/calls/${agentCallControlId}/actions/bridge`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          call_control_id: prospectCallId,
-        }),
-      });
-
-      if (!bridgeResponse.ok) {
-        const errorText = await bridgeResponse.text();
-        console.error(`[CALL BRIDGE] Failed to bridge calls: ${errorText}`);
-        return res.status(502).json({ message: "Failed to bridge calls" });
-      }
-
-      callSession.status = 'bridged';
-      console.log(`[CALL BRIDGE] Calls bridged: agent=${agentCallControlId}, prospect=${prospectCallId}`);
-
-      res.json({
-        success: true,
-        agentCallId: agentCallControlId,
-        prospectCallId,
-        status: 'bridged',
-      });
-    } catch (error) {
-      console.error("[CALL BRIDGE] Error:", error);
-      res.status(500).json({
-        message: "Failed to bridge call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Get call session status
-  app.get("/api/calls/:callControlId/status", requireAuth, async (req, res) => {
-    const { callControlId } = req.params;
-    const session = activeHumanCalls.get(callControlId);
-
-    if (!session) {
-      return res.status(404).json({ message: "Call session not found" });
-    }
-
-    res.json({
-      ...session,
-      duration: Math.floor((Date.now() - session.startedAt.getTime()) / 1000),
-    });
-  });
-
-  // Transfer call to another number
-  app.post("/api/calls/transfer", requireAuth, async (req, res) => {
-    try {
-      const { callControlId, transferTo } = req.body as { callControlId?: string; transferTo?: string };
-
-      if (!callControlId || !transferTo) {
-        return res.status(400).json({ message: "Missing callControlId or transferTo" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/transfer`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({
-          to: transferTo,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL TRANSFER] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to transfer call",
-          status: response.status,
-        });
-      }
-
-      console.log(`[CALL TRANSFER] Call ${callControlId} transferred to ${transferTo}`);
-      res.json({ success: true, transferredTo: transferTo });
-    } catch (error) {
-      console.error("[CALL TRANSFER] Error:", error);
-      res.status(500).json({
-        message: "Failed to transfer call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Hold call
-  app.post("/api/calls/hold", requireAuth, async (req, res) => {
-    try {
-      const { callControlId } = req.body as { callControlId?: string };
-
-      if (!callControlId) {
-        return res.status(400).json({ message: "Missing callControlId" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hold`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL HOLD] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to hold call",
-          status: response.status,
-        });
-      }
-
-      console.log(`[CALL HOLD] Call ${callControlId} put on hold`);
-      res.json({ success: true, held: true });
-    } catch (error) {
-      console.error("[CALL HOLD] Error:", error);
-      res.status(500).json({
-        message: "Failed to hold call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Unhold (resume) call
-  app.post("/api/calls/unhold", requireAuth, async (req, res) => {
-    try {
-      const { callControlId } = req.body as { callControlId?: string };
-
-      if (!callControlId) {
-        return res.status(400).json({ message: "Missing callControlId" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/unhold`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL UNHOLD] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to resume call",
-          status: response.status,
-        });
-      }
-
-      console.log(`[CALL UNHOLD] Call ${callControlId} resumed`);
-      res.json({ success: true, held: false });
-    } catch (error) {
-      console.error("[CALL UNHOLD] Error:", error);
-      res.status(500).json({
-        message: "Failed to resume call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Hang up a manual call via Telnyx Call Control (server-side)
-  app.post("/api/calls/hangup", requireAuth, async (req, res) => {
-    try {
-      const { callControlId } = req.body as { callControlId?: string };
-      if (!callControlId || typeof callControlId !== "string") {
-        return res.status(400).json({ message: "Missing required field: callControlId" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL HANGUP] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to hang up Telnyx call",
-          status: response.status,
-        });
-      }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("[CALL HANGUP] Error:", error);
-      res.status(500).json({
-        message: "Failed to hang up call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Send DTMF tones during a call via Telnyx Call Control
-  app.post("/api/calls/dtmf", requireAuth, async (req, res) => {
-    try {
-      const { callControlId, digit } = req.body as { callControlId?: string; digit?: string };
-      if (!callControlId || typeof callControlId !== "string") {
-        return res.status(400).json({ message: "Missing required field: callControlId" });
-      }
-      if (!digit || typeof digit !== "string" || !/^[0-9*#]+$/.test(digit)) {
-        return res.status(400).json({ message: "Invalid DTMF digit(s)" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/send_dtmf`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({ digits: digit }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL DTMF] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to send DTMF",
-          status: response.status,
-        });
-      }
-
-      res.json({ success: true, digit });
-    } catch (error) {
-      console.error("[CALL DTMF] Error:", error);
-      res.status(500).json({
-        message: "Failed to send DTMF",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Mute call via Telnyx Call Control
-  app.post("/api/calls/mute", requireAuth, async (req, res) => {
-    try {
-      const { callControlId } = req.body as { callControlId?: string };
-      if (!callControlId || typeof callControlId !== "string") {
-        return res.status(400).json({ message: "Missing required field: callControlId" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      // Telnyx uses client_mute_on action to mute the agent's microphone
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/client_mute_on`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL MUTE] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to mute call",
-          status: response.status,
-        });
-      }
-
-      res.json({ success: true, muted: true });
-    } catch (error) {
-      console.error("[CALL MUTE] Error:", error);
-      res.status(500).json({
-        message: "Failed to mute call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // Unmute call via Telnyx Call Control
-  app.post("/api/calls/unmute", requireAuth, async (req, res) => {
-    try {
-      const { callControlId } = req.body as { callControlId?: string };
-      if (!callControlId || typeof callControlId !== "string") {
-        return res.status(400).json({ message: "Missing required field: callControlId" });
-      }
-
-      const telnyxApiKey = process.env.TELNYX_API_KEY;
-      if (!telnyxApiKey) {
-        return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-      }
-
-      // Telnyx uses client_mute_off action to unmute the agent's microphone
-      const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/client_mute_off`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${telnyxApiKey}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[CALL UNMUTE] Telnyx API error: ${response.status} - ${errorText}`);
-        return res.status(502).json({
-          message: "Failed to unmute call",
-          status: response.status,
-        });
-      }
-
-      res.json({ success: true, muted: false });
-    } catch (error) {
-      console.error("[CALL UNMUTE] Error:", error);
-      res.status(500).json({
-        message: "Failed to unmute call",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
   // Create call attempt when call connects (before disposition)
   app.post("/api/call-attempts/start", requireAuth, async (req, res) => {
     try {
-      // Accept either telnyxCallId or callControlId (callControlId is the new name)
-      const { campaignId, contactId, telnyxCallId, callControlId, dialedNumber } = req.body;
-      const actualCallId = telnyxCallId || callControlId; // Support both names
+      const { campaignId, contactId, telnyxCallId, dialedNumber } = req.body;
       const agentId = req.user?.userId;
 
       if (!agentId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      if (!campaignId || !contactId || !actualCallId) {
-        return res.status(400).json({
-          message: "Missing required fields: campaignId, contactId, telnyxCallId/callControlId"
+      if (!campaignId || !contactId || !telnyxCallId) {
+        return res.status(400).json({ 
+          message: "Missing required fields: campaignId, contactId, telnyxCallId" 
         });
       }
 
@@ -7636,7 +6048,7 @@ export function registerRoutes(app: Express) {
           campaignId,
           contactId,
           agentId,
-          telnyxCallId: actualCallId,
+          telnyxCallId,
           startedAt: new Date(),
         })
         .returning();
@@ -7791,184 +6203,166 @@ export function registerRoutes(app: Express) {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const rawDisposition = typeof req.body.disposition === "string"
-        ? req.body.disposition.trim()
-        : "";
-      if (!rawDisposition) {
-        return res.status(400).json({ message: "Disposition is required" });
-      }
-
-      const campaignId = req.body.campaignId;
-      const contactId = req.body.contactId;
-      const queueItemId = req.body.queueItemId;
-
-      if (!campaignId || !contactId) {
-        return res.status(400).json({ message: "Missing required fields: campaignId, contactId" });
-      }
-
-      const mapToCanonicalDisposition = (value: string): CanonicalDisposition => {
-        const d = value.toLowerCase().trim();
-
-        if (["qualified", "lead", "qualified_lead", "meeting_booked", "callback_requested", "callback-requested", "callback"].includes(d)) {
-          return "qualified_lead";
-        }
-        if (["voicemail", "voicemail_left", "machine"].includes(d)) {
-          return "voicemail";
-        }
-        if (["no_answer", "no-answer", "busy", "failed", "connected", "completed", "needs_review", "hung_up"].includes(d)) {
-          return "no_answer";
-        }
-        if (["not_interested", "not interested"].includes(d)) {
-          return "not_interested";
-        }
-        if (["dnc", "dnc_request", "dnc-request", "do_not_call", "do not call"].includes(d)) {
-          return "do_not_call";
-        }
-        if (["wrong_number", "invalid", "invalid_data", "invalid-data"].includes(d)) {
-          return "invalid_data";
-        }
-        return "no_answer";
-      };
-
-      const canonicalDisposition = mapToCanonicalDisposition(rawDisposition);
+      console.log('[DISPOSITION] Received disposition request:', {
+        disposition: req.body.disposition,
+        contactId: req.body.contactId,
+        campaignId: req.body.campaignId,
+        queueItemId: req.body.queueItemId
+      });
 
       // Check if user is admin
       const userRoles = req.user?.roles || [req.user?.role];
-      const isAdmin = userRoles.includes("admin");
+      const isAdmin = userRoles.includes('admin');
 
-      let queueItem: any | null = null;
-      if (queueItemId) {
-        queueItem = await storage.getQueueItemById(queueItemId);
+      // STRICT: Verify queue item ownership before allowing disposition (unless admin)
+      if (req.body.queueItemId) {
+        const queueItem = await storage.getQueueItemById(req.body.queueItemId);
         if (!queueItem) {
           return res.status(404).json({ message: "Queue item not found" });
         }
 
-        if (!isAdmin && queueItem.agentId && queueItem.agentId !== agentId) {
+        // STRICT: Only allow disposition if the queue item is assigned to this agent (or admin)
+        if (!isAdmin && queueItem.agentId !== agentId) {
           return res.status(403).json({ message: "You can only create dispositions for queue items assigned to you" });
         }
       }
 
+      // Build the call data object manually to avoid schema validation issues
+      const callData = {
+        agentId,
+        campaignId: req.body.campaignId,
+        contactId: req.body.contactId,
+        queueItemId: req.body.queueItemId,
+        disposition: req.body.disposition,
+        duration: req.body.duration || 0,
+        notes: req.body.notes || null,
+        qualificationData: req.body.qualificationData || null,
+        callbackRequested: req.body.callbackRequested || false,
+        telnyxCallId: req.body.telnyxCallId || null,
+        dialedNumber: req.body.dialedNumber || null, // Capture dialed phone number from frontend
+      };
+
+      const call = await storage.createCallDisposition(callData);
+
+      // ==================== INTELLIGENT DISPOSITION HANDLING ====================
+      // Check for specific dispositions and perform associated actions
+
+      const disposition = req.body.disposition;
+      const contactId = req.body.contactId;
+      const campaignId = req.body.campaignId;
+
+      // Get contact details for suppression actions
       let contact = null;
+      let account = null;
       if (contactId) {
         try {
           contact = await storage.getContact(contactId);
+          // Also fetch account to get company main phone
+          if (contact && contact.accountId) {
+            account = await storage.getAccount(contact.accountId);
+          }
         } catch (error) {
-          console.error("[DISPOSITION] Error fetching contact:", error);
+          console.error('[DISPOSITION] Error fetching contact:', error);
         }
       }
 
-      const dialedNumber =
-        req.body.dialedNumber ||
-        queueItem?.dialedNumber ||
-        contact?.directPhoneE164 ||
-        contact?.mobilePhoneE164 ||
-        contact?.directPhone ||
-        contact?.mobilePhone ||
-        null;
-
-      if (!dialedNumber) {
-        return res.status(400).json({ message: "Missing dialedNumber for call attempt" });
-      }
-
-      const { dialerRuns, dialerCallAttempts } = await import("@shared/schema");
-
-      const [existingRun] = await db
-        .select()
-        .from(dialerRuns)
-        .where(and(
-          eq(dialerRuns.campaignId, campaignId),
-          eq(dialerRuns.runType, "manual_dial"),
-          eq(dialerRuns.agentType, "human"),
-          eq(dialerRuns.humanAgentId, agentId),
-          inArray(dialerRuns.status, ["active", "pending", "paused"])
-        ))
-        .orderBy(desc(dialerRuns.createdAt))
-        .limit(1);
-
-      const run = existingRun || (await db.insert(dialerRuns).values({
-        campaignId,
-        runType: "manual_dial",
-        agentType: "human",
-        humanAgentId: agentId,
-        status: "active",
-        startedAt: new Date(),
-        maxConcurrentCalls: 1,
-        callTimeoutSeconds: 30,
-        createdBy: agentId,
-      }).returning())[0];
-
-      const callDurationSeconds = Number(req.body.duration) || 0;
-      const callStartedAt = callDurationSeconds > 0
-        ? new Date(Date.now() - callDurationSeconds * 1000)
-        : null;
-      const callEndedAt = new Date();
-      const isVoicemail = canonicalDisposition === "voicemail";
-      const isNoAnswer = canonicalDisposition === "no_answer";
-      const connected = !isVoicemail && !isNoAnswer;
-
-      const queueItemIdForAttempt = queueItem && queueItem._queueTable === "campaign_queue"
-        ? queueItem.id
-        : null;
-
-      const [callAttempt] = await db
-        .insert(dialerCallAttempts)
-        .values({
-          dialerRunId: run.id,
-          campaignId,
-          contactId,
-          queueItemId: queueItemIdForAttempt,
-          agentType: "human",
-          humanAgentId: agentId,
-          phoneDialed: dialedNumber,
-          attemptNumber: queueItem?.attemptNumber || 1,
-          callStartedAt,
-          callEndedAt,
-          callDurationSeconds: Number.isFinite(callDurationSeconds) ? callDurationSeconds : null,
-          connected,
-          voicemailDetected: isVoicemail,
-          disposition: canonicalDisposition,
-          dispositionSubmittedAt: new Date(),
-          dispositionSubmittedBy: agentId,
-          notes: req.body.notes || null,
-          recordingUrl: req.body.recordingUrl || null,
-          telnyxCallId: req.body.callControlId || req.body.telnyxCallId || null,
-          updatedAt: new Date(),
-        })
-        .returning();
-
-      const result = await processDisposition(callAttempt.id, canonicalDisposition, agentId);
-      if (!result.success) {
-        console.error("[DISPOSITION] Disposition engine errors:", result.errors);
-      }
-
-      if (canonicalDisposition === "not_interested" && contact && contactId && campaignId) {
+      // 1. DNC REQUEST - Add CONTACT to global Do Not Call list
+      // NOTE: We add the CONTACT to DNC, not the phone numbers, because multiple contacts
+      // may share the same company phone. We don't want to block everyone at that company.
+      if (disposition === 'dnc-request' && contact && contactId) {
         try {
-          const { campaignSuppressionContacts } = await import("@shared/schema");
+          console.log(`[DISPOSITION] DNC request for contact ${contactId}`);
+          console.log(`[DISPOSITION] Contact: ${contact.firstName} ${contact.lastName} (${contact.email})`);
+          console.log(`[DISPOSITION] Company: ${account?.name || 'N/A'}`);
+
+          // Add CONTACT to global DNC list (not phone numbers!)
+          const { globalDnc } = await import('@shared/schema');
+
+          await db.insert(globalDnc)
+            .values({
+              contactId: contactId,
+              phoneE164: contact.directPhoneE164 || contact.mobilePhoneE164 || account?.mainPhoneE164 || null,
+              reason: 'DNC request from agent',
+              source: `Agent Console - ${agentId}`,
+              createdBy: agentId,
+            })
+            .onConflictDoNothing(); // Ignore if already in DNC
+
+          console.log(`[DISPOSITION] ✅ Contact ${contactId} added to global DNC - will NEVER be called again`);
+        } catch (error) {
+          console.error('[DISPOSITION] ❌ Error adding contact to DNC:', error);
+        }
+      }
+
+      // 2. NOT INTERESTED - Add to campaign-specific suppression (not global)
+      if (disposition === 'not_interested') {
+        if (contact && contactId && campaignId) {
+          try {
+            console.log(`[DISPOSITION] Not Interested - adding to campaign suppression for contact ${contactId} in campaign ${campaignId}`);
+
+            // Add contact to THIS campaign's suppression list (prevents re-calling in this campaign only)
+            const { campaignSuppressionContacts } = await import('@shared/schema');
+
+            await db.insert(campaignSuppressionContacts)
+              .values({
+                campaignId,
+                contactId,
+                reason: 'Not Interested',
+                addedBy: agentId,
+              })
+              .onConflictDoNothing(); // Ignore if already suppressed
+
+            console.log(`[DISPOSITION] ✅ Contact added to campaign suppression - will not be called again in THIS campaign`);
+          } catch (error) {
+            console.error('[DISPOSITION] Error adding Not Interested to campaign suppression:', error);
+          }
+        } else {
+          console.error(`[DISPOSITION] ⚠️ Cannot add to campaign suppression - Missing required data: contactId=${contactId}, campaignId=${campaignId}, contact=${!!contact}`);
+        }
+      }
+
+      // 3. QUALIFIED/LEAD DISPOSITION - Add to campaign-level suppression
+      // Check if this disposition represents a qualified lead (by name or system action)
+      const qualifyingDispositions = ['qualified', 'lead'];
+      let isQualified = qualifyingDispositions.includes(disposition);
+
+      // Also check if disposition has systemAction === 'converted_qualified'
+      if (!isQualified) {
+        try {
+          const { dispositions: dispositionsTable } = await import('@shared/schema');
+          const [dispositionRecord] = await db
+            .select({ systemAction: dispositionsTable.systemAction })
+            .from(dispositionsTable)
+            .where(eq(dispositionsTable.label, disposition))
+            .limit(1);
+
+          if (dispositionRecord?.systemAction === 'converted_qualified') {
+            isQualified = true;
+          }
+        } catch (error) {
+          console.error('[DISPOSITION] Error checking disposition system action:', error);
+        }
+      }
+
+      if (isQualified && contact && contactId && campaignId) {
+        try {
+          console.log(`[DISPOSITION] Qualified/Lead call - adding to campaign suppression for contact ${contactId}`);
+
+          // Add contact to campaign suppression list (prevents re-calling in this campaign)
+          const { campaignSuppressionContacts } = await import('@shared/schema');
+
           await db.insert(campaignSuppressionContacts)
             .values({
               campaignId,
               contactId,
-              reason: "Not Interested",
+              reason: `Qualified - ${disposition}`,
               addedBy: agentId,
             })
-            .onConflictDoNothing();
-        } catch (error) {
-          console.error("[DISPOSITION] Error adding Not Interested to campaign suppression:", error);
-        }
-      }
+            .onConflictDoNothing(); // Ignore if already suppressed
 
-      if (canonicalDisposition === "qualified_lead" && contact && contactId && campaignId) {
-        try {
-          const { campaignSuppressionContacts } = await import("@shared/schema");
-          await db.insert(campaignSuppressionContacts)
-            .values({
-              campaignId,
-              contactId,
-              reason: `Qualified - ${rawDisposition}`,
-              addedBy: agentId,
-            })
-            .onConflictDoNothing();
+          console.log(`[DISPOSITION] Contact added to campaign suppression list`);
 
+          // Check per-account cap and auto-suppress if reached
           if (contact.accountId) {
             const [campaign] = await db
               .select({
@@ -7981,14 +6375,26 @@ export function registerRoutes(app: Express) {
               .limit(1);
 
             if (campaign?.accountCapEnabled && campaign.accountCapValue) {
-              const { batchCheckAccountCaps } = await import("./lib/campaign-suppression");
+              console.log(`[DISPOSITION] Checking per-account cap for account ${contact.accountId} (mode: ${campaign.accountCapMode}, cap: ${campaign.accountCapValue})`);
+
+              // Use the new batch account cap checking logic
+              const { batchCheckAccountCaps } = await import('./lib/campaign-suppression');
               const capResults = await batchCheckAccountCaps(campaignId, [contact.accountId]);
               const capStatus = capResults.get(contact.accountId);
-              const qualifiedCount = (capStatus?.currentCount || 0) + 1;
+
+              // Log current status
+              console.log(`[DISPOSITION] Account has ${capStatus?.currentCount || 0} counted items (mode: ${campaign.accountCapMode}), cap is ${campaign.accountCapValue}`);
+
+              // Check if this disposition pushes the account over the cap
+              const qualifiedCount = (capStatus?.currentCount || 0) + 1; // Include this current call
               const reachedCap = qualifiedCount >= campaign.accountCapValue;
 
+              // If cap is reached or exceeded, auto-suppress the entire account from this campaign
               if (reachedCap) {
-                const { campaignSuppressionAccounts } = await import("@shared/schema");
+                console.log(`[DISPOSITION] ⚠️ Account cap reached! Auto-suppressing account ${contact.accountId} from campaign ${campaignId}`);
+
+                const { campaignSuppressionAccounts } = await import('@shared/schema');
+
                 await db.insert(campaignSuppressionAccounts)
                   .values({
                     campaignId,
@@ -7996,61 +6402,75 @@ export function registerRoutes(app: Express) {
                     reason: `Account cap reached (${qualifiedCount}/${campaign.accountCapValue} qualified calls)`,
                     addedBy: agentId,
                   })
-                  .onConflictDoNothing();
+                  .onConflictDoNothing(); // Ignore if already suppressed
 
-                await db.delete(agentQueue)
+                // Remove all contacts from this account from ALL agents' queues in this campaign
+                const removedFromQueues = await db.delete(agentQueue)
                   .where(
                     and(
                       eq(agentQueue.campaignId, campaignId),
                       eq(agentQueue.accountId, contact.accountId)
                     )
-                  );
+                  )
+                  .returning({ contactId: agentQueue.contactId });
+
+                console.log(`[DISPOSITION] ✅ Account suppressed. Removed ${removedFromQueues.length} contacts from queues`);
               }
             }
           }
         } catch (error) {
-          console.error("[DISPOSITION] Error handling qualified disposition suppression:", error);
+          console.error('[DISPOSITION] Error handling qualified disposition suppression:', error);
         }
       }
 
-      if (canonicalDisposition === "invalid_data" && contactId) {
-        try {
-          await db.update(contactsTable)
-            .set({
-              isInvalid: true,
-              invalidReason: `Agent marked as ${rawDisposition}`,
-              invalidatedAt: new Date(),
-              invalidatedBy: agentId,
-            })
-            .where(eq(contactsTable.id, contactId));
-        } catch (error) {
-          console.error("[DISPOSITION] Error marking contact invalid:", error);
-        }
-      }
-
+      // 4. QUEUE MANAGEMENT - Intelligent next actions based on disposition
+      // CRITICAL: Queue cleanup must succeed or whole request fails
       if (contactId && campaignId) {
-        const finalDispositions: CanonicalDisposition[] = ["qualified_lead", "not_interested", "do_not_call"];
-        const retryDispositions: CanonicalDisposition[] = ["voicemail", "no_answer"];
+        // Define final dispositions (contact should be removed from campaign immediately)
+        const finalDispositions = ['qualified', 'lead', 'not_interested', 'dnc-request', 'callback-requested'];
 
-        if (finalDispositions.includes(canonicalDisposition)) {
-          await db.delete(agentQueue)
+        // Define retry dispositions (contact should be requeued after delay for ALL agents)
+        // IMPORTANT: Voicemail contacts get LOW priority (0) to ensure fresh contacts are dialed first
+        const retryDispositions = ['no-answer', 'busy', 'voicemail'];
+
+        // Define invalid dispositions (contact should be marked invalid and removed)
+        const invalidDispositions = ['wrong_number', 'invalid_data'];
+
+        if (finalDispositions.includes(disposition)) {
+          // Remove from ALL agents' queues (final disposition - contact is done)
+          console.log(`[DISPOSITION] Final disposition "${disposition}" - removing contact ${contactId} from ALL queues in campaign ${campaignId}`);
+
+          const removed = await db.delete(agentQueue)
             .where(
               and(
                 eq(agentQueue.contactId, contactId),
                 eq(agentQueue.campaignId, campaignId)
               )
-            );
-        } else if (retryDispositions.includes(canonicalDisposition)) {
-          const retryDays = canonicalDisposition === "voicemail" ? 7 : 3;
+            )
+            .returning({ agentId: agentQueue.agentId, queueState: agentQueue.queueState });
+
+          if (removed.length > 0) {
+            console.log(`[DISPOSITION] ✅ Successfully removed from ${removed.length} agents' queues`);
+          }
+        } else if (retryDispositions.includes(disposition)) {
+          // Requeue with appropriate delay for ALL agents
+          // Voicemail: 7 days (1 week), No-answer/Busy: 3 days
+          const retryDays = disposition === 'voicemail' ? 7 : 3;
+          console.log(`[DISPOSITION] Retry disposition "${disposition}" - requeuing contact ${contactId} with ${retryDays}-day delay for ALL agents`);
+
           const retryDate = new Date();
           retryDate.setDate(retryDate.getDate() + retryDays);
-          const retryPriority = canonicalDisposition === "voicemail" ? 0 : 50;
 
-          await db.update(agentQueue)
+          // FIRST-PASS PRIORITY LOGIC: Voicemail gets priority=0 (lowest), other retries get priority=50
+          // This ensures fresh contacts (priority=100) are always dialed before voicemail retries
+          const retryPriority = disposition === 'voicemail' ? 0 : 50;
+
+          // Update queue items for ALL agents (remove agentId filter to prevent reappearing to other agents)
+          const updated = await db.update(agentQueue)
             .set({
-              queueState: "queued",
+              queueState: 'queued',
               scheduledFor: retryDate,
-              priority: retryPriority,
+              priority: retryPriority, // Set low priority for retries, especially voicemail
               lockedBy: null,
               lockedAt: null,
               updatedAt: new Date(),
@@ -8059,9 +6479,29 @@ export function registerRoutes(app: Express) {
               and(
                 eq(agentQueue.contactId, contactId),
                 eq(agentQueue.campaignId, campaignId)
+                // REMOVED: eq(agentQueue.agentId, agentId) - This was causing contacts to reappear to other agents!
               )
-            );
-        } else if (canonicalDisposition === "invalid_data") {
+            )
+            .returning({ agentId: agentQueue.agentId });
+
+          console.log(`[DISPOSITION] ✅ Contact requeued for ${updated.length} agents at ${retryDate.toISOString()} (${retryDays} days) with priority ${retryPriority}`);
+        } else if (invalidDispositions.includes(disposition)) {
+          // Mark contact as invalid and remove from campaign
+          console.log(`[DISPOSITION] Invalid disposition "${disposition}" - marking contact ${contactId} as invalid`);
+
+          // Mark contact as invalid
+          if (contact) {
+            await db.update(contactsTable)
+              .set({
+                isInvalid: true,
+                invalidReason: `Agent marked as ${disposition}`,
+                invalidatedAt: new Date(),
+                invalidatedBy: agentId,
+              })
+              .where(eq(contactsTable.id, contactId));
+          }
+
+          // Remove from ALL queues
           await db.delete(agentQueue)
             .where(
               and(
@@ -8069,18 +6509,26 @@ export function registerRoutes(app: Express) {
                 eq(agentQueue.campaignId, campaignId)
               )
             );
+
+          console.log(`[DISPOSITION] ✅ Contact marked invalid and removed from campaign`);
+        } else {
+          // Default behavior for other dispositions - remove from current agent's queue only
+          console.log(`[DISPOSITION] Standard disposition "${disposition}" - removing from current agent's queue`);
+
+          await db.delete(agentQueue)
+            .where(
+              and(
+                eq(agentQueue.contactId, contactId),
+                eq(agentQueue.campaignId, campaignId),
+                eq(agentQueue.agentId, agentId)
+              )
+            );
+
+          console.log(`[DISPOSITION] ✅ Removed from queue`);
         }
       }
 
-      res.status(201).json({
-        success: true,
-        callAttemptId: callAttempt.id,
-        disposition: canonicalDisposition,
-        actions: result.actions,
-        leadId: result.leadId,
-        nextAttemptAt: result.nextAttemptAt,
-        errors: result.errors,
-      });
+      res.status(201).json(call);
     } catch (error) {
       if (error instanceof z.ZodError) {
         console.error('[DISPOSITION VALIDATION ERROR]', error.errors);
@@ -8166,41 +6614,19 @@ export function registerRoutes(app: Express) {
       }
 
       // FALLBACK: Use environment variables if no database config exists
-      const envProvider = process.env.SIP_TRUNK_PROVIDER || "telnyx";
-      const envUsername =
-        process.env.SIP_TRUNK_USERNAME ||
-        process.env.TELNYX_WEBRTC_USERNAME ||
-        process.env.TELNYX_SIP_USERNAME;
-      const envPassword =
-        process.env.SIP_TRUNK_PASSWORD ||
-        process.env.TELNYX_WEBRTC_PASSWORD ||
-        process.env.TELNYX_SIP_PASSWORD;
-      const envDomain =
-        process.env.SIP_TRUNK_DOMAIN ||
-        process.env.TELNYX_SIP_DOMAIN ||
-        (envProvider.toLowerCase() === "telnyx" ? "sip.telnyx.com" : "");
-      const envCallerId =
-        process.env.SIP_TRUNK_CALLER_ID ||
-        process.env.TELNYX_FROM_NUMBER ||
-        "";
-      const envConnectionId =
-        process.env.SIP_TRUNK_CONNECTION_ID ||
-        process.env.TELNYX_SIP_CONNECTION_ID ||
-        process.env.TELNYX_CONNECTION_ID ||
-        process.env.TELNYX_CALL_CONTROL_APP_ID ||
-        "";
+      const envUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const envPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
 
       if (envUsername && envPassword) {
         console.log('[SIP-TRUNK] No database config, using environment variables');
         return res.json({
           id: 'env-default',
-          name: `${envProvider} (Environment)`,
-          provider: envProvider,
+          name: 'Telnyx (Environment)',
+          provider: 'telnyx',
           sipUsername: envUsername,
           sipPassword: envPassword,
-          sipDomain: envDomain,
-          connectionId: envConnectionId || null,
-          callerIdNumber: envCallerId,
+          sipDomain: 'sip.telnyx.com',
+          callerIdNumber: process.env.TELNYX_FROM_NUMBER || '',
           isActive: true,
           isDefault: true,
         });
@@ -8222,7 +6648,7 @@ export function registerRoutes(app: Express) {
         return res.json({
           success: false,
           message: "No SIP trunk configured",
-          recommendation: "Go to Telephony Settings and add your SIP credentials"
+          recommendation: "Go to Telephony Settings and add a Credential Connection from Telnyx Portal"
         });
       }
 
@@ -8237,9 +6663,15 @@ export function registerRoutes(app: Express) {
         issues.push("SIP password appears invalid (too short)");
       }
 
-      // Check basic username format
-      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9@._-]+$/)) {
-        issues.push("SIP username contains unexpected characters");
+      // Check if username looks like a Credential Connection format
+      // Telnyx Credential Connection usernames are typically in format: user123456789
+      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9_-]+$/)) {
+        issues.push("SIP username contains invalid characters - should be alphanumeric");
+      }
+
+      // Check domain
+      if (config.sipDomain && !config.sipDomain.includes('telnyx')) {
+        issues.push("SIP domain doesn't look like Telnyx - ensure you're using sip.telnyx.com");
       }
 
       console.log('[SIP-TRUNK-TEST] Config:', {
@@ -8258,7 +6690,6 @@ export function registerRoutes(app: Express) {
         config: {
           id: config.id,
           name: config.name,
-          provider: config.provider,
           sipUsername: config.sipUsername,
           sipDomain: config.sipDomain,
           connectionId: config.connectionId,
@@ -8269,7 +6700,7 @@ export function registerRoutes(app: Express) {
         },
         issues,
         recommendation: issues.length > 0
-          ? "Please verify your SIP credentials with your provider"
+          ? "Please verify your Credential Connection credentials in Telnyx Portal"
           : "Credentials look valid. If WebRTC still fails, check browser console for socket errors."
       });
     } catch (error) {
@@ -8302,46 +6733,6 @@ export function registerRoutes(app: Express) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation failed", errors: error.errors });
       } res.status(500).json({ message: "Failed to create SIP trunk configuration", error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Import Telnyx SIP trunk from environment variables
-  app.post("/api/sip-trunks/import-env", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      const existing = await storage.getSipTrunkConfigs();
-      const telnyxUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
-      const telnyxPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
-      const telnyxDomain = process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com";
-      const telnyxConnectionId = process.env.TELNYX_SIP_CONNECTION_ID || process.env.TELNYX_CONNECTION_ID || process.env.TELNYX_CALL_CONTROL_APP_ID;
-      const telnyxCallerId = process.env.TELNYX_FROM_NUMBER || "";
-
-      if (!telnyxUsername || !telnyxPassword) {
-        return res.status(400).json({ message: "TELNYX_SIP_USERNAME and TELNYX_SIP_PASSWORD are required" });
-      }
-
-      const duplicate = existing.find((config) =>
-        config.provider === "telnyx" && config.sipUsername === telnyxUsername
-      );
-      if (duplicate) {
-        return res.json(duplicate);
-      }
-
-      const created = await storage.createSipTrunkConfig({
-        name: "Telnyx (Environment)",
-        provider: "telnyx",
-        sipUsername: telnyxUsername,
-        sipPassword: telnyxPassword,
-        sipDomain: telnyxDomain,
-        connectionId: telnyxConnectionId,
-        callerIdNumber: telnyxCallerId,
-        isActive: true,
-        isDefault: existing.length === 0,
-      });
-
-      res.json(created);
-    } catch (error) {
-      console.error('[SIP-TRUNK] Error importing env config:', error);
-      res.status(500).json({ message: "Failed to import SIP trunk configuration" });
     }
   });
 
@@ -8610,10 +7001,7 @@ export function registerRoutes(app: Express) {
   app.get("/api/agent-statuses/available", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const campaignId = req.query.campaignId as string | undefined;
-      const allAgents = await storage.getAvailableAgents();
-      const agents = campaignId
-        ? allAgents.filter((agent) => agent.campaignId === campaignId)
-        : allAgents;
+      const agents = await storage.getAvailableAgents(campaignId);
       res.json(agents);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch available agents" });
@@ -9051,13 +7439,13 @@ export function registerRoutes(app: Express) {
       console.log(`[Mailgun Webhook] ${eventType} - ${recipient} - Campaign: ${campaignIdHeader}`);
 
       // Find contact by email
-      const contact = await db.select().from(contactsTable)
-        .where(eq(contactsTable.emailNormalized, recipient.toLowerCase()))
+      const contact = await db.select().from(schema.contacts)
+        .where(eq(schema.contacts.emailNormalized, recipient.toLowerCase()))
         .limit(1);
       const contactId = contact[0]?.id;
 
       // Store event in email_events table
-      await db.insert(emailEvents).values({
+      await db.insert(schema.emailEvents).values({
         messageId,
         campaignId: campaignIdHeader || null,
         contactId: contactId || null,
@@ -9081,16 +7469,19 @@ export function registerRoutes(app: Express) {
           eventType === 'complained' ? 'spam_complaint' : 'manual';
 
         // Check if already suppressed
-        const existing = await db.select().from(suppressionEmails)
-          .where(eq(suppressionEmails.email, recipient.toLowerCase()))
+        const existing = await db.select().from(schema.emailSuppressionList)
+          .where(eq(schema.emailSuppressionList.emailNormalized, recipient.toLowerCase()))
           .limit(1);
 
         if (existing.length === 0) {
           // Add to suppression list
-          await db.insert(suppressionEmails).values({
-            email: recipient.toLowerCase(),
+          await db.insert(schema.emailSuppressionList).values({
+            email: recipient,
+            emailNormalized: recipient.toLowerCase(),
             reason: suppressionReason,
-            source: 'mailgun_webhook',
+            campaignId: campaignIdHeader || null,
+            contactId: contactId || null,
+            metadata: { event: eventType, timestamp },
           });
 
           console.log(`[Mailgun Webhook] Added ${recipient} to suppression list (${suppressionReason})`);
@@ -9112,9 +7503,9 @@ export function registerRoutes(app: Express) {
               updateData.invalidatedAt = new Date();
             }
 
-            await db.update(contactsTable)
+            await db.update(schema.contacts)
               .set(updateData)
-              .where(eq(contactsTable.id, contactId));
+              .where(eq(schema.contacts.id, contactId));
           }
         }
       }
@@ -9520,236 +7911,6 @@ export function registerRoutes(app: Express) {
 
   // ==================== LEADS & QA ====================
 
-  // Unified QA Conversations endpoint - fetches ALL interactions (calls, test calls, emails)
-  app.get("/api/qa/conversations", requireAuth, async (req, res) => {
-    try {
-      console.log(`[QA] GET /api/qa/conversations query:`, req.query);
-      const { campaignId, type, status, search, limit = '100', offset = '0' } = req.query;
-      const limitNum = Math.min(parseInt(limit as string) || 100, 500);
-      const offsetNum = parseInt(offset as string) || 0;
-
-      const conversations: any[] = [];
-
-      // 1. Fetch Call Sessions with transcripts
-      let callSessionsQuery = db
-        .select({
-          id: callSessions.id,
-          campaignId: callSessions.campaignId,
-          contactId: callSessions.contactId,
-          status: callSessions.status,
-          agentType: callSessions.agentType,
-          startedAt: callSessions.startedAt,
-          endedAt: callSessions.endedAt,
-          durationSec: callSessions.durationSec,
-          aiTranscript: callSessions.aiTranscript,
-          aiAnalysis: callSessions.aiAnalysis,
-          aiDisposition: callSessions.aiDisposition,
-          recordingUrl: callSessions.recordingUrl,
-          createdAt: callSessions.createdAt,
-          campaignName: campaigns.name,
-          contactFirstName: contacts.firstName,
-          contactLastName: contacts.lastName,
-          contactEmail: contacts.email,
-          companyName: accounts.name,
-        })
-        .from(callSessions)
-        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
-        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
-        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
-        .orderBy(desc(callSessions.createdAt));
-
-      if (campaignId && campaignId !== 'all') {
-        // @ts-ignore
-        callSessionsQuery = callSessionsQuery.where(eq(callSessions.campaignId, campaignId as string));
-      }
-      
-      // Apply limit after filtering
-      // @ts-ignore
-      const callSessionsData = await callSessionsQuery.limit(limitNum);
-      
-      console.log(`[QA] Found ${callSessionsData.length} call sessions in DB`);
-
-      for (const session of callSessionsData) {
-        const sessionAnalysis = session.aiAnalysis as any;
-        const conversationQuality = sessionAnalysis?.conversationQuality;
-        conversations.push({
-          id: session.id,
-          type: 'call',
-          source: 'call_session',
-          campaignId: session.campaignId,
-          campaignName: session.campaignName || 'Unknown Campaign',
-          contactId: session.contactId,
-          contactName: `${session.contactFirstName || ''} ${session.contactLastName || ''}`.trim() || 'Unknown',
-          companyName: session.companyName || 'Unknown',
-          status: session.status,
-          disposition: session.aiDisposition,
-          agentType: session.agentType,
-          duration: session.durationSec,
-          transcript: session.aiTranscript,
-          analysis: session.aiAnalysis,
-          detectedIssues: conversationQuality?.issues || [],
-          callSummary: sessionAnalysis?.summary || conversationQuality?.summary,
-          recordingUrl: session.recordingUrl,
-          createdAt: session.createdAt,
-          isTestCall: false,
-        });
-      }
-
-      // 2. Fetch Test Calls with transcripts
-      let testCallsQuery = db
-        .select({
-          id: campaignTestCalls.id,
-          campaignId: campaignTestCalls.campaignId,
-          virtualAgentId: campaignTestCalls.virtualAgentId,
-          testPhoneNumber: campaignTestCalls.testPhoneNumber,
-          testContactName: campaignTestCalls.testContactName,
-          testCompanyName: campaignTestCalls.testCompanyName,
-          status: campaignTestCalls.status,
-          disposition: campaignTestCalls.disposition,
-          durationSeconds: campaignTestCalls.durationSeconds,
-          fullTranscript: campaignTestCalls.fullTranscript,
-          transcriptTurns: campaignTestCalls.transcriptTurns,
-          aiPerformanceMetrics: campaignTestCalls.aiPerformanceMetrics,
-          detectedIssues: campaignTestCalls.detectedIssues,
-          callSummary: campaignTestCalls.callSummary,
-          testResult: campaignTestCalls.testResult,
-          recordingUrl: campaignTestCalls.recordingUrl,
-          createdAt: campaignTestCalls.createdAt,
-          campaignName: campaigns.name,
-          agentName: virtualAgents.name,
-        })
-        .from(campaignTestCalls)
-        .leftJoin(campaigns, eq(campaignTestCalls.campaignId, campaigns.id))
-        .leftJoin(virtualAgents, eq(campaignTestCalls.virtualAgentId, virtualAgents.id))
-        .orderBy(desc(campaignTestCalls.createdAt));
-
-      if (campaignId && campaignId !== 'all') {
-        // @ts-ignore
-        testCallsQuery = testCallsQuery.where(eq(campaignTestCalls.campaignId, campaignId as string));
-      }
-
-      // @ts-ignore
-      const testCallsData = await testCallsQuery.limit(limitNum);
-
-      for (const testCall of testCallsData) {
-        conversations.push({
-          id: testCall.id,
-          type: 'call',
-          source: 'test_call',
-          campaignId: testCall.campaignId,
-          campaignName: testCall.campaignName || 'Unknown Campaign',
-          contactName: testCall.testContactName || 'Test Contact',
-          companyName: testCall.testCompanyName || 'Test Company',
-          status: testCall.status,
-          disposition: testCall.disposition,
-          agentType: 'ai',
-          agentName: testCall.agentName,
-          duration: testCall.durationSeconds,
-          transcript: testCall.fullTranscript,
-          transcriptTurns: testCall.transcriptTurns,
-          analysis: testCall.aiPerformanceMetrics,
-          detectedIssues: testCall.detectedIssues,
-          callSummary: testCall.callSummary,
-          testResult: testCall.testResult,
-          recordingUrl: testCall.recordingUrl,
-          createdAt: testCall.createdAt,
-          isTestCall: true,
-        });
-      }
-
-      // 3. Fetch Email Sends (for email interactions)
-      if (!type || type === 'all' || type === 'email') {
-        let emailsQuery = db
-          .select({
-            id: emailSends.id,
-            campaignId: emailSends.campaignId,
-            contactId: emailSends.contactId,
-            status: emailSends.status,
-            sentAt: emailSends.sentAt,
-            createdAt: emailSends.createdAt,
-            campaignName: campaigns.name,
-            contactFirstName: contacts.firstName,
-            contactLastName: contacts.lastName,
-            contactEmail: contacts.email,
-            companyName: accounts.name,
-          })
-          .from(emailSends)
-          .leftJoin(campaigns, eq(emailSends.campaignId, campaigns.id))
-          .leftJoin(contacts, eq(emailSends.contactId, contacts.id))
-          .leftJoin(accounts, eq(contacts.accountId, accounts.id))
-          .orderBy(desc(emailSends.createdAt));
-
-        if (campaignId && campaignId !== 'all') {
-          // @ts-ignore
-          emailsQuery = emailsQuery.where(eq(emailSends.campaignId, campaignId as string));
-        }
-
-        // @ts-ignore
-        const emailsData = await emailsQuery.limit(limitNum);
-
-        for (const email of emailsData) {
-          conversations.push({
-            id: email.id,
-            type: 'email',
-            source: 'email_send',
-            campaignId: email.campaignId,
-            campaignName: email.campaignName || 'Unknown Campaign',
-            contactId: email.contactId,
-            contactName: `${email.contactFirstName || ''} ${email.contactLastName || ''}`.trim() || 'Unknown',
-            contactEmail: email.contactEmail,
-            companyName: email.companyName || 'Unknown',
-            status: email.status,
-            createdAt: email.createdAt,
-            sentAt: email.sentAt,
-            isTestCall: false,
-          });
-        }
-      }
-
-      // Sort all conversations by createdAt descending
-      conversations.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      // Apply search filter if provided
-      let filtered = conversations;
-      if (search) {
-        const searchLower = (search as string).toLowerCase();
-        filtered = conversations.filter(c =>
-          c.contactName?.toLowerCase().includes(searchLower) ||
-          c.companyName?.toLowerCase().includes(searchLower) ||
-          c.campaignName?.toLowerCase().includes(searchLower)
-        );
-      }
-
-      // Apply type filter
-      if (type && type !== 'all') {
-        filtered = filtered.filter(c => c.type === type);
-      }
-
-      // Apply pagination
-      const paginated = filtered.slice(offsetNum, offsetNum + limitNum);
-
-      // Calculate stats
-      const stats = {
-        total: filtered.length,
-        calls: filtered.filter(c => c.type === 'call').length,
-        emails: filtered.filter(c => c.type === 'email').length,
-        testCalls: filtered.filter(c => c.isTestCall).length,
-        withTranscripts: filtered.filter(c => c.transcript || c.transcriptTurns).length,
-      };
-
-      res.json({
-        conversations: paginated,
-        stats,
-        total: filtered.length,
-        limit: limitNum,
-        offset: offsetNum,
-      });
-    } catch (error) {
-      console.error('[QA Conversations] Error:', error);
-      res.status(500).json({ message: 'Failed to fetch QA conversations' });
-    }
-  });
-
   app.get("/api/leads", requireAuth, async (req, res) => {
     // Disable HTTP caching to ensure fresh data for all users
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -10027,7 +8188,7 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      await storage.deleteLead(req.params.id, req.user!.userId);
+      await storage.deleteLead(req.params.id, req.user!.id);
       res.json({ message: "Lead deleted successfully" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete lead" });
@@ -10650,8 +8811,7 @@ export function registerRoutes(app: Express) {
 
       // Upload screenshot to S3
       const s3Key = `lead-verifications/${leadId}/${Date.now()}-${file.originalname}`;
-      await uploadToS3(s3Key, file.buffer, file.mimetype);
-      const screenshotUrl = await getPublicUrl(s3Key);
+      const s3Result = await uploadToS3(s3Key, file.buffer, file.mimetype);
 
       console.log('[Lead Verification] Screenshot uploaded to S3:', s3Key);
 
@@ -10662,7 +8822,7 @@ export function registerRoutes(app: Express) {
           verificationType: 'linkedin_verified',
           verificationStatus: 'pending_ai',
           agentId: req.user!.userId,
-          screenshotUrl,
+          screenshotUrl: s3Result.url,
           screenshotS3Key: s3Key,
           metadata: {
             originalFilename: file.originalname,
@@ -10675,24 +8835,14 @@ export function registerRoutes(app: Express) {
       console.log('[Lead Verification] Created verification record:', verification.id);
 
       // Trigger AI validation
-      const { verifyLinkedInData } = await import('./services/linkedin-vision');
-      const aiRawResult = await verifyLinkedInData(screenshotUrl, {
-        fullName: contactName,
-        companyName
-      });
-      const validationConfidence = typeof aiRawResult.matchScore === 'number' ? aiRawResult.matchScore : 0;
-      const aiStatus = aiRawResult.verified
-        ? 'AI Verified'
-        : validationConfidence >= 70
-          ? 'Flagged for QA Review'
-          : 'Rejected';
-      const aiResult = {
-        status: aiStatus,
-        validation_confidence: validationConfidence,
-        extracted_data: aiRawResult.extracted ?? {},
-        comments: (aiRawResult.suggestions || []).join('; '),
-        raw: aiRawResult
-      };
+      const { validateLinkedInScreenshot } = await import('./services/linkedin-screenshot-validator');
+      const aiResult = await validateLinkedInScreenshot(
+        s3Result.url,
+        lead,
+        contactName,
+        companyName,
+        jobTitle
+      );
 
       // Map AI status to DB status
       let dbStatus: 'ai_verified' | 'flagged_review' | 'rejected';
@@ -10813,12 +8963,12 @@ export function registerRoutes(app: Express) {
       // Create new contact
       const [newContact] = await db.insert(contacts)
         .values({
-          fullName: `${newContactFirstName} ${newContactLastName}`,
           firstName: newContactFirstName,
           lastName: newContactLastName,
+          fullName: `${newContactFirstName} ${newContactLastName}`,
           jobTitle: newContactJobTitle || null,
           email: newContactEmail,
-          directPhone: newContactPhone || null,
+          phone: newContactPhone || null,
           linkedinUrl: linkedinUrl || null,
           accountId: accountId,
         })
@@ -10927,8 +9077,8 @@ export function registerRoutes(app: Express) {
       };
       const leadsData = await storage.getLeads(qaStatusFilter);
       
-      // Import storage utilities to generate fresh presigned URLs for recordings
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
+      // Import S3 utilities to generate fresh presigned URLs for recordings
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
 
       // Generate fresh presigned URLs for recordings stored in S3 (7-day validity)
       const csvData = await Promise.all(leadsData.map(async (lead) => {
@@ -10953,7 +9103,7 @@ export function registerRoutes(app: Express) {
           'Lead ID': lead.id,
           'Contact Name': lead.contactName || '',
           'Contact Email': lead.contactEmail || '',
-          'Job Title': '',
+          'Job Title': lead.contactTitle || '',
           'Company': lead.accountName || '',
           'Industry': lead.accountIndustry || '',
           'Phone': lead.dialedNumber || '',
@@ -11068,8 +9218,8 @@ export function registerRoutes(app: Express) {
         .leftJoin(campaigns, eq(leads.campaignId, campaigns.id))
         .where(inArray(leads.id, validLeadIds));
 
-      // Import storage utilities for fresh presigned URLs
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
+      // Import S3 utilities for fresh presigned URLs
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
       
       // Convert to CSV format with fresh presigned URLs for recordings
       const PapaModule = await import('papaparse');
@@ -11144,7 +9294,7 @@ export function registerRoutes(app: Express) {
       let deletedCount = 0;
       for (const leadId of leadIds) {
         try {
-          await storage.deleteLead(leadId, req.user!.userId);
+          await storage.deleteLead(leadId, req.user!.id);
           deletedCount++;
         } catch (err) {
           console.error(`Failed to delete lead ${leadId}:`, err);
@@ -11153,12 +9303,11 @@ export function registerRoutes(app: Express) {
 
       // Log the bulk delete action
       await storage.createActivityLog({
-        entityType: 'lead',
-        entityId: leadIds[0],
-        eventType: 'note_added',
-        createdBy: req.user!.userId,
-        payload: {
-          action: 'bulk_delete',
+        userId: req.user!.userId,
+        action: 'bulk_delete_leads',
+        resource: 'leads',
+        resourceId: null,
+        details: {
           leadIds,
           deletedCount,
         },
@@ -11223,12 +9372,11 @@ export function registerRoutes(app: Express) {
 
       // Log the bulk update action
       await storage.createActivityLog({
-        entityType: 'lead',
-        entityId: leadIds[0],
-        eventType: 'note_added',
-        createdBy: req.user!.userId,
-        payload: {
-          action: 'bulk_update',
+        userId: req.user!.userId,
+        action: 'bulk_update_leads',
+        resource: 'leads',
+        resourceId: null,
+        details: {
           leadIds,
           updates,
           updatedCount,
@@ -11535,7 +9683,7 @@ export function registerRoutes(app: Express) {
         db.select({ id: campaigns.id, type: campaigns.type, status: campaigns.status }).from(campaigns),
         db.select({ count: sql<number>`count(*)::int` })
           .from(leads)
-          .where(and(sql`${leads.createdAt} >= ${thisMonth}`, isNull(leads.deletedAt)))
+          .where(sql`${leads.createdAt} >= ${thisMonth}`)
       ]);
 
       const activeCampaigns = allCampaigns.filter(c => c.status === 'active');
@@ -11566,11 +9714,9 @@ export function registerRoutes(app: Express) {
   });
 
   // Agent-specific dashboard stats
-  // UNIFIED: Combines legacy callSessions and new dialerCallAttempts for accurate stats
   app.get("/api/dashboard/agent-stats", requireAuth, async (req, res) => {
     try {
       const agentId = req.user!.userId;
-      const { dialerCallAttempts: dca, dialerRuns } = await import('@shared/schema');
 
       // Get today and this month dates for filtering
       const today = new Date();
@@ -11580,82 +9726,57 @@ export function registerRoutes(app: Express) {
       thisMonth.setDate(1);
       thisMonth.setHours(0, 0, 0, 0);
 
-      // ========== DIALER CALL ATTEMPTS (Primary source for new calls) ==========
-      const dialerCallsToday = await db
-        .select({
-          count: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
-        })
-        .from(dca)
-        .where(and(
-          eq(dca.humanAgentId, agentId),
-          gte(dca.createdAt, today)
-        ));
-
-      const dialerCallsThisMonth = await db
-        .select({
-          count: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
-        })
-        .from(dca)
-        .where(and(
-          eq(dca.humanAgentId, agentId),
-          gte(dca.createdAt, thisMonth)
-        ));
-
-      const dialerCallsTotal = await db
-        .select({
-          count: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dca.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dca.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          totalDuration: sql<number>`SUM(COALESCE(${dca.callDurationSeconds}, 0))::int`,
-        })
-        .from(dca)
-        .where(eq(dca.humanAgentId, agentId));
-
-      // ========== LEGACY CALL SESSIONS (For backwards compatibility) ==========
-      const legacyStats = await db
-        .select({
-          todayCount: sql<number>`COUNT(CASE WHEN ${callSessions.startedAt} >= ${today} THEN 1 END)::int`,
-          monthCount: sql<number>`COUNT(CASE WHEN ${callSessions.startedAt} >= ${thisMonth} THEN 1 END)::int`,
-          totalCount: sql<number>`COUNT(*)::int`,
-          totalDuration: sql<number>`SUM(COALESCE(${callSessions.durationSec}, 0))::int`,
-        })
-        .from(callSessions)
-        .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
+      // Get call sessions for this agent
+      const allCallJobs = await db
+        .select()
+        .from(callJobs)
         .where(eq(callJobs.agentId, agentId));
 
-      // Legacy qualified count
-      const legacyQualified = await db
-        .select({
-          count: sql<number>`COUNT(*)::int`,
-        })
-        .from(callDispositions)
-        .innerJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
-        .innerJoin(callSessions, eq(callDispositions.callSessionId, callSessions.id))
-        .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
-        .where(and(
-          eq(callJobs.agentId, agentId),
-          eq(dispositions.systemAction, 'converted_qualified')
-        ));
+      const callJobIds = allCallJobs.map(j => j.id);
 
-      // ========== MERGE STATS ==========
-      const todayDialer = dialerCallsToday[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
-      const monthDialer = dialerCallsThisMonth[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
-      const totalDialer = dialerCallsTotal[0] || { count: 0, connected: 0, qualified: 0, totalDuration: 0 };
-      const legacy = legacyStats[0] || { todayCount: 0, monthCount: 0, totalCount: 0, totalDuration: 0 };
-      const legacyQual = legacyQualified[0]?.count || 0;
+      let callSessions = [];
+      if (callJobIds.length > 0) {
+        callSessions = await db
+          .select()
+          .from(callSessions as any)
+          .where(inArray((callSessions as any).callJobId, callJobIds));
+      }
 
-      const callsToday = todayDialer.count + legacy.todayCount;
-      const callsThisMonth = monthDialer.count + legacy.monthCount;
-      const totalCalls = totalDialer.count + legacy.totalCount;
-      const totalDuration = totalDialer.totalDuration + legacy.totalDuration;
-      const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
-      const qualifiedCount = totalDialer.qualified + legacyQual;
+      // Get disposition details for call sessions
+      const sessionIds = callSessions.map((s: any) => s.id);
+      let dispositionsData = [];
+      if (sessionIds.length > 0) {
+        dispositionsData = await db
+          .select({
+            sessionId: callDispositions.callSessionId,
+            dispositionId: callDispositions.dispositionId,
+            label: dispositions.label,
+            systemAction: dispositions.systemAction,
+          })
+          .from(callDispositions)
+          .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
+          .where(inArray(callDispositions.callSessionId, sessionIds));
+      }
+
+      // Calculate stats
+      const todaySessions = callSessions.filter((s: any) =>
+        s.startedAt && new Date(s.startedAt) >= today
+      );
+      const thisMonthSessions = callSessions.filter((s: any) =>
+        s.startedAt && new Date(s.startedAt) >= thisMonth
+      );
+
+      const totalDuration = callSessions.reduce((sum: number, s: any) =>
+        sum + (s.durationSec || 0), 0
+      );
+      const avgDuration = callSessions.length > 0
+        ? Math.round(totalDuration / callSessions.length)
+        : 0;
+
+      // Count qualified leads (dispositions with converted_qualified action)
+      const qualifiedCount = dispositionsData.filter(d =>
+        d.systemAction === 'converted_qualified'
+      ).length;
 
       // Get leads created by this agent
       const agentLeads = await db
@@ -11680,9 +9801,9 @@ export function registerRoutes(app: Express) {
         );
 
       res.json({
-        callsToday,
-        callsThisMonth,
-        totalCalls,
+        callsToday: todaySessions.length,
+        callsThisMonth: thisMonthSessions.length,
+        totalCalls: callSessions.length,
         avgDuration,
         qualified: qualifiedCount,
         leadsApproved: approvedLeads,
@@ -11756,11 +9877,7 @@ export function registerRoutes(app: Express) {
   // Filter field metadata is public (no auth required) - only exposes schema/configuration
   app.get("/api/filters/fields", async (req, res) => {
     try {
-      const rawCategory = req.query.category;
-      const category =
-        typeof rawCategory === 'string' && filterFieldCategoryEnum.enumValues.includes(rawCategory as any)
-          ? (rawCategory as FilterField['category'])
-          : undefined;
+      const category = req.query.category as string | undefined;
       const fields = await storage.getFilterFields(category);
 
       // Group by category for easier UI consumption
@@ -11918,38 +10035,21 @@ export function registerRoutes(app: Express) {
             if (segmentIds && segmentIds.length > 0) {
               if (!audienceContactIds) audienceContactIds = new Set<string>();
               for (const segmentId of segmentIds) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment?.entityType !== 'contact') {
-                  continue;
-                }
-                const segmentMembers = await storage.getSegmentMembers(segmentId);
-                segmentMembers.forEach((member) => audienceContactIds!.add(member.id));
+                const segmentContacts = await storage.getContactsBySegmentId(segmentId);
+                segmentContacts.forEach(c => audienceContactIds!.add(c.id));
               }
             }
             
             if (campaignId) {
+              // Get campaign audience
               const campaign = await storage.getCampaign(campaignId);
-              const audienceRefs = campaign?.audienceRefs as any;
-              const listIds = audienceRefs?.lists || audienceRefs?.selectedLists || [];
-              const campaignSegmentIds = audienceRefs?.segments || audienceRefs?.selectedSegments || [];
-              if (listIds.length > 0) {
+              if (campaign?.audienceListIds?.length) {
                 if (!audienceContactIds) audienceContactIds = new Set<string>();
-                for (const listId of listIds) {
+                for (const listId of campaign.audienceListIds) {
                   const list = await storage.getList(listId);
                   if (list?.recordIds) {
-                    list.recordIds.forEach((id: string) => audienceContactIds!.add(id));
+                    list.recordIds.forEach(id => audienceContactIds!.add(id));
                   }
-                }
-              }
-              if (campaignSegmentIds.length > 0) {
-                if (!audienceContactIds) audienceContactIds = new Set<string>();
-                for (const segmentId of campaignSegmentIds) {
-                  const segment = await storage.getSegment(segmentId);
-                  if (segment?.entityType !== 'contact') {
-                    continue;
-                  }
-                  const segmentMembers = await storage.getSegmentMembers(segmentId);
-                  segmentMembers.forEach((member) => audienceContactIds!.add(member.id));
                 }
               }
             }
@@ -12094,7 +10194,7 @@ export function registerRoutes(app: Express) {
       await storage.deleteExpiredSelectionContexts().catch(() => { });
 
       // Validate client payload (omit server-managed fields)
-      const clientSchema = insertSelectionContextSchema.omit({ userId: true });
+      const clientSchema = insertSelectionContextSchema.omit({ userId: true, expiresAt: true });
       const validated = clientSchema.parse(req.body);
 
       // Set expiration to 15 minutes from now
@@ -12104,7 +10204,7 @@ export function registerRoutes(app: Express) {
         ...validated,
         userId,
         expiresAt
-      } as any);
+      });
 
       res.status(201).json(context);
     } catch (error) {
@@ -12191,7 +10291,7 @@ export function registerRoutes(app: Express) {
         Object.entries(validated).filter(([_, v]) => v !== undefined)
       );
 
-      const asset = await storage.createContentAsset({ ...cleanData, ownerId: userId } as any);
+      const asset = await storage.createContentAsset({ ...cleanData, ownerId: userId });
       console.log("Asset created:", asset.id);
       res.status(201).json(asset);
     } catch (error) {
@@ -12272,7 +10372,7 @@ export function registerRoutes(app: Express) {
       if (result.success) {
         // Update push record with success
         await storage.updateContentPush(pushRecord.id, {
-          status: 'completed',
+          status: 'success',
           externalId: result.externalId,
           responsePayload: result.responsePayload,
         });
@@ -12352,7 +10452,7 @@ export function registerRoutes(app: Express) {
 
       // Update attempt count and status atomically
       await storage.updateContentPush(id, {
-        status: 'in_progress',
+        status: 'retrying',
         attemptCount: newAttemptCount
       });
 
@@ -12362,7 +10462,7 @@ export function registerRoutes(app: Express) {
 
       if (result.success) {
         await storage.updateContentPush(id, {
-          status: 'completed',
+          status: 'success',
           externalId: result.externalId,
           responsePayload: result.responsePayload,
         });
@@ -12475,7 +10575,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertEventSchema.parse(req.body);
-      const event = await storage.createEvent({ ...validated, ownerId: userId } as any);
+      const event = await storage.createEvent({ ...validated, createdBy: userId });
       res.status(201).json(event);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -12540,7 +10640,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertResourceSchema.parse(req.body);
-      const resource = await storage.createResource({ ...validated, ownerId: userId } as any);
+      const resource = await storage.createResource({ ...validated, createdBy: userId });
       res.status(201).json(resource);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -12605,7 +10705,7 @@ export function registerRoutes(app: Express) {
     try {
       const userId = req.user!.userId;
       const validated = insertNewsSchema.parse(req.body);
-      const newsItem = await storage.createNews({ ...validated, ownerId: userId } as any);
+      const newsItem = await storage.createNews({ ...validated, createdBy: userId });
       res.status(201).json(newsItem);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -13044,43 +11144,6 @@ export function registerRoutes(app: Express) {
             callControlId: payload?.call_control_id,
             state: payload?.state,
           });
-
-          // Start transcription when call is answered
-          if (payload?.call_control_id) {
-            try {
-              const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-              if (TELNYX_API_KEY) {
-                const transcriptionResponse = await fetch(
-                  `https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/transcription_start`,
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${TELNYX_API_KEY}`,
-                    },
-                    body: JSON.stringify({
-                      transcription_engine: "A", // Google (supports interim_results and speaker diarization)
-                      language: "en",
-                      interim_results: true, // Send partial transcripts in real-time
-                      transcription_tracks: "both", // Transcribe both inbound and outbound
-                      enable_speaker_diarization: true, // Identify different speakers
-                    }),
-                  }
-                );
-
-                if (transcriptionResponse.ok) {
-                  console.log(`[Telnyx Webhook] Transcription started for call ${payload.call_control_id}`);
-                } else {
-                  const errorText = await transcriptionResponse.text();
-                  console.warn(
-                    `[Telnyx Webhook] Failed to start transcription: ${transcriptionResponse.status} - ${errorText}`
-                  );
-                }
-              }
-            } catch (error) {
-              console.warn(`[Telnyx Webhook] Error starting transcription:`, error);
-            }
-          }
           break;
 
         case 'call.hangup':
@@ -13171,236 +11234,6 @@ export function registerRoutes(app: Express) {
     } catch (error: any) {
       console.error("[Telnyx Webhook] Error:", error.message);
       // Don't return error to Telnyx - we already acknowledged with 200
-    }
-  });
-
-  // ==================== HUMAN AGENT CALL WEBHOOK ====================
-  // Handles call events for human-initiated calls from Agent Console
-  // This is separate from AI/TeXML webhooks - uses Programmable Voice App ID: 2853482451592807572
-  app.post("/api/webhooks/human-call", async (req, res) => {
-    try {
-      // Acknowledge immediately
-      res.status(200).json({ received: true });
-
-      const eventType = req.body?.data?.event_type;
-      const payload = req.body?.data?.payload;
-      const callControlId = payload?.call_control_id;
-
-      // Enhanced debug logging
-      console.log(`[Human-Call Webhook] ========================================`);
-      console.log(`[Human-Call Webhook] Received webhook event`);
-      console.log(`[Human-Call Webhook] Event Type: ${eventType}`);
-      console.log(`[Human-Call Webhook] Call Control ID: ${callControlId}`);
-      console.log(`[Human-Call Webhook] Full payload:`, JSON.stringify(payload, null, 2));
-
-      if (!eventType || !callControlId) {
-        console.log("[Human-Call Webhook] Missing event_type or call_control_id");
-        return;
-      }
-
-      // Check if this is a tracked human agent call
-      const callSession = activeHumanCalls.get(callControlId);
-      console.log(`[Human-Call Webhook] Active calls count: ${activeHumanCalls.size}`);
-      console.log(`[Human-Call Webhook] Session found: ${!!callSession}`);
-      if (callSession) {
-        console.log(`[Human-Call Webhook] Session status: ${callSession.status}`);
-        console.log(`[Human-Call Webhook] Prospect number: ${callSession.prospectNumber}`);
-      }
-
-      switch (eventType) {
-        case 'call.answered':
-          console.log(`[Human-Call Webhook] Call answered: ${callControlId}`);
-
-          if (callSession && callSession.status === 'calling_agent') {
-            // Agent answered their phone - now bridge to prospect
-            console.log(`[Human-Call Webhook] *** AGENT ANSWERED ***`);
-            console.log(`[Human-Call Webhook] Agent answered, bridging to prospect: ${callSession.prospectNumber}`);
-            callSession.status = 'agent_connected';
-
-            // Automatically bridge to prospect
-            const telnyxApiKey = process.env.TELNYX_API_KEY;
-            const connectionId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
-            const fromNumber = process.env.TELNYX_HUMAN_AGENT_FROM_NUMBER || process.env.TELNYX_FROM_NUMBER;
-            const webhookUrl = `${process.env.PUBLIC_WEBHOOK_HOST ? 'https://' + process.env.PUBLIC_WEBHOOK_HOST : ''}/api/webhooks/human-call`;
-
-            console.log(`[Human-Call Webhook] Using Connection ID: ${connectionId}`);
-            console.log(`[Human-Call Webhook] Using From Number: ${fromNumber}`);
-            console.log(`[Human-Call Webhook] Prospect Webhook URL: ${webhookUrl}`);
-
-            try {
-              // Play announcement to agent
-              console.log(`[Human-Call Webhook] Playing announcement to agent...`);
-              const speakResponse = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/speak`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${telnyxApiKey}`,
-                },
-                body: JSON.stringify({
-                  payload: "Connecting you to the prospect now.",
-                  voice: "female",
-                  language: "en-US",
-                }),
-              });
-              console.log(`[Human-Call Webhook] Speak response: ${speakResponse.status}`);
-
-              // Call the prospect
-              console.log(`[Human-Call Webhook] Calling prospect at ${callSession.prospectNumber}...`);
-              const prospectResponse = await fetch("https://api.telnyx.com/v2/calls", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${telnyxApiKey}`,
-                },
-                body: JSON.stringify({
-                  connection_id: connectionId,
-                  to: callSession.prospectNumber,
-                  from: fromNumber,
-                  answering_machine_detection: "detect_words",
-                  client_state: Buffer.from(JSON.stringify({
-                    type: 'human_agent_prospect_leg',
-                    agentCallId: callControlId,
-                  })).toString('base64'),
-                  webhook_url: webhookUrl,
-                }),
-              });
-
-              if (prospectResponse.ok) {
-                const prospectResult = await prospectResponse.json();
-                callSession.prospectCallId = prospectResult.data?.call_control_id;
-                callSession.status = 'calling_prospect';
-                console.log(`[Human-Call Webhook] Calling prospect: ${callSession.prospectCallId}`);
-              } else {
-                console.error(`[Human-Call Webhook] Failed to call prospect: ${await prospectResponse.text()}`);
-              }
-            } catch (err) {
-              console.error(`[Human-Call Webhook] Error bridging call:`, err);
-            }
-          } else if (payload.client_state) {
-            // Has client_state - could be callback prospect leg or direct mode
-            console.log(`[Human-Call Webhook] *** CALL ANSWERED (has client_state) ***`);
-            console.log(`[Human-Call Webhook] Raw client_state: ${payload.client_state}`);
-            try {
-              const clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString());
-              console.log(`[Human-Call Webhook] Decoded client_state:`, JSON.stringify(clientState));
-
-              if (clientState.type === 'human_agent_direct') {
-                // Direct mode - prospect answered the call
-                console.log(`[Human-Call Webhook] *** DIRECT MODE: PROSPECT ANSWERED ***`);
-                if (callSession) {
-                  callSession.status = 'calling_prospect';
-                  console.log(`[Human-Call Webhook] Direct call now active with prospect`);
-                }
-              } else if (clientState.type === 'human_agent_prospect_leg' && clientState.agentCallId) {
-                // Callback mode - prospect answered, need to bridge
-                const agentSession = activeHumanCalls.get(clientState.agentCallId);
-                console.log(`[Human-Call Webhook] Looking for agent session with ID: ${clientState.agentCallId}`);
-                console.log(`[Human-Call Webhook] Agent session found: ${!!agentSession}`);
-                if (agentSession) {
-                  console.log(`[Human-Call Webhook] Prospect answered, bridging calls`);
-                  console.log(`[Human-Call Webhook] Agent Call ID: ${clientState.agentCallId}`);
-                  console.log(`[Human-Call Webhook] Prospect Call ID: ${callControlId}`);
-
-                  const telnyxApiKey = process.env.TELNYX_API_KEY;
-
-                  // Bridge agent to prospect
-                  console.log(`[Human-Call Webhook] Sending bridge command...`);
-                  const bridgeResponse = await fetch(`https://api.telnyx.com/v2/calls/${clientState.agentCallId}/actions/bridge`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${telnyxApiKey}`,
-                    },
-                    body: JSON.stringify({
-                      call_control_id: callControlId,
-                    }),
-                  });
-
-                  if (bridgeResponse.ok) {
-                    agentSession.status = 'bridged';
-                    console.log(`[Human-Call Webhook] *** CALLS BRIDGED SUCCESSFULLY ***`);
-                  } else {
-                    const errText = await bridgeResponse.text();
-                    console.error(`[Human-Call Webhook] Bridge failed: ${bridgeResponse.status} - ${errText}`);
-                  }
-                } else {
-                  console.log(`[Human-Call Webhook] Agent session not found! Available sessions:`, Array.from(activeHumanCalls.keys()));
-                }
-              } else {
-                console.log(`[Human-Call Webhook] client_state type not recognized:`, clientState.type);
-              }
-            } catch (err) {
-              console.error(`[Human-Call Webhook] Error parsing client_state:`, err);
-            }
-          } else if (callSession && callSession.status === 'calling_prospect') {
-            // Direct mode: prospect answered
-            console.log(`[Human-Call Webhook] *** PROSPECT ANSWERED (Direct mode) ***`);
-            callSession.status = 'bridged';
-            console.log(`[Human-Call Webhook] Direct call now active with prospect`);
-          } else {
-            console.log(`[Human-Call Webhook] call.answered but no session or client_state - might be a different call type`);
-          }
-          break;
-
-        case 'call.hangup':
-          console.log(`[Human-Call Webhook] Call hangup: ${callControlId}, cause: ${payload?.hangup_cause}`);
-
-          if (callSession) {
-            callSession.status = 'ended';
-
-            // If agent leg hung up, also hang up prospect
-            if (callSession.prospectCallId && callControlId === callSession.agentCallId) {
-              try {
-                const telnyxApiKey = process.env.TELNYX_API_KEY;
-                await fetch(`https://api.telnyx.com/v2/calls/${callSession.prospectCallId}/actions/hangup`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${telnyxApiKey}`,
-                  },
-                  body: JSON.stringify({ cause: "normal_clearing" }),
-                });
-                console.log(`[Human-Call Webhook] Hung up prospect leg`);
-              } catch (err) {
-                console.error(`[Human-Call Webhook] Error hanging up prospect:`, err);
-              }
-            }
-
-            // Cleanup after a delay
-            setTimeout(() => {
-              activeHumanCalls.delete(callControlId);
-            }, 5000);
-          }
-          break;
-
-        case 'call.machine.detection.ended':
-          const amdResult = payload?.result;
-          console.log(`[Human-Call Webhook] AMD result: ${amdResult} for ${callControlId}`);
-
-          if (amdResult === 'machine' || amdResult === 'fax') {
-            // Hang up on machines/voicemail
-            try {
-              const telnyxApiKey = process.env.TELNYX_API_KEY;
-              await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${telnyxApiKey}`,
-                },
-                body: JSON.stringify({ cause: "normal_clearing" }),
-              });
-              console.log(`[Human-Call Webhook] Hung up machine-detected call`);
-            } catch (err) {
-              console.error(`[Human-Call Webhook] Error hanging up machine call:`, err);
-            }
-          }
-          break;
-
-        default:
-          console.log(`[Human-Call Webhook] Unhandled event: ${eventType}`);
-      }
-    } catch (error: any) {
-      console.error("[Human-Call Webhook] Error:", error.message);
     }
   });
 
@@ -13631,7 +11464,7 @@ export function registerRoutes(app: Express) {
           { name: 'Other', value: 0 },
         ],
         dispositions: [],
-        campaignLeads: {} as Record<string, number>,
+        campaignLeads: {},
       };
 
       // Aggregate email stats
@@ -13774,12 +11607,12 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Get fresh recording URL for a lead (serves from GCS with 7-day presigned URLs)
+  // Get fresh recording URL for a lead (serves from S3 with 7-day presigned URLs)
   app.get("/api/leads/:id/recording-url", requireAuth, async (req, res) => {
     try {
       const { leads } = await import('@shared/schema');
       const { getRecordingUrl, isRecordingStorageEnabled } = await import('./services/recording-storage');
-      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/storage');
+      const { getPresignedDownloadUrl, s3ObjectExists } = await import('./lib/s3');
       
       const [lead] = await db.select().from(leads).where(eq(leads.id, req.params.id)).limit(1);
       
@@ -13787,33 +11620,33 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
       
-      // Check if recording exists in GCS first (permanent storage)
+      // Check if recording exists in S3 first (permanent storage)
       if (lead.recordingS3Key) {
         try {
           const exists = await s3ObjectExists(lead.recordingS3Key);
           if (exists) {
-            // Generate 7-day presigned URL for GCS recording
+            // Generate 7-day presigned URL for S3 recording
             const url = await getPresignedDownloadUrl(lead.recordingS3Key, 7 * 24 * 60 * 60);
-            console.log(`[Recording URL] Serving from GCS: ${lead.recordingS3Key}`);
+            console.log(`[Recording URL] Serving from S3: ${lead.recordingS3Key}`);
             return res.json({ url, source: 'local', expiresIn: '7 days' });
           }
         } catch (s3Error) {
-          console.error(`[Recording URL] GCS check failed for lead ${lead.id}:`, s3Error);
+          console.error(`[Recording URL] S3 check failed for lead ${lead.id}:`, s3Error);
         }
       }
       
-      // No GCS recording - try to use the recording storage service
+      // No S3 recording - try to use the recording storage service
       if (lead.recordingUrl && isRecordingStorageEnabled()) {
-        console.log(`[Recording URL] Attempting to store recording in GCS for lead ${lead.id}...`);
+        console.log(`[Recording URL] Attempting to store recording in S3 for lead ${lead.id}...`);
         const result = await getRecordingUrl(lead.id, lead.recordingUrl);
         
         if (result.url && result.source === 'local') {
-          console.log(`[Recording URL] Successfully stored and serving from GCS for lead ${lead.id}`);
+          console.log(`[Recording URL] Successfully stored and serving from S3 for lead ${lead.id}`);
           return res.json({ url: result.url, source: 'local', expiresIn: '7 days' });
         }
       }
       
-      // Fall back to original Telnyx URL if GCS storage failed or not configured
+      // Fall back to original Telnyx URL if S3 storage failed or not configured
       if (!lead.recordingUrl) {
         return res.status(404).json({ message: "No recording URL available for this lead" });
       }
@@ -14030,33 +11863,14 @@ export function registerRoutes(app: Express) {
           reviewCount: 0,
           errors: [] as string[]
         };
-        const baseLeadFilter: FilterGroup = {
-          logic: 'AND',
-          conditions: [
-            {
-              id: 'campaignId',
-              field: 'campaignId',
-              operator: 'equals',
-              values: [campaignId]
-            }
-          ]
-        };
         
         console.log(`[ConsolidatedProcessing] Campaign ${campaignId}: Starting all validation steps in correct order`);
         
         // Step 1: Sync recordings and trigger transcription (MUST BE FIRST)
         try {
-          const leads = await storage.getLeads({
-            ...baseLeadFilter,
-            conditions: [
-              ...baseLeadFilter.conditions,
-              {
-                id: 'qaStatus',
-                field: 'qaStatus',
-                operator: 'equals',
-                values: ['new']
-              }
-            ]
+          const leads = await storage.getLeads({ 
+            campaignId, 
+            qaStatus: 'new' 
           });
           
           console.log(`[ConsolidatedProcessing] Step 1/4: Syncing ${leads.length} call recordings`);
@@ -14084,7 +11898,7 @@ export function registerRoutes(app: Express) {
           console.log(`[ConsolidatedProcessing] Step 2/4: Validating contact emails`);
           
           // Get all contacts for this campaign
-          const leads = await storage.getLeads(baseLeadFilter);
+          const leads = await storage.getLeads({ campaignId });
           const contactIds = leads
             .map(l => l.contactId)
             .filter((id): id is string => id != null);
@@ -14122,7 +11936,7 @@ export function registerRoutes(app: Express) {
           await reEvaluateCampaignLeads(campaignId);
           
           // Count final statuses (AI analyzer now sets qaStatus automatically)
-          const finalLeads = await storage.getLeads(baseLeadFilter);
+          const finalLeads = await storage.getLeads({ campaignId });
           results.approvedCount = finalLeads.filter(l => l.qaStatus === 'approved').length;
           results.rejectedCount = finalLeads.filter(l => l.qaStatus === 'rejected').length;
           results.reviewCount = finalLeads.filter(l => l.qaStatus === 'under_review').length;
@@ -14231,8 +12045,7 @@ export function registerRoutes(app: Express) {
   // Get account brief (from customFields)
   app.get("/api/accounts/:id/brief", requireAuth, async (req, res) => {
     try {
-      const accounts = await storage.getAccountsByIds([req.params.id]);
-      const account = accounts[0];
+      const account = await storage.getAccountById(req.params.id);
 
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
@@ -14279,8 +12092,7 @@ export function registerRoutes(app: Express) {
   app.get("/api/accounts/:id/insights", requireAuth, async (req, res) => {
     try {
       const accountId = req.params.id;
-      const accounts = await storage.getAccountsByIds([accountId]);
-      const account = accounts[0];
+      const account = await storage.getAccountById(accountId);
 
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
@@ -14290,8 +12102,8 @@ export function registerRoutes(app: Express) {
       const customFields = (account.customFields as any) || {};
       const accountBrief = customFields.aiAccountBrief || null;
 
-      // Calculate engagement score based on activities
-      const { m365Activities } = await import('@shared/schema');
+      // Calculate engagement score based on activities and opportunities
+      const { m365Activities, opportunities: opportunitiesTable } = await import('@shared/schema');
 
       // Get M365 email activities
       const emailActivities = await db
@@ -14303,12 +12115,12 @@ export function registerRoutes(app: Express) {
       // Get opportunities for this account
       const opportunities = await db
         .select()
-        .from(pipelineOpportunities)
-        .where(eq(pipelineOpportunities.accountId, accountId));
+        .from(opportunitiesTable)
+        .where(eq(opportunitiesTable.accountId, accountId));
 
       // Calculate engagement metrics
       const recentEmails = emailActivities.filter(a => {
-        const activityDate = new Date(a.receivedDateTime || a.sentDateTime || a.createdAt);
+        const activityDate = new Date(a.receivedAt);
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         return activityDate >= thirtyDaysAgo;
@@ -14328,21 +12140,14 @@ export function registerRoutes(app: Express) {
         engagementScore >= 40 ? 'medium' :
         'low';
 
-      // Generate AI recommendations using Gemini
+      // Generate AI recommendations if OpenAI is available
       let recommendations = null;
       let nextBestActions = null;
 
       try {
-        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-        if (!geminiKey) {
-          console.warn('[AI Insights] Gemini API key not configured, skipping recommendations');
-        } else {
-          const { GoogleGenerativeAI } = await import("@google/generative-ai");
-          const genai = new GoogleGenerativeAI(geminiKey);
+        const openai = await import('./lib/' + 'openai').then(m => m.default);
 
-          const recommendationPrompt = `You are a B2B sales strategist providing actionable recommendations based on account data and engagement patterns.
-
-Analyze this B2B account and provide strategic recommendations:
+        const recommendationPrompt = `Analyze this B2B account and provide strategic recommendations:
 
 Account: ${account.name}
 Industry: ${account.industryStandardized || 'Unknown'}
@@ -14363,19 +12168,26 @@ Provide JSON response with:
   "opportunities": ["..."]
 }`;
 
-          const model = genai.getGenerativeModel({
-            model: "gemini-2.0-flash-exp",
-            generationConfig: {
-              temperature: 0.7,
-              responseMimeType: "application/json",
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a B2B sales strategist providing actionable recommendations based on account data and engagement patterns.'
+            },
+            {
+              role: 'user',
+              content: recommendationPrompt
             }
-          });
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.7,
+        });
 
-          const result = await model.generateContent(recommendationPrompt);
-          const aiResponse = JSON.parse(result.response?.text() || '{}');
-          recommendations = aiResponse.recommendations || [];
-          nextBestActions = aiResponse.nextBestActions || [];
-        }
+        const aiResponse = JSON.parse(completion.choices[0]?.message?.content || '{}');
+        recommendations = aiResponse.recommendations || [];
+        nextBestActions = aiResponse.nextBestActions || [];
+
       } catch (aiError) {
         console.error('[AI Insights] Error generating recommendations:', aiError);
         // Continue without AI recommendations
@@ -14498,7 +12310,7 @@ Provide JSON response with:
   // ==================== ACTIVITY LOGS ====================
 
   // Get activity logs for an entity
-  app.get("/api/activity-log/:entityType/:entityId", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.get("/api/activity-log/:entityType/:entityId", requireAuth, async (req: Request, res: Response) => {
     try {
       const { entityType, entityId } = req.params;
       const limitParam = req.query.limit as string | undefined;
@@ -14532,7 +12344,7 @@ Provide JSON response with:
   });
 
   // Create activity log (for manual logging)
-  app.post("/api/activity-log", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.post("/api/activity-log", requireAuth, async (req: Request, res: Response) => {
     try {
       const validatedData = insertActivityLogSchema.omit({ createdBy: true }).parse(req.body);
 
@@ -14557,19 +12369,6 @@ Provide JSON response with:
   // ==================== AI VOICE AGENT CALLS ====================
 
   app.use("/api/ai-calls", aiCallsRouter);
-  app.use("/api/texml", texmlRouter);
-
-  // ==================== OPENAI SIP REALTIME (Inbound) ====================
-
-  app.use("/api/openai/sip", openaiSipRouter);
-
-  // ==================== OPENAI WEBRTC REALTIME ====================
-
-  app.use("/api/openai/webrtc", openaiWebrtcRouter);
-
-  // ==================== TELNYX WEBRTC ====================
-
-  app.use("/api/telnyx/webrtc", telnyxWebrtcRouter);
 
   // ==================== CAMPAIGN TEST CALLS (AI Agent Testing) ====================
 
@@ -14579,24 +12378,6 @@ Provide JSON response with:
   // ==================== VIRTUAL AGENTS (AI Personas) ====================
 
   app.use("/api/virtual-agents", virtualAgentsRouter);
-
-  // ==================== VOICE PROVIDERS (Dynamic Voice Discovery + Preview) ====================
-
-  app.use("/api/voice-providers", voiceProviderRouter);
-
-  // ==================== VOICE INSIGHTS (Campaign Call Analytics & Quality) ====================
-  // Centralized API for all voice call insights, dispositions, quality tracking
-  // Gemini Live exclusive - no OpenAI Realtime fallback
-  app.use("/api/voice-insights", voiceInsightsRouter);
-
-  // ==================== UNIFIED KNOWLEDGE HUB (SINGLE SOURCE OF TRUTH) ====================
-  // All AI agents consume knowledge from this centralized hub only
-  // No other routes, documents, or hidden configurations are permitted
-  app.use("/api/knowledge-hub", knowledgeHubRouter);
-
-  // ==================== AGENT DEFAULTS (Global Agent Configuration) ====================
-
-  app.use("/api/agent-defaults", agentDefaultsRouter);
 
   // ==================== HYBRID CAMPAIGN AGENTS ====================
 
@@ -14619,45 +12400,9 @@ Provide JSON response with:
   // Voice Agent OI Modes: use_existing | fresh_research | none
   app.use("/api/org-intelligence-injection", orgIntelligenceInjectionRouter);
 
-  // ==================== PROBLEM INTELLIGENCE SYSTEM ====================
-  // Service Catalog, Problem Framework, Campaign Problem Intelligence
-  app.use("/api", problemIntelligenceRouter);
-
-  // ==================== SMI AGENT (Search, Mapping & Intelligence) ====================
-  // Title/Role Mapping, Industry Classification, Multi-Perspective Intelligence,
-  // Contact Intelligence, Solution Mapping, Learning & Predictive Scoring
-  app.use("/api/smi", requireAuth, smiAgentRouter);
-
   // ==================== DIALER RUNS (Manual/PowerDialer) ====================
 
   app.use("/api/dialer-runs", dialerRunsRouter);
-
-  // ==================== PREVIEW STUDIO ====================
-  // Preview and test campaign content (emails, call plans, live simulation)
-  app.use("/api/preview-studio", previewStudioRouter);
-
-  // ==================== SIMULATIONS ====================
-  // TRUE telephony-free simulation - NO dialer, NO phone, NO SIP
-  // call_mode: "SIMULATION" enforced - completely decoupled from telephony
-  app.use("/api/simulations", simulationsRouter);
-
-  // ==================== KNOWLEDGE BLOCKS ====================
-  // Modular, versioned agent knowledge management
-  app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
-  app.use("/api/agent-prompts", agentPromptVisibilityRouter);
-
-  // ==================== AGENT INFRASTRUCTURE ====================
-  // Core agents (Email, Voice), Registry, Governance, Foundational Prompts
-  app.use("/api/agents", agentInfrastructureRouter);
-
-  // ==================== PROMPT VARIANTS ====================
-  // A/B testing and multi-perspective prompt generation
-  app.use("/api", promptVariantsRouter);
-
-  // ==================== SUPER ORGANIZATION ====================
-  // Platform owner organization (Pivotal B2B) management
-  // Only accessible by organization owners
-  app.use("/api/super-org", superOrganizationRouter);
 
   // ==================== QUEUE MANAGEMENT ====================
 
@@ -14865,20 +12610,10 @@ Provide JSON response with:
   // ==================== CLIENT PORTAL (Must be before catch-all /api routes) ====================
   app.use('/api/client-portal', clientPortalRouter);
 
-  // ==================== CLIENT HIERARCHY & QA GATING ====================
-  app.use('/api/admin', requireAuth, clientAssignmentRouter);
-  app.use('/api', requireAuth, qaGatedContentRouter);
-
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
   app.use('/api/campaigns', requireAuth, campaignSuppressionRouter);
   app.use('/api/campaigns', requireAuth, campaignEmailRouter);
   app.use('/api/campaigns', requireAuth, campaignSendRouter);
-
-  // ==================== CAMPAIGN INGESTION (AI Auto-Generate) ====================
-  app.use('/api/campaigns', requireAuth, campaignIngestionRouter);
-
-  // ==================== INTELLIGENT CAMPAIGN CONTEXT (Multi-Modal Creation) ====================
-  app.use('/api/campaign-context', requireAuth, campaignContextRouter);
 
   app.use(verificationCampaignsRouter);
   app.use(verificationContactsRouter);
@@ -14898,8 +12633,8 @@ Provide JSON response with:
   // ==================== TELEMARKETING SUPPRESSION LISTS ====================
   app.use('/api/telemarketing/suppressions', requireAuth, telemarketingSuppressionRouter);
 
-  // ==================== STORAGE FILE OPERATIONS ====================
-  app.use(storageFilesRouter);
+  // ==================== S3 FILE OPERATIONS ====================
+  app.use(s3FilesRouter);
 
   // ==================== CSV IMPORT JOBS (BullMQ) ====================
   app.use(csvImportJobsRouter);
@@ -14921,8 +12656,7 @@ Provide JSON response with:
   app.use(aiCsvMappingRouter);
   
   // ==================== LINKEDIN VERIFICATION ====================
-  // DISABLED: LinkedIn verification feature is no longer active
-  // app.use('/api/linkedin-verification', linkedinVerificationRouter);
+  app.use('/api/linkedin-verification', linkedinVerificationRouter);
 
   // ==================== AGENT PERFORMANCE & REPORTING ====================
   app.use('/api', agentReportsRouter);
@@ -14959,7 +12693,7 @@ Provide JSON response with:
   // ==================== ADMIN DATA MANAGEMENT ====================
 
   // Delete verification campaigns
-  app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/verification_campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(verificationCampaigns);
 
@@ -14967,7 +12701,7 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'campaign',
         entityId: req.user!.userId,
-        eventType: 'disposition_saved',
+        eventType: 'campaign_deleted',
         payload: { action: 'admin_delete_verification_campaigns', description: 'Admin deleted all verification campaigns' },
         createdBy: req.user!.userId,
       });
@@ -14980,14 +12714,14 @@ Provide JSON response with:
   });
 
   // Delete verification contacts
-  app.delete("/api/admin/data/verification_contacts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/verification_contacts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(verificationContacts);
 
       await storage.createActivityLog({
         entityType: 'contact',
         entityId: req.user!.userId,
-        eventType: 'disposition_saved',
+        eventType: 'contact_deleted',
         payload: { action: 'admin_delete_verification_contacts', description: 'Admin deleted all verification contacts' },
         createdBy: req.user!.userId,
       });
@@ -15000,14 +12734,14 @@ Provide JSON response with:
   });
 
   // Delete regular campaigns
-  app.delete("/api/admin/data/campaigns", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/campaigns", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(campaigns);
 
       await storage.createActivityLog({
         entityType: 'campaign',
         entityId: req.user!.userId,
-        eventType: 'disposition_saved',
+        eventType: 'campaign_deleted',
         payload: { action: 'admin_delete_campaigns', description: 'Admin deleted all regular campaigns' },
         createdBy: req.user!.userId,
       });
@@ -15020,15 +12754,15 @@ Provide JSON response with:
   });
 
   // Delete contacts
-  app.delete("/api/admin/data/contacts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/contacts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(contacts);
 
       await storage.createActivityLog({
         entityType: 'contact',
         entityId: req.user!.userId,
-        eventType: 'disposition_saved',
-        payload: { action: 'admin_delete_contacts', description: 'Admin deleted all contacts' },
+        action: 'admin_delete_contacts',
+        description: `Admin deleted all contacts`,
         createdBy: req.user!.userId,
       });
 
@@ -15040,18 +12774,15 @@ Provide JSON response with:
   });
 
   // Delete accounts
-  app.delete("/api/admin/data/accounts", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/accounts", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(accounts);
 
       await storage.createActivityLog({
         entityType: 'account',
         entityId: req.user!.userId,
-        eventType: 'note_added',
-        payload: {
-          action: 'admin_delete_accounts',
-          description: 'Admin deleted all accounts'
-        },
+        action: 'admin_delete_accounts',
+        description: `Admin deleted all accounts`,
         createdBy: req.user!.userId,
       });
 
@@ -15063,18 +12794,15 @@ Provide JSON response with:
   });
 
   // Delete leads
-  app.delete("/api/admin/data/leads", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/leads", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const result = await db.delete(leads);
 
       await storage.createActivityLog({
         entityType: 'lead',
         entityId: req.user!.userId,
-        eventType: 'note_added',
-        payload: {
-          action: 'admin_delete_leads',
-          description: 'Admin deleted all leads'
-        },
+        action: 'admin_delete_leads',
+        description: `Admin deleted all leads`,
         createdBy: req.user!.userId,
       });
 
@@ -15086,7 +12814,7 @@ Provide JSON response with:
   });
 
   // Delete ALL business data
-  app.delete("/api/admin/data/all", requireAuth, requireRole('admin'), async (req: ExpressRequest, res: Response) => {
+  app.delete("/api/admin/data/all", requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
     try {
       // Delete in order to respect foreign key constraints
       await db.delete(leads);
@@ -15103,11 +12831,8 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'user',
         entityId: req.user!.userId,
-        eventType: 'note_added',
-        payload: {
-          action: 'admin_delete_all_data',
-          description: 'Admin deleted ALL business data'
-        },
+        action: 'admin_delete_all_data',
+        description: `Admin deleted ALL business data`,
         createdBy: req.user!.userId,
       });
 
@@ -15121,7 +12846,7 @@ Provide JSON response with:
   // ==================== PHONE BULK EDITOR ROUTES ====================
 
   // Search for contacts and accounts with phone pattern matching
-  app.post("/api/phone-bulk/search", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.post("/api/phone-bulk/search", requireAuth, async (req: Request, res: Response) => {
     try {
       const { searchType, phonePattern, contactFilters: contactFilterConditions, accountFilters: accountFilterConditions, listId } = req.body;
 
@@ -15143,7 +12868,7 @@ Provide JSON response with:
       if (searchType === 'contacts' || searchType === 'both') {
         // Build filter for contacts
         const contactFilters: FilterGroup | undefined = contactFilterConditions ? {
-          logic: 'AND',
+          operator: 'and',
           conditions: contactFilterConditions
         } : undefined;
 
@@ -15151,15 +12876,16 @@ Provide JSON response with:
 
         // If list filtering is specified, filter by list membership
         if (listId) {
-          const listMembers = await storage.getListMembers(listId);
-          const listContactIds = new Set(listMembers.map((member) => member.id));
-          allContacts = allContacts.filter((contact) => listContactIds.has(contact.id));
+          const listContacts = await storage.getListContacts(listId);
+          const listContactIds = new Set(listContacts.map(lc => lc.contactId));
+          allContacts = allContacts.filter(c => listContactIds.has(c.id));
         }
 
         // Filter by phone pattern
         const matchingContacts = allContacts.filter(contact =>
-          matchesPattern(contact.directPhone, phonePattern) ||
-          matchesPattern(contact.mobilePhone, phonePattern)
+          matchesPattern(contact.phone, phonePattern) ||
+          matchesPattern(contact.mobile, phonePattern) ||
+          matchesPattern(contact.tel, phonePattern)
         );
 
         // Map to result format
@@ -15168,25 +12894,25 @@ Provide JSON response with:
           type: 'contact',
           name: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           email: contact.email,
-          phone: contact.directPhone,
-          mobile: contact.mobilePhone,
-          tel: contact.phoneExtension,
-          company: (contact as any).accountName || null,
+          phone: contact.phone,
+          mobile: contact.mobile,
+          tel: contact.tel,
+          company: contact.companyName,
           accountId: contact.accountId,
-          title: contact.jobTitle,
+          title: contact.title,
           department: contact.department,
           city: contact.city,
           state: contact.state,
           country: contact.country,
           seniorityLevel: contact.seniorityLevel,
-          jobFunction: contact.department
+          jobFunction: contact.jobFunction
         })));
       }
 
       if (searchType === 'accounts' || searchType === 'both') {
         // Build filter for accounts
         const accountFilters: FilterGroup | undefined = accountFilterConditions ? {
-          logic: 'AND',
+          operator: 'and',
           conditions: accountFilterConditions
         } : undefined;
 
@@ -15194,31 +12920,31 @@ Provide JSON response with:
 
         // If list filtering is specified, filter by list membership
         if (listId) {
-          const listMembers = await storage.getListMembers(listId);
-          const listAccountIds = new Set(listMembers.map((member) => member.id));
-          allAccounts = allAccounts.filter((account) => listAccountIds.has(account.id));
+          const listAccounts = await storage.getListAccounts(listId);
+          const listAccountIds = new Set(listAccounts.map(la => la.accountId));
+          allAccounts = allAccounts.filter(a => listAccountIds.has(a.id));
         }
 
         // Filter by phone pattern
         const matchingAccounts = allAccounts.filter(account =>
-          matchesPattern(account.mainPhone, phonePattern)
+          matchesPattern(account.hqPhone, phonePattern)
         );
 
         // Map to result format
         results.push(...matchingAccounts.map(account => ({
           id: account.id,
           type: 'account',
-          name: account.name,
+          name: account.companyName,
           email: null,
-          phone: account.mainPhone,
+          phone: account.hqPhone,
           mobile: null,
           tel: null,
-          company: account.name,
+          company: account.companyName,
           accountId: account.id,
-          website: account.domain,
-          industry: account.industryStandardized,
-          companySize: account.employeesSizeRange,
-          revenue: account.annualRevenue,
+          website: account.website,
+          industry: account.industry,
+          companySize: account.companySize,
+          revenue: account.revenue,
           hqCity: account.hqCity,
           hqState: account.hqState,
           hqCountry: account.hqCountry,
@@ -15240,7 +12966,7 @@ Provide JSON response with:
   });
 
   // Bulk update phone numbers
-  app.post("/api/phone-bulk/update", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.post("/api/phone-bulk/update", requireAuth, async (req: Request, res: Response) => {
     try {
       const { updates } = req.body;
 
@@ -15261,9 +12987,9 @@ Provide JSON response with:
         if (type === 'contact') {
           // Update contact phone fields
           const updateData: any = {};
-          if (fieldUpdates.phone !== undefined) updateData.directPhone = fieldUpdates.phone;
-          if (fieldUpdates.mobile !== undefined) updateData.mobilePhone = fieldUpdates.mobile;
-          if (fieldUpdates.tel !== undefined) updateData.phoneExtension = fieldUpdates.tel;
+          if (fieldUpdates.phone !== undefined) updateData.phone = fieldUpdates.phone;
+          if (fieldUpdates.mobile !== undefined) updateData.mobile = fieldUpdates.mobile;
+          if (fieldUpdates.tel !== undefined) updateData.tel = fieldUpdates.tel;
 
           if (Object.keys(updateData).length > 0) {
             await db.update(contacts)
@@ -15274,7 +13000,7 @@ Provide JSON response with:
         } else if (type === 'account') {
           // Update account phone fields
           const updateData: any = {};
-          if (fieldUpdates.phone !== undefined) updateData.mainPhone = fieldUpdates.phone;
+          if (fieldUpdates.phone !== undefined) updateData.hqPhone = fieldUpdates.phone;
 
           if (Object.keys(updateData).length > 0) {
             await db.update(accounts)
@@ -15289,11 +13015,8 @@ Provide JSON response with:
       await storage.createActivityLog({
         entityType: 'user',
         entityId: req.user!.userId,
-        eventType: 'note_added',
-        payload: {
-          action: 'phone_bulk_update',
-          description: `Bulk updated ${contactsUpdated} contacts and ${accountsUpdated} accounts`
-        },
+        action: 'phone_bulk_update',
+        description: `Bulk updated ${contactsUpdated} contacts and ${accountsUpdated} accounts`,
         createdBy: req.user!.userId,
       });
 
@@ -15315,7 +13038,7 @@ Provide JSON response with:
   // =============================================================================
 
   // Manually trigger email validation job
-  app.post("/api/jobs/trigger/email-validation", requireAuth, requireRole('admin'), async (req, res) => {
+  app.post("/api/jobs/trigger/email-validation", requireAuth, requireRole(['admin']), async (req, res) => {
     try {
       const { triggerEmailValidation } = await import('./jobs/email-validation-job');
       const result = await triggerEmailValidation();
@@ -15332,7 +13055,7 @@ Provide JSON response with:
   });
 
   // Manually trigger AI enrichment job
-  app.post("/api/jobs/trigger/ai-enrichment", requireAuth, requireRole('admin'), async (req, res) => {
+  app.post("/api/jobs/trigger/ai-enrichment", requireAuth, requireRole(['admin']), async (req, res) => {
     try {
       const { triggerAiEnrichment } = await import('./jobs/ai-enrichment-job');
       const result = await triggerAiEnrichment();
@@ -15366,7 +13089,7 @@ Provide JSON response with:
   });
 
   // Get background job status
-  app.get("/api/jobs/status", requireAuth, requireRole('admin'), async (req, res) => {
+  app.get("/api/jobs/status", requireAuth, requireRole(['admin']), async (req, res) => {
     try {
       const ENABLE_EMAIL_VALIDATION = process.env.ENABLE_EMAIL_VALIDATION !== 'false';
       const ENABLE_AI_ENRICHMENT = process.env.ENABLE_AI_ENRICHMENT !== 'false';
@@ -15390,12 +13113,11 @@ Provide JSON response with:
   // ==================== CALL ANALYTICS ====================
 
   // Get comprehensive call analytics (overall, per-campaign, per-agent)
-  // UNIFIED: Combines legacy callAttempts and new dialerCallAttempts for accurate stats
-  app.get("/api/analytics/call-stats", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.get("/api/analytics/call-stats", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { callAttempts, dispositions, campaigns: campaignsTable, users, dialerCallAttempts, virtualAgents } = await import('@shared/schema');
+      const { callAttempts, dispositions, campaigns: campaignsTable, users } = await import('@shared/schema');
 
-      // ========== LEGACY CALL ATTEMPTS STATS ==========
+      // Get qualified disposition labels (systemAction = 'converted_qualified')
       const qualifiedDisps = await db
         .select({ label: dispositions.label })
         .from(dispositions)
@@ -15403,7 +13125,8 @@ Provide JSON response with:
 
       const qualifiedLabels = qualifiedDisps.map(d => d.label);
 
-      const [legacyOverall] = await db
+      // Calculate overall stats using SQL aggregation
+      const [overallStats] = await db
         .select({
           attempted: sql<number>`COUNT(*)::int`,
           connected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IS NOT NULL OR ${callAttempts.duration} > 0 THEN 1 END)::int`,
@@ -15413,37 +13136,8 @@ Provide JSON response with:
         })
         .from(callAttempts);
 
-      // ========== NEW DIALER CALL ATTEMPTS STATS ==========
-      const [dialerOverall] = await db
-        .select({
-          attempted: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.voicemailDetected} = true THEN 1 END)::int`,
-          noAnswer: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'no_answer' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
-          dnc: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'do_not_call' THEN 1 END)::int`,
-          avgDuration: sql<number>`AVG(COALESCE(${dialerCallAttempts.callDurationSeconds}, 0))::int`,
-        })
-        .from(dialerCallAttempts);
-
-      // Merge overall stats
-      const legacy = legacyOverall || { attempted: 0, connected: 0, qualified: 0 };
-      const dialer = dialerOverall || { attempted: 0, connected: 0, qualified: 0, voicemail: 0, noAnswer: 0, notInterested: 0, dnc: 0, avgDuration: 0 };
-
-      const overallStats = {
-        attempted: legacy.attempted + dialer.attempted,
-        connected: legacy.connected + dialer.connected,
-        qualified: legacy.qualified + dialer.qualified,
-        voicemail: dialer.voicemail,
-        noAnswer: dialer.noAnswer,
-        notInterested: dialer.notInterested,
-        dnc: dialer.dnc,
-        avgDuration: dialer.avgDuration
-      };
-
-      // ========== PER-CAMPAIGN STATS (UNIFIED) ==========
-      const legacyCampaignStats = await db
+      // Calculate per-campaign stats using SQL GROUP BY
+      const campaignStats = await db
         .select({
           campaignId: callAttempts.campaignId,
           campaignName: campaignsTable.name,
@@ -15457,55 +13151,8 @@ Provide JSON response with:
         .leftJoin(campaignsTable, eq(callAttempts.campaignId, campaignsTable.id))
         .groupBy(callAttempts.campaignId, campaignsTable.name);
 
-      const dialerCampaignStats = await db
-        .select({
-          campaignId: dialerCallAttempts.campaignId,
-          campaignName: campaignsTable.name,
-          attempted: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-        })
-        .from(dialerCallAttempts)
-        .leftJoin(campaignsTable, eq(dialerCallAttempts.campaignId, campaignsTable.id))
-        .groupBy(dialerCallAttempts.campaignId, campaignsTable.name);
-
-      // Merge campaign stats
-      const campaignMap = new Map<string, { id: string; name: string; attempted: number; connected: number; qualified: number }>();
-      for (const stat of legacyCampaignStats) {
-        campaignMap.set(stat.campaignId, {
-          id: stat.campaignId,
-          name: stat.campaignName || 'Unknown',
-          attempted: stat.attempted,
-          connected: stat.connected,
-          qualified: stat.qualified
-        });
-      }
-      for (const stat of dialerCampaignStats) {
-        const existing = campaignMap.get(stat.campaignId);
-        if (existing) {
-          existing.attempted += stat.attempted;
-          existing.connected += stat.connected;
-          existing.qualified += stat.qualified;
-        } else {
-          campaignMap.set(stat.campaignId, {
-            id: stat.campaignId,
-            name: stat.campaignName || 'Unknown',
-            attempted: stat.attempted,
-            connected: stat.connected,
-            qualified: stat.qualified
-          });
-        }
-      }
-      const campaignStats = Array.from(campaignMap.values()).map(c => ({
-        campaignId: c.id,
-        campaignName: c.name,
-        attempted: c.attempted,
-        connected: c.connected,
-        qualified: c.qualified
-      }));
-
-      // ========== PER-AGENT STATS (UNIFIED) ==========
-      const legacyAgentStats = await db
+      // Calculate per-agent stats using SQL GROUP BY
+      const agentStats = await db
         .select({
           agentId: callAttempts.agentId,
           agentName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
@@ -15519,85 +13166,8 @@ Provide JSON response with:
         .leftJoin(users, eq(callAttempts.agentId, users.id))
         .groupBy(callAttempts.agentId, users.firstName, users.lastName);
 
-      const dialerHumanAgentStats = await db
-        .select({
-          agentId: dialerCallAttempts.humanAgentId,
-          agentName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
-          attempted: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-        })
-        .from(dialerCallAttempts)
-        .innerJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
-        .where(isNotNull(dialerCallAttempts.humanAgentId))
-        .groupBy(dialerCallAttempts.humanAgentId, users.firstName, users.lastName);
-
-      const dialerAIAgentStats = await db
-        .select({
-          agentId: dialerCallAttempts.virtualAgentId,
-          agentName: virtualAgents.name,
-          attempted: sql<number>`COUNT(*)::int`,
-          connected: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.connected} = true THEN 1 END)::int`,
-          qualified: sql<number>`COUNT(CASE WHEN ${dialerCallAttempts.disposition} = 'qualified_lead' THEN 1 END)::int`,
-        })
-        .from(dialerCallAttempts)
-        .innerJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
-        .where(isNotNull(dialerCallAttempts.virtualAgentId))
-        .groupBy(dialerCallAttempts.virtualAgentId, virtualAgents.name);
-
-      // Merge agent stats
-      const agentMap = new Map<string, { id: string; name: string; type: string; attempted: number; connected: number; qualified: number }>();
-      for (const stat of legacyAgentStats) {
-        if (!stat.agentId) continue;
-        agentMap.set(stat.agentId, {
-          id: stat.agentId,
-          name: stat.agentName || 'Unknown',
-          type: 'human',
-          attempted: stat.attempted,
-          connected: stat.connected,
-          qualified: stat.qualified
-        });
-      }
-      for (const stat of dialerHumanAgentStats) {
-        if (!stat.agentId) continue;
-        const existing = agentMap.get(stat.agentId);
-        if (existing) {
-          existing.attempted += stat.attempted;
-          existing.connected += stat.connected;
-          existing.qualified += stat.qualified;
-        } else {
-          agentMap.set(stat.agentId, {
-            id: stat.agentId,
-            name: stat.agentName || 'Unknown',
-            type: 'human',
-            attempted: stat.attempted,
-            connected: stat.connected,
-            qualified: stat.qualified
-          });
-        }
-      }
-      for (const stat of dialerAIAgentStats) {
-        if (!stat.agentId) continue;
-        agentMap.set(`ai_${stat.agentId}`, {
-          id: stat.agentId,
-          name: `🤖 ${stat.agentName}`,
-          type: 'ai',
-          attempted: stat.attempted,
-          connected: stat.connected,
-          qualified: stat.qualified
-        });
-      }
-      const agentStats = Array.from(agentMap.values()).map(a => ({
-        agentId: a.id,
-        agentName: a.name,
-        agentType: a.type,
-        attempted: a.attempted,
-        connected: a.connected,
-        qualified: a.qualified
-      }));
-
       res.json({
-        overall: overallStats,
+        overall: overallStats || { attempted: 0, connected: 0, qualified: 0 },
         byCampaign: campaignStats,
         byAgent: agentStats,
       });
@@ -15608,7 +13178,7 @@ Provide JSON response with:
   });
 
   // Get queue status analytics (total, queued, in progress, completed, skipped, removed)
-  app.get("/api/analytics/queue-status", requireAuth, async (req: ExpressRequest, res: Response) => {
+  app.get("/api/analytics/queue-status", requireAuth, async (req: Request, res: Response) => {
     try {
       const { agentQueue, campaigns: campaignsTable } = await import('@shared/schema');
       const campaignId = req.query.campaignId as string | undefined;
@@ -15668,15 +13238,15 @@ Provide JSON response with:
     try {
       const { campaignId, limit } = req.body;
 
-      console.log(`[Manual Trigger] Email validation requested by ${req.user?.username ?? 'unknown'}`, { campaignId, limit });
+      console.log(`[Manual Trigger] Email validation requested by ${req.user.username}`, { campaignId, limit });
 
       // Import and run email validation job
-      const { triggerEmailValidation } = await import('./jobs/email-validation-job');
-      const result = await triggerEmailValidation();
+      const { processEmailValidation } = await import('./jobs/email-validation-job');
+      const result = await processEmailValidation({ campaignId, limit });
 
       res.json({
-        ...result,
         message: "Email validation job triggered successfully",
+        ...result
       });
     } catch (error: any) {
       console.error('[Manual Trigger] Email validation error:', error);
@@ -15693,19 +13263,19 @@ Provide JSON response with:
     try {
       const { accountIds, contactIds, campaignId } = req.body;
 
-      console.log(`[Manual Trigger] AI enrichment requested by ${req.user?.username ?? 'unknown'}`, {
+      console.log(`[Manual Trigger] AI enrichment requested by ${req.user.username}`, {
         accountIds: accountIds?.length,
         contactIds: contactIds?.length,
         campaignId
       });
 
       // Import and run AI enrichment job
-      const { triggerAiEnrichment } = await import('./jobs/ai-enrichment-job');
-      const result = await triggerAiEnrichment();
+      const { processAiEnrichment } = await import('./jobs/ai-enrichment-job');
+      const result = await processAiEnrichment({ accountIds, contactIds, campaignId });
 
       res.json({
-        ...result,
         message: "AI enrichment job triggered successfully",
+        ...result
       });
     } catch (error: any) {
       console.error('[Manual Trigger] AI enrichment error:', error);
@@ -15722,16 +13292,13 @@ Provide JSON response with:
     try {
       const { mailboxIds } = req.body;
 
-      console.log(`[Manual Trigger] M365 email sync requested by ${req.user?.username ?? 'unknown'}`, {
+      console.log(`[Manual Trigger] M365 email sync requested by ${req.user.username}`, {
         mailboxIds: mailboxIds?.length || 'all active'
       });
 
       // Import and run M365 sync job
-      const { m365SyncService } = await import('./services/m365-sync-service');
-      if (mailboxIds?.length) {
-        console.warn('[Manual Trigger] M365 sync ignores mailboxIds (syncs all active mailboxes).');
-      }
-      const result = await m365SyncService.syncAllMailboxes();
+      const { syncM365Emails } = await import('./jobs/m365-sync-job');
+      const result = await syncM365Emails({ mailboxIds });
 
       res.json({
         message: "M365 email sync job triggered successfully",
@@ -15753,7 +13320,7 @@ Provide JSON response with:
     try {
       const { limit } = req.body;
 
-      console.log(`[Manual Trigger] Telnyx recording sync requested by ${req.user?.username ?? 'unknown'}`, {
+      console.log(`[Manual Trigger] Telnyx recording sync requested by ${req.user.username}`, {
         limit: limit || 50
       });
 
@@ -15917,7 +13484,7 @@ Provide JSON response with:
   // and static serving handles it in production mode
 
   // Global error handler
-  app.use((error: Error, req: ExpressRequest, res: Response, next: NextFunction) => {
+  app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
     console.error("Global error handler:", error.stack);
 
     // Zod validation errors

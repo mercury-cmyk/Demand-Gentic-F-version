@@ -28,7 +28,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuLabel,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -345,26 +344,10 @@ export default function CampaignsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="gap-2 shadow-sm">
-                <Plus className="w-4 h-4" />
-                New Campaign
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Select Campaign Type</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setLocation("/campaigns/email/create")}>
-                <Mail className="mr-2 h-4 w-4" />
-                Email Campaign
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setLocation("/phone-campaigns/create")}>
-                <Phone className="mr-2 h-4 w-4" />
-                Phone Campaign
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
+            <Plus className="w-4 h-4" />
+            New Campaign
+          </Button>
         </div>
       </div>
 

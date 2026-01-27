@@ -1920,4 +1920,178 @@ router.put("/prompt-optimization", requireAuth, requireRole("admin"), async (req
   }
 });
 
+/**
+ * GET /api/org-intelligence/campaign-context/:organizationId
+ * Fetch organization intelligence and convert it to campaign context format
+ * This allows users to populate campaign context from organization data when creating a campaign
+ */
+router.get("/campaign-context/:organizationId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { organizationId } = req.params;
+
+    if (!organizationId) {
+      return res.status(400).json({ error: "Organization ID is required" });
+    }
+
+    // Fetch the campaign organization
+    const [org] = await db.select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, organizationId))
+      .limit(1);
+
+    if (!org) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+
+    // Extract JSON fields with type safety
+    const positioning = (org.positioning as Record<string, any>) ?? {};
+    const offerings = (org.offerings as Record<string, any>) ?? {};
+    const icp = (org.icp as Record<string, any>) ?? {};
+    const identity = (org.identity as Record<string, any>) ?? {};
+    const outreach = (org.outreach as Record<string, any>) ?? {};
+
+    // Convert organization intelligence to campaign context format
+    const campaignContext = {
+      // Campaign Objectives - derived from organization's positioning and offerings
+      objectives: {
+        primaryGoal: positioning['oneLiner']?.['value'] || `Promote ${org.name}'s solutions to target market`,
+        secondaryGoals: [
+          `Demonstrate ${offerings['differentiators']?.['value'] || 'value proposition'}`,
+          `Generate qualified leads in ${icp['industries']?.['value'] || 'target industries'}`,
+          `Build awareness for ${offerings['coreProducts']?.['value'] || 'core offerings'}`,
+        ],
+        desiredOutcomes: [
+          'Qualified opportunities',
+          'Pipeline generation',
+          'Market awareness',
+          'Sales conversations',
+        ],
+        kpis: [
+          'Meetings booked',
+          'Qualified leads',
+          'Response rate',
+          'Conversion to opportunity',
+        ],
+        confidence: 0.85,
+      },
+
+      // Target Audience - derived from ICP
+      targetAudience: {
+        industries: icp['industries']?.['value']?.split(',').map((i: string) => i.trim()).filter(Boolean) || ['Unknown'],
+        regions: identity['regions']?.['value']?.split(',').map((r: string) => r.trim()).filter(Boolean) || ['North America'],
+        companySizeMin: null,
+        companySizeMax: null,
+        jobTitles: icp['personas']?.['value']?.split(',').map((j: string) => j.trim()).filter(Boolean) || ['Manager', 'Director', 'VP'],
+        jobFunctions: ['Sales', 'Marketing', 'Operations', 'Strategy'],
+        seniorityLevels: ['mid', 'senior', 'director', 'vp'],
+        confidence: 0.80,
+      },
+
+      // Deliverables - what's being promoted
+      deliverables: [
+        {
+          type: 'product',
+          name: offerings['coreProducts']?.['value']?.split(',')[0]?.trim() || org.name,
+          description: identity['description']?.['value'] || offerings['problemsSolved']?.['value'] || 'Core offering',
+          valueProposition: positioning['whyUs']?.['value'] || 'Unique value in market',
+        },
+      ],
+
+      // Assets - content to use
+      assets: [
+        {
+          type: 'information',
+          name: `${org.name} Overview`,
+          description: identity['description']?.['value'] || 'Company overview',
+          gated: false,
+        },
+        {
+          type: 'other',
+          name: 'Demo',
+          description: `Live demonstration of ${offerings['coreProducts']?.['value'] || 'solutions'}`,
+          gated: false,
+        },
+      ],
+
+      // Core Message - key positioning statement
+      coreMessage: positioning['oneLiner']?.['value'] || `${org.name} helps companies ${offerings['useCases']?.['value'] || 'achieve their goals'}`,
+
+      // Talking Points - from offerings and positioning
+      talkingPoints: [
+        offerings['coreProducts']?.['value'] || 'Core products and services',
+        offerings['differentiators']?.['value'] || 'Competitive differentiators',
+        offerings['problemsSolved']?.['value'] || 'Business problems solved',
+        positioning['competitors']?.['value'] || 'Market positioning',
+      ].filter(Boolean),
+
+      // Conversation Flow - from outreach angles and call openers
+      conversationFlow: {
+        opening: outreach['callOpeners']?.['value']?.split('\n')[0]?.trim() || `Hi, I wanted to reach out about ${org.name}'s solutions...`,
+        discoveryQuestions: [
+          `What are your current challenges with ${icp['industries']?.['value'] || 'your business'}?`,
+          'How are you currently solving this problem?',
+          'What would success look like for your team?',
+        ],
+        valuePresentation: [
+          offerings['useCases']?.['value'] || 'Key use cases',
+          offerings['differentiators']?.['value'] || 'What makes us unique',
+        ],
+        objections: icp['objections']?.['value']?.split(',').map((o: string) => ({ objection: o.trim(), response: 'Ready to address' })) || [
+          { objection: 'Price concerns', response: 'ROI-focused pricing model' },
+          { objection: 'Implementation complexity', response: 'Streamlined onboarding' },
+        ],
+        closingStatement: `Let's schedule a brief call to explore how ${org.name} can help your team`,
+        nextSteps: 'Demo meeting next week',
+      },
+
+      // Qualification Criteria
+      qualificationCriteria: {
+        qualifyingConditions: [
+          `Works in ${icp['industries']?.['value'] || 'target industries'}`,
+          `Has role as ${icp['personas']?.['value'] || 'decision maker'}`,
+          'Budget authority or influence',
+        ],
+        disqualifyingConditions: [
+          'Current customer',
+          'Using competing solution',
+        ],
+      },
+
+      // Success Indicators
+      successIndicators: {
+        qualifiedLead: `Interest in ${offerings['coreProducts']?.['value'] || 'solutions'}`,
+        meetingCriteria: 'Budget + timeline + authority',
+        decisionMakerAttributes: icp['personas']?.['value']?.split(',').map((j: string) => j.trim()).filter(Boolean) || ['VP of Sales', 'Director of Operations'],
+      },
+
+      // Metadata
+      sourceOrganization: org.id,
+      organizationName: org.name,
+      organizationIndustry: org.industry || 'Unknown',
+      organizationDescription: org.description || identity['description']?.['value'],
+      source: 'organization_intelligence',
+      timestamp: new Date().toISOString(),
+    };
+
+    res.json({
+      success: true,
+      campaignContext,
+      organization: {
+        id: org.id,
+        name: org.name,
+        domain: org.domain,
+        industry: org.industry,
+      },
+      message: `Campaign context loaded from ${org.name}'s organization intelligence`,
+    });
+
+  } catch (error: any) {
+    console.error('[Org-Intelligence] Campaign context fetch error:', error);
+    res.status(500).json({
+      error: "Failed to load campaign context from organization intelligence",
+      details: error.message,
+    });
+  }
+});
+
 export default router;

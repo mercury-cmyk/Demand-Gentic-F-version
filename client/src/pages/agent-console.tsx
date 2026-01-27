@@ -53,6 +53,7 @@ import { LeadVerificationModal } from "@/components/lead-verification-modal";
 import { AudioDeviceSettings } from "@/components/audio-device-settings";
 import { useCallControl } from "@/hooks/useCallControl";
 import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { useSIPWebSocket } from "@/hooks/useSIPWebSocket";
 
 // Call state type for Call Control API calls
 type CallState = 'idle' | 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
@@ -463,7 +464,7 @@ export default function AgentConsolePage() {
   }, [isConnected, callState, callControlId]);
 
   // Fetch SIP trunk credentials for WebRTC
-  const { data: sipTrunkConfig } = useQuery<{
+  const { data: sipTrunkConfig, isLoading: sipLoading, error: sipError } = useQuery<{
     sipUsername: string;
     sipPassword: string;
     sipDomain: string;
@@ -473,40 +474,76 @@ export default function AgentConsolePage() {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
-  // WebRTC SIP connection for browser-based audio
+  // Debug SIP trunk config fetch
+  useEffect(() => {
+    console.log('[AGENT CONSOLE] SIP Trunk Config Status:', {
+      isLoading: sipLoading,
+      data: sipTrunkConfig,
+      error: sipError,
+      hasUsername: !!sipTrunkConfig?.sipUsername,
+      hasPassword: !!sipTrunkConfig?.sipPassword,
+    });
+  }, [sipTrunkConfig, sipLoading, sipError]);
+
+  // Notify user if SIP credentials are missing (WebRTC will be disabled)
+  const [sipWarned, setSipWarned] = useState(false);
+  useEffect(() => {
+    if (sipLoading) {
+      console.log('[AGENT CONSOLE] Still loading SIP credentials...');
+      return;
+    }
+
+    const missing = !sipTrunkConfig?.sipUsername || !sipTrunkConfig?.sipPassword;
+    if (missing && !sipWarned) {
+      console.warn('WebRTC initialization skipped: Missing SIP credentials');
+      console.warn('[AGENT CONSOLE] SIP config:', sipTrunkConfig);
+      console.warn('[AGENT CONSOLE] Error:', sipError);
+      toast({
+        variant: 'destructive',
+        title: 'WebRTC Disabled',
+        description: 'Missing SIP credentials. Click-to-call will use callback mode.',
+        duration: 8000,
+      });
+      setSipWarned(true);
+    }
+  }, [sipTrunkConfig, sipLoading, sipError, sipWarned, toast]);
+
+  // SIP WebSocket connection for browser-based audio via native SIP
   const {
-    isConnected: webrtcConnected,
-    callState: webrtcCallState,
-    callDuration: webrtcCallDuration,
-    makeCall: webrtcMakeCall,
-    hangup: webrtcHangup,
-    toggleMute: webrtcToggleMute,
-    toggleHold: webrtcToggleHold,
-    isMuted: webrtcIsMuted,
-    lastError: webrtcError,
-  } = useSIPWebRTC({
-    sipUri: sipTrunkConfig?.sipUsername,
-    sipPassword: sipTrunkConfig?.sipPassword,
+    isConnected: sipConnected,
+    callState: sipCallState,
+    callDuration: sipCallDuration,
+    makeCall: sipMakeCall,
+    hangup: sipHangup,
+    toggleMute: sipToggleMute,
+    toggleHold: sipToggleHold,
+    isMuted: sipIsMuted,
+    lastError: sipWebSocketError,
+  } = useSIPWebSocket({
+    onCallStateChange: (state) => {
+      console.log('[AGENT CONSOLE] SIP call state changed to:', state);
+    },
+    onCallEnd: () => {
+      console.log('[AGENT CONSOLE] SIP call ended');
+    },
   });
 
-  // Log WebRTC connection status
+  // Log SIP connection status
   useEffect(() => {
-    console.log('[AGENT CONSOLE] WebRTC status:', {
-      webrtcConnected,
-      webrtcCallState,
-      webrtcError,
-      sipUsername: sipTrunkConfig?.sipUsername,
-      hasSipPassword: !!sipTrunkConfig?.sipPassword,
+    console.log('[AGENT CONSOLE] SIP WebSocket status:', {
+      sipConnected,
+      sipCallState,
+      sipWebSocketError,
     });
-  }, [webrtcConnected, webrtcCallState, webrtcError, sipTrunkConfig]);
+  }, [sipConnected, sipCallState, sipWebSocketError]);
 
-  // Sync WebRTC call status with component callStatus
-  // When using WebRTC for calls, update the component's callStatus state
+  // Sync SIP call status with component callStatus
+  // When using SIP for calls, update the component's callStatus state
   useEffect(() => {
-    if (webrtcConnected && webrtcCallState) {
-      console.log('[AGENT CONSOLE] Syncing WebRTC status to callStatus:', webrtcCallState);
-      // Map WebRTC statuses to our CallStatus type
-      switch (webrtcCallState) {
+    if (sipConnected && sipCallState) {
+      console.log('[AGENT CONSOLE] Syncing SIP status to callStatus:', sipCallState);
+      // Map SIP statuses to our CallStatus type
+      switch (sipCallState) {
         case 'connecting':
         case 'ringing':
           setCallStatus('connecting');
@@ -549,25 +586,25 @@ export default function AgentConsolePage() {
     setTransferNumber('');
   };
 
-  // Call initiation - uses WebRTC when connected, falls back to Call Control API
+  // Call initiation - uses SIP WebSocket when connected, falls back to Call Control API
   const makeCall = async (phoneNumber: string, options?: { campaignId?: string; contactId?: string; queueItemId?: string }) => {
     console.log('[AGENT CONSOLE] makeCall invoked:', {
       phoneNumber,
       isConnected,
-      webrtcConnected,
+      sipConnected,
       options,
     });
 
     // Set connecting status immediately so UI shows hang up button
     setCallStatus('connecting');
 
-    if (webrtcConnected && webrtcMakeCall) {
-      // Use WebRTC for browser-based audio
-      console.log('[AGENT CONSOLE] Making WebRTC call to:', phoneNumber);
-      webrtcMakeCall(phoneNumber);
+    if (sipConnected && sipMakeCall) {
+      // Use SIP WebSocket for browser-based audio
+      console.log('[AGENT CONSOLE] Making SIP call to:', phoneNumber);
+      sipMakeCall(phoneNumber);
     } else {
       // Fallback to Call Control API with direct mode
-      console.log('[AGENT CONSOLE] WebRTC not connected - using Call Control API (direct mode) to:', phoneNumber);
+      console.log('[AGENT CONSOLE] SIP not connected - using Call Control API (direct mode) to:', phoneNumber);
       await apiMakeCall(phoneNumber, {
         campaignId: options?.campaignId || selectedCampaignId,
         contactId: options?.contactId,
@@ -577,11 +614,11 @@ export default function AgentConsolePage() {
     }
   };
 
-  // Hangup call - uses WebRTC when active, falls back to Call Control API
+  // Hangup call - uses SIP WebSocket when active, falls back to Call Control API
   const hangup = async () => {
     console.log('[AGENT CONSOLE] Hanging up call', {
-      webrtcConnected,
-      webrtcCallState,
+      sipConnected,
+      sipCallState,
       callControlId,
       callState,
     });
@@ -589,10 +626,10 @@ export default function AgentConsolePage() {
     // Check if we have an active Call Control API call
     const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
 
-    // Use WebRTC hangup only if WebRTC is active AND we don't have a Call Control call
-    if (webrtcConnected && webrtcHangup && webrtcCallState !== 'idle' && !hasActiveCallControlCall) {
-      console.log('[AGENT CONSOLE] Using WebRTC hangup');
-      webrtcHangup();
+    // Use SIP hangup only if SIP is active AND we don't have a Call Control call
+    if (sipConnected && sipHangup && sipCallState !== 'idle' && !hasActiveCallControlCall) {
+      console.log('[AGENT CONSOLE] Using SIP hangup');
+      sipHangup();
     } else if (hasActiveCallControlCall) {
       // Use Call Control API hangup when we have an active call control ID
       console.log('[AGENT CONSOLE] Using Call Control API hangup for:', callControlId);
@@ -600,8 +637,8 @@ export default function AgentConsolePage() {
     } else {
       // Fallback - try both just in case
       console.log('[AGENT CONSOLE] Fallback hangup - trying both methods');
-      if (webrtcHangup && webrtcCallState !== 'idle') {
-        webrtcHangup();
+      if (sipHangup && sipCallState !== 'idle') {
+        sipHangup();
       }
       await apiHangup();
     }

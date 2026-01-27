@@ -110,7 +110,7 @@ export function getRedisConnectionOptions() {
     enableReadyCheck: false,
 
     // Connection timeouts (shorter in dev, longer in prod for VPC latency)
-    connectTimeout: isProduction ? 30000 : 15000,
+    connectTimeout: isProduction ? 60000 : 30000,
 
     // Command timeout - prevent hanging on slow responses
     // Increased for Cloud Run VPC connector latency
@@ -119,7 +119,7 @@ export function getRedisConnectionOptions() {
     // Retry strategy with exponential backoff and max attempts
     retryStrategy: (times: number) => {
       // In production, be more patient with retries (VPC connector may need time)
-      const maxRetries = isProduction ? 10 : 5;
+      const maxRetries = isProduction ? 10 : 20; // Increased dev retries since we are seeing ECONNRESET issues
 
       if (times > maxRetries) {
         logRedisWarning(`Max retries (${maxRetries}) exceeded - giving up`);
@@ -127,10 +127,11 @@ export function getRedisConnectionOptions() {
         return null; // Stop retrying
       }
 
-      // Exponential backoff: 100ms, 200ms, 400ms, 800ms, ... up to 5s
-      const delay = Math.min(Math.pow(2, times - 1) * 100, 5000);
+      // Exponential backoff: 200ms default start
+      const delay = Math.min(Math.pow(2, times - 1) * 200, 5000);
 
-      if (times > 3) {
+      // Log less often in dev to reduce noise unless it persists
+      if (times > 5) {
         logRedisWarning(`Connection retry ${times}/${maxRetries} in ${delay}ms`);
       }
 

@@ -1,0 +1,728 @@
+/**
+ * Drachtio SIP Server
+ *
+ * Dedicated SIP server using drachtio-srf framework for handling:
+ * - Inbound/outbound SIP call signaling
+ * - RTP media bridge
+ * - SIP registration and presence
+ * - Failover and high availability
+ *
+ * Requires:
+ * - Public IP with UDP ports 5060, 5061 (SIP)
+ * - UDP ports 10000-20000 (RTP/media)
+ * - STUN/TURN servers for NAT traversal
+ *
+ * Configuration:
+ * - DRACHTIO_HOST: Drachtio server address (default: localhost)
+ * - DRACHTIO_PORT: Drachtio command port (default: 9022)
+ * - SIP_LISTEN_PORT: Port for SIP signaling (default: 5060)
+ * - SIP_LISTEN_HOST: Bind address (default: 0.0.0.0)
+ * - PUBLIC_IP: Public IP for SDP (required for production)
+ * - STUN_SERVERS: STUN server addresses
+ * - TURN_SERVERS: TURN server addresses with credentials
+ */
+
+import Srf from 'drachtio-srf';
+import { EventEmitter } from 'events';
+import { v4 as uuidv4 } from 'uuid';
+import * as sdp from 'sdp-transform';
+
+// Configuration
+const DRACHTIO_HOST = process.env.DRACHTIO_HOST || 'localhost';
+const DRACHTIO_PORT = parseInt(process.env.DRACHTIO_PORT || '9022');
+const SIP_LISTEN_HOST = process.env.SIP_LISTEN_HOST || '0.0.0.0';
+const SIP_LISTEN_PORT = parseInt(process.env.SIP_LISTEN_PORT || '5060');
+const PUBLIC_IP = process.env.PUBLIC_IP || '';
+const RTP_PORT_MIN = parseInt(process.env.RTP_PORT_MIN || '10000');
+const RTP_PORT_MAX = parseInt(process.env.RTP_PORT_MAX || '20000');
+
+// STUN/TURN Configuration
+const STUN_SERVERS = (process.env.STUN_SERVERS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302')
+  .split(',')
+  .map((s: string) => s.trim());
+
+const TURN_SERVERS = process.env.TURN_SERVERS
+  ? JSON.parse(process.env.TURN_SERVERS)
+  : [];
+
+// Logging
+const log = (msg: string, data?: any) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[Drachtio SIP] ${timestamp} ${msg}`, data || '');
+};
+
+const logError = (msg: string, error?: any) => {
+  const timestamp = new Date().toISOString();
+  console.error(`[Drachtio SIP] ${timestamp} ${msg}`, error || '');
+};
+
+/**
+ * Call state tracking
+ */
+export interface DrachtioCall {
+  callId: string;
+  callGuid: string;
+  from: string;
+  to: string;
+  state: 'initiating' | 'ringing' | 'answered' | 'ended';
+  direction: 'inbound' | 'outbound';
+  startTime: Date;
+  endTime?: Date;
+  req?: any;
+  res?: any;
+  campaign?: {
+    campaignId: string;
+    contactId: string;
+    queueItemId: string;
+  };
+}
+
+/**
+ * RTP Port Manager
+ */
+class RTPPortManager {
+  private usedPorts: Set<number> = new Set();
+  private portRange = { min: RTP_PORT_MIN, max: RTP_PORT_MAX };
+
+  allocate(): number {
+    for (let port = this.portRange.min; port <= this.portRange.max; port += 2) {
+      if (!this.usedPorts.has(port) && !this.usedPorts.has(port + 1)) {
+        this.usedPorts.add(port);
+        this.usedPorts.add(port + 1);
+        return port;
+      }
+    }
+    throw new Error(`No available RTP ports (range ${this.portRange.min}-${this.portRange.max})`);
+  }
+
+  release(port: number): void {
+    this.usedPorts.delete(port);
+    this.usedPorts.delete(port + 1);
+  }
+
+  getUtilization(): { used: number; total: number; percentage: number } {
+    const total = (this.portRange.max - this.portRange.min + 1) / 2;
+    const used = this.usedPorts.size / 2;
+    return {
+      used: Math.floor(used),
+      total: Math.floor(total),
+      percentage: Math.round((used / total) * 100),
+    };
+  }
+}
+
+const rtpPortManager = new RTPPortManager();
+
+/**
+ * Call tracking
+ */
+class CallTracker extends EventEmitter {
+  private calls: Map<string, DrachtioCall> = new Map();
+
+  add(call: DrachtioCall): void {
+    this.calls.set(call.callId, call);
+    this.emit('call:added', call);
+    log(`Call added: ${call.callId} (${call.direction}) ${call.from} -> ${call.to}`);
+  }
+
+  update(callId: string, data: Partial<DrachtioCall>): void {
+    const call = this.calls.get(callId);
+    if (call) {
+      Object.assign(call, data);
+      this.emit('call:updated', call);
+    }
+  }
+
+  remove(callId: string): void {
+    const call = this.calls.get(callId);
+    if (call) {
+      call.endTime = new Date();
+      this.calls.delete(callId);
+      this.emit('call:removed', call);
+      log(`Call removed: ${callId}`);
+    }
+  }
+
+  get(callId: string): DrachtioCall | undefined {
+    return this.calls.get(callId);
+  }
+
+  getAll(): DrachtioCall[] {
+    return Array.from(this.calls.values());
+  }
+
+  getStats(): any {
+    const calls = this.getAll();
+    return {
+      total: calls.length,
+      inbound: calls.filter((c) => c.direction === 'inbound').length,
+      outbound: calls.filter((c) => c.direction === 'outbound').length,
+      averageDuration: this.calculateAverageDuration(),
+    };
+  }
+
+  private calculateAverageDuration(): number {
+    // TODO: Calculate from ended calls
+    return 0;
+  }
+}
+
+const callTracker = new CallTracker();
+
+/**
+ * Drachtio SIP Server Manager
+ */
+export class DrachtioSIPServer {
+  private srf: any = null;
+  private isInitialized = false;
+  private isConnected = false;
+  private canMakeOutboundCalls = false;
+  private lastConnectionError: string | null = null;
+
+  async initialize(): Promise<boolean> {
+    if (this.isInitialized) {
+      log('Already initialized');
+      return this.isConnected;
+    }
+
+    try {
+      log('Initializing Drachtio SIP Server...');
+      log(`Configuration: host=${DRACHTIO_HOST}, port=${DRACHTIO_PORT}, listenPort=${SIP_LISTEN_PORT}`);
+
+      if (!PUBLIC_IP) {
+        logError('PUBLIC_IP not set - SDP will not include public address');
+      }
+
+      // Create SRF instance
+      this.srf = new Srf();
+
+      // Connect to Drachtio daemon
+      await this.connectToDrachtio();
+
+      // Setup call handlers
+      this.setupCallHandlers();
+
+      this.isInitialized = true;
+      this.isConnected = true;
+
+      // Test if we can make outbound calls by checking socket availability
+      this.canMakeOutboundCalls = this.testOutboundCapability();
+
+      log('Drachtio SIP Server initialized successfully');
+      log(`Outbound calling capability: ${this.canMakeOutboundCalls ? 'AVAILABLE' : 'NOT AVAILABLE'}`);
+      return true;
+    } catch (error) {
+      logError('Failed to initialize Drachtio SIP Server', error);
+      this.isConnected = false;
+      this.canMakeOutboundCalls = false;
+      return false;
+    }
+  }
+
+  /**
+   * Test if outbound calls can be made
+   * Drachtio requires a valid socket for outbound UAC requests
+   */
+  private testOutboundCapability(): boolean {
+    if (!this.srf) return false;
+
+    try {
+      // Check if the SRF has a valid socket for outbound requests
+      // The drachtio agent stores sockets in an internal map
+      const agent = this.srf._agent;
+      if (!agent) {
+        log('No drachtio agent available');
+        return false;
+      }
+
+      // Check if we have any registered sockets
+      const sockets = agent._sockets;
+      if (!sockets || sockets.size === 0) {
+        log('No sockets registered with drachtio agent');
+        return false;
+      }
+
+      log(`Drachtio has ${sockets.size} socket(s) registered`);
+      return true;
+    } catch (error: any) {
+      log(`Error checking outbound capability: ${error.message}`);
+      return false;
+    }
+  }
+
+  private async connectToDrachtio(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Connection timeout to Drachtio at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`));
+      }, 10000);
+
+      this.srf.connect(
+        {
+          host: DRACHTIO_HOST,
+          port: DRACHTIO_PORT,
+        },
+        () => {
+          clearTimeout(timeout);
+          log(`Connected to Drachtio daemon at ${DRACHTIO_HOST}:${DRACHTIO_PORT}`);
+          resolve();
+        },
+        (error: any) => {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      );
+
+      this.srf.on('error', (error: any) => {
+        logError('Drachtio connection error', error);
+        this.isConnected = false;
+      });
+
+      this.srf.on('disconnect', () => {
+        log('Drachtio connection closed');
+        this.isConnected = false;
+      });
+    });
+  }
+
+  private setupCallHandlers(): void {
+    if (!this.srf) return;
+
+    // INVITE handler (inbound and outbound call requests)
+    this.srf.invite(async (req: any, res: any) => {
+      const callId = req.uri.user;
+      const from = req.from.uri;
+      const to = req.to.uri;
+
+      log(`INVITE received: ${from} -> ${to}`);
+
+      try {
+        const call: DrachtioCall = {
+          callId: uuidv4(),
+          callGuid: req.headers['call-id'],
+          from,
+          to,
+          state: 'initiating',
+          direction: 'inbound',
+          startTime: new Date(),
+          req,
+          res,
+        };
+
+        callTracker.add(call);
+
+        // Extract SDP from request
+        const remoteSdp = req.body;
+        const rtpPort = rtpPortManager.allocate();
+
+        // Generate local SDP with ICE and DTLS
+        const localSdp = this.generateSDP({
+          port: rtpPort,
+          remoteSdp,
+          callId: call.callId,
+        });
+
+        // Send 180 Ringing
+        res.send(180, {
+          headers: {
+            'Content-Type': 'application/sdp',
+          },
+          body: localSdp,
+        });
+
+        callTracker.update(call.callId, { state: 'ringing' });
+
+        // Accept call (send 200 OK)
+        res.send(200, {
+          headers: {
+            'Content-Type': 'application/sdp',
+          },
+          body: localSdp,
+        });
+
+        callTracker.update(call.callId, { state: 'answered' });
+
+        // Setup media handlers
+        await this.setupMediaHandlers(call, rtpPort);
+
+        // BYE handler (call termination)
+        req.on('bye', () => {
+          log(`BYE received for call ${call.callId}`);
+          rtpPortManager.release(rtpPort);
+          callTracker.remove(call.callId);
+        });
+
+        // CANCEL handler
+        req.on('cancel', () => {
+          log(`CANCEL received for call ${call.callId}`);
+          rtpPortManager.release(rtpPort);
+          callTracker.remove(call.callId);
+        });
+      } catch (error) {
+        logError(`Error handling INVITE: ${error}`, error);
+        res.send(500, { body: 'Server Internal Error' });
+      }
+    });
+
+    // REGISTER handler (if needed for presence/registration)
+    this.srf.register(async (req: any, res: any) => {
+      const user = req.from.uri.split('@')[0];
+      log(`REGISTER from ${user}`);
+
+      // Accept registration
+      res.send(200, {
+        headers: {
+          'Contact': req.headers['contact'],
+        },
+      });
+    });
+
+    // OPTIONS handler (SIP keep-alive / OPTIONS ping)
+    this.srf.options(async (req: any, res: any) => {
+      res.send(200, {
+        headers: {
+          'Allow': 'INVITE, ACK, BYE, CANCEL, OPTIONS, REGISTER',
+          'Accept': 'application/sdp',
+        },
+      });
+    });
+  }
+
+  /**
+   * Generate SDP with ICE candidates and DTLS
+   */
+  private generateSDP(options: {
+    port: number;
+    remoteSdp?: string;
+    callId: string;
+  }): string {
+    const { port, remoteSdp, callId } = options;
+    const listenAddr = PUBLIC_IP || SIP_LISTEN_HOST;
+
+    const sdpObj = {
+      version: 0,
+      origin: {
+        username: 'drachtio',
+        sessionId: Math.random() * 1e10,
+        sessionVersion: 0,
+        netType: 'IN',
+        ipVer: 4,
+        address: listenAddr,
+      },
+      name: `Call ${callId}`,
+      timing: { start: 0, stop: 0 },
+      media: [
+        {
+          type: 'audio',
+          port,
+          protocol: 'RTP/SAVP', // RTP with SRTP
+          payloads: [111, 126, 0, 8, 97, 98],
+          rtp: [
+            { payload: 111, codec: 'OPUS', rate: 48000, encoding: 2 },
+            { payload: 126, codec: 'telephone-event', rate: 8000 },
+            { payload: 0, codec: 'PCMU', rate: 8000 },
+            { payload: 8, codec: 'PCMA', rate: 8000 },
+            { payload: 97, codec: 'iLBC', rate: 8000 },
+            { payload: 98, codec: 'iLBC', rate: 8000 },
+          ],
+          fmtp: [
+            { payload: 126, config: '0-15' },
+            { payload: 97, config: 'mode=20' },
+            { payload: 98, config: 'mode=30' },
+          ],
+          iceUfrag: this.generateUfrag(),
+          icePwd: this.generatePwd(),
+          candidates: this.generateICECandidates(listenAddr, port),
+          fingerprint: {
+            type: 'sha-256',
+            hash: this.generateDTLSFingerprint(),
+          },
+          setup: 'passive',
+          rtcpMux: 'yes',
+        } as any,
+      ],
+      groups: [
+        {
+          type: 'BUNDLE',
+          mids: '0',
+        },
+      ],
+    } as any;
+
+    return sdp.write(sdpObj);
+  }
+
+  /**
+   * Generate ICE candidates
+   */
+  private generateICECandidates(
+    address: string,
+    port: number
+  ): Array<{ foundation: string; component: number; transport: string; priority: number; ip: string; port: number; type: string }> {
+    const candidates: Array<any> = [
+      {
+        foundation: '1',
+        component: 1,
+        transport: 'udp',
+        priority: 2130706431,
+        ip: address,
+        port,
+        type: 'host',
+      },
+    ];
+
+    // Add STUN reflexive candidates if STUN servers available
+    if (STUN_SERVERS.length > 0) {
+      candidates.push({
+        foundation: '2',
+        component: 1,
+        transport: 'udp',
+        priority: 2130706431,
+        ip: address,
+        port,
+        type: 'srflx',
+        raddr: address,
+        rport: port,
+      });
+    }
+
+    return candidates;
+  }
+
+  private generateUfrag(): string {
+    return Math.random().toString(36).substr(2, 16);
+  }
+
+  private generatePwd(): string {
+    return Math.random().toString(36).substr(2, 24);
+  }
+
+  private generateDTLSFingerprint(): string {
+    // In production, use actual DTLS certificate fingerprint
+    return 'F2:B7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7:7D:D7:7E:0C:B7:E7';
+  }
+
+  /**
+   * Setup media handlers for RTP/RTCP
+   */
+  private async setupMediaHandlers(call: DrachtioCall, rtpPort: number): Promise<void> {
+    log(`Setting up media handlers for call ${call.callId} on port ${rtpPort}`);
+
+    // TODO: Implement RTP packet handling
+    // - Listen on rtpPort (UDP)
+    // - Decode audio from RTP packets
+    // - Stream to media processor (Gemini, etc.)
+    // - Encode and send audio back via RTP
+  }
+
+  /**
+   * Check if outbound calls can be made
+   */
+  canMakeOutbound(): boolean {
+    return this.canMakeOutboundCalls && this.isConnected && !!this.srf;
+  }
+
+  /**
+   * Initiate outbound call via SIP trunk
+   */
+  async initiateCall(options: {
+    to: string;
+    from: string;
+    campaignId?: string;
+    contactId?: string;
+    queueItemId?: string;
+    onAudioReceived?: (audio: Buffer) => void;
+    onCallStateChanged?: (state: string) => void;
+    onCallEnded?: (reason: string) => void;
+  }): Promise<{ callId: string; success: boolean; error?: string }> {
+    if (!this.isConnected || !this.srf) {
+      return { callId: '', success: false, error: 'Drachtio not connected' };
+    }
+
+    // Check if we can actually make outbound calls
+    if (!this.canMakeOutboundCalls) {
+      // Re-test capability in case it changed
+      this.canMakeOutboundCalls = this.testOutboundCapability();
+      if (!this.canMakeOutboundCalls) {
+        return {
+          callId: '',
+          success: false,
+          error: 'SIP outbound calling not available - no valid socket. Fall back to Telnyx API.'
+        };
+      }
+    }
+
+    const callId = uuidv4();
+    let rtpPort: number | null = null;
+
+    // SIP trunk configuration from environment
+    const sipTrunkHost = process.env.SIP_TRUNK_HOST || 'sip.telnyx.com';
+    const sipUsername = process.env.SIP_USERNAME || '';
+    const sipPassword = process.env.SIP_PASSWORD || '';
+
+    try {
+      rtpPort = rtpPortManager.allocate();
+      const localSdp = this.generateSDP({ port: rtpPort, callId });
+
+      // Format the destination number (strip + if present for SIP URI)
+      const toNumber = options.to.replace(/^\+/, '');
+      const fromNumber = options.from.replace(/^\+/, '');
+
+      // Build SIP URI for Telnyx trunk
+      const requestUri = `sip:${toNumber}@${sipTrunkHost}`;
+
+      log(`Initiating outbound call ${callId} to ${requestUri}`);
+
+      // Create UAC (User Agent Client) to send INVITE
+      const uacOptions = {
+        headers: {
+          'From': `<sip:${fromNumber}@${sipTrunkHost}>`,
+          'To': `<sip:${toNumber}@${sipTrunkHost}>`,
+          'Contact': `<sip:${fromNumber}@${PUBLIC_IP || '127.0.0.1'}:${SIP_LISTEN_PORT}>`,
+        },
+        auth: sipUsername && sipPassword ? {
+          username: sipUsername,
+          password: sipPassword,
+        } : undefined,
+        localSdp,
+      };
+
+      // Use simple UAC toward the SIP trunk
+      let uac: any;
+      try {
+        uac = await this.srf.createUAC(requestUri, {
+          ...uacOptions,
+          callingNumber: fromNumber,
+          calledNumber: toNumber,
+        });
+      } catch (uacError: any) {
+        // Handle specific assertion errors from drachtio-srf
+        if (uacError.message?.includes('AssertionError') || uacError.name === 'AssertionError') {
+          log('Drachtio socket not available for outbound calls - disabling SIP outbound');
+          this.canMakeOutboundCalls = false;
+          this.lastConnectionError = 'Socket assertion failed - drachtio daemon may not support outbound UAC';
+          throw new Error('SIP socket not available for outbound calls. Use Telnyx API instead.');
+        }
+        throw uacError;
+      }
+
+      const call: DrachtioCall = {
+        callId,
+        callGuid: (uac as any)?.headers?.['call-id'] || `${Date.now()}-${Math.random()}`,
+        from: options.from,
+        to: options.to,
+        state: 'ringing',
+        direction: 'outbound',
+        startTime: new Date(),
+        req: uac as any,
+        res: undefined,
+        campaign: {
+          campaignId: options.campaignId || '',
+          contactId: options.contactId || '',
+          queueItemId: options.queueItemId || '',
+        },
+      };
+
+      callTracker.add(call);
+
+      // Handle call events
+      if (uac) {
+        (uac as any).on('destroy', () => {
+          log(`Call ${callId} destroyed`);
+          call.state = 'ended';
+          call.endTime = new Date();
+          if (rtpPort) rtpPortManager.release(rtpPort);
+          if (options.onCallEnded) {
+            options.onCallEnded('call_ended');
+          }
+        });
+      }
+
+      if (options.onCallStateChanged) {
+        options.onCallStateChanged('ringing');
+      }
+
+      log(`Call ${callId} initiated successfully`);
+      return { callId, success: true };
+    } catch (error: any) {
+      if (rtpPort) rtpPortManager.release(rtpPort);
+      logError(`Failed to initiate call ${callId}: ${error.message}`, error);
+
+      // Mark outbound as unavailable if it's a socket/connection issue
+      if (error.message?.includes('socket') || error.message?.includes('Socket') ||
+          error.message?.includes('AssertionError') || error.message?.includes('not available')) {
+        this.canMakeOutboundCalls = false;
+      }
+
+      return { callId, success: false, error: error.message };
+    }
+  }
+
+  /**
+   * End call
+   */
+  async endCall(callId: string): Promise<void> {
+    const call = callTracker.get(callId);
+    if (!call) {
+      throw new Error(`Call not found: ${callId}`);
+    }
+
+    // Send BYE
+    if (call.req) {
+      call.req.bye();
+    }
+
+    callTracker.remove(callId);
+    log(`Call ended: ${callId}`);
+  }
+
+  /**
+   * Get server stats
+   */
+  getStats() {
+    return {
+      connected: this.isConnected,
+      canMakeOutboundCalls: this.canMakeOutboundCalls,
+      lastConnectionError: this.lastConnectionError,
+      drachtioHost: DRACHTIO_HOST,
+      drachtioPort: DRACHTIO_PORT,
+      sipListenPort: SIP_LISTEN_PORT,
+      publicIp: PUBLIC_IP,
+      rtpPorts: rtpPortManager.getUtilization(),
+      calls: callTracker.getStats(),
+      stunServers: STUN_SERVERS.length,
+      turnServers: TURN_SERVERS.length,
+    };
+  }
+
+  /**
+   * Health check
+   */
+  async healthCheck(): Promise<boolean> {
+    if (!this.isConnected) {
+      try {
+        await this.connectToDrachtio();
+      } catch (error) {
+        logError('Health check failed', error);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Get call state by ID
+   */
+  getCallState(callId: string): DrachtioCall | undefined {
+    return callTracker.get(callId);
+  }
+
+  /**
+   * Get all active calls
+   */
+  getActiveCalls(): DrachtioCall[] {
+    return callTracker.getAll();
+  }
+}
+
+// Export singleton instance
+export const drachtioServer = new DrachtioSIPServer();

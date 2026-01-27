@@ -13,7 +13,7 @@ User
 2025-12-23 18:29:09.98
 609ad58d
 User
-[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766496549, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_6501kd5pce36fjp8jerr6asd80cc", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+15593366940", "to_number": "+447792730360", "sip_status_code": 403, "error_reason": "unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447792730360 exceeded D66 (SIP 403)", "call_
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766496549, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_6501kd5pce36fjp8jerr6asd80cc", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447792730360", "sip_status_code": 403, "error_reason": "unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447792730360 exceeded D66 (SIP 403)", "call_
 2025-12-23 18:29:12.26
 cfb987c5
 User

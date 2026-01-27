@@ -26,13 +26,13 @@ async function updateCampaign() {
 
   await db.update(campaigns)
     .set({
-      phoneNumber: '+15593366940',
+      phoneNumber: '+12094571966',
       aiAgentSettings: updatedSettings
     })
     .where(eq(campaigns.id, campaignId));
 
   console.log('\nUpdated:');
-  console.log('  Phone: +15593366940');
+  console.log('  Phone: +12094571966');
   console.log('  AI Settings:', updatedSettings);
   console.log('\nCampaign ready for 50 concurrent calls!');
 

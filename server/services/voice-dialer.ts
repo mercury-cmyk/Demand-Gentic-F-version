@@ -7,6 +7,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { processDisposition, updateContactSuppression } from "./disposition-engine";
 import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { applyAudioConfiguration } from "./audio-configuration";
 import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
@@ -35,6 +36,11 @@ import {
   getActiveCallSessions,
   type CallSession,
 } from "./call-session-store";
+import {
+  logCallIntelligence,
+  getCallIntelligence,
+  type CallIntelligenceLogInput,
+} from "./call-intelligence-logger";
 import {
   ensureVoiceAgentControlLayer,
   validateOpeningMessageVariables,
@@ -360,7 +366,8 @@ export function setAmdResultForSession(callControlId: string, result: string, co
       };
 
       // If machine detected, mark session for voicemail disposition
-      if (result === 'machine' || result.startsWith('machine_end') || result === 'fax') {
+      // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
+      if (result.startsWith('machine') || result === 'fax') {
         console.log(`${LOG_PREFIX} 📠 Machine detected via AMD for active session ${sessionId} - setting voicemail disposition`);
         session.detectedDisposition = 'voicemail';
         session.callOutcome = 'voicemail';
@@ -390,6 +397,26 @@ export function getPendingAmdResult(callControlId: string): { result: string; co
     return { result: pending.result, confidence: pending.confidence };
   }
   return null;
+}
+
+/**
+ * Peek at pending AMD result without removing it - used for polling by Gemini dialer
+ * Returns the AMD result if available, or null if not yet received
+ */
+export function peekAmdResult(callControlId: string): { result: string; confidence: number } | null {
+  const pending = amdResultsByCallControlId.get(callControlId);
+  if (pending) {
+    return { result: pending.result, confidence: pending.confidence };
+  }
+  return null;
+}
+
+/**
+ * Consume (remove) the AMD result after it's been used
+ * Call this after successfully handling the AMD result
+ */
+export function consumeAmdResult(callControlId: string): void {
+  amdResultsByCallControlId.delete(callControlId);
 }
 
 function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' | null {
@@ -1441,18 +1468,13 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         try {
           if (session.contactId) {
             await db.insert(callSessions).values({
-              id: uuidv4(),
-              callId: session.callId,
+              telnyxCallId: session.callId,
               campaignId: session.campaignId,
               contactId: session.contactId,
-              status: 'blocked',
+              status: 'failed',
+              toNumberE164: session.calledNumber || 'unknown',
               startedAt: new Date(),
               endedAt: new Date(),
-              metadata: {
-                blockedReason: validationResult.reason,
-                missingVariables: validationResult.missing,
-                dispositionCategory: 'blocked_missing_data',
-              },
             }).onConflictDoNothing();
           }
         } catch (logError) {
@@ -2104,10 +2126,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Event handlers: Audio from Gemini -> Telnyx
     provider.on('audio:delta', (event: any) => {
-      if (!event?.audioBuffer || !(event.audioBuffer instanceof Buffer)) {
+      console.log(`${LOG_PREFIX} 🎵 audio:delta received - checking buffer...`);
+      if (!event?.audioBuffer) {
+        console.warn(`${LOG_PREFIX} ⚠️ audio:delta missing audioBuffer`);
+        return;
+      }
+      if (!(event.audioBuffer instanceof Buffer)) {
+        console.warn(`${LOG_PREFIX} ⚠️ audioBuffer is not a Buffer: ${typeof event.audioBuffer}`);
         return;
       }
 
+      console.log(`${LOG_PREFIX} 🎤 Queuing ${event.audioBuffer.length} bytes for Telnyx (format: ${event.format || 'unknown'})`);
       enqueueTelnyxOutboundAudio(session, event.audioBuffer);
       ensureTelnyxOutboundPacer(session);
     });
@@ -3435,7 +3464,7 @@ DO NOT:
 
 Speak NOW and deliver your response to their question while introducing yourself.`;
       
-      console.log(`${LOG_PREFIX} EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript.substring(0, 80)}..."`);
+      console.log(`${LOG_PREFIX} EARLY QUESTION DETECTED in identity confirmation: "${prospectTranscript?.substring(0, 80) ?? ''}..."`);
     } else {
       // Standard identity confirmation - proceed with introduction
       responseInstructions = `The contact just confirmed their identity. You MUST speak immediately - do not wait for them to say anything else.
@@ -4225,6 +4254,43 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           updatedAt: new Date(),
         }).where(eq(campaignTestCalls.id, testCallId));
 
+        // ✅ CRITICAL: Also create a call_sessions record and log intelligence for test calls
+        // This ensures test calls are visible in the main call quality analytics
+        try {
+          const [testCallSession] = await db.insert(callSessions).values({
+            toNumberE164: session.calledNumber || '+1-test-call',
+            startedAt: session.callStartedAt || session.startTime,
+            endedAt: new Date(),
+            durationSec: callDuration,
+            status: 'completed' as const,
+            agentType: 'ai' as const,
+            aiAgentId: session.virtualAgentId || 'openai-realtime',
+            aiConversationId: session.openaiSessionId || undefined,
+            aiTranscript: fullTranscript || undefined,
+            aiDisposition: disposition,
+            campaignId: session.campaignId,
+            contactId: session.contactId || undefined,
+          }).returning();
+
+          // Log comprehensive call intelligence for test calls
+          const intelligenceResult = await logCallIntelligence({
+            callSessionId: testCallSession.id,
+            dialerCallAttemptId: session.callAttemptId,
+            campaignId: session.campaignId,
+            contactId: session.contactId,
+            qualityAnalysis: conversationQuality,
+            fullTranscript,
+          });
+
+          if (intelligenceResult.success) {
+            console.log(`${LOG_PREFIX} ✅ Test call intelligence logged: ${intelligenceResult.recordId}`);
+          } else {
+            console.warn(`${LOG_PREFIX} ⚠️ Failed to log test call intelligence: ${intelligenceResult.error}`);
+          }
+        } catch (testSessionError) {
+          console.error(`${LOG_PREFIX} Error creating test call session/intelligence:`, testSessionError);
+        }
+
         dispositionProcessed = true;
         console.log(`${LOG_PREFIX} ✅ Test call ${callId} post-call analysis saved to campaignTestCalls`);
         console.log(`${LOG_PREFIX} Test call summary: ${session.callSummary?.summary || 'No summary generated'}`);
@@ -4487,16 +4553,31 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             await db.update(callSessions)
               .set({
                 aiAnalysis: mergedAnalysis as any,
-                updatedAt: new Date(),
               })
               .where(eq(callSessions.id, callSessionId));
 
             await db.update(callProducerTracking)
               .set({
                 transcriptAnalysis: mergedAnalysis as any,
-                qualityScore: conversationQuality.overallScore,
+                qualityScore: String(conversationQuality.overallScore),
               })
               .where(eq(callProducerTracking.callSessionId, callSessionId));
+
+            // ✅ CRITICAL: Log comprehensive call intelligence to ensure all calls are tracked
+            const intelligenceResult = await logCallIntelligence({
+              callSessionId,
+              dialerCallAttemptId: session.callAttemptId,
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              qualityAnalysis: conversationQuality,
+              fullTranscript,
+            });
+
+            if (intelligenceResult.success) {
+              console.log(`${LOG_PREFIX} ✅ Call intelligence logged: ${intelligenceResult.recordId}`);
+            } else {
+              console.warn(`${LOG_PREFIX} ⚠️ Failed to log call intelligence: ${intelligenceResult.error}`);
+            }
           } catch (analysisError) {
             console.error(`${LOG_PREFIX} Failed to persist conversation quality for ${callSessionId}:`, analysisError);
           }
@@ -4583,7 +4664,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       });
 
       await updateCallSessionStatus(session.callId, "active", {
-        conversationQuality,
+        conversationQuality: conversationQuality as unknown as Record<string, unknown>,
       });
 
       session.lastRealtimeQualityAt = new Date();
@@ -4686,9 +4767,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           }
 
           // Check for AMD-detected voicemail that wasn't caught earlier
+          // CRITICAL: Use startsWith('machine') to catch ALL machine results
           if (session.amdResult?.detected &&
-              (session.amdResult.result === 'machine' ||
-               session.amdResult.result?.startsWith('machine_end') ||
+              (session.amdResult.result?.startsWith('machine') ||
                session.amdResult.result === 'fax')) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' but AMD detected machine (${session.amdResult.result}) - marking as voicemail`);
             return 'voicemail';
@@ -4733,23 +4814,23 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             );
             
             if (isGatekeeperInteraction) {
-              // PHASE 3: Gatekeeper interaction = ambiguous, use needs_review for quick retry
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' with gatekeeper interaction (identity not confirmed) - marking as needs_review for quick retry`);
-              return 'needs_review';
+              // PHASE 3: Gatekeeper interaction = ambiguous, use no_answer for quick retry
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with gatekeeper interaction (identity not confirmed) - marking as no_answer for quick retry`);
+              return 'no_answer';
             }
 
-            // Short call without identity confirmation - ambiguous, use needs_review
+            // Short call without identity confirmation - ambiguous, use no_answer
             const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
             if (callDurationSeconds < 30) {
-              // PHASE 3: Short call without identity = ambiguous, use needs_review
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' - short call (${callDurationSeconds}s) without identity confirmation - marking as needs_review`);
-              return 'needs_review';
+              // PHASE 3: Short call without identity = ambiguous, use no_answer
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' - short call (${callDurationSeconds}s) without identity confirmation - marking as no_answer`);
+              return 'no_answer';
             }
 
             // PHASE 3: Has transcripts but no identity confirmation = ambiguous
             if (hasUserTranscripts) {
-              console.log(`${LOG_PREFIX} Outcome '${outcome}' with transcripts but no identity confirmation - marking as needs_review`);
-              return 'needs_review';
+              console.log(`${LOG_PREFIX} Outcome '${outcome}' with transcripts but no identity confirmation - marking as no_answer`);
+              return 'no_answer';
             }
           }
 
@@ -4842,11 +4923,11 @@ async function scheduleEngagedCallTranscription(options: {
   leadId: string | null;
 }): Promise<void> {
   // Helper to get telnyxCallId from session/bridge
-  const getTelnyxCallId = (callAttemptId: string): string | null => {
+  const getTelnyxCallId = async (callAttemptId: string): Promise<string | null> => {
     try {
-      const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
+      const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
       const bridge = getTelnyxAiBridge();
-      const callState = bridge.getClientStateByControlId(callAttemptId) || (bridge.activeCalls?.get(callAttemptId));
+      const callState = bridge.getClientStateByControlId(callAttemptId) || bridge.getActiveCall(callAttemptId);
       if (callState?.callControlId) {
         return callState.callControlId;
       }
@@ -4881,7 +4962,7 @@ async function scheduleEngagedCallTranscription(options: {
         callAttemptId: options.callAttemptId,
         contactFirstName: testCall.contactFirstName,
         agentId: null,
-        telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
+        telnyxCallId: (await getTelnyxCallId(options.callAttemptId)) || null,
         dialedNumber: testCall.phoneDialed,
         campaignId: testCall.campaignId,
       });
@@ -4915,7 +4996,7 @@ async function scheduleEngagedCallTranscription(options: {
       callAttemptId: options.callAttemptId,
       contactFirstName: attempt.contactFirstName || null,
       agentId: attempt.agentId || null,
-      telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
+      telnyxCallId: (await getTelnyxCallId(options.callAttemptId)) || null,
       dialedNumber: attempt.phoneDialed,
       campaignId: attempt.campaignId || null,
     });

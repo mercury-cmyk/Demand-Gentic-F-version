@@ -17,7 +17,7 @@
 
 1. **JWT Secret**: Generated new hash `4f34480d3577e15deefcdf3be6e875afc6f2304ac4870f89dfb550076314fb45`
 2. **Database Credentials**: Used local values (npg_C6fqpmSFxvl7)
-3. **Telnyx Phone**: Used local number (+15593366940)
+3. **Telnyx Phone**: Used local number (+12094571966)
 
 ### ✅ Phase 3: GCP Secret Manager Sync
 **Results**:
@@ -84,7 +84,7 @@ POST /api/webhooks/telnyx → HTTP 200 ✓
 | PGPASSWORD | 5 | Active (local value) |
 | DATABASE_URL | 7 | Active |
 | TELNYX_API_KEY | 11 | Active |
-| TELNYX_FROM_NUMBER | 9 | Active (local +15593366940) |
+| TELNYX_FROM_NUMBER | 9 | Active (local +12094571966) |
 | BASE_URL | 1 | Active (https://demandgentic.ai) |
 | TELNYX_WEBHOOK_URL | 8 | Active (production domain) |
 | PUBLIC_WEBSOCKET_URL | 7 | Active (wss://demandgentic.ai) |

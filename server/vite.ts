@@ -23,13 +23,7 @@ export async function setupVite(app: Express, server: Server) {
   const viteConfig = (await import("../vite.config")).default;
   const serverOptions = {
     middlewareMode: true,
-    hmr: { 
-      server,
-      // Port 443 for wss when using ngrok, otherwise the server port
-      clientPort: process.env.PUBLIC_WEBHOOK_HOST ? 443 : undefined,
-      host: process.env.PUBLIC_WEBHOOK_HOST || undefined,
-      protocol: process.env.PUBLIC_WEBHOOK_HOST ? 'wss' : undefined,
-    },
+    hmr: false, // Disable HMR to prevent WebSocket conflicts and reload loops
     allowedHosts: true as const,
   };
 

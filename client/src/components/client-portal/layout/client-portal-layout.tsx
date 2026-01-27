@@ -1,8 +1,19 @@
+/**
+ * Client Portal Layout
+ *
+ * DESIGN PRINCIPLES (aligned with main dashboard):
+ * 1. Single, centralized Agentic Operator entry point - prominently placed at TOP
+ * 2. Unified campaign management hub
+ * 3. Campaign-bound templates and voice stimulation
+ * 4. Clean, intentional navigation structure
+ */
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +44,8 @@ import {
   FileText,
   HelpCircle,
   Phone,
+  BotMessageSquare,
+  BarChart3,
 } from 'lucide-react';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { CampaignSimulationPanel } from '../simulation/campaign-simulation-panel';
@@ -50,10 +63,27 @@ interface ClientPortalLayoutProps {
   children: React.ReactNode;
 }
 
+/**
+ * Navigation Structure
+ *
+ * DESIGN: Centralized Agentic Operator at TOP, then unified campaign hub
+ */
+
+// Primary action - Agentic Operator (centralized AI entry point)
+const agenticOperator = {
+  name: 'Agentic Operator',
+  href: '/client-portal/dashboard?tab=agent',
+  icon: BotMessageSquare,
+  badge: 'AI',
+  description: 'Your AI-powered command center',
+};
+
+// Main navigation - organized by priority
 const navigation = [
   { name: 'Dashboard', href: '/client-portal/dashboard', icon: LayoutDashboard },
+  { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
   { name: 'Projects', href: '/client-portal/projects', icon: FolderKanban },
-  { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone },
+  { name: 'Analytics', href: '/client-portal/dashboard?tab=reports', icon: BarChart3 },
   { name: 'Orders', href: '/client-portal/orders', icon: ShoppingCart },
   { name: 'Billing', href: '/client-portal/billing', icon: CreditCard },
   { name: 'Settings', href: '/client-portal/settings', icon: Settings },
@@ -195,8 +225,42 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         </div>
 
         <nav className="flex-1 px-2 py-4 space-y-1">
+          {/* AGENTIC OPERATOR - Centralized AI Entry Point */}
+          <div className="px-2 mb-4">
+            <Link href={agenticOperator.href}>
+              <button
+                onClick={() => {
+                  setSidebarOpen(false);
+                  handleOpenAssistant();
+                }}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold cursor-pointer transition-all',
+                  'bg-gradient-to-r from-primary/20 via-primary/10 to-transparent',
+                  'border border-primary/20 hover:border-primary/40',
+                  'text-primary hover:shadow-md hover:scale-[1.02]',
+                  'group'
+                )}
+              >
+                <div className="p-1.5 rounded-md bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                  <agenticOperator.icon className="h-5 w-5" />
+                </div>
+                <div className="flex-1 text-left">
+                  <span className="block">{agenticOperator.name}</span>
+                  <span className="text-xs font-normal text-muted-foreground">{agenticOperator.description}</span>
+                </div>
+                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5">
+                  {agenticOperator.badge}
+                </Badge>
+              </button>
+            </Link>
+          </div>
+
+          <Separator className="my-3 mx-2" />
+
+          {/* Main Navigation */}
           {navigation.map((item) => {
-            const isActive = location.startsWith(item.href);
+            const isActive = location === item.href ||
+              (item.href !== '/client-portal/dashboard' && location.startsWith(item.href.split('?')[0]));
             return (
               <Link key={item.name} href={item.href}>
                 <span
@@ -241,23 +305,23 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
           <div className="flex-1" />
 
-          {/* Demand Assistant Button in Header */}
+          {/* Agentic Operator Button in Header - Single Entry Point */}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="default"
                   size="sm"
-                  className="gap-2 relative group"
+                  className="gap-2 relative group bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
                   onClick={() => handleOpenAssistant()}
                 >
-                  <MessageSquare className="h-4 w-4" />
-                  <span className="hidden sm:inline">Demand Assistant</span>
-                  <Sparkles className="h-3 w-3 text-amber-500 absolute -top-1 -right-1 animate-pulse" />
+                  <BotMessageSquare className="h-4 w-4" />
+                  <span className="hidden sm:inline">Agentic Operator</span>
+                  <Sparkles className="h-3 w-3 text-amber-300 absolute -top-1 -right-1 animate-pulse" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>Ask me anything about your account!</p>
+                <p>Your AI-powered command center for campaigns, emails, and reports</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -309,14 +373,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         onNavigate={handleVoiceNavigation}
       />
 
-      {/* Floating Demand Assistant FAB with Suggestions */}
+      {/* Floating Agentic Operator FAB with Suggestions */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
         {/* Suggestions Popup */}
         {showSuggestions && !voiceOpen && (
           <div className="bg-card border rounded-lg shadow-lg p-4 w-72 animate-in slide-in-from-bottom-5 fade-in duration-300">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-500" />
+                <BotMessageSquare className="h-4 w-4 text-primary" />
                 <span className="text-sm font-medium">Hi{user?.firstName ? `, ${user.firstName}` : ''}!</span>
               </div>
               <Button
@@ -329,7 +393,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">
-              I can help you navigate and get insights. Try asking:
+              I'm your Agentic Operator. I can help with campaigns, reports, and more:
             </p>
             <div className="space-y-2">
               {getSuggestions().map((suggestion, idx) => (
@@ -346,7 +410,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           </div>
         )}
 
-        {/* FAB Button */}
+        {/* FAB Button - Centralized Agentic Operator */}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -362,13 +426,13 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                   }
                 }}
                 className={cn(
-                  "relative h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg",
+                  "relative h-14 w-14 rounded-full bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-lg",
                   "flex items-center justify-center transition-all hover:scale-105 hover:shadow-xl",
                   "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
                   !hasInteracted && "animate-bounce"
                 )}
               >
-                <MessageSquare className="h-6 w-6" />
+                <BotMessageSquare className="h-6 w-6" />
                 {!hasInteracted && (
                   <span className="absolute -top-1 -right-1 flex h-4 w-4">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -380,7 +444,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
               </button>
             </TooltipTrigger>
             <TooltipContent side="left">
-              <p>Demand Assistant - Ask me anything!</p>
+              <p>Agentic Operator - Your AI command center</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

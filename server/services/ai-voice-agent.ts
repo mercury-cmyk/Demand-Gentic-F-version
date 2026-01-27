@@ -76,6 +76,15 @@ export interface CallContext {
   virtualAgentId?: string; // Virtual agent ID for tracking in reports
   runId?: string; // Dialer run ID for unified tracking
   callAttemptId?: string; // Dialer call attempt ID for unified tracking
+  // Campaign context for AI agent behavior
+  organizationName?: string; // The organization name (NOT campaign name)
+  campaignObjective?: string; // e.g., "Book qualified meetings with IT decision makers"
+  successCriteria?: string; // e.g., "Meeting booked with decision maker"
+  targetAudienceDescription?: string; // e.g., "CISOs at mid-market companies"
+  productServiceInfo?: string; // Product/service details
+  talkingPoints?: string[]; // Key points to mention
+  // Max call duration in seconds - auto-hangup after this time
+  maxCallDurationSeconds?: number;
 }
 
 type ConversationPhase = "opening" | "gatekeeper" | "pitch" | "objection_handling" | "closing" | "handoff";

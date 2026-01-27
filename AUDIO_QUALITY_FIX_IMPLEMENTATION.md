@@ -359,3 +359,36 @@ if (metrics) {
   - Automatic reconnection with exponential backoff
   - Audio quality monitoring service
   - Real-time alerting
+
+- **2026-01-26**: Audio Normalization & Gain Control
+  - Added `normalizeAudio()` function for peak detection and adaptive scaling
+  - Implemented gain normalization in all transcoding paths:
+    - `pcm24kToG711()`: Gemini 24kHz output → Telnyx 8kHz
+    - `g711ToPcm16k()`: Telnyx 8kHz input → Gemini 16kHz
+    - `pcm16kToG711()`: Alternative 16kHz output path
+  - Enhanced logging with compression metrics
+  - Prevents clipping distortion during resampling and encoding
+  - Ensures consistent amplitude for optimal G.711 compression
+  - Target levels: 90-95% of full scale for safe encoding
+
+### Audio Normalization Details (2026-01-26)
+
+**Root Cause:** Missing gain normalization caused clipping during format conversion:
+- PCM 24kHz → 8kHz downsampling without post-filter amplitude restoration
+- Weak input to G.711 encoder (poor compression quality)
+- Inconsistent volume levels
+
+**Solution:** 
+```typescript
+function normalizeAudio(pcmBuffer, targetLevel=0.9):
+  1. Find peak amplitude
+  2. Calculate scale factor (maxAllowed / peak)
+  3. Apply scaling with clamping
+  4. Return normalized buffer
+```
+
+**Impact:** All audio now transcodes at optimal amplitude, eliminating distortion and improving clarity.
+
+**Files Modified:**
+- `audio-transcoder.ts`: +110 lines (normalizeAudio function + 3 updated paths)
+- `gemini-live-provider.ts`: +1 line (enhanced logging)

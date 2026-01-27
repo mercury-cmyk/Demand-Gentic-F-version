@@ -7,7 +7,7 @@ import "dotenv/config";
 const PUBLIC_WEBHOOK_HOST = "steve-unbalking-guessingly.ngrok-free.dev";
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_TEXML_APP_ID = process.env.TELNYX_TEXML_APP_ID;
-const FROM_NUMBER = process.env.TELNYX_FROM_NUMBER || "+15593366940";
+const FROM_NUMBER = process.env.TELNYX_FROM_NUMBER || "+12094571966";
 
 // Test phone number
 const TO_NUMBER = "+447798787206";
@@ -27,8 +27,9 @@ async function testCall() {
     return;
   }
   
-  const texmlUrl = `https://${PUBLIC_WEBHOOK_HOST}/api/texml/ai-call?client_state=dGVzdA==`;
-  const statusCallback = `https://${PUBLIC_WEBHOOK_HOST}/api/webhooks/telnyx`;
+  const cleanHost = (PUBLIC_WEBHOOK_HOST || '').replace(/^https?:\/\//, '');
+  const texmlUrl = `https://${cleanHost}/api/texml/ai-call?client_state=dGVzdA==`;
+  const statusCallback = `https://${cleanHost}/api/webhooks/telnyx`;
   
   console.log("\nTeXML URL:", texmlUrl);
   console.log("Status Callback:", statusCallback);

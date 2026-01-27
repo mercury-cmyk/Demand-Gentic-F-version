@@ -1,6 +1,6 @@
 import { SQL, and, or, eq, ilike, sql, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
-import { FilterGroup, FilterCondition } from "@shared/filter-types";
-import { accounts, contacts, leads, campaigns } from "@shared/schema";
+import { FilterGroup, FilterCondition } from "../shared/filter-types";
+import { accounts, contacts, leads, campaigns } from "../shared/schema";
 
 type TableType = typeof accounts | typeof contacts | typeof leads | typeof campaigns;
 

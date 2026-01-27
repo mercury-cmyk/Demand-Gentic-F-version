@@ -14,6 +14,27 @@ import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, Conta
 import { checkSuppressionBulk, getSuppressionReason } from "../lib/suppression.service";
 import { getBestPhoneForContact } from "../lib/phone-utils";
 
+const GEMINI_VOICE_PREFERENCES = [
+  "Juniper",
+  "Ember",
+  "Lyra",
+  "Orion",
+  "Bamboo",
+  "Jade",
+  "Pumice",
+];
+
+function normalizeGeminiVoice(voice?: string) {
+  if (voice?.trim()) {
+    const match = GEMINI_VOICE_PREFERENCES.find(
+      (v) => v.toLowerCase() === voice.trim().toLowerCase()
+    );
+    if (match) return match;
+    console.warn(`[AI Calls] Unknown Gemini voice "${voice}" - falling back to ${GEMINI_VOICE_PREFERENCES[0]}`);
+  }
+  return GEMINI_VOICE_PREFERENCES[0];
+}
+
 const router = Router();
 
 const generateScriptsSchema = z.object({
@@ -780,8 +801,14 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
       agentFullName: aiSettings.persona?.name || "Sarah",
     };
 
+    // Determine provider - default to Gemini Live (same as production campaigns)
+    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
+    const isGemini = !defaultProvider.includes('openai');
+    const provider = isGemini ? 'gemini_live' : 'openai_realtime';
+
     console.log("[AI Test Call] Initiating test call to:", phoneNumber);
     console.log("[AI Test Call] Using from number:", fromNumber);
+    console.log("[AI Test Call] Using provider:", provider);
     console.log("[AI Test Call] AI Settings:", JSON.stringify(aiSettings.persona, null, 2));
 
     const bridge = getTelnyxAiBridge();
@@ -790,7 +817,7 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
       fromNumber,
       aiSettings,
       context,
-      'openai_realtime'
+      provider as 'openai_realtime' | 'gemini_live'
     );
 
     res.json({
@@ -1093,7 +1120,9 @@ router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign
         webhookHost = u.host;
       } catch {}
     }
-    webhookHost = webhookHost || 'localhost:5000';
+    // Ensure host doesn't have protocol
+    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
+
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
@@ -1211,7 +1240,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     }
 
     let systemPrompt = "You are a professional AI assistant.";
-    let voice = "Pumice"; // Default Gemini Live voice
+    let voice = normalizeGeminiVoice(); // Default Gemini Live voice (validated)
     let campaignOrgName = organizationName;
     
     // Load campaign info if campaignId provided
@@ -1231,12 +1260,12 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       const [agent] = await db.select().from(virtualAgents).where(eq(virtualAgents.id, virtualAgentId)).limit(1);
       if (agent) {
         systemPrompt = agent.systemPrompt || systemPrompt;
-        voice = agent.voice || voice;
+        voice = normalizeGeminiVoice(agent.voice || voice);
       }
     }
 
     if (systemPromptOverride?.trim()) systemPrompt = systemPromptOverride.trim();
-    if (voiceOverride?.trim()) voice = voiceOverride.trim();
+    if (voiceOverride?.trim()) voice = normalizeGeminiVoice(voiceOverride);
 
     let normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
     if (!normalizedPhone.startsWith('+')) normalizedPhone = '+' + normalizedPhone.replace(/^0+/, '');
@@ -1271,7 +1300,9 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
         webhookHost = u.host;
       } catch {}
     }
-    webhookHost = webhookHost || 'localhost:5000';
+    // Ensure host doesn't have protocol
+    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
+
     const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
 
@@ -1314,13 +1345,13 @@ router.get("/gemini-voices", requireAuth, (req, res) => {
   // The backend uses a pass-through string in the dialer, so any voice name
   // provided by the UI will be sent to the API.
   res.json([
-    { id: "Pumice", name: "Pumice", description: "Soft and breathy" },
     { id: "Juniper", name: "Juniper", description: "Energetic and bright" },
-    { id: "Bamboo", name: "Bamboo", description: "Calm and grounded" },
     { id: "Ember", name: "Ember", description: "Warm and rich" },
     { id: "Lyra", name: "Lyra", description: "Clear and professional" },
     { id: "Orion", name: "Orion", description: "Deep and authoritative" },
-    { id: "Jade", name: "Jade", description: "New experimental voice" }
+    { id: "Bamboo", name: "Bamboo", description: "Calm and grounded" },
+    { id: "Jade", name: "Jade", description: "New experimental voice" },
+    { id: "Pumice", name: "Pumice", description: "Soft and breathy (legacy)" }
   ]);
 });
 
