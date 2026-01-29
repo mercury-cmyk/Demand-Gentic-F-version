@@ -24,92 +24,9 @@ import { eq } from "drizzle-orm";
 // Use dynamic import to avoid async module initialization issue with voice-dialer
 // import { setAmdResultForSession } from "./voice-dialer";
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
+import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
+import { processDisposition } from "./disposition-engine";
 
-/**
- * Normalize phone number to E.164 format required by Telnyx
- * Examples:
- *   07542679573 -> +447542679573 (UK mobile)
- *   020 7123 4567 -> +442071234567 (UK landline)
- *   +441733712345 -> +441733712345 (already valid)
- *   001234567890 -> +1234567890 (US format)
- *   441733712345 -> +441733712345 (missing + only)
- *   6506468370 -> +16506468370 (US number without country code)
- *   3126072391 -> +13126072391 (US number without country code)
- */
-function normalizeToE164(phoneNumber: string): string {
-  // Remove all non-digit characters except leading +
-  let normalized = phoneNumber.replace(/[^\d+]/g, '');
-  
-  // If starts with +, check for invalid formats and fix them
-  if (normalized.startsWith('+')) {
-    // CRITICAL FIX: Handle bad data like "+07818517774" or "+0012026888819"
-    // These are invalid E.164 - no country code starts with 0
-    if (normalized.startsWith('+00')) {
-      // International dial prefix was included: +0012345... -> +12345...
-      normalized = '+' + normalized.substring(3);
-    } else if (normalized.startsWith('+0')) {
-      // UK national format with + added: +07818... -> +447818...
-      // Check if it looks like a UK number (07=mobile, 01/02/03=landline)
-      const withoutPlus = normalized.substring(1);
-      if (/^0[1-9]/.test(withoutPlus)) {
-        // UK national format - convert to +44
-        normalized = '+44' + withoutPlus.substring(1);
-      }
-    }
-    return normalized;
-  }
-  
-  // Handle 00 prefix (international format used in UK/EU)
-  if (normalized.startsWith('00')) {
-    return '+' + normalized.substring(2);
-  }
-  
-  // Handle UK numbers starting with 0 (national format)
-  // UK mobiles: 07xxx, UK landlines: 01xxx, 02xxx, 03xxx
-  if (/^0[1-9]/.test(normalized)) {
-    // Remove leading 0 and add +44 for UK
-    return '+44' + normalized.substring(1);
-  }
-  
-  // Handle numbers that already have country code but missing +
-  // Check for common country codes at start based on length patterns
-  
-  // UK numbers (44) - typically 12-13 digits with country code
-  if (normalized.startsWith('44') && normalized.length >= 12 && normalized.length <= 13) {
-    return '+' + normalized;
-  }
-  
-  // US/Canada (1) - 11 digits with country code
-  if (normalized.startsWith('1') && normalized.length === 11) {
-    return '+' + normalized;
-  }
-  
-  // Germany (49), France (33), Netherlands (31), etc - check for common EU codes
-  const euCountryCodes = ['49', '33', '31', '34', '39', '46', '47', '48', '32', '43', '41'];
-  for (const code of euCountryCodes) {
-    if (normalized.startsWith(code) && normalized.length >= 10 && normalized.length <= 14) {
-      return '+' + normalized;
-    }
-  }
-  
-  // Japan (81), India (91), Australia (61), etc
-  const asiaPacificCodes = ['81', '91', '61', '86', '82', '65', '60', '63', '62'];
-  for (const code of asiaPacificCodes) {
-    if (normalized.startsWith(code) && normalized.length >= 10 && normalized.length <= 15) {
-      return '+' + normalized;
-    }
-  }
-  
-  // If 10 digits and looks like US/Canada area code (not starting with 0 or 1)
-  // US area codes start with 2-9, so 10-digit numbers starting with 2-9 are likely US
-  if (normalized.length === 10 && /^[2-9]/.test(normalized)) {
-    return '+1' + normalized;
-  }
-  
-  // Default: assume missing + and add it
-  // This handles cases where country code is present but + is missing
-  return '+' + normalized;
-}
 
 export interface TelnyxCallEvent {
   event_type: string;
@@ -247,6 +164,12 @@ export class TelnyxAiBridge extends EventEmitter {
   // Format phone number to E.164 format (required by Telnyx)
   private formatToE164(phoneNumber: string): string {
     const formatted = normalizeToE164(phoneNumber);
+
+    if (!isValidE164(formatted)) {
+      console.error(`[TelnyxAiBridge] Invalid E.164 phone after normalization: ${phoneNumber} -> ${formatted}`);
+      throw new Error(`invalid_phone_e164:${phoneNumber}`);
+    }
+
     console.log(`[TelnyxAiBridge] Formatted phone: ${phoneNumber} -> ${formatted}`);
     return formatted;
   }
@@ -335,11 +258,9 @@ export class TelnyxAiBridge extends EventEmitter {
     fromNumber: string,
     settings: AiAgentSettings,
     context: CallContext,
-    _provider: string = 'gemini_live' // ENFORCED: All calls use Gemini Live
+    _provider: string = 'openai_realtime'
   ): Promise<{ callId: string; callControlId: string }> {
-    // ENFORCED: All AI voice calls route through Gemini Live
-    // OpenAI Realtime is completely disabled
-    const provider = 'gemini_live';
+    const provider = 'openai_realtime';
 
     // Global channel guard: wait for available Telnyx outbound slot
     const waitStart = Date.now();
@@ -354,7 +275,7 @@ export class TelnyxAiBridge extends EventEmitter {
       phoneNumber = this.formatToE164(phoneNumber);
       fromNumber = this.formatToE164(fromNumber);
 
-      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
+      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: OpenAI Realtime`);
       
       const contactFullName = [context.contactFirstName, context.contactLastName]
         .filter(Boolean)
@@ -1123,59 +1044,23 @@ export class TelnyxAiBridge extends EventEmitter {
     try {
       const queueItem = await storage.getQueueItemById(call.queueItemId);
       if (queueItem) {
-        
-        // Fetch contact info for lead record
-        const contact = await storage.getContact(queueItem.contactId);
-        const contactName = contact?.fullName || 
-          (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
-           contact?.firstName || contact?.lastName || 'Unknown');
-        
-        const shouldCreateLead = disposition === "qualified" || disposition === "callback_requested" || disposition === "handoff" || disposition === "meeting_booked";
-        if (!shouldCreateLead) {
-          console.log(
-            `[TelnyxAiBridge] Skipping lead creation for AI call ${callId} (disposition=${disposition})`
-          );
-        } else {
-          const existingLead = await storage.findLeadByAiCallId(callId);
-          if (existingLead) {
-            console.log(`[TelnyxAiBridge] Lead already exists for AI call ${callId}, skipping duplicate`);
-          } else {
-          await storage.createLead({
-            campaignId: call.campaignId,
-            contactId: queueItem.contactId,
-            contactName: contactName,
-            contactEmail: contact?.email || undefined,
-            accountName: contact?.companyNorm || undefined,
-            callAttemptId: call.callAttemptId || undefined,
-            agentId: null,
-            qaStatus: "new",
-            notes: `[AI Agent Call] ${summary}\n\nPhase: ${phase}\nGatekeeper Attempts: ${gatekeeperAttempts}\nDuration: ${Math.round(duration / 1000)}s\n\nTranscript:\n${transcript}`,
-            callDuration: Math.round(duration / 1000),
-            dialedNumber: call.dialedNumber || undefined,
-            telnyxCallId: call.callControlId,
-            customFields: {
-              aiCallId: callId,
-              aiPhase: phase,
-              aiDisposition: disposition,
-              aiGatekeeperAttempts: gatekeeperAttempts,
-                aiHandoff: call.disposition === "handoff",
-              },
-            });
-
-            console.log(`[TelnyxAiBridge] Lead created for AI call ${callId}`);
-          }
-        }
-
-        await storage.updateQueueStatus(call.queueItemId, "done");
+        // NOTE: Lead creation is now handled by processDisposition() below
+        // This ensures all qualified leads go through the standard disposition engine
+        // which creates leads, updates queue status, and handles suppression consistently
+        console.log(
+          `[TelnyxAiBridge] Call ${callId} ending with disposition: ${disposition} (phase: ${phase})`
+        );
       }
 
       // Update dialer_call_attempts with disposition if we have a callAttemptId
+      // CRITICAL FIX: Use processDisposition() instead of direct DB update to ensure lead creation
       if (call.callAttemptId) {
         const canonicalDisposition = this.mapToCanonicalDisposition(disposition);
+        
+        // First update the call attempt record with call metadata
         await db
           .update(dialerCallAttempts)
           .set({
-            disposition: canonicalDisposition,
             dispositionSubmittedAt: new Date(),
             callEndedAt: new Date(),
             callDurationSeconds: Math.round(duration / 1000),
@@ -1184,7 +1069,27 @@ export class TelnyxAiBridge extends EventEmitter {
             updatedAt: new Date(),
           })
           .where(eq(dialerCallAttempts.id, call.callAttemptId));
-        console.log(`[TelnyxAiBridge] Updated call attempt ${call.callAttemptId} with disposition: ${canonicalDisposition}`);
+        
+        // Then process disposition through engine (creates leads, updates queue, handles suppression)
+        try {
+          const dispositionResult = await processDisposition(
+            call.callAttemptId,
+            canonicalDisposition,
+            'telnyx_ai_bridge'
+          );
+          
+          if (dispositionResult.success) {
+            console.log(`[TelnyxAiBridge] ✅ Disposition processed for ${call.callAttemptId}: ${canonicalDisposition}`, {
+              leadCreated: !!dispositionResult.leadId,
+              leadId: dispositionResult.leadId,
+              actions: dispositionResult.actions
+            });
+          } else {
+            console.error(`[TelnyxAiBridge] ⚠️ Disposition processing had errors:`, dispositionResult.errors);
+          }
+        } catch (dispError) {
+          console.error(`[TelnyxAiBridge] ❌ Failed to process disposition for ${call.callAttemptId}:`, dispError);
+        }
       }
     } catch (error) {
       console.error(`[TelnyxAiBridge] Failed to create lead for AI call:`, error);

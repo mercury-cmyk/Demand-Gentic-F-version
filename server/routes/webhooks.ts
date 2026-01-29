@@ -1,13 +1,72 @@
 import { Router, Request, Response } from "express";
 import { verifyApiKey, verifyHmac } from "../lib/webhookVerify";
 import { db } from "../db";
-import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog } from "@shared/schema";
+import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog, campaignTestCalls } from "@shared/schema";
 import { z } from "zod";
 import crypto from "crypto";
 import { eq, or, and, sql } from "drizzle-orm";
 import { mapTelnyxHangupCause, shouldTriggerSuppression } from "../lib/contact-suppression";
 import { updateContactSuppression } from "../services/disposition-engine";
 import { setAmdResultForSession } from "../services/voice-dialer";
+
+/**
+ * Helper function to handle test call webhook events
+ * Updates campaignTestCalls table based on call events
+ */
+async function handleTestCallEvent(eventType: string, payload: any, clientState: any): Promise<boolean> {
+  if (!clientState?.is_test_call || !clientState?.test_call_id) {
+    return false; // Not a test call
+  }
+
+  const testCallId = clientState.test_call_id;
+  console.log(`[Telnyx Webhook] Processing test call event: ${eventType} for test call ${testCallId}`);
+
+  try {
+    switch (eventType) {
+      case 'call.initiated':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} initiated`);
+        break;
+
+      case 'call.answered':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} answered`);
+        await db.update(campaignTestCalls)
+          .set({
+            status: 'in_progress',
+            answeredAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+
+      case 'call.hangup':
+      case 'call.ended':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} ended`);
+        await db.update(campaignTestCalls)
+          .set({
+            status: 'completed',
+            endedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+
+      case 'call.machine.detection.ended':
+        const amdResult = payload?.result || payload?.machine_detection_result;
+        console.log(`[Telnyx Webhook] Test call ${testCallId} AMD result: ${amdResult}`);
+        await db.update(campaignTestCalls)
+          .set({
+            metadata: sql`COALESCE(metadata, '{}'::jsonb) || ${JSON.stringify({ amdResult })}::jsonb`,
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+    }
+    return true; // Handled as test call
+  } catch (error) {
+    console.error(`[Telnyx Webhook] Error handling test call event:`, error);
+    return true; // Still mark as test call even if update failed
+  }
+}
 
 const router = Router();
 
@@ -291,6 +350,24 @@ router.post("/telnyx", async (req, res) => {
     }
 
     console.log(`[Telnyx Webhook] Processing event: ${eventType}`);
+
+    // Decode client_state once for use throughout webhook processing
+    let decodedClientState: any = null;
+    if (payload?.client_state) {
+      try {
+        decodedClientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+      } catch (e) {
+        // Not base64 encoded or invalid JSON - ignore
+      }
+    }
+
+    // Handle test call events (updates campaignTestCalls table)
+    // Test calls are identified by is_test_call flag in client_state
+    const isTestCall = await handleTestCallEvent(eventType, payload, decodedClientState);
+    if (isTestCall) {
+      console.log(`[Telnyx Webhook] Processed as test call event`);
+      // Continue processing - test calls also need AI bridge handling
+    }
 
     // Import AI bridge for handling AI call events
     const { getTelnyxAiBridge } = await import('../services/telnyx-ai-bridge');
@@ -850,6 +927,22 @@ router.post("/texml/ai-call-failover", async (req, res) => {
   <Hangup />
 </Response>`);
   }
+});
+
+// ==================== CATCH-ALL FOR UNKNOWN WEBHOOK ENDPOINTS ====================
+// This prevents 401 errors for webhook paths that don't exist but are being hit by external services
+router.all("*", (req, res) => {
+  console.log(`[Webhooks] Received request to unknown endpoint: ${req.method} ${req.path}`);
+  console.log(`[Webhooks] Headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`[Webhooks] Body preview:`, JSON.stringify(req.body)?.slice(0, 500));
+  
+  // Return 200 OK to acknowledge receipt (prevents retries from external services)
+  res.status(200).json({ 
+    status: "received", 
+    message: "Webhook endpoint not configured",
+    path: req.path,
+    method: req.method
+  });
 });
 
 export default router;

@@ -24,7 +24,7 @@ import verificationJobRecoveryRouter from './routes/verification-job-recovery';
 import verificationAccountCapsRouter from './routes/verification-account-caps';
 import verificationPriorityConfigRouter from './routes/verification-priority-config';
 import suppressionRouter from './routes/suppression-routes';
-import s3FilesRouter from './routes/s3-files';
+import s3FilesRouter from './routes/storage-files';
 import csvImportJobsRouter from './routes/csv-import-jobs';
 import contactsCSVImportRouter from './routes/contacts-csv-import';
 import emailValidationTestRouter from './routes/email-validation-test';
@@ -54,11 +54,13 @@ import virtualAgentsRouter from './routes/virtual-agents';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
+import texmlRouter from './routes/texml';
 import aiOperatorRouter from './routes/ai-operator';
 import agentCommandRouter from './routes/agent-command-routes';
 import orgIntelligenceRouter from './routes/org-intelligence-routes';
 import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-routes';
 import campaignTestCallsRouter from './routes/campaign-test-calls';
+import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
 import { z } from "zod";
 import {
@@ -80,7 +82,7 @@ import {
 import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
-import { uploadToS3 } from "./lib/s3";
+import { uploadToS3 } from "./lib/storage";
 import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
@@ -114,7 +116,6 @@ import {
   insertSoftphoneProfileSchema,
   insertCallRecordingAccessLogSchema,
   pipelineBulkImportSchema,
-  insertSipTrunkConfigSchema,
   insertAgentStatusSchema,
   insertAutoDialerQueueSchema,
   insertContentAssetSchema,
@@ -5564,7 +5565,7 @@ export function registerRoutes(app: Express) {
   // Add contacts to manual queue (with filters)
   app.post("/api/campaigns/:id/manual/queue/add", requireAuth, requireRole('admin', 'campaign_manager', 'agent'), async (req, res) => {
     try {
-      const { agentId, filters, contactIds, limit = 1000 } = req.body;
+      const { agentId, filters, contactIds, limit = 50000 } = req.body;
 
       if (!agentId) {
         return res.status(400).json({ message: "agentId is required" });
@@ -6238,9 +6239,19 @@ export function registerRoutes(app: Express) {
         notes: req.body.notes || null,
         qualificationData: req.body.qualificationData || null,
         callbackRequested: req.body.callbackRequested || false,
-        telnyxCallId: req.body.telnyxCallId || null,
+        // Accept both field names for Telnyx call ID (frontend sends callControlId, some APIs use telnyxCallId)
+        telnyxCallId: req.body.telnyxCallId || req.body.callControlId || null,
         dialedNumber: req.body.dialedNumber || null, // Capture dialed phone number from frontend
       };
+
+      // Log disposition details for debugging qualified lead creation
+      console.log('[DISPOSITION] Processing disposition:', {
+        disposition: callData.disposition,
+        contactId: callData.contactId,
+        campaignId: callData.campaignId,
+        telnyxCallId: callData.telnyxCallId,
+        agentId: callData.agentId,
+      });
 
       const call = await storage.createCallDisposition(callData);
 
@@ -6580,192 +6591,73 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // ==================== SIP TRUNK CONFIGURATION ====================
+  // ==================== SIP TRUNK CONFIGURATION (WebRTC) ====================
 
-  // Get all SIP trunk configurations
-  app.get("/api/sip-trunks", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      const configs = await storage.getSipTrunkConfigs();
-      res.json(configs);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch SIP trunk configurations" });
-    }
-  });
-
-  // Get default SIP trunk config (for agents)
-  // Returns WebRTC Credential Connection credentials for browser-based calling
-  // PRIORITY: Database config first, then environment variables as fallback
+  /**
+   * GET /api/sip-trunks/default
+   * Returns the default SIP trunk configuration for WebRTC authentication.
+   * The agent console uses this to initialize TelnyxRTC with SIP credentials.
+   *
+   * PRIORITY:
+   * 1. Database config (sipTrunkConfigs table)
+   * 2. Environment variables (TELNYX_WEBRTC_USERNAME, TELNYX_WEBRTC_PASSWORD, etc.)
+   *
+   * This endpoint returns SIP credentials which work reliably across all regions,
+   * unlike JWT tokens which can have latency issues with Telnyx API calls.
+   */
   app.get("/api/sip-trunks/default", requireAuth, async (req, res) => {
     try {
-      // First, try to get config from database
-      const config = await storage.getDefaultSipTrunkConfig();
-      if (config) {
-        console.log('[SIP-TRUNK] Using database config:', config.name, '| Username:', config.sipUsername, '| Domain:', config.sipDomain);
-        return res.json(config);
-      }
+      // PRIORITY 1: Check database for SIP trunk config
+      const dbConfig = await storage.getDefaultSipTrunkConfig();
 
-      // If no default is set, try to get any active trunk from database
-      const allConfigs = await storage.getSipTrunkConfigs();
-      const activeConfig = allConfigs.find(c => c.isActive);
-
-      if (activeConfig) {
-        console.log('[SIP-TRUNK] Using active database config:', activeConfig.name);
-        return res.json(activeConfig);
-      }
-
-      // FALLBACK: Use environment variables if no database config exists
-      const envUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
-      const envPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
-
-      if (envUsername && envPassword) {
-        console.log('[SIP-TRUNK] No database config, using environment variables');
+      if (dbConfig) {
+        console.log('[SIP-TRUNKS] Using database config:', dbConfig.name);
         return res.json({
-          id: 'env-default',
-          name: 'Telnyx (Environment)',
-          provider: 'telnyx',
-          sipUsername: envUsername,
-          sipPassword: envPassword,
-          sipDomain: 'sip.telnyx.com',
-          callerIdNumber: process.env.TELNYX_FROM_NUMBER || '',
-          isActive: true,
-          isDefault: true,
+          sipUsername: dbConfig.sipUsername,
+          sipPassword: dbConfig.sipPassword,
+          sipDomain: dbConfig.sipDomain || 'sip.telnyx.com',
+          connectionId: dbConfig.connectionId,
+          callerIdNumber: dbConfig.callerIdNumber || process.env.TELNYX_FROM_NUMBER,
+          name: dbConfig.name,
+          source: 'database',
         });
       }
 
-      return res.status(404).json({ message: "No SIP trunk configured. Add one in Telephony Settings or set environment variables." });
-    } catch (error) {
-      console.error('[SIP-TRUNK] Error:', error);
-      res.status(500).json({ message: "Failed to fetch default SIP trunk" });
-    }
-  });
+      // PRIORITY 2: Use environment variables as fallback
+      const sipUsername = process.env.TELNYX_WEBRTC_USERNAME || process.env.TELNYX_SIP_USERNAME;
+      const sipPassword = process.env.TELNYX_WEBRTC_PASSWORD || process.env.TELNYX_SIP_PASSWORD;
+      const sipDomain = process.env.TELNYX_SIP_DOMAIN || 'sip.telnyx.com';
+      const connectionId = process.env.TELNYX_WEBRTC_CREDENTIAL_ID || process.env.TELNYX_SIP_CONNECTION_ID;
+      const callerIdNumber = process.env.TELNYX_FROM_NUMBER;
 
-  // Test/verify SIP trunk credentials
-  // This endpoint helps diagnose WebRTC connection issues
-  app.get("/api/sip-trunks/test", requireAuth, async (req, res) => {
-    try {
-      const config = await storage.getDefaultSipTrunkConfig();
-      if (!config) {
+      if (sipUsername && sipPassword) {
+        console.log('[SIP-TRUNKS] Using environment variables for SIP config');
         return res.json({
-          success: false,
-          message: "No SIP trunk configured",
-          recommendation: "Go to Telephony Settings and add a Credential Connection from Telnyx Portal"
+          sipUsername,
+          sipPassword,
+          sipDomain,
+          connectionId,
+          callerIdNumber,
+          source: 'environment',
         });
       }
 
-      // Check if credentials look valid
-      const issues: string[] = [];
+      // No config found
+      console.error('[SIP-TRUNKS] No SIP trunk configuration found in database or environment');
+      console.error('[SIP-TRUNKS] Required env vars: TELNYX_WEBRTC_USERNAME, TELNYX_WEBRTC_PASSWORD');
+      console.error('[SIP-TRUNKS] Or configure in Admin > SIP Trunks');
 
-      if (!config.sipUsername || config.sipUsername.length < 5) {
-        issues.push("SIP username appears invalid (too short)");
-      }
-
-      if (!config.sipPassword || config.sipPassword.length < 8) {
-        issues.push("SIP password appears invalid (too short)");
-      }
-
-      // Check if username looks like a Credential Connection format
-      // Telnyx Credential Connection usernames are typically in format: user123456789
-      if (config.sipUsername && !config.sipUsername.match(/^[a-zA-Z0-9_-]+$/)) {
-        issues.push("SIP username contains invalid characters - should be alphanumeric");
-      }
-
-      // Check domain
-      if (config.sipDomain && !config.sipDomain.includes('telnyx')) {
-        issues.push("SIP domain doesn't look like Telnyx - ensure you're using sip.telnyx.com");
-      }
-
-      console.log('[SIP-TRUNK-TEST] Config:', {
-        id: config.id,
-        name: config.name,
-        sipUsername: config.sipUsername,
-        sipDomain: config.sipDomain,
-        connectionId: config.connectionId,
-        hasPassword: !!config.sipPassword,
-        passwordLength: config.sipPassword?.length,
-        issues: issues.length > 0 ? issues : 'None'
+      return res.status(404).json({
+        message: 'SIP trunk not configured',
+        hint: 'Configure SIP credentials in database or set TELNYX_WEBRTC_USERNAME and TELNYX_WEBRTC_PASSWORD environment variables',
       });
 
-      res.json({
-        success: issues.length === 0,
-        config: {
-          id: config.id,
-          name: config.name,
-          sipUsername: config.sipUsername,
-          sipDomain: config.sipDomain,
-          connectionId: config.connectionId,
-          hasPassword: !!config.sipPassword,
-          passwordLength: config.sipPassword?.length,
-          isActive: config.isActive,
-          isDefault: config.isDefault,
-        },
-        issues,
-        recommendation: issues.length > 0
-          ? "Please verify your Credential Connection credentials in Telnyx Portal"
-          : "Credentials look valid. If WebRTC still fails, check browser console for socket errors."
+    } catch (error) {
+      console.error('[SIP-TRUNKS] Error fetching default config:', error);
+      return res.status(500).json({
+        message: 'Failed to fetch SIP trunk configuration',
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
-    } catch (error) {
-      console.error('[SIP-TRUNK-TEST] Error:', error);
-      res.status(500).json({ success: false, message: "Test failed", error: String(error) });
-    }
-  });
-
-  // Get specific SIP trunk config
-  app.get("/api/sip-trunks/:id", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      const config = await storage.getSipTrunkConfig(req.params.id);
-      if (!config) {
-        return res.status(404).json({ message: "SIP trunk configuration not found" });
-      }
-      res.json(config);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch SIP trunk configuration" });
-    }
-  });
-
-  // Create SIP trunk config
-  app.post("/api/sip-trunks", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      const validated = insertSipTrunkConfigSchema.parse(req.body);
-      const config = await storage.createSipTrunkConfig(validated);
-      res.status(201).json(config);
-    } catch (error) {
-      console.error('[SIP-TRUNK] Error creating SIP trunk:', error);
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Validation failed", errors: error.errors });
-      } res.status(500).json({ message: "Failed to create SIP trunk configuration", error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-  });
-
-  // Update SIP trunk config
-  app.patch("/api/sip-trunks/:id", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      const config = await storage.updateSipTrunkConfig(req.params.id, req.body);
-      if (!config) {
-        return res.status(404).json({ message: "SIP trunk configuration not found" });
-      }
-      res.json(config);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update SIP trunk configuration" });
-    }
-  });
-
-  // Delete SIP trunk config
-  app.delete("/api/sip-trunks/:id", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      await storage.deleteSipTrunkConfig(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete SIP trunk configuration" });
-    }
-  });
-
-  // Set default SIP trunk
-  app.post("/api/sip-trunks/:id/set-default", requireAuth, requireRole('admin'), async (req, res) => {
-    try {
-      await storage.setDefaultSipTrunk(req.params.id);
-      res.json({ message: "Default SIP trunk updated successfully" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to set default SIP trunk" });
     }
   });
 
@@ -12368,7 +12260,14 @@ Provide JSON response with:
 
   // ==================== AI VOICE AGENT CALLS ====================
 
+  // Telnyx TeXML webhooks (AI voice streaming)
+  app.use("/api/texml", texmlRouter);
+
   app.use("/api/ai-calls", aiCallsRouter);
+
+  // ==================== AGENT CALL CONTROL (Browser-based calling) ====================
+  // Provides endpoints for agent console to make/hangup calls via Telnyx Call Control API
+  app.use("/api/calls", agentCallControlRouter);
 
   // ==================== CAMPAIGN TEST CALLS (AI Agent Testing) ====================
 
