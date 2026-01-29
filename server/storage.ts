@@ -2495,8 +2495,14 @@ export class DatabaseStorage implements IStorage {
 
       // Auto-create Lead for qualified dispositions
       // CRITICAL FIX: Never create leads for voicemail dispositions
+      console.log('[LEAD CREATION] Checking disposition for lead creation:', {
+        disposition: call.disposition,
+        contactId: call.contactId,
+        shouldCreateLead: call.disposition === 'qualified' && !!call.contactId,
+      });
+
       if (call.disposition === 'qualified' && call.contactId && call.disposition !== 'voicemail') {
-        console.log('[LEAD CREATION] Qualified disposition detected for contact:', call.contactId);
+        console.log('[LEAD CREATION] ✅ Qualified disposition detected - creating lead for contact:', call.contactId);
 
         // Get contact info
         const contact = await this.getContact(call.contactId);

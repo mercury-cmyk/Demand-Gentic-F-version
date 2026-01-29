@@ -173,14 +173,10 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
 
     // Determine provider FIRST (needed for WebSocket path)
     // Determine provider - default to Google Gemini Live (same as production campaigns)
-    const defaultProvider = env.VOICE_PROVIDER?.toLowerCase() || 'google';
-    const isGoogleDefault = !defaultProvider.includes('openai');
-    const effectiveProvider = validatedData.voiceProvider || (isGoogleDefault ? 'google' : 'openai');
+    const effectiveProvider = 'openai';
 
-    // Build WebSocket URL for the appropriate dialer
-    // CRITICAL: Use /gemini-live-dialer for Google, /voice-dialer for OpenAI
-    // This ensures test calls use the SAME workflow as actual campaign calls
-    const dialerPath = effectiveProvider === 'google' ? '/gemini-live-dialer' : '/voice-dialer';
+    // Build WebSocket URL for the OpenAI dialer
+    const dialerPath = '/voice-dialer';
 
     let wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] ||
                    process.env.REPLIT_DEV_DOMAIN ||
@@ -228,8 +224,8 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
 
     // Map provider selection to internal format
     // client_state uses openai_realtime for legacy compatibility, session store uses openai
-    const providerForClientState = effectiveProvider === 'google' ? 'google' : 'openai_realtime';
-    const providerForSession = effectiveProvider === 'google' ? 'google' : 'openai';
+    const providerForClientState = 'openai_realtime';
+    const providerForSession = 'openai';
     console.log(`[Campaign Test Call] Using voice provider: ${effectiveProvider} (voice: ${voice})`);
 
     const customParams = {
@@ -743,44 +739,41 @@ router.patch("/:campaignId/test-calls/:testCallId", requireAuth, requireRole("ad
 
 /**
  * POST /api/campaign-test-calls/webhook
- * Webhook handler for test call events from Telnyx
+ * DEPRECATED: This webhook endpoint is kept for backwards compatibility.
+ * All Telnyx webhooks should use /api/webhooks/telnyx instead.
+ * The main webhook handler now processes test call events automatically.
  */
 router.post("/webhook", async (req, res) => {
   try {
     // Always respond immediately
     res.status(200).send("OK");
 
+    console.log(`[Test Call Webhook] ⚠️ DEPRECATED: Received event on /api/campaign-test-calls/webhook - should use /api/webhooks/telnyx`);
+
     const event = req.body;
     const eventData = event.data || event;
     const eventType = eventData.event_type || (event as any).event_type;
     const payload = eventData.payload || eventData;
-
-    // Log the full incoming payload for traceability
-    console.log(`[Test Call Webhook] Raw event payload:`, JSON.stringify(event, null, 2));
-    console.log(`[Test Call Webhook] EventType: ${eventType}`);
-    if (payload) {
-      console.log(`[Test Call Webhook] Payload:`, JSON.stringify(payload, null, 2));
-    }
 
     // Decode client_state to get test call ID
     let clientState: any = null;
     if (payload?.client_state) {
       try {
         clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
-        console.log(`[Test Call Webhook] Decoded client_state:`, clientState);
       } catch (e) {
-        console.log(`[Test Call Webhook] Could not decode client_state`);
+        // Ignore decode errors
       }
     }
 
     if (!clientState?.is_test_call || !clientState?.test_call_id) {
-      // Not a test call or missing test call ID - skip
-      console.log(`[Test Call Webhook] Not a test call or missing test_call_id. Skipping.`);
+      console.log(`[Test Call Webhook] Not a test call. Skipping.`);
       return;
     }
 
     const testCallId = clientState.test_call_id;
+    console.log(`[Test Call Webhook] Processing legacy webhook for test call ${testCallId}`);
 
+    // Handle the event (same logic as main webhook)
     switch (eventType) {
       case 'call.initiated':
         console.log(`[Test Call Webhook] Test call ${testCallId} initiated`);

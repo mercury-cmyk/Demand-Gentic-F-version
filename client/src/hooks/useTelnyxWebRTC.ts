@@ -124,6 +124,18 @@ export function useSIPWebRTC({
       audioElement.srcObject = remoteStream;
       audioElement.volume = 1.0;
       audioElement.muted = false;
+
+      // Apply selected speaker device if available
+      if (selectedSpeakerId && audioElement.setSinkId) {
+        audioElement.setSinkId(selectedSpeakerId)
+          .then(() => {
+            console.log('[AUDIO] ✅ Speaker device set to:', selectedSpeakerId);
+          })
+          .catch((err) => {
+            console.warn('[AUDIO] Could not set speaker device:', err);
+            // Fall back to default speaker
+          });
+      }
       
       // Try to play
       const playPromise = audioElement.play();
@@ -148,7 +160,7 @@ export function useSIPWebRTC({
       console.error('[AUDIO] Error attaching remote stream:', error);
       return false;
     }
-  }, [toast]);
+  }, [toast, selectedSpeakerId]);
 
   /**
    * Monitor audio and attempt recovery if stream is missing
@@ -158,18 +170,25 @@ export function useSIPWebRTC({
     if (audioMonitorRef.current) {
       clearInterval(audioMonitorRef.current);
     }
-    
+
     let noAudioCount = 0;
-    const maxRetries = 3;
-    
+    const maxRetries = 10; // Increased from 3 to 10 for better recovery
+
     audioMonitorRef.current = setInterval(() => {
       const audioElement = document.getElementById('remoteAudio') as HTMLAudioElement;
-      
+
       if (!audioElement || !audioElement.srcObject) {
         noAudioCount++;
+        console.log(`[AUDIO-MONITOR] No audio element or srcObject (attempt ${noAudioCount}/${maxRetries})`);
         if (noAudioCount <= maxRetries) {
           console.log('[AUDIO-MONITOR] Re-attaching stream...');
-          attachRemoteStream(call);
+          const attached = attachRemoteStream(call);
+          if (attached) {
+            console.log('[AUDIO-MONITOR] ✅ Stream re-attached successfully');
+            noAudioCount = 0;
+          }
+        } else {
+          console.error('[AUDIO-MONITOR] ❌ Audio recovery failed after', maxRetries, 'attempts');
         }
         return;
       }
@@ -177,16 +196,24 @@ export function useSIPWebRTC({
       // Check if audio tracks are active
       const stream = audioElement.srcObject as MediaStream;
       const audioTracks = stream.getAudioTracks();
-      
+
       if (audioTracks.length === 0 || !audioTracks[0].enabled) {
         noAudioCount++;
+        console.log(`[AUDIO-MONITOR] Audio tracks missing or disabled (attempt ${noAudioCount}/${maxRetries})`);
         if (noAudioCount <= maxRetries) {
-          attachRemoteStream(call);
+          const attached = attachRemoteStream(call);
+          if (attached) {
+            console.log('[AUDIO-MONITOR] ✅ Stream re-attached successfully');
+            noAudioCount = 0;
+          }
         }
       } else {
+        if (noAudioCount > 0) {
+          console.log('[AUDIO-MONITOR] ✅ Audio is now working');
+        }
         noAudioCount = 0;
       }
-    }, 5000);
+    }, 3000); // Check every 3 seconds instead of 5 for faster recovery
   }, [attachRemoteStream]);
 
   /**
@@ -343,27 +370,37 @@ export function useSIPWebRTC({
           if (call.state === 'active') {
             console.log('[AUDIO] Call active - attempting to attach remote stream');
             streamAttachRetryRef.current = 0;
-            
+
             // Try to attach immediately
             const attached = attachRemoteStream(call);
-            
+
             if (!attached) {
               // Retry with delays if initial attach fails
+              // Increased retry count from 5 to 10 for better reliability on slow connections
+              const maxRetries = 10;
               const retryAttach = () => {
-                if (streamAttachRetryRef.current < 5) {
+                if (streamAttachRetryRef.current < maxRetries) {
                   streamAttachRetryRef.current++;
-                  console.log(`[AUDIO] Retry attach attempt ${streamAttachRetryRef.current}`);
+                  console.log(`[AUDIO] Retry attach attempt ${streamAttachRetryRef.current}/${maxRetries}`);
                   const success = attachRemoteStream(call);
                   if (!success) {
-                    setTimeout(retryAttach, 500);
+                    // Increase delay progressively: 500ms, 700ms, 900ms, etc.
+                    const delay = 500 + (streamAttachRetryRef.current * 200);
+                    setTimeout(retryAttach, delay);
                   } else {
+                    console.log('[AUDIO] ✅ Remote audio stream attached successfully');
                     // Start monitoring once attached
                     startAudioMonitor(call);
                   }
+                } else {
+                  console.error('[AUDIO] ❌ Failed to attach remote audio stream after', maxRetries, 'attempts - call may be silent!');
+                  // Still start the monitor to keep trying
+                  startAudioMonitor(call);
                 }
               };
               setTimeout(retryAttach, 300);
             } else {
+              console.log('[AUDIO] ✅ Remote audio stream attached on first attempt');
               startAudioMonitor(call);
             }
           }

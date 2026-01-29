@@ -234,6 +234,12 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
       return res.status(400).json({ message: "Contact has no phone number" });
     }
 
+      // Build agent name with proper fallback chain (avoid placeholder values)
+      const resolvedAgentName = aiSettings.persona?.name 
+        || (aiSettings as any).agentName 
+        || campaign.name 
+        || "Sarah Mitchell";
+
       const context: CallContext = {
         contactFirstName: contact.firstName || "there",
         contactLastName: contact.lastName || "",
@@ -243,7 +249,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         phoneNumber,
         campaignId,
         queueItemId,
-        agentFullName: aiSettings.persona?.name || "your representative",
+        agentFullName: resolvedAgentName,
       };
 
     const bridge = getTelnyxAiBridge();
@@ -548,6 +554,12 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
         const contact = contactId ? await storage.getContact(contactId) : null;
         const account = contact?.accountId ? await storage.getAccount(contact.accountId) : null;
 
+          // Build agent name with proper fallback chain (avoid placeholder values)
+          const resolvedAgentName = aiSettings.persona?.name 
+            || (aiSettings as any).agentName 
+            || campaign.name 
+            || "Sarah Mitchell";
+
           const context: CallContext = {
             contactFirstName: item.firstName || contact?.firstName || "there",
             contactLastName: item.lastName || contact?.lastName || "",
@@ -558,7 +570,7 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
             campaignId,
             contactId: contactId || undefined,
             queueItemId: item.id,
-            agentFullName: aiSettings.persona?.name || "your representative",
+            agentFullName: resolvedAgentName,
             virtualAgentId: (item as any).virtualAgentId || undefined,
           };
 
@@ -666,45 +678,25 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
   }
 });
 
+/**
+ * DEPRECATED: This webhook endpoint is kept for backwards compatibility.
+ * All Telnyx webhooks should use /api/webhooks/telnyx instead.
+ * This endpoint now forwards to the main webhook handler.
+ */
 router.post("/webhook", async (req, res) => {
   try {
     // Always respond immediately to Telnyx
     res.status(200).send("OK");
 
+    console.log(`[AI Webhook] ⚠️ DEPRECATED: Received event on /api/ai-calls/webhook - should use /api/webhooks/telnyx`);
+
     const event = req.body as TelnyxCallEvent;
-    
-    // DEBUG: Log the complete webhook payload to understand structure
-    console.log(`[AI Webhook] COMPLETE PAYLOAD:`, JSON.stringify(req.body, null, 2).substring(0, 500));
-    
-    // Extract event data - handle different Telnyx payload formats
     const eventData: any = event.data || event;
     const eventType = eventData.event_type || event.event_type;
-    const payload = eventData.payload || eventData;
-    
-    console.log(`[AI Webhook] Received event: ${eventType}`, JSON.stringify({
-      call_control_id: payload?.call_control_id,
-      state: payload?.state,
-      direction: payload?.direction,
-    }));
-    
-    // Check if this is an OpenAI Realtime call by looking at client_state
-    let clientState: any = null;
-    if (payload?.client_state) {
-      try {
-        clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
-      } catch (e) {
-        // Not base64 encoded or invalid JSON
-      }
-    }
-    
-    // TeXML calls handle streaming automatically via <Stream bidirectionalMode="rtp" />
-    // No need to call streaming_start - just log the event for debugging
-    if (clientState?.provider === 'openai_realtime' && eventType === 'call.answered') {
-      console.log(`[AI Webhook] OpenAI Realtime TeXML call answered: ${payload?.call_control_id}`);
-      console.log(`[AI Webhook] Streaming handled automatically by TeXML <Stream> verb`);
-      return; // TeXML handles everything, don't pass to bridge
-    }
 
+    console.log(`[AI Webhook] Forwarding event to main handler: ${eventType}`);
+
+    // Forward to the main AI bridge handler
     const bridge = getTelnyxAiBridge();
     await bridge.handleWebhookEvent(event);
   } catch (error) {
@@ -1270,7 +1262,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     let normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
     if (!normalizedPhone.startsWith('+')) normalizedPhone = '+' + normalizedPhone.replace(/^0+/, '');
 
-    const wsUrl = getPublicWsUrl(req, '/gemini-live-dialer');
+    const wsUrl = getPublicWsUrl(req, '/voice-dialer');
     const callId = `gemini-test-${Date.now()}`;
     
     // Include contact context for proper placeholder substitution
@@ -1282,7 +1274,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       system_prompt: systemPrompt,
       voice, // Dynamic voice selection for automatic synchronization
       agent_settings: settingsOverride,
-      provider: 'gemini_live',
+      provider: 'openai_realtime',
       // Contact context for DemandGentic.ai By Pivotal B2B identity
       contact_name: contactName,
       contact_first_name: contactFirstName,

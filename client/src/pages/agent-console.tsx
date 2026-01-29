@@ -53,7 +53,6 @@ import { LeadVerificationModal } from "@/components/lead-verification-modal";
 import { AudioDeviceSettings } from "@/components/audio-device-settings";
 import { useCallControl } from "@/hooks/useCallControl";
 import { useSIPWebRTC } from "@/hooks/useTelnyxWebRTC";
-import { useSIPWebSocket } from "@/hooks/useSIPWebSocket";
 
 // Call state type for Call Control API calls
 type CallState = 'idle' | 'calling_agent' | 'agent_connected' | 'calling_prospect' | 'connecting' | 'ringing' | 'active' | 'held' | 'hangup';
@@ -429,7 +428,7 @@ export default function AgentConsolePage() {
     callDuration,
     isMuted,
     callControlId,
-    formatDuration,
+    formatDuration: formatCallControlDuration,
     makeCall: apiMakeCall,
     hangup: apiHangup,
     toggleMute,
@@ -508,42 +507,50 @@ export default function AgentConsolePage() {
     }
   }, [sipTrunkConfig, sipLoading, sipError, sipWarned, toast]);
 
-  // SIP WebSocket connection for browser-based audio via native SIP
+  const sipUri = useMemo(() => {
+    if (!sipTrunkConfig?.sipUsername || !sipTrunkConfig?.sipDomain) return undefined;
+    return `sip:${sipTrunkConfig.sipUsername}@${sipTrunkConfig.sipDomain}`;
+  }, [sipTrunkConfig?.sipUsername, sipTrunkConfig?.sipDomain]);
+
+  // Telnyx WebRTC connection for browser-based audio
   const {
-    isConnected: sipConnected,
-    callState: sipCallState,
-    callDuration: sipCallDuration,
-    makeCall: sipMakeCall,
-    hangup: sipHangup,
-    toggleMute: sipToggleMute,
-    toggleHold: sipToggleHold,
-    isMuted: sipIsMuted,
-    lastError: sipWebSocketError,
-  } = useSIPWebSocket({
+    isConnected: webrtcConnected,
+    callState: webrtcCallState,
+    callDuration: webrtcCallDuration,
+    makeCall: webrtcMakeCall,
+    hangup: webrtcHangup,
+    toggleMute: webrtcToggleMute,
+    toggleHold: webrtcToggleHold,
+    isMuted: webrtcIsMuted,
+    lastError: webrtcError,
+    setAudioDevices,
+    formatDuration: formatWebRTCDuration,
+  } = useSIPWebRTC({
+    sipUri,
+    sipPassword: sipTrunkConfig?.sipPassword,
     onCallStateChange: (state) => {
-      console.log('[AGENT CONSOLE] SIP call state changed to:', state);
+      console.log('[AGENT CONSOLE] WebRTC call state changed to:', state);
     },
     onCallEnd: () => {
-      console.log('[AGENT CONSOLE] SIP call ended');
+      console.log('[AGENT CONSOLE] WebRTC call ended');
     },
   });
 
-  // Log SIP connection status
+  // Log WebRTC connection status
   useEffect(() => {
-    console.log('[AGENT CONSOLE] SIP WebSocket status:', {
-      sipConnected,
-      sipCallState,
-      sipWebSocketError,
+    console.log('[AGENT CONSOLE] WebRTC status:', {
+      webrtcConnected,
+      webrtcCallState,
+      webrtcError,
     });
-  }, [sipConnected, sipCallState, sipWebSocketError]);
+  }, [webrtcConnected, webrtcCallState, webrtcError]);
 
-  // Sync SIP call status with component callStatus
-  // When using SIP for calls, update the component's callStatus state
+  // Sync WebRTC call status with component callStatus
   useEffect(() => {
-    if (sipConnected && sipCallState) {
-      console.log('[AGENT CONSOLE] Syncing SIP status to callStatus:', sipCallState);
-      // Map SIP statuses to our CallStatus type
-      switch (sipCallState) {
+    if (webrtcConnected && webrtcCallState) {
+      console.log('[AGENT CONSOLE] Syncing WebRTC status to callStatus:', webrtcCallState);
+      // Map WebRTC statuses to our CallStatus type
+      switch (webrtcCallState) {
         case 'connecting':
         case 'ringing':
           setCallStatus('connecting');
@@ -563,6 +570,14 @@ export default function AgentConsolePage() {
       }
     }
   }, [webrtcConnected, webrtcCallState]);
+
+  const activeCallDuration = webrtcConnected ? webrtcCallDuration : callDuration;
+  const formatActiveDuration = () => {
+    if (webrtcConnected) {
+      return formatWebRTCDuration();
+    }
+    return formatCallControlDuration();
+  };
 
   // Additional UI state
   const [isHeld, setIsHeld] = useState(false);
@@ -591,20 +606,29 @@ export default function AgentConsolePage() {
     console.log('[AGENT CONSOLE] makeCall invoked:', {
       phoneNumber,
       isConnected,
-      sipConnected,
+      webrtcConnected,
       options,
     });
 
     // Set connecting status immediately so UI shows hang up button
     setCallStatus('connecting');
 
-    if (sipConnected && sipMakeCall) {
-      // Use SIP WebSocket for browser-based audio
-      console.log('[AGENT CONSOLE] Making SIP call to:', phoneNumber);
-      sipMakeCall(phoneNumber);
+    if (webrtcConnected && webrtcMakeCall) {
+      // Use Telnyx WebRTC for browser-based audio
+      console.log('[AGENT CONSOLE] Making WebRTC call to:', phoneNumber);
+      webrtcMakeCall(phoneNumber);
     } else {
-      // Fallback to Call Control API with direct mode
-      console.log('[AGENT CONSOLE] SIP not connected - using Call Control API (direct mode) to:', phoneNumber);
+      // WebRTC not connected - warn user about potential audio issues
+      console.warn('[AGENT CONSOLE] ⚠️ WebRTC not connected - calls may have no audio!');
+      toast({
+        variant: "destructive",
+        title: "Audio Connection Issue",
+        description: "WebRTC is not connected. You may not hear the call. Try refreshing the page or check your network.",
+        duration: 8000,
+      });
+
+      // Still attempt the call via Call Control API
+      console.log('[AGENT CONSOLE] Attempting call via Call Control API (direct mode) to:', phoneNumber);
       await apiMakeCall(phoneNumber, {
         campaignId: options?.campaignId || selectedCampaignId,
         contactId: options?.contactId,
@@ -617,8 +641,8 @@ export default function AgentConsolePage() {
   // Hangup call - uses SIP WebSocket when active, falls back to Call Control API
   const hangup = async () => {
     console.log('[AGENT CONSOLE] Hanging up call', {
-      sipConnected,
-      sipCallState,
+      webrtcConnected,
+      webrtcCallState,
       callControlId,
       callState,
     });
@@ -627,9 +651,9 @@ export default function AgentConsolePage() {
     const hasActiveCallControlCall = callControlId && callState !== 'idle' && callState !== 'hangup';
 
     // Use SIP hangup only if SIP is active AND we don't have a Call Control call
-    if (sipConnected && sipHangup && sipCallState !== 'idle' && !hasActiveCallControlCall) {
-      console.log('[AGENT CONSOLE] Using SIP hangup');
-      sipHangup();
+    if (webrtcConnected && webrtcHangup && webrtcCallState !== 'idle' && !hasActiveCallControlCall) {
+      console.log('[AGENT CONSOLE] Using WebRTC hangup');
+      webrtcHangup();
     } else if (hasActiveCallControlCall) {
       // Use Call Control API hangup when we have an active call control ID
       console.log('[AGENT CONSOLE] Using Call Control API hangup for:', callControlId);
@@ -637,8 +661,8 @@ export default function AgentConsolePage() {
     } else {
       // Fallback - try both just in case
       console.log('[AGENT CONSOLE] Fallback hangup - trying both methods');
-      if (sipHangup && sipCallState !== 'idle') {
-        sipHangup();
+      if (webrtcHangup && webrtcCallState !== 'idle') {
+        webrtcHangup();
       }
       await apiHangup();
     }
@@ -1359,7 +1383,7 @@ export default function AgentConsolePage() {
       campaignId: currentQueueItem.campaignId,
       contactId: switchedContact?.id || currentQueueItem.contactId, // Use switched contact if present
       disposition,
-      duration: callDuration,
+      duration: activeCallDuration,
       notes,
       qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
       callbackRequested: disposition === 'callback-requested',
@@ -1401,7 +1425,7 @@ export default function AgentConsolePage() {
       case 'ringing':
         return <Badge variant="outline" className="bg-white/10 text-white border-white/20" data-testid="badge-call-ringing">Ringing...</Badge>;
       case 'active':
-        return <Badge className="bg-gradient-to-r from-blue-500 to-cyan-600 text-white border-0 shadow-lg" data-testid="badge-call-active">Active - {formatDuration()}</Badge>;
+        return <Badge className="bg-gradient-to-r from-blue-500 to-cyan-600 text-white border-0 shadow-lg" data-testid="badge-call-active">Active - {formatActiveDuration()}</Badge>;
       case 'held':
         return <Badge variant="outline" className="bg-white/10 text-white border-white/20" data-testid="badge-call-held">On Hold</Badge>;
       case 'wrap-up':
@@ -1552,7 +1576,7 @@ export default function AgentConsolePage() {
             {callStatus === 'active' && (
               <div className="flex items-center gap-1 text-white">
                 <Clock className="h-3 w-3" />
-                <span className="font-mono text-[10px]" data-testid="text-call-duration">{formatDuration()}</span>
+                <span className="font-mono text-[10px]" data-testid="text-call-duration">{formatActiveDuration()}</span>
               </div>
             )}
 
@@ -1593,7 +1617,7 @@ export default function AgentConsolePage() {
               </p>
             </div>
 
-            {campaignDetails && dialMode === 'manual' && selectedCampaignId && (
+            {campaignDetails && (dialMode === 'manual' || dialMode === 'ai_agent') && selectedCampaignId && (
               <>
                 <Separator orientation="vertical" className="h-8 bg-white/20" />
                 <QueueControls 
@@ -1654,7 +1678,7 @@ export default function AgentConsolePage() {
             {callStatus === 'active' && (
               <div className="flex items-center gap-2 text-white">
                 <Clock className="h-4 w-4" />
-                <span className="font-mono text-sm" data-testid="text-call-duration">{formatDuration()}</span>
+                <span className="font-mono text-sm" data-testid="text-call-duration">{formatActiveDuration()}</span>
               </div>
             )}
 
@@ -2470,9 +2494,9 @@ export default function AgentConsolePage() {
                       </Button>
                     )}
 
-                    {callDuration > 0 && (
+                    {activeCallDuration > 0 && (
                       <div className="text-sm text-muted-foreground">
-                        Call duration: {Math.floor(callDuration / 60)}:{(callDuration % 60).toString().padStart(2, '0')}
+                        Call duration: {Math.floor(activeCallDuration / 60)}:{(activeCallDuration % 60).toString().padStart(2, '0')}
                       </div>
                     )}
                   </CardContent>
@@ -2514,7 +2538,7 @@ export default function AgentConsolePage() {
               campaignId: currentQueueItem.campaignId,
               contactId: switchedContact?.id || currentQueueItem.contactId,
               disposition,
-              duration: callDuration,
+              duration: activeCallDuration,
               notes,
               qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
               callbackRequested: false,
@@ -2582,7 +2606,8 @@ export default function AgentConsolePage() {
         onOpenChange={setShowAudioSettings}
         onDevicesSelected={(micId, speakerId) => {
           console.log('[AUDIO SETTINGS] Devices selected:', { micId, speakerId });
-          // Devices are automatically saved to localStorage by AudioDeviceSettings component
+          // Apply to the active WebRTC session and persist via the component
+          setAudioDevices?.(micId, speakerId);
         }}
       />
     </div>
