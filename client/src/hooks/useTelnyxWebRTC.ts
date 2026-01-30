@@ -277,15 +277,15 @@ export function useSIPWebRTC({
 
       console.log('TelnyxRTC instance created, connecting...');
 
-      // Set connection timeout (30 seconds)
+      // Set connection timeout (60 seconds) - increased from 30s for better reliability
       connectionTimeout = setTimeout(() => {
         console.error('=== TELNYX CONNECTION TIMEOUT ===');
-        console.error('Connection failed to establish within 30 seconds');
+        console.error('Connection failed to establish within 60 seconds');
         setIsConnected(false);
         toast({
           variant: "destructive",
           title: "Connection Timeout",
-          description: "Unable to connect to calling service. Check your network connection.",
+          description: "Unable to connect to calling service. Falling back to Call Control API mode.",
           duration: 10000,
         });
 
@@ -296,7 +296,7 @@ export function useSIPWebRTC({
             console.error('Error disconnecting after timeout:', e);
           }
         }
-      }, 30000);
+      }, 60000);
 
       // Event listeners
       telnyxClient.on('telnyx.ready', () => {

@@ -26,6 +26,7 @@ import {
   getBusinessHoursForCountry
 } from '../utils/business-hours';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
+import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
 const DEFAULT_MAX_CONCURRENT_CALLS = 20; // Max 20 concurrent calls
@@ -989,8 +990,9 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
 
   // Initiate calls in parallel batches
   // Use SIP dialer if enabled AND initialized, otherwise fall back to Telnyx API bridge
-  const useSip = sipDialer.isReady();
-  const bridge = useSip ? null : getTelnyxAiBridge();
+  // FORCE_DISABLE_SIP: User requested complete removal of SIP from AI calls
+  const useSip = false; // sipDialer.isReady();
+  const bridge = getTelnyxAiBridge();
 
   if (useSip) {
     console.log(`[AI Orchestrator] Using SIP-based calling for campaign ${campaignId}`);
@@ -1048,7 +1050,24 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
     const batchPromises = batch.map(async (item) => {
       try {
         // Use resolved phone from compliance check
-        const phoneNumber = item._resolvedPhone || item.dialedNumber || item.phone || item.phoneNumber;
+        const rawPhoneNumber = item._resolvedPhone || item.dialedNumber || item.phone || item.phoneNumber || "";
+        let phoneNumber = rawPhoneNumber ? normalizeToE164(rawPhoneNumber) : "";
+        if (!phoneNumber || !isValidE164(phoneNumber)) {
+          console.warn(`[AI Orchestrator] Invalid phone number for queue item ${item.id}: raw="${rawPhoneNumber}" normalized="${phoneNumber}"`);
+          try {
+            await db.execute(sql`
+              UPDATE campaign_queue
+              SET status = 'removed',
+                  removed_reason = 'invalid_phone',
+                  enqueued_reason = COALESCE(enqueued_reason, '') || '|invalid_phone',
+                  updated_at = NOW()
+              WHERE id = ${item.id}
+            `);
+          } catch (markError) {
+            console.error(`[AI Orchestrator] Failed to mark item ${item.id} as invalid_phone:`, markError);
+          }
+          return { success: false, itemId: item.id, error: 'invalid_phone' };
+        }
         const contactId = item.contact_id || item.contactId;
 
         // CRITICAL: Skip items without contact_id - they can't be tracked properly
@@ -1056,6 +1075,28 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
           console.warn(`[AI Orchestrator] Skipping queue item ${item.id} - missing contact_id`);
           return { success: false, itemId: item.id, error: 'missing_contact_id' };
         }
+
+        // Validate/normalize phone number before proceeding (avoid Telnyx 422 loops)
+        const normalizedPhone = normalizeToE164(String(phoneNumber || ''));
+        if (!isValidE164(normalizedPhone)) {
+          console.warn(`[AI Orchestrator] Removing queue item ${item.id} due to invalid phone: ${phoneNumber} -> ${normalizedPhone}`);
+          try {
+            await db.execute(sql`
+              UPDATE campaign_queue
+              SET status = 'removed',
+                  removed_reason = 'invalid_phone',
+                  enqueued_reason = COALESCE(enqueued_reason, '') || '|invalid_phone:' || ${String(phoneNumber || '').substring(0, 32)},
+                  updated_at = NOW()
+              WHERE id = ${item.id}
+            `);
+          } catch (updateError) {
+            console.error(`[AI Orchestrator] Failed to mark queue item ${item.id} invalid:`, updateError);
+          }
+          return { success: false, itemId: item.id, error: 'invalid_phone' };
+        }
+
+        // Use normalized phone going forward
+        phoneNumber = normalizedPhone;
 
         // Contact data comes from the SQL query (snake_case)
         // Use virtual agent name if available, fall back to aiSettings persona

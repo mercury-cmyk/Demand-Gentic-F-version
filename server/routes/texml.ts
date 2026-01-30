@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { storePendingCallState } from "../services/pending-call-state";
 
 const router = Router();
 
@@ -9,6 +10,9 @@ const router = Router();
  * Supports both GET and POST for flexibility with different TeXML invocation methods:
  * - GET: Used when Telnyx fetches instructions from URL directly
  * - POST: Used when Telnyx sends form-encoded data with call details
+ * 
+ * IMPORTANT: We store the full client_state in memory and only pass call_id in the URL
+ * to avoid URL length limits that can cause ngrok/proxy WebSocket upgrade failures.
  */
 const aiCallHandler = (req: any, res: any) => {
   console.log("[TeXML] Received request:", req.method, req.body, req.query);
@@ -24,57 +28,83 @@ const aiCallHandler = (req: any, res: any) => {
 
   console.log("[TeXML] Client state from query:", req.query.client_state ? "present" : "missing");
 
-  // CRITICAL: Determine dialer path based on provider in client_state
-  // This ensures test calls use the SAME workflow as actual campaign calls
-  let dialerPath = '/gemini-live-dialer'; // Default to Gemini Live (same as production)
+  // Determine if we have custom parameters passed from the initiation
+  // These might be in ClientState (base64) or directly in the body if we added them to the URL
+  const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] ||
+               req.get('host') ||
+               'localhost:8080';
+
+  // CRITICAL FIX: Store full client_state in memory and only pass call_id in URL
+  // This avoids URL length limits (~3KB base64 client_state was breaking ngrok WebSocket upgrades)
+  // Also determine the correct dialer path based on provider
+  let dialerPath = '/voice-dialer'; // Default to OpenAI
+  let finalWsUrl = '';
+  let actualCallId: string | null = null;
 
   if (clientState) {
     try {
-      const config = JSON.parse(Buffer.from(clientState, 'base64').toString('utf-8'));
-      const provider = config.provider || 'google';
+      // Decode base64 client_state to extract call_id, provider, and store full context
+      const decoded = Buffer.from(clientState, 'base64').toString('utf-8');
+      const contextData = JSON.parse(decoded);
+      actualCallId = contextData.call_id;
 
-      // Route to correct dialer based on provider
-      // OpenAI variants go to /voice-dialer, Google/Gemini variants go to /gemini-live-dialer
-      if (provider === 'openai_realtime' || provider === 'openai') {
-        dialerPath = '/voice-dialer';
-      } else if (provider === 'google' || provider === 'gemini_live' || provider === 'gemini') {
+      // CRITICAL: Determine dialer based on provider
+      // 'google', 'gemini', 'gemini_live' → /gemini-live-dialer
+      // 'openai' or 'openai_realtime' → /voice-dialer
+      const provider = contextData.provider?.toLowerCase() || '';
+      
+      // RESTORE LEGACY ROUTING: Force all TeXML calls to use /voice-dialer
+      // The /gemini-live-dialer endpoint is for SIP enforcement which isn't delivering audio logs
+      // voice-dialer.ts supports both OpenAI and Gemini providers
+      dialerPath = '/voice-dialer'; 
+      console.log(`[TeXML] Provider: ${provider || 'default'} → forcing routing to /voice-dialer (legacy mode)`);
+      
+      /* 
+      // Original routing logic - disabled to fix silent calls
+      if (provider.includes('google') || provider.includes('gemini')) {
         dialerPath = '/gemini-live-dialer';
+        console.log(`[TeXML] Provider: ${provider} → routing to /gemini-live-dialer`);
       } else {
-        // Default to Gemini Live for unknown providers (matches production behavior)
-        dialerPath = '/gemini-live-dialer';
+        console.log(`[TeXML] Provider: ${provider || 'default'} → routing to /voice-dialer`);
       }
-      console.log(`[TeXML] Detected provider: ${provider}, using dialer: ${dialerPath}`);
+      */
+
+      // Build WebSocket URL with correct dialer path
+      const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')
+        ? `${host}${dialerPath}`
+        : `wss://${host}${dialerPath}`;
+
+      if (actualCallId) {
+        // Store full context for retrieval when WebSocket connects
+        storePendingCallState(actualCallId, contextData);
+        // Only pass call_id in URL (short, safe for WebSocket upgrade)
+        finalWsUrl = `${wsUrl}?call_id=${encodeURIComponent(actualCallId)}`;
+        console.log(`[TeXML] Stored context for call ${actualCallId}, URL length now: ${finalWsUrl.length}`);
+      } else {
+        // Fallback: no call_id found, use legacy behavior (may fail with long URLs)
+        console.warn("[TeXML] No call_id in client_state, using legacy URL encoding");
+        finalWsUrl = `${wsUrl}?client_state=${encodeURIComponent(clientState)}`;
+      }
     } catch (e) {
-      console.log("[TeXML] Could not parse client_state, defaulting to Gemini Live dialer");
+      console.error("[TeXML] Failed to parse client_state:", e);
+      // Fallback: use legacy behavior with default dialer
+      const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')
+        ? `${host}${dialerPath}`
+        : `wss://${host}${dialerPath}`;
+      finalWsUrl = `${wsUrl}?client_state=${encodeURIComponent(clientState)}`;
     }
+  } else {
+    // No client_state - use default dialer
+    const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')
+      ? `${host}${dialerPath}`
+      : `wss://${host}${dialerPath}`;
+    finalWsUrl = wsUrl;
   }
-
-  const envWsUrl = process.env.PUBLIC_WEBSOCKET_URL;
-  // Remove any existing dialer path from the env URL
-  let host = envWsUrl?.replace(/\/(voice-dialer|gemini-live-dialer).*$/, '');
-
-  // If no env var, try to determine from request properly handling ngrok/proxies
-  if (!host) {
-     const forwardedHost = req.get('x-forwarded-host');
-     const requestHost = req.get('host');
-     host = forwardedHost || requestHost || 'localhost:5000';
-  }
-
-  const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')
-    ? `${host}${dialerPath}`
-    : `wss://${host}${dialerPath}`;
-
-  console.log(`[TeXML] Resolved Host: ${host}`);
-  console.log(`[TeXML] Final WS URL: ${wsUrl}`);
-
-  // We can pass the same parameters we were using before
-  // If we have clientState, we should pass it along to the WebSocket
-  // Note: client_state is already base64 encoded, we only URL-encode it for safe URL transport
-  const finalWsUrl = clientState ? `${wsUrl}?client_state=${encodeURIComponent(clientState)}` : wsUrl;
 
   console.log(`[TeXML] Client state length: ${clientState?.length || 0}`);
   console.log(`[TeXML] Final WS URL length: ${finalWsUrl.length}`);
-  console.log(`[TeXML] Responding with Stream to: ${wsUrl}`);
+  console.log(`[TeXML] Dialer path: ${dialerPath}`);
+  console.log(`[TeXML] Responding with Stream to: ${finalWsUrl.replace(/\?.*$/, '')}`);
 
   // Escape any XML special characters in the URL
   const escapedWsUrl = finalWsUrl.replace(/&/g, '&amp;');
@@ -87,8 +117,6 @@ const aiCallHandler = (req: any, res: any) => {
 
   // Note: Machine detection can still be done via WebSocket stream data if needed,
   // but doesn't block the <Stream> connection from establishing
-  // CRITICAL: Do NOT use track="inbound_track" - it prevents outbound audio playback!
-  // bidirectionalMode="rtp" enables full duplex audio by default
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
@@ -106,32 +134,15 @@ router.post("/ai-call", aiCallHandler);
  */
 router.post("/incoming", (req, res) => {
   console.log("[TeXML] Received incoming call:", req.body);
-  
-  // Resolve WebSocket URL using the same robust logic as ai-call
-  const envWsUrl = process.env.PUBLIC_WEBSOCKET_URL;
-  let host = envWsUrl?.split('/voice-dialer')[0];
-  
-  if (!host) {
-     const forwardedHost = req.get('x-forwarded-host');
-     const requestHost = req.get('host');
-     host = forwardedHost || requestHost || 'localhost:5000';
-  }
-
-  const wsUrl = host.startsWith('wss://') || host.startsWith('ws://') 
-    ? `${host}/voice-dialer`
-    : `wss://${host}/voice-dialer`;
-
-  console.log(`[TeXML] Incoming Call - Stream URL: ${wsUrl}`);
 
   res.set("Content-Type", "application/xml");
   // CRITICAL FIX: Remove AMD blocking from incoming calls too
   // Connect directly to stream without AMD delays
-  // CRITICAL: Do NOT use track="inbound_track" - it prevents outbound audio playback!
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>
-        <Stream url="${wsUrl}" bidirectionalMode="rtp" />
+        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" />
     </Connect>
 </Response>`);
 });

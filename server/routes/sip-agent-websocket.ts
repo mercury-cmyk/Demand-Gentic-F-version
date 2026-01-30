@@ -27,6 +27,10 @@ export function setupSIPAgentWebSocket(server: Server) {
     path: '/api/sip-agent',
   });
 
+  wss.on('error', (err) => {
+    console.error(`[SIP Agent WebSocket] WebSocket server error:`, err);
+  });
+
   wss.on('connection', (ws: WebSocket, req) => {
     const sessionId = uuidv4();
     const agentId = (req.headers['x-agent-id'] as string) || 'unknown';

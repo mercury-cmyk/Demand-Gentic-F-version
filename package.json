@@ -17,9 +17,8 @@
     "test-audio": "tsx test-audio-transmission.ts",
     "check-orchestrator": "tsx check-orchestrator-readiness.ts",
     "start:gemini-relay": "tsx server/gemini-relay.ts",
-    "vector:backfill": "tsx scripts/backfill-vector-documents.ts",
-    "sip:validate": "tsx server/services/sip/sip-init.ts",
-    "sip:stats": "tsx -e \"import {getSIPStats} from './server/services/sip/sip-init.ts'; console.log(getSIPStats())\""
+    "start:livekit-agent": "tsx server/services/livekit/worker.ts dev",
+    "vector:backfill": "tsx scripts/backfill-vector-documents.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
@@ -36,6 +35,9 @@
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
+    "@livekit/agents": "^1.0.39",
+    "@livekit/agents-plugin-google": "^1.0.39",
+    "@livekit/agents-plugin-silero": "^1.0.39",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "@openai/agents": "^0.3.7",
@@ -117,8 +119,7 @@
     "i18n-iso-countries": "^7.14.0",
     "input-otp": "^1.4.2",
     "ioredis": "^5.8.2",
-    "jsonwebtoken": "^9.0.2",
-    "jssip": "^3.11.1",
+    "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.12.24",
     "lucide-react": "^0.453.0",
     "mailgun.js": "^12.6.0",

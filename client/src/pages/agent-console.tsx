@@ -613,29 +613,16 @@ export default function AgentConsolePage() {
     // Set connecting status immediately so UI shows hang up button
     setCallStatus('connecting');
 
-    if (webrtcConnected && webrtcMakeCall) {
-      // Use Telnyx WebRTC for browser-based audio
-      console.log('[AGENT CONSOLE] Making WebRTC call to:', phoneNumber);
-      webrtcMakeCall(phoneNumber);
-    } else {
-      // WebRTC not connected - warn user about potential audio issues
-      console.warn('[AGENT CONSOLE] ⚠️ WebRTC not connected - calls may have no audio!');
-      toast({
-        variant: "destructive",
-        title: "Audio Connection Issue",
-        description: "WebRTC is not connected. You may not hear the call. Try refreshing the page or check your network.",
-        duration: 8000,
-      });
-
-      // Still attempt the call via Call Control API
-      console.log('[AGENT CONSOLE] Attempting call via Call Control API (direct mode) to:', phoneNumber);
-      await apiMakeCall(phoneNumber, {
-        campaignId: options?.campaignId || selectedCampaignId,
-        contactId: options?.contactId,
-        queueItemId: options?.queueItemId,
-        mode: 'direct',
-      });
-    }
+    // BYPASS WebRTC entirely - use Call Control API (Telnyx REST API)
+    // This avoids all WebSocket connection issues, country whitelist errors, and NAT traversal problems
+    // Call Control API has higher reliability and works for all whitelisted countries
+    console.log('[AGENT CONSOLE] Using Call Control API (REST) for call to:', phoneNumber);
+    await apiMakeCall(phoneNumber, {
+      campaignId: options?.campaignId || selectedCampaignId,
+      contactId: options?.contactId,
+      queueItemId: options?.queueItemId,
+      mode: 'direct',
+    });
   };
 
   // Hangup call - uses SIP WebSocket when active, falls back to Call Control API

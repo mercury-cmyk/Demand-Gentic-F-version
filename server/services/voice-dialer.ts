@@ -713,15 +713,35 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           // Decode client_state from Telnyx or URL parameters
           let customParams: any = {};
           
+          // NEW Priority 0: Check if call_id is in URL and retrieve from pending-call-state store
+          // This is the new optimized path that avoids long URLs breaking WebSocket upgrades
+          const urlCallId = url.searchParams.get('call_id');
+          if (urlCallId && !url.searchParams.get('client_state')) {
+            try {
+              const { getPendingCallState } = await import('./pending-call-state');
+              const storedContext = getPendingCallState(urlCallId);
+              if (storedContext) {
+                customParams = storedContext;
+                console.log(`${LOG_PREFIX} ✅ Retrieved call context from pending-call-state for ${urlCallId}`);
+              } else {
+                console.warn(`${LOG_PREFIX} ⚠️ No pending call state found for ${urlCallId}, falling back to other methods`);
+              }
+            } catch (storeErr) {
+              console.error(`${LOG_PREFIX} Failed to retrieve from pending-call-state:`, storeErr);
+            }
+          }
+          
           // Priority 1: Check URL query parameter client_state (for TeXML implementation) - this is where WE put the data
           // Priority 2: Check message.start.client_state (Telnyx sends its own binary format here, not useful)
-          const urlClientState = url.searchParams.get('client_state');
-          const messageClientState = message.start?.client_state;
+          // Only do this if we didn't already get params from pending-call-state
+          if (Object.keys(customParams).length === 0) {
+            const urlClientState = url.searchParams.get('client_state');
+            const messageClientState = message.start?.client_state;
           
-          // Prefer URL client_state since that's where we encode our params
-          const rawClientState = urlClientState || messageClientState;
+            // Prefer URL client_state since that's where we encode our params
+            const rawClientState = urlClientState || messageClientState;
           
-          if (rawClientState) {
+            if (rawClientState) {
             const clientStateOrigin = urlClientState ? 'URL params' : 'Telnyx payload';
             let normalizedClientState = rawClientState;
 
@@ -779,10 +799,11 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               );
               customParams = message.start?.custom_parameters || {};
             }
-          } else {
-            // Fallback to custom_parameters if client_state not provided
-            customParams = message.start?.custom_parameters || {};
-          }
+            } else {
+              // Fallback to custom_parameters if client_state not provided
+              customParams = message.start?.custom_parameters || {};
+            }
+          } // End of if (Object.keys(customParams).length === 0)
           
           sessionId = customParams.call_id || urlParams.call_id || message.stream_id || `call-${Date.now()}`;
           const runId = customParams.run_id || urlParams.run_id;

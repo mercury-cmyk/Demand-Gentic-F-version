@@ -728,7 +728,21 @@ router.post("/call-attempts/:id/disposition", async (req, res) => {
       return res.status(400).json({ error: "Disposition already submitted for this call attempt" });
     }
 
-    // Update call attempt with disposition and notes
+    // CRITICAL FIX: Calculate call duration if missing callStartedAt
+    // This handles Agent Console calls where /start endpoint wasn't called
+    let finalCallDuration = callAttempt.callDurationSeconds;
+    let finalCallStartedAt = callAttempt.callStartedAt;
+    
+    if (!callAttempt.callStartedAt && callAttempt.callEndedAt && callAttempt.createdAt) {
+      // Estimate start time: created time + 2 second connection delay
+      finalCallStartedAt = new Date(callAttempt.createdAt.getTime() + 2000);
+      // Calculate duration in seconds
+      finalCallDuration = Math.floor((callAttempt.callEndedAt.getTime() - finalCallStartedAt.getTime()) / 1000);
+      
+      console.log(`[Disposition] Backfilled missing callStartedAt for ${req.params.id}: duration=${finalCallDuration}s`);
+    }
+
+    // Update call attempt with disposition, notes, and corrected timing
     await db
       .update(dialerCallAttempts)
       .set({
@@ -736,6 +750,8 @@ router.post("/call-attempts/:id/disposition", async (req, res) => {
         dispositionSubmittedAt: new Date(),
         dispositionSubmittedBy: (req as any).user?.id,
         notes: notes || callAttempt.notes,
+        callStartedAt: finalCallStartedAt || callAttempt.callStartedAt,
+        callDurationSeconds: finalCallDuration || callAttempt.callDurationSeconds,
         updatedAt: new Date()
       })
       .where(eq(dialerCallAttempts.id, req.params.id));

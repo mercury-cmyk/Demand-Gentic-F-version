@@ -62,6 +62,7 @@ import orgIntelligenceInjectionRouter from './routes/org-intelligence-injection-
 import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
+import simulationsRouter from './routes/simulations';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -83,7 +84,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, type InsertMailboxAccount } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -6255,12 +6256,129 @@ export function registerRoutes(app: Express) {
 
       const call = await storage.createCallDisposition(callData);
 
-      // ==================== INTELLIGENT DISPOSITION HANDLING ====================
-      // Check for specific dispositions and perform associated actions
-
+      // ==================== PROCESS DISPOSITION THROUGH DISPOSITION ENGINE ====================
+      // This handles all the complex logic: lead creation, queue suppression, DNC, retries, etc.
+      // CRITICAL: This must be called for BOTH AI and manual agents to ensure leads are created
+      
       const disposition = req.body.disposition;
       const contactId = req.body.contactId;
       const campaignId = req.body.campaignId;
+
+      // If we have a call attempt ID or telnyxCallId, use it for disposition processing
+      // Otherwise, we need to find/create one for the disposition engine
+      let callAttemptIdForProcessing = req.body.callAttemptId || call.telnyxCallId || null;
+
+      // Try to find an existing call attempt record to link to
+      if (!callAttemptIdForProcessing && campaignId && contactId) {
+        try {
+          // Find the most recent call attempt for this contact in this campaign
+          const [recentAttempt] = await db
+            .select()
+            .from(dialerCallAttempts)
+            .where(
+              and(
+                eq(dialerCallAttempts.campaignId, campaignId),
+                eq(dialerCallAttempts.contactId, contactId)
+              )
+            )
+            .orderBy(desc(dialerCallAttempts.createdAt))
+            .limit(1);
+
+          if (recentAttempt) {
+            callAttemptIdForProcessing = recentAttempt.id;
+            console.log(`[DISPOSITION] Found existing call attempt: ${callAttemptIdForProcessing}`);
+          }
+        } catch (err) {
+          console.error('[DISPOSITION] Failed to find call attempt:', err);
+        }
+      }
+
+      // CRITICAL: Call processDisposition to handle lead creation, queue management, suppression
+      // This MUST be called for BOTH AI and manual agents for all dispositions, especially qualified
+      let leadCreatedViaEngine = false;
+      if (callAttemptIdForProcessing && disposition) {
+        try {
+          console.log(`[DISPOSITION] Processing disposition through engine: ${disposition} for call attempt ${callAttemptIdForProcessing}`);
+          
+          const { processDisposition: processDispo } = await import('./services/disposition-engine');
+          const dispositionResult = await processDispo(callAttemptIdForProcessing, disposition as any, 'manual_agent_console');
+          
+          if (dispositionResult.leadId) {
+            console.log(`[DISPOSITION] ✅ Lead created: ${dispositionResult.leadId}`);
+            leadCreatedViaEngine = true;
+          }
+          if (dispositionResult.actions.length > 0) {
+            console.log(`[DISPOSITION] Actions taken:`, dispositionResult.actions);
+          }
+          if (dispositionResult.errors.length > 0) {
+            console.error(`[DISPOSITION] Errors:`, dispositionResult.errors);
+          }
+        } catch (err) {
+          console.error('[DISPOSITION] Error processing disposition through engine:', err);
+        }
+      }
+      
+      // FALLBACK: If disposition engine didn't create a lead but we have a qualified disposition,
+      // create the lead directly. This handles manual agent console calls without call attempts.
+      if (!leadCreatedViaEngine && ['qualified', 'lead'].includes(disposition)) {
+        try {
+          console.log(`[DISPOSITION] ⚠️ Disposition engine didn't create lead, attempting direct lead creation...`);
+          
+          // Get contact info
+          const contact = await storage.getContact(contactId);
+          if (!contact) {
+            console.error('[DISPOSITION] Cannot create lead - contact not found');
+          } else {
+            const contactName = contact.fullName || 
+              (contact.firstName && contact.lastName ? `${contact.firstName} ${contact.lastName}` : 
+               contact.firstName || contact.lastName || 'Unknown');
+            
+            // Check if lead already exists for this contact in this campaign
+            const [existingLead] = await db
+              .select({ id: leads.id })
+              .from(leads)
+              .where(
+                and(
+                  eq(leads.campaignId, campaignId),
+                  eq(leads.contactId, contactId)
+                )
+              )
+              .limit(1);
+            
+            if (existingLead) {
+              console.log(`[DISPOSITION] Lead already exists: ${existingLead.id}`);
+            } else {
+              const [newLead] = await db
+                .insert(leads)
+                .values({
+                  campaignId: campaignId,
+                  contactId: contactId,
+                  callAttemptId: callAttemptIdForProcessing || undefined,
+                  contactName: contactName,
+                  contactEmail: contact.email || undefined,
+                  companyName: contact.companyName || undefined,
+                  qaStatus: 'new',
+                  qaDecision: null,
+                  agentId: agentId,
+                  dialedNumber: callData.dialedNumber || null,
+                  recordingUrl: null,
+                  callDuration: callData.duration || 0,
+                })
+                .returning({ id: leads.id });
+              
+              if (newLead) {
+                console.log(`[DISPOSITION] ✅ FALLBACK: Lead created directly: ${newLead.id} for manual agent console call`);
+              }
+            }
+          }
+        } catch (fallbackErr) {
+          console.error('[DISPOSITION] Fallback lead creation failed:', fallbackErr);
+        }
+      }
+
+      // ==================== INTELLIGENT DISPOSITION HANDLING ====================
+      // Legacy suppression and queue management (kept as backup/parallel processing)
+      // Check for specific dispositions and perform associated actions
 
       // Get contact details for suppression actions
       let contact = null;
@@ -12302,6 +12420,10 @@ Provide JSON response with:
   // ==================== DIALER RUNS (Manual/PowerDialer) ====================
 
   app.use("/api/dialer-runs", dialerRunsRouter);
+
+  // ==================== SIMULATIONS (Telephony-Free Testing) ====================
+
+  app.use("/api/simulations", simulationsRouter);
 
   // ==================== QUEUE MANAGEMENT ====================
 

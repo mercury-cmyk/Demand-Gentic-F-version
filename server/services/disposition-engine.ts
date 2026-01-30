@@ -202,20 +202,19 @@ async function processQualifiedLead(
   rules: CampaignRules,
   result: DispositionResult
 ): Promise<void> {
-  // QUALITY GATE: Enforce minimum call duration for qualified leads
-  // Short calls (<30 seconds) typically indicate:
-  // - Premature qualification by AI
-  // - Quick "yes" responses without real engagement
-  // - False positives from misunderstood responses
-  const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 30;
+  // QUALITY GATE: Flag short calls for review but don't prevent lead creation
+  // All qualified dispositions should create leads regardless of duration.
+  // Short calls are flagged for immediate QA review but still appear as leads.
+  // This allows manual agents to mark ANY call as qualified without duration gates.
+  const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20; // Minimal threshold - mostly just spam filter
   const callDuration = callAttempt.callDurationSeconds || 0;
   
-  if (callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS) {
-    console.warn(`[DispositionEngine] ⚠️ QUALITY GATE: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below minimum threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Downgrading to needs_review.`);
-    result.actions.push(`Quality gate: Call duration ${callDuration}s below ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s minimum - flagged for manual review`);
-    
-    // Still create lead but flag it for immediate QA review with lower priority
-    // This ensures short-duration "qualified" calls don't slip through
+  // Determine if call should be flagged for review based on duration
+  const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
+  
+  if (isShortDurationCall) {
+    console.warn(`[DispositionEngine] ⚠️ SHORT DURATION: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below preferred threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Flagging for QA review.`);
+    result.actions.push(`⚠️ Call duration ${callDuration}s is short - flagged for priority QA review`);
   }
 
   // Update campaign queue state and clear lock
@@ -250,10 +249,6 @@ async function processQualifiedLead(
   const contactName = contact?.fullName || 
     (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
      contact?.firstName || contact?.lastName || 'Unknown');
-
-  // Determine QA status based on call duration quality gate
-  // Short calls get flagged for immediate review with a note
-  const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
   const qaStatus = isShortDurationCall ? 'under_review' : 'new';
   const qaDecision = isShortDurationCall 
     ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). AI marked as qualified but requires manual verification.`

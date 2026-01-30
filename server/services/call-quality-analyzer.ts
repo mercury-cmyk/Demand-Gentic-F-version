@@ -292,26 +292,31 @@ function analyzeTranscript(
 } {
   const lowerTranscript = transcript.toLowerCase();
 
+  // Ensure criteria properties are arrays to prevent null/undefined errors
+  const positiveKeywords = criteria.positiveResponseKeywords || [];
+  const negativeKeywords = criteria.negativeResponseKeywords || [];
+  const objectionKeywords = criteria.objectionKeywords || [];
+
   // Find positive signals
   const positiveSignals: string[] = [];
-  for (const keyword of criteria.positiveResponseKeywords) {
-    if (lowerTranscript.includes(keyword.toLowerCase())) {
+  for (const keyword of positiveKeywords) {
+    if (keyword && lowerTranscript.includes(keyword.toLowerCase())) {
       positiveSignals.push(keyword);
     }
   }
 
   // Find negative signals
   const negativeSignals: string[] = [];
-  for (const keyword of criteria.negativeResponseKeywords) {
-    if (lowerTranscript.includes(keyword.toLowerCase())) {
+  for (const keyword of negativeKeywords) {
+    if (keyword && lowerTranscript.includes(keyword.toLowerCase())) {
       negativeSignals.push(keyword);
     }
   }
 
   // Find objections
   const objections: string[] = [];
-  for (const keyword of criteria.objectionKeywords) {
-    if (lowerTranscript.includes(keyword.toLowerCase())) {
+  for (const keyword of objectionKeywords) {
+    if (keyword && lowerTranscript.includes(keyword.toLowerCase())) {
       objections.push(keyword);
     }
   }
@@ -372,35 +377,37 @@ function identifyBreakdown(
   }
 
   // Unhandled objection
-  for (const objection of criteria.objectionKeywords) {
-    if (lowerTranscript.includes(objection.toLowerCase())) {
-      // Check if there was a response after the objection
-      const objectionIndex = lowerTranscript.indexOf(objection.toLowerCase());
-      const afterObjection = lowerTranscript.substring(objectionIndex + objection.length);
+  const objectionKeywords = criteria.objectionKeywords || [];
+  const positiveKeywords = criteria.positiveResponseKeywords || [];
+  
+  for (const objection of objectionKeywords) {
+    if (!objection) continue;
+    // Check if there was a response after the objection
+    const objectionIndex = lowerTranscript.indexOf(objection.toLowerCase());
+    const afterObjection = lowerTranscript.substring(objectionIndex + objection.length);
 
-      // If call ended shortly after objection without positive recovery
-      const hasPositiveRecovery = criteria.positiveResponseKeywords.some((pos) =>
-        afterObjection.includes(pos.toLowerCase())
-      );
+    // If call ended shortly after objection without positive recovery
+    const hasPositiveRecovery = positiveKeywords.some((pos) =>
+      pos && afterObjection.includes(pos.toLowerCase())
+    );
 
-      if (!hasPositiveRecovery && afterObjection.length < 200) {
-        return {
-          phase: "objection_handling",
-          breakdownType: "objection_unhandled",
-          description: `Objection "${objection}" was not successfully addressed`,
-          atSeconds: Math.round((objectionIndex / lowerTranscript.length) * callDurationSeconds),
-          transcript: transcript.substring(
-            Math.max(0, objectionIndex - 100),
-            Math.min(transcript.length, objectionIndex + 200)
-          ),
-        };
-      }
+    if (!hasPositiveRecovery && afterObjection.length < 200) {
+      return {
+        phase: "objection_handling",
+        breakdownType: "objection_unhandled",
+        description: `Objection "${objection}" was not successfully addressed`,
+        atSeconds: Math.round((objectionIndex / lowerTranscript.length) * callDurationSeconds),
+        transcript: transcript.substring(
+          Math.max(0, objectionIndex - 100),
+          Math.min(transcript.length, objectionIndex + 200)
+        ),
+      };
     }
   }
 
   // No engagement (no positive signals at all)
-  const hasAnyPositive = criteria.positiveResponseKeywords.some((pos) =>
-    lowerTranscript.includes(pos.toLowerCase())
+  const hasAnyPositive = positiveKeywords.some((pos) =>
+    pos && lowerTranscript.includes(pos.toLowerCase())
   );
   if (!hasAnyPositive && callDurationSeconds < 60) {
     return {
@@ -715,13 +722,19 @@ export async function analyzeCall(
 
     // Store analysis result
     if (lead) {
-      await db
-        .update(leads)
-        .set({
-          aiAnalysis: result as unknown as object,
-          updatedAt: new Date(),
-        })
-        .where(eq(leads.id, callId));
+      try {
+        // Ensure result is JSON serializable - remove any undefined or circular references
+        const serializableResult = JSON.parse(JSON.stringify(result));
+        await db
+          .update(leads)
+          .set({
+            aiAnalysis: serializableResult as unknown as object,
+            updatedAt: new Date(),
+          })
+          .where(eq(leads.id, callId));
+      } catch (serializeErr) {
+        console.error(`${LOG_PREFIX} Failed to serialize analysis result for lead ${callId}:`, serializeErr);
+      }
     }
 
     // Log activity
@@ -837,7 +850,9 @@ function checkCriteriaAlignment(
     authority: ["decide", "decision", "approval", "sign off"],
   };
 
-  for (const field of criteria.requiredFields) {
+  const requiredFields = criteria.requiredFields || [];
+  for (const field of requiredFields) {
+    if (!field) continue;
     const keywords = fieldKeywords[field] || [field];
     const foundCount = keywords.filter((k) => lowerTranscript.includes(k.toLowerCase())).length;
 

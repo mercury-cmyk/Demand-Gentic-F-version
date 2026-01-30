@@ -137,6 +137,34 @@ interface BrowserSimulationMessage {
   timestamp: Date;
 }
 
+async function parseJsonResponse<T>(response: Response, context: string): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    const preview = text.replace(/\s+/g, ' ').slice(0, 200);
+    const hint = preview.startsWith('<!DOCTYPE')
+      ? 'Received HTML instead of JSON. Check auth/session or API server routing.'
+      : `Unexpected response: ${preview || response.statusText}`;
+    throw new Error(`${context} returned non-JSON. ${hint}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function parseErrorMessage(response: Response, context: string): Promise<Error> {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await response.json();
+    const message = data?.message || data?.error || response.statusText;
+    return new Error(message || `${context} failed`);
+  }
+  const text = await response.text();
+  const preview = text.replace(/\s+/g, ' ').slice(0, 200);
+  const hint = preview.startsWith('<!DOCTYPE')
+    ? 'Received HTML instead of JSON. Check auth/session or API server routing.'
+    : preview || response.statusText;
+  return new Error(`${context} failed. ${hint}`);
+}
+
 export function LiveSimulationPanel({
   campaignId,
   accountId,
@@ -190,7 +218,7 @@ export function LiveSimulationPanel({
     queryKey: ['/api/voice-providers/voices'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/voice-providers/voices');
-      return res.json();
+      return parseJsonResponse<VoicesByProvider>(res, 'Voice list');
     },
     staleTime: 15 * 60 * 1000, // 15 minutes
   });
@@ -237,7 +265,7 @@ export function LiveSimulationPanel({
         if (contactId) params.set('contactId', contactId);
 
         const response = await apiRequest('GET', `/api/preview-studio/assembled-prompt?${params.toString()}`);
-        const data = await response.json();
+        const data = await parseJsonResponse<any>(response, 'Auto-load prompt');
 
         setCustomSystemPrompt(data.systemPrompt || '');
         setCustomFirstMessage(data.firstMessage || '');
@@ -316,7 +344,7 @@ export function LiveSimulationPanel({
       if (contactId) params.set('contactId', contactId);
 
       const response = await apiRequest('GET', `/api/preview-studio/assembled-prompt?${params.toString()}`);
-      const data = await response.json();
+      const data = await parseJsonResponse<any>(response, 'Load prompt');
 
       setCustomSystemPrompt(data.systemPrompt || '');
       setCustomFirstMessage(data.firstMessage || '');
@@ -409,7 +437,7 @@ export function LiveSimulationPanel({
       }
 
       const response = await apiRequest("POST", "/api/preview-studio/phone-test/start", requestBody);
-      return response.json();
+      return parseJsonResponse<any>(response, 'Start phone test');
     },
     onMutate: () => {
       setCallStatus('initiating');
@@ -490,10 +518,9 @@ export function LiveSimulationPanel({
       
       const res = await apiRequest('POST', '/api/simulations/start', simRequest);
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Simulation failed');
+        throw await parseErrorMessage(res, 'Simulation');
       }
-      return res.json();
+      return parseJsonResponse<any>(res, 'Simulation');
     },
     onMutate: () => {
       setTextSimStatus('running');
@@ -674,11 +701,10 @@ export function LiveSimulationPanel({
 
       if (!res.ok) {
         stream.getTracks().forEach(track => track.stop());
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to start voice simulation');
+        throw await parseErrorMessage(res, 'Voice simulation');
       }
 
-      const data = await res.json();
+      const data = await parseJsonResponse<any>(res, 'Voice simulation');
       
       // Store session
       (window as any).__voiceSimSession = data.session;
@@ -896,10 +922,9 @@ export function LiveSimulationPanel({
     mutationFn: async (sessionId: string) => {
       const response = await apiRequest('POST', `/api/preview-studio/phone-test/${sessionId}/hangup`);
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to end call');
+        throw await parseErrorMessage(response, 'End call');
       }
-      return response.json();
+      return parseJsonResponse<any>(response, 'End call');
     },
     onSuccess: () => {
       setCallStatus('completed');

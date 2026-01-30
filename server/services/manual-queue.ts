@@ -33,7 +33,7 @@ export class ManualQueueService {
     agentId: string,
     campaignId: string,
     filters: ManualQueueFilters,
-    limit: number = 100
+    limit: number = 50000
   ): Promise<{ added: number; skipped: number }> {
     try {
       // Get campaign to verify it's in manual mode

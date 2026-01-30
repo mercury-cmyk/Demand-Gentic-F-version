@@ -16,6 +16,7 @@
 import { WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Buffer } from 'buffer';
+import { GoogleAuth } from 'google-auth-library';
 import { db } from "../db";
 import { contacts, campaigns, campaignQueue, type CanonicalDisposition } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
@@ -26,12 +27,59 @@ import { processDisposition } from "./disposition-engine";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-// CRITICAL: Model name must be in format "models/model-name" for Google AI Studio endpoint
-// Valid Live API models (2026):
-//   - models/gemini-live-2.5-flash-native-audio (GA, recommended)
-//   - models/gemini-live-2.5-flash-preview-native-audio-09-2025 (Preview)
-const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-live-2.5-flash-native-audio";
-const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+// Model name - strip 'models/' prefix if present for Vertex AI
+const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.0-flash-live-001";
+const GEMINI_MODEL_ID = RAW_GEMINI_MODEL.replace(/^models\//, '');
+
+// Vertex AI configuration - prefer Vertex AI (paid) over Google AI Studio (free/limited)
+const GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+const VERTEX_AI_LOCATION = process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+const USE_VERTEX_AI = !!GOOGLE_CLOUD_PROJECT;
+
+// Google Auth for Vertex AI OAuth2
+let googleAuth: GoogleAuth | null = null;
+
+/**
+ * Get Vertex AI access token for Bearer authentication
+ */
+async function getVertexAccessToken(): Promise<string> {
+  if (!googleAuth) {
+    googleAuth = new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+  }
+  const accessToken = await googleAuth.getAccessToken();
+  if (!accessToken) {
+    throw new Error('Failed to get Google Cloud access token');
+  }
+  return accessToken;
+}
+
+/**
+ * Get the correct WebSocket URL for Gemini Live API
+ */
+function getGeminiWebSocketUrl(): string {
+  if (USE_VERTEX_AI) {
+    // Vertex AI endpoint - uses OAuth2 Bearer token (no API key in URL)
+    return `wss://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+  } else {
+    // Google AI Studio endpoint - uses API key in URL
+    return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+  }
+}
+
+/**
+ * Get the correct model name format
+ */
+function getModelName(): string {
+  if (USE_VERTEX_AI) {
+    // Vertex AI format: projects/{project}/locations/{location}/publishers/google/models/{model}
+    return `projects/${GOOGLE_CLOUD_PROJECT}/locations/${VERTEX_AI_LOCATION}/publishers/google/models/${GEMINI_MODEL_ID}`;
+  } else {
+    // Google AI Studio format: models/{model}
+    return `models/${GEMINI_MODEL_ID}`;
+  }
+}
 
 // Preferred Gemini 2.5 Flash Native Audio voices
 // Available voices: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr
@@ -1104,15 +1152,23 @@ CRITICAL RULES:
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, 'ulaw');
             const pcm16kBase64 = pcm16kBuffer.toString('base64');
 
-            // CRITICAL: Gemini API uses camelCase for all properties
-            geminiWs.send(JSON.stringify({
+            // Use snake_case for Vertex AI, camelCase for Google AI Studio
+            const audioMessage = USE_VERTEX_AI ? {
+              realtime_input: {
+                media_chunks: [{
+                  data: pcm16kBase64,
+                  mime_type: 'audio/pcm;rate=16000'
+                }]
+              }
+            } : {
               realtimeInput: {
                 mediaChunks: [{
                   data: pcm16kBase64,
                   mimeType: 'audio/pcm;rate=16000'
                 }]
               }
-            }));
+            };
+            geminiWs.send(JSON.stringify(audioMessage));
 
             // Reset audio timeout on successful send
             if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
@@ -1225,9 +1281,33 @@ CRITICAL RULES:
   });
 
   // 2. Connect to Gemini Multimodal Live API
-  function connectToGemini() {
-    geminiWs = new WebSocket(GEMINI_WS_URL);
+  async function connectToGemini() {
     geminiConnected = false;
+
+    // Get access token for Vertex AI
+    let accessToken: string | null = null;
+    if (USE_VERTEX_AI) {
+      try {
+        accessToken = await getVertexAccessToken();
+        console.log('[Gemini Live] ✅ Got Vertex AI access token');
+      } catch (error: any) {
+        console.error('[Gemini Live] ❌ Failed to get Vertex AI access token:', error.message);
+        attemptReconnect();
+        return;
+      }
+    }
+
+    const wsUrl = getGeminiWebSocketUrl();
+    console.log(`[Gemini Live] Connecting to ${USE_VERTEX_AI ? 'Vertex AI' : 'Google AI Studio'}...`);
+    console.log(`[Gemini Live] Model: ${GEMINI_MODEL_ID}`);
+    console.log(`[Gemini Live] URL: ${wsUrl.replace(/key=[^&]+/, 'key=***')}`);
+
+    // Create WebSocket with Bearer token for Vertex AI
+    const wsOptions = USE_VERTEX_AI && accessToken
+      ? { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      : {};
+
+    geminiWs = new WebSocket(wsUrl, wsOptions);
 
     // Set connection timeout
     const connectionTimeout = setTimeout(() => {
@@ -1242,8 +1322,8 @@ CRITICAL RULES:
       clearTimeout(connectionTimeout);
       geminiConnected = true;
       reconnectAttempts = 0;
-      console.log('[Gemini Live] ✅ Connected to Google Gemini API');
-      
+      console.log(`[Gemini Live] ✅ Connected to ${USE_VERTEX_AI ? 'Vertex AI' : 'Google AI Studio'}`);
+
       // Start keepalive heartbeat with silence frames
       // SPEED OPTIMIZATION: Send actual silence audio frames instead of turn_complete
       // This keeps the audio pipeline "warm" and prevents WebSocket idle timeouts
@@ -1254,29 +1334,39 @@ CRITICAL RULES:
             // Generate 20ms of silence (320 samples at 16kHz, 16-bit = 640 bytes)
             const silenceFrame = Buffer.alloc(640, 0);
             const silenceBase64 = silenceFrame.toString('base64');
-            // CRITICAL: Gemini API uses camelCase for all properties
-            geminiWs.send(JSON.stringify({
+            // Use snake_case for Vertex AI, camelCase for Google AI Studio
+            const silenceMessage = USE_VERTEX_AI ? {
+              realtime_input: {
+                media_chunks: [{
+                  data: silenceBase64,
+                  mime_type: 'audio/pcm;rate=16000'
+                }]
+              }
+            } : {
               realtimeInput: {
                 mediaChunks: [{
                   data: silenceBase64,
                   mimeType: 'audio/pcm;rate=16000'
                 }]
               }
-            }));
+            };
+            geminiWs.send(JSON.stringify(silenceMessage));
           } catch (e) {
             console.warn('[Gemini Live] Keepalive silence frame failed:', e);
           }
         }
       }, AUDIO_KEEPALIVE_INTERVAL);
-      
-      // Send Setup Message
-      // CRITICAL: Gemini API uses camelCase for all properties
-      const setupMessage = {
+
+      // Send Setup Message - use snake_case for Vertex AI, camelCase for Google AI Studio
+      const modelName = getModelName();
+      console.log(`[Gemini Live] Sending setup with model: ${modelName}`);
+
+      const setupMessage = USE_VERTEX_AI ? {
         setup: {
-          model: GEMINI_MODEL,
+          model: modelName,
           tools: [
             {
-              functionDeclarations: [
+              function_declarations: [
                 {
                   name: "book_appointment",
                   description: "Books an appointment or meeting for the user. Call this when the user confirms a date and time.",
@@ -1341,11 +1431,78 @@ CRITICAL RULES:
               ]
             }
           ],
+          generation_config: {
+            response_modalities: ["AUDIO"],
+            speech_config: {
+              voice_config: {
+                prebuilt_voice_config: {
+                  voice_name: voiceName
+                }
+              }
+            }
+          },
+          system_instruction: {
+            parts: [{ text: systemPrompt }]
+          }
+        }
+      } : {
+        // Google AI Studio version (camelCase)
+        setup: {
+          model: modelName,
+          tools: [
+            {
+              functionDeclarations: [
+                {
+                  name: "book_appointment",
+                  description: "Books an appointment or meeting for the user. Call this when the user confirms a date and time.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      date: { type: "string", description: "The date of the appointment (YYYY-MM-DD)" },
+                      time: { type: "string", description: "The time of the appointment (HH:mm)" },
+                      notes: { type: "string", description: "Any additional notes or context for the meeting" }
+                    },
+                    required: ["date", "time"]
+                  }
+                },
+                {
+                  name: "lookup_lead_info",
+                  description: "Looks up information about a lead or contact from the database using their email or phone number.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      email: { type: "string", description: "The email address of the contact to look up." },
+                      phone: { type: "string", description: "The phone number of the contact to look up." }
+                    }
+                  }
+                },
+                {
+                  name: "end_call",
+                  description: "Ends the phone call gracefully. Call this AFTER saying goodbye to the user.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      reason: { type: "string", description: "Brief reason for ending the call" }
+                    },
+                    required: ["reason"]
+                  }
+                },
+                {
+                  name: "submit_disposition",
+                  description: "Submit the call outcome/disposition. Call this BEFORE end_call.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      disposition: { type: "string", description: "The call outcome" },
+                      notes: { type: "string", description: "Brief notes about the call" }
+                    },
+                    required: ["disposition"]
+                  }
+                }
+              ]
+            }
+          ],
           generationConfig: {
-            // SPEED OPTIMIZATION: Audio-only mode skips text generation step
-            // This reduces latency by ~100-200ms per response
-            // Tradeoff: No text transcripts for disposition detection
-            // CRITICAL: Must be uppercase "AUDIO" per Gemini API spec
             responseModalities: ["AUDIO"],
             speechConfig: {
               voiceConfig: {
@@ -1366,9 +1523,16 @@ CRITICAL RULES:
     geminiWs.on('message', async (data: any) => {
       try {
         const response = JSON.parse(data.toString());
-        
+
+        // Check for API errors first
+        if (response.error) {
+          console.error('[Gemini Live] ❌ API error:', response.error);
+          return;
+        }
+
         // CRITICAL: Handle setupComplete - Gemini is now ready to receive audio and respond
-        if (response.setupComplete !== undefined) {
+        // Support both snake_case (Vertex AI) and camelCase (Google AI Studio)
+        if (response.setupComplete !== undefined || response.setup_complete !== undefined) {
           setupComplete = true;
           reconnectAttempts = 0;
           console.log('[Gemini Live] ✅ Setup complete - Gemini is ready');
@@ -1378,17 +1542,20 @@ CRITICAL RULES:
           trySendOpeningMessage();
           return;
         }
-        
-        // Track audio received
-        if (response.serverContent?.modelTurn?.parts?.some((p: any) => p.inlineData)) {
+
+        // Track audio received - support both snake_case and camelCase
+        const serverContent = response.serverContent || response.server_content;
+        const modelTurn = serverContent?.modelTurn || serverContent?.model_turn;
+        if (modelTurn?.parts?.some((p: any) => p.inlineData || p.inline_data)) {
           metrics.audioChunksReceived++;
           metrics.lastAudioReceivedTime = Date.now();
-          
+
           // Record in monitor
           if (callId) {
-            for (const part of response.serverContent.modelTurn.parts) {
-              if (part.inlineData?.data) {
-                const audioBytes = Buffer.byteLength(part.inlineData.data, 'base64');
+            for (const part of modelTurn.parts) {
+              const inlineData = part.inlineData || part.inline_data;
+              if (inlineData?.data) {
+                const audioBytes = Buffer.byteLength(inlineData.data, 'base64');
                 audioQualityMonitor.recordAudioReceived(callId, audioBytes);
               }
             }

@@ -20,7 +20,7 @@ const VOICE_VARIABLE_CONTRACT: ContractItem[] = [
   { key: "contact.full_name", requiredForCall: true, validator: "nonempty" },
   { key: "contact.first_name", requiredForCall: true, validator: "nonempty" },
   { key: "contact.job_title", requiredForCall: true, validator: "nonempty" },
-  { key: "contact.email", requiredForCall: true, validator: "email" },
+  { key: "contact.email", requiredForCall: false, validator: "email" },  // Optional - many contacts don't have email
   { key: "system.caller_id", requiredForCall: true, validator: "phone" },
   { key: "system.called_number", requiredForCall: true, validator: "phone" },
   { key: "system.time_utc", requiredForCall: true, validator: "utc_timestamp" },

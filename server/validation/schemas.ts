@@ -107,12 +107,12 @@ export const bulkSuppressionSchema = z.object({
     value: z.string().min(1).max(500),
     type: z.enum(['email', 'phone']),
     reason: z.string().max(500).optional(),
-  })).min(1).max(1000), // Limit bulk operations to 1000 items
+  })).min(1).max(50000), // Limit bulk operations to 50k items
 });
 
 // Queue management schemas
 export const manualQueueSchema = z.object({
-  contactIds: z.array(z.string().uuid()).min(1).max(1000),
+  contactIds: z.array(z.string().uuid()).min(1).max(50000),
   agentId: z.string().uuid(),
 });
 
@@ -131,7 +131,7 @@ export const filterSchema = z.object({
 // Pagination schemas
 export const paginationSchema = z.object({
   page: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1)).optional(),
-  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(50000)).optional(),
   sortBy: z.string().max(50).optional(),
   sortOrder: z.enum(['asc', 'desc']).optional(),
 });
