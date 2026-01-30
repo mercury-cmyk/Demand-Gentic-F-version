@@ -88,6 +88,15 @@ interface QueryResponse {
   needsMoreData: boolean;
 }
 
+interface ApprovedReport {
+  id: string;
+  reportName: string;
+  reportType: string;
+  reportSummary?: string | null;
+  createdAt: string;
+  fileUrl?: string | null;
+}
+
 interface AgenticReportsPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -121,6 +130,19 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
       });
       if (!res.ok) throw new Error('Failed to fetch stats');
       return res.json();
+    },
+    enabled: open,
+  });
+
+  const { data: approvedReports, isLoading: approvedReportsLoading } = useQuery<ApprovedReport[]>({
+    queryKey: ['client-approved-reports'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/reports', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch approved reports');
+      const data = await res.json();
+      return data?.reports || [];
     },
     enabled: open,
   });
@@ -192,6 +214,8 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
   };
 
   const statsData = stats?.data;
+  const isPendingReport = generateReportMutation.data?.data?.status === 'pending_review';
+  const generatedReport = generateReportMutation.data?.data?.report;
 
   // Prepare chart data
   const leadStatusData = statsData ? [
@@ -532,7 +556,22 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   <p className="text-muted-foreground">Generating AI report...</p>
                 </div>
-              ) : generateReportMutation.data?.success ? (
+              ) : isPendingReport ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-amber-500" />
+                      Report Submitted for Review
+                    </CardTitle>
+                    <CardDescription>
+                      Your report has been generated and sent to our QA team. It will appear in Approved Reports once published.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    Report ID: {generateReportMutation.data?.data?.reportId}
+                  </CardContent>
+                </Card>
+              ) : generatedReport ? (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold">AI-Generated Report</h3>
@@ -557,19 +596,19 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-sm">{generateReportMutation.data.data.report.executiveSummary}</p>
+                      <p className="text-sm">{generatedReport.executiveSummary}</p>
                     </CardContent>
                   </Card>
 
                   {/* Highlights */}
-                  {generateReportMutation.data.data.report.highlights?.length > 0 && (
+                  {generatedReport.highlights?.length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-base">Key Highlights</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-2 gap-4">
-                          {generateReportMutation.data.data.report.highlights.map((h: ReportHighlight, i: number) => (
+                          {generatedReport.highlights.map((h: ReportHighlight, i: number) => (
                             <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
                               {getTrendIcon(h.trend)}
                               <div>
@@ -585,14 +624,14 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   )}
 
                   {/* Campaign Analysis */}
-                  {generateReportMutation.data.data.report.campaignAnalysis?.length > 0 && (
+                  {generatedReport.campaignAnalysis?.length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-base">Campaign Analysis</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-4">
-                          {generateReportMutation.data.data.report.campaignAnalysis.map((c: any, i: number) => (
+                          {generatedReport.campaignAnalysis.map((c: any, i: number) => (
                             <div key={i} className="border-l-4 border-blue-500 pl-4">
                               <div className="flex items-center gap-2 mb-1">
                                 <h4 className="font-medium">{c.campaignName}</h4>
@@ -617,7 +656,7 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   )}
 
                   {/* Recommendations */}
-                  {generateReportMutation.data.data.report.recommendations?.length > 0 && (
+                  {generatedReport.recommendations?.length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-base flex items-center gap-2">
@@ -627,7 +666,7 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                       </CardHeader>
                       <CardContent>
                         <ul className="space-y-2">
-                          {generateReportMutation.data.data.report.recommendations.map((r: string, i: number) => (
+                          {generatedReport.recommendations.map((r: string, i: number) => (
                             <li key={i} className="flex items-start gap-2 text-sm">
                               <div className="h-5 w-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 text-xs font-medium">
                                 {i + 1}
@@ -657,6 +696,48 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   </div>
                 </div>
               )}
+
+              <Separator className="my-6" />
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-blue-500" />
+                    Approved Reports
+                  </CardTitle>
+                  <CardDescription>Only QA-approved reports are listed here.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {approvedReportsLoading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading approved reports...
+                    </div>
+                  ) : approvedReports && approvedReports.length > 0 ? (
+                    <div className="space-y-3">
+                      {approvedReports.map((report) => (
+                        <div key={report.id} className="flex items-center justify-between border rounded-lg p-3">
+                          <div>
+                            <p className="font-medium">{report.reportName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {report.reportType} • {new Date(report.createdAt).toLocaleDateString()}
+                            </p>
+                            {report.reportSummary && (
+                              <p className="text-xs text-muted-foreground mt-1">{report.reportSummary}</p>
+                            )}
+                          </div>
+                          <Button variant="outline" size="sm" disabled={!report.fileUrl}>
+                            <Download className="h-4 w-4 mr-2" />
+                            {report.fileUrl ? "Download" : "No File"}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No approved reports yet.</p>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
           </div>
         </Tabs>

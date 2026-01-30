@@ -250,7 +250,7 @@ export async function configureCampaignAgents(campaignId: string, type: string) 
     const [newAgent] = await db.insert(virtualAgents).values({
       ...updateData,
       provider: 'gemini_live', // Default to Gemini
-      voice: 'Kore', // Default voice
+      voice: 'Fenrir', // Default voice
     }).returning();
     
     virtualAgentId = newAgent.id;

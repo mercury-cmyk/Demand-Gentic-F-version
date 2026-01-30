@@ -912,7 +912,7 @@ const defaultFormData: VirtualAgentFormData = {
   name: '',
   description: '',
   provider: 'google',
-  voice: 'Kore',
+  voice: 'Fenrir',
   externalAgentId: '',
   systemPrompt: '',
   firstMessage: '',
@@ -1343,7 +1343,7 @@ export default function VirtualAgentsPage() {
             name: '',
             description: '',
             provider: defaults.defaultVoiceProvider || 'google',
-            voice: defaults.defaultVoice || 'Kore',
+            voice: defaults.defaultVoice || 'Fenrir',
             settings: {
               systemTools: DEFAULT_SYSTEM_TOOLS,
               advanced: DEFAULT_ADVANCED_SETTINGS,
@@ -1671,7 +1671,7 @@ export default function VirtualAgentsPage() {
       // Always send required settings for preview session
       const testAdvanced = ((testCallAgent?.settings as VirtualAgentSettings | null)?.advanced ?? {}) as Partial<AdvancedSettings>;
       const requiredSettings = {
-        voice: voice ?? testCallAgent?.voice ?? 'Kore',
+        voice: voice ?? testCallAgent?.voice ?? 'Fenrir',
         settings: {
           systemTools: {
             ...DEFAULT_SYSTEM_TOOLS,

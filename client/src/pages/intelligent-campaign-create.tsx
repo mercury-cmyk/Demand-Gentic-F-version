@@ -5,7 +5,7 @@
  * AI-powered campaign wizard with structured context.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useLocation, Link } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -35,7 +35,6 @@ import {
   Zap,
   Bot,
   FileText,
-  Plus,
 } from 'lucide-react';
 import type { StructuredCampaignContext } from '@shared/campaign-context-types';
 
@@ -50,6 +49,17 @@ interface Organization {
   industry?: string;
 }
 
+interface ClientAccount {
+  id: string;
+  name: string;
+}
+
+interface ClientProject {
+  id: string;
+  name: string;
+  status: string;
+}
+
 // ============================================================
 // PAGE COMPONENT
 // ============================================================
@@ -60,6 +70,8 @@ export default function IntelligentCampaignCreatePage() {
   
   // State
   const [campaignType, setCampaignType] = useState<'telemarketing' | 'email'>('telemarketing');
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [showWizard, setShowWizard] = useState(false);
   const [preloadedContext, setPreloadedContext] = useState<Partial<StructuredCampaignContext> | null>(null);
@@ -73,6 +85,27 @@ export default function IntelligentCampaignCreatePage() {
       return res.json();
     },
   });
+
+  const { data: clientAccounts = [], isLoading: clientsLoading } = useQuery<ClientAccount[]>({
+    queryKey: ['admin-client-accounts'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/client-portal/admin/clients');
+      if (!res.ok) throw new Error('Failed to load clients');
+      return res.json();
+    },
+  });
+
+  const { data: clientDetail, isLoading: projectsLoading } = useQuery<{ projects: ClientProject[] }>({
+    queryKey: ['admin-client-projects', selectedClientId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/client-portal/admin/clients/${selectedClientId}`);
+      if (!res.ok) throw new Error('Failed to load client projects');
+      return res.json();
+    },
+    enabled: !!selectedClientId,
+  });
+
+  const clientProjects = clientDetail?.projects || [];
 
   // Automatically fetch context when organization is selected
   const fetchOrgContextMutation = useMutation({
@@ -115,6 +148,23 @@ export default function IntelligentCampaignCreatePage() {
     }
   }, [fetchOrgContextMutation]);
 
+  useEffect(() => {
+    if (!selectedClientId) {
+      setSelectedProjectId('');
+      return;
+    }
+
+    if (selectedProjectId && clientProjects.some((project) => project.id === selectedProjectId)) {
+      return;
+    }
+
+    if (clientProjects.length > 0) {
+      setSelectedProjectId(clientProjects[0].id);
+    } else {
+      setSelectedProjectId('');
+    }
+  }, [selectedClientId, selectedProjectId, clientProjects]);
+
   // Create campaign mutation
   const createCampaignMutation = useMutation({
     mutationFn: async (data: { context: StructuredCampaignContext; legacyFields: Record<string, any> }) => {
@@ -122,6 +172,8 @@ export default function IntelligentCampaignCreatePage() {
         name: data.legacyFields.campaignObjective?.substring(0, 100) || 'New Campaign',
         type: campaignType,
         status: 'draft',
+        clientAccountId: selectedClientId,
+        projectId: selectedProjectId,
         organizationId: selectedOrgId || undefined,
         
         // Legacy fields for backward compatibility
@@ -160,8 +212,16 @@ export default function IntelligentCampaignCreatePage() {
   });
 
   const handleWizardComplete = useCallback((context: StructuredCampaignContext, legacyFields: Record<string, any>) => {
+    if (!selectedClientId || !selectedProjectId) {
+      toast({
+        title: 'Client & Project Required',
+        description: 'Select a client and project before creating a campaign.',
+        variant: 'destructive',
+      });
+      return;
+    }
     createCampaignMutation.mutate({ context, legacyFields });
-  }, [createCampaignMutation]);
+  }, [createCampaignMutation, selectedClientId, selectedProjectId, toast]);
 
   const handleCancel = useCallback(() => {
     if (showWizard) {
@@ -170,6 +230,10 @@ export default function IntelligentCampaignCreatePage() {
       setLocation('/campaigns');
     }
   }, [showWizard, setLocation]);
+
+  const selectedClient = clientAccounts.find((client) => client.id === selectedClientId);
+  const selectedProject = clientProjects.find((project) => project.id === selectedProjectId);
+  const canStartWizard = !!selectedClientId && !!selectedProjectId;
 
   // If wizard is active, show full-screen wizard
   if (showWizard) {
@@ -195,6 +259,12 @@ export default function IntelligentCampaignCreatePage() {
                 <><MessageSquare className="h-3 w-3" /> Email</>
               )}
             </Badge>
+            {selectedClient && selectedProject && (
+              <Badge variant="secondary" className="gap-1">
+                <Building2 className="h-3 w-3" />
+                {selectedClient.name} / {selectedProject.name}
+              </Badge>
+            )}
             {selectedOrgId && organizations.find(o => o.id === selectedOrgId) && (
               <Badge variant="secondary" className="gap-1">
                 <Building2 className="h-3 w-3" />
@@ -234,6 +304,72 @@ export default function IntelligentCampaignCreatePage() {
           Use our intelligent wizard to create a structured, high-converting campaign
         </p>
       </div>
+
+      {/* Campaign Type Selection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Building2 className="h-5 w-5" />
+            Client & Project
+          </CardTitle>
+          <CardDescription>
+            Link this campaign to a client and project for governance and reporting
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Client</label>
+              {clientsLoading ? (
+                <div className="text-sm text-muted-foreground">Loading clients...</div>
+              ) : (
+                <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clientAccounts.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No clients found</div>
+                    ) : (
+                      clientAccounts.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Project</label>
+              {!selectedClientId ? (
+                <div className="text-sm text-muted-foreground">Select a client first</div>
+              ) : projectsLoading ? (
+                <div className="text-sm text-muted-foreground">Loading projects...</div>
+              ) : (
+                <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clientProjects.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No projects found</div>
+                    ) : (
+                      clientProjects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name} ({project.status})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Campaign Type Selection */}
       <Card>
@@ -437,16 +573,21 @@ export default function IntelligentCampaignCreatePage() {
       </Card>
 
       {/* Actions */}
-      <div className="flex justify-between">
+      <div className="flex justify-between items-center">
         <Button variant="outline" onClick={() => setLocation('/campaigns')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Campaigns
         </Button>
         
-        <Button size="lg" onClick={() => setShowWizard(true)}>
-          <Wand2 className="h-5 w-5 mr-2" />
-          Start Intelligent Campaign Creator
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <Button size="lg" onClick={() => setShowWizard(true)} disabled={!canStartWizard}>
+            <Wand2 className="h-5 w-5 mr-2" />
+            Start Intelligent Campaign Creator
+          </Button>
+          {!canStartWizard && (
+            <span className="text-xs text-muted-foreground">Select a client and project to continue</span>
+          )}
+        </div>
       </div>
     </div>
   );

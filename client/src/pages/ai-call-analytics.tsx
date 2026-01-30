@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -89,10 +90,8 @@ export function AiCallAnalyticsPanel({ embedded = false }: AiCallAnalyticsPanelP
         
         const statsPromises = campaignsToFetch.map(async (campaign) => {
           try {
-            const response = await fetch(`/api/ai-calls/campaign/${campaign.id}/stats`);
-            if (response.ok) {
-              return await response.json();
-            }
+            const response = await apiRequest('GET', `/api/ai-calls/campaign/${campaign.id}/stats`);
+            return response;
           } catch {
           }
           return null;
@@ -122,8 +121,8 @@ export function AiCallAnalyticsPanel({ embedded = false }: AiCallAnalyticsPanelP
         });
       }
       
-      const response = await fetch(`/api/ai-calls/campaign/${selectedCampaign}/stats`);
-      return response.json();
+      const response = await apiRequest('GET', `/api/ai-calls/campaign/${selectedCampaign}/stats`);
+      return response;
     },
     enabled: selectedCampaign !== 'all' || aiCampaigns.length >= 0,
   });

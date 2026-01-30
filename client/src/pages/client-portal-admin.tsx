@@ -39,8 +39,22 @@ import {
   Phone,
   Database,
   Target,
+  Copy,
+  ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 interface BillingConfig {
   clientAccountId: string;
@@ -102,6 +116,10 @@ export default function ClientPortalAdmin() {
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
   const [grantAccessCampaignType, setGrantAccessCampaignType] = useState<'data' | 'email' | 'phone'>('data');
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [inviteDomainInput, setInviteDomainInput] = useState('');
+  const [inviteEnabled, setInviteEnabled] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
 
   // Queries
   const { data: clients, isLoading: clientsLoading } = useQuery<ClientAccount[]>({
@@ -147,7 +165,14 @@ export default function ClientPortalAdmin() {
 
   // Mutations
   const createClientMutation = useMutation({
-    mutationFn: async (data: { name: string; companyName?: string; contactEmail?: string; contactPhone?: string }) => {
+    mutationFn: async (data: {
+      name: string;
+      companyName?: string;
+      contactEmail?: string;
+      contactPhone?: string;
+      inviteDomains?: string[];
+      inviteEnabled?: boolean;
+    }) => {
       return apiRequest('POST', '/api/client-portal/admin/clients', data);
     },
     onSuccess: () => {
@@ -235,12 +260,79 @@ export default function ClientPortalAdmin() {
     },
   });
 
+  const deleteClientMutation = useMutation({
+    mutationFn: async (clientId: string) => apiRequest('DELETE', `/api/client-portal/admin/clients/${clientId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/clients'] });
+      setSelectedClient(null);
+      setClientDetail(null);
+      toast({ title: 'Client removed' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to remove client', variant: 'destructive' });
+    },
+  });
+
+  const updateInviteMutation = useMutation({
+    mutationFn: async (payload: { inviteDomains: string[]; inviteEnabled: boolean }) => {
+      if (!selectedClient) throw new Error('No client selected');
+      return apiRequest('PATCH', `/api/client-portal/admin/clients/${selectedClient.id}`, payload);
+    },
+    onSuccess: () => {
+      if (selectedClient) {
+        fetchClientDetail(selectedClient.id);
+      }
+      setSelectedClient((prev) =>
+        prev && selectedClient && prev.id === selectedClient.id
+          ? { ...prev, inviteDomains: parseDomainInput(inviteDomainInput), inviteEnabled }
+          : prev,
+      );
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/clients'] });
+      toast({ title: 'Invite settings updated' });
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || 'Failed to update invite settings', variant: 'destructive' });
+    },
+  });
+
+  const regenerateInviteMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedClient) throw new Error('No client selected');
+      const res = await apiRequest('POST', `/api/client-portal/admin/clients/${selectedClient.id}/invite/regenerate`);
+      return res.json();
+    },
+    onSuccess: (data: { inviteSlug: string; joinUrl: string }) => {
+      setClientDetail((prev: any) => (prev ? { ...prev, inviteSlug: data.inviteSlug } : prev));
+      setSelectedClient((prev) =>
+        prev && selectedClient && prev.id === selectedClient.id ? { ...prev, inviteSlug: data.inviteSlug } : prev,
+      );
+      setCopyState('idle');
+      toast({ title: 'Invite link regenerated' });
+    },
+    onError: () => {
+      toast({ title: 'Failed to regenerate link', variant: 'destructive' });
+    },
+  });
+
+  const parseDomainInput = (value: string) =>
+    Array.from(
+      new Set(
+        value
+          .split(',')
+          .map((d) => d.trim().toLowerCase())
+          .filter((d) => d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)),
+      ),
+    );
+
   const fetchClientDetail = async (clientId: string) => {
     const response = await fetch(`/api/client-portal/admin/clients/${clientId}`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
     });
     const data = await response.json();
     setClientDetail(data);
+    setInviteDomainInput((data?.inviteDomains || []).join(', '));
+    setInviteEnabled(data?.inviteEnabled !== false);
+    setCopyState('idle');
   };
 
   const fetchBillingConfig = async (clientId: string) => {
@@ -271,6 +363,7 @@ export default function ClientPortalAdmin() {
       companyName: formData.get('companyName') as string,
       contactEmail: formData.get('contactEmail') as string,
       contactPhone: formData.get('contactPhone') as string,
+      inviteDomains: parseDomainInput((formData.get('inviteDomains') as string) || ''),
     });
   };
 
@@ -284,6 +377,25 @@ export default function ClientPortalAdmin() {
       lastName: formData.get('lastName') as string,
     });
   };
+
+  const handleSaveInviteSettings = () => {
+    if (!selectedClient) return;
+    updateInviteMutation.mutate({
+      inviteDomains: parseDomainInput(inviteDomainInput),
+      inviteEnabled,
+    });
+  };
+
+  const handleDeleteClient = () => {
+    if (!selectedClient) return;
+    deleteClientMutation.mutate(selectedClient.id);
+    setShowDeleteConfirm(false);
+  };
+
+  const joinUrl =
+    selectedClient && clientDetail
+      ? `${window.location.origin}/client-portal/join/${clientDetail.inviteSlug}`
+      : '';
 
   const handleSaveBillingConfig = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -318,15 +430,83 @@ export default function ClientPortalAdmin() {
     }).format(amount);
   };
 
+  const totalClients = clients?.length ?? 0;
+  const activeClients = clients?.filter((c) => c.isActive).length ?? 0;
+  const inviteReady = clients?.filter((c: any) => !!c.inviteSlug)?.length ?? 0;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Client Portal Management</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage client accounts, users, billing, and invoices
-          </p>
+      <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
+        <div className="rounded-2xl border bg-gradient-to-r from-slate-900 via-slate-800 to-sky-800 text-white p-6 shadow-lg">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm uppercase tracking-wide text-slate-300">Outbound Admin</p>
+              <h1 className="text-3xl font-semibold mt-1">Client Portal Management</h1>
+              <p className="text-slate-200/80 mt-2 max-w-2xl">
+                Curate access, manage billing, and ship invite links that only match verified company domains.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setShowCreateClient(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                New Client
+              </Button>
+              {selectedClient && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-white border-white/40 hover:border-white"
+                  onClick={() => setShowGrantAccess(true)}
+                >
+                  <ShieldCheck className="h-4 w-4 mr-1" />
+                  Grant Access
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
+              <p className="text-xs text-slate-200/80">Total Clients</p>
+              <p className="text-2xl font-semibold">{totalClients}</p>
+            </div>
+            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
+              <p className="text-xs text-slate-200/80">Active</p>
+              <p className="text-2xl font-semibold">{activeClients}</p>
+            </div>
+            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
+              <p className="text-xs text-slate-200/80">Invite-ready</p>
+              <p className="text-2xl font-semibold">{inviteReady}</p>
+            </div>
+          </div>
         </div>
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Navigation</CardTitle>
+            <CardDescription>Jump between admin surfaces</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2">
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('clients')}>
+              <Building2 className="h-4 w-4 mr-2" />
+              Clients
+            </Button>
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('hierarchy')}>
+              <Network className="h-4 w-4 mr-2" />
+              Hierarchy
+            </Button>
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('orders')}>
+              <FileText className="h-4 w-4 mr-2" />
+              Requests
+            </Button>
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('invoices')}>
+              <CreditCard className="h-4 w-4 mr-2" />
+              Invoices
+            </Button>
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('settings')}>
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -413,16 +593,166 @@ export default function ClientPortalAdmin() {
                     )}
                   </div>
                   {selectedClient && (
-                    <Button variant="outline" size="sm" onClick={handleOpenBillingConfig}>
-                      <DollarSign className="h-4 w-4 mr-1" />
-                      Billing Config
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={handleOpenBillingConfig}>
+                        <DollarSign className="h-4 w-4 mr-1" />
+                        Billing
+                      </Button>
+                      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="destructive" size="sm">
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Remove
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete {selectedClient.name}?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This removes the client account and all linked portal users. Campaign assets and
+                              orders tied to this client will cascade-delete. This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={handleDeleteClient}
+                              disabled={deleteClientMutation.isPending}
+                            >
+                              {deleteClientMutation.isPending ? 'Removing...' : 'Delete client'}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   )}
                 </div>
               </CardHeader>
               <CardContent>
                 {selectedClient && clientDetail ? (
                   <div className="space-y-6">
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="rounded-xl border p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="font-semibold flex items-center gap-2">
+                              <LinkIcon className="h-4 w-4" />
+                              Invite & self-serve access
+                            </h3>
+                            <p className="text-sm text-muted-foreground">
+                              Unique URL for this client. Only company domains below can join.
+                            </p>
+                          </div>
+                          <Badge variant={inviteEnabled ? 'default' : 'secondary'}>
+                            {inviteEnabled ? 'Enabled' : 'Disabled'}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Join link</Label>
+                          <div className="flex gap-2">
+                            <Input readOnly value={joinUrl} className="font-mono text-xs" />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (!joinUrl) return;
+                                navigator.clipboard.writeText(joinUrl);
+                                setCopyState('copied');
+                                setTimeout(() => setCopyState('idle'), 1500);
+                              }}
+                            >
+                              <Copy className="h-4 w-4 mr-1" />
+                              {copyState === 'copied' ? 'Copied' : 'Copy'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => window.open(joinUrl, '_blank')}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Switch checked={inviteEnabled} onCheckedChange={setInviteEnabled} id="invite-enabled" />
+                            <Label htmlFor="invite-enabled" className="text-sm text-muted-foreground">
+                              Allow employees to self-enroll
+                            </Label>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="ml-auto"
+                              onClick={() => regenerateInviteMutation.mutate()}
+                              disabled={regenerateInviteMutation.isPending}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                              {regenerateInviteMutation.isPending ? 'Refreshing...' : 'Regenerate'}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Allowed email domains</Label>
+                          <Input
+                            value={inviteDomainInput}
+                            onChange={(e) => setInviteDomainInput(e.target.value)}
+                            placeholder="acme.com, acme.co.uk"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Comma separated. If blank, only manually-created users can log in.
+                          </p>
+                        </div>
+
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => fetchClientDetail(selectedClient.id)}>
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            Reset
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSaveInviteSettings}
+                            disabled={updateInviteMutation.isPending}
+                          >
+                            {updateInviteMutation.isPending ? 'Saving...' : 'Save access controls'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border p-4 bg-muted/50 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-semibold flex items-center gap-2">
+                            <Users className="h-4 w-4" />
+                            Client snapshot
+                          </h3>
+                          <Badge variant={selectedClient.isActive ? 'default' : 'secondary'}>
+                            {selectedClient.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Company</p>
+                            <p className="font-medium">{selectedClient.companyName || '—'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Primary contact</p>
+                            <p className="font-medium">{selectedClient.contactEmail || '—'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Projects</p>
+                            <p className="font-medium">{clientDetail.projects?.length ?? 0}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Portal users</p>
+                            <p className="font-medium">{clientDetail.users?.length ?? 0}</p>
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Self-serve link is locked to the domains above. Use the "Grant Access" button to hand-pick
+                          campaign entitlements for this client.
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Users Section */}
                     <div>
                       <div className="flex items-center justify-between mb-3">
@@ -950,6 +1280,13 @@ export default function ClientPortalAdmin() {
               <div>
                 <Label htmlFor="contactPhone">Contact Phone</Label>
                 <Input id="contactPhone" name="contactPhone" placeholder="+1 555 123 4567" />
+              </div>
+              <div>
+                <Label htmlFor="inviteDomains">Allowed email domains (comma separated)</Label>
+                <Input id="inviteDomains" name="inviteDomains" placeholder="acme.com, acme.co.uk" />
+                <p className="text-xs text-muted-foreground">
+                  We'll lock the join link to these domains. Leave blank to auto-use the contact email domain.
+                </p>
               </div>
             </div>
             <DialogFooter className="mt-6">

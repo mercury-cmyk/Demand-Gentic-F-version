@@ -51,6 +51,7 @@ import OrdersPage from "@/pages/orders";
 import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
+import CallRecordingsPage from "@/pages/call-recordings";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
@@ -90,6 +91,7 @@ import AIProjectCreatorPage from "@/pages/ai-project-creator";
 import ClientPortalAdmin from "@/pages/client-portal-admin";
 import ClientPortalOrderDetail from "@/pages/client-portal-order-detail";
 import ClientPortalLogin from "@/pages/client-portal-login";
+import ClientPortalJoin from "@/pages/client-portal-join";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
@@ -311,6 +313,7 @@ function AuthenticatedApp() {
               <Route path="/reports" component={ReportsPage} />
               <Route path="/call-reports" component={CallReportsPage} />
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
+              <Route path="/call-recordings" component={CallRecordingsPage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
               <Route path="/ai-call-analytics">
@@ -455,6 +458,7 @@ function Router() {
       <Route path="/login" component={LoginPage} />
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/client-portal/login" component={ClientPortalLogin} />
+      <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
       <Route path="/client-portal/dashboard" component={ClientPortalDashboard} />
       <Route path="/client-portal/simulations" component={ClientPortalSimulations} />
       <Route>

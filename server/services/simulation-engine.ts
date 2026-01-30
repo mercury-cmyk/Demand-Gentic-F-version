@@ -190,15 +190,16 @@ export class SimulationEngine {
   private gemini: GoogleGenerativeAI | null = null;
   private provider: "openai" | "gemini" = "gemini";
   
-  constructor(provider?: "openai" | "gemini") {
-    this.provider = provider || "gemini";
+  constructor(_provider?: "openai" | "gemini") {
+    this.provider = "gemini";
     this.initializeClients();
   }
   
   private initializeClients() {
     if (process.env.OPENAI_API_KEY) {
-      this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      console.warn("[SimulationEngine] OpenAI is configured but disabled. Gemini-only runtime enforced.");
     }
+    this.openai = null;
     if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY) {
       this.gemini = new GoogleGenerativeAI(
         process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY!

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { db } from '../db';
 import { eq, and, desc, sql, or, like, isNotNull, asc, inArray } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
@@ -19,6 +20,7 @@ import {
   insertClientPortalOrderSchema,
   // QA-approved leads system
   leads,
+  leadComments,
   campaigns,
   contacts,
   accounts,
@@ -62,6 +64,11 @@ async function logClientPortalActivity(params: {
 
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "7d";
+const PORTAL_BASE_URL =
+  process.env.CLIENT_PORTAL_BASE_URL ||
+  process.env.APP_BASE_URL ||
+  process.env.MSFT_OAUTH_APP_URL ||
+  "";
 
 export interface ClientJWTPayload {
   clientUserId: string;
@@ -78,6 +85,29 @@ declare global {
       clientUser?: ClientJWTPayload;
     }
   }
+}
+
+function generateInviteSlug() {
+  return `join_${crypto.randomBytes(6).toString('hex')}`;
+}
+
+function normalizeDomains(input: unknown): string[] {
+  if (!input) return [];
+  const raw = Array.isArray(input) ? input : String(input).split(',');
+  const unique = new Set(
+    raw
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d && /^[a-z0-9.-]+\\.[a-z]{2,}$/i.test(d)),
+  );
+  return Array.from(unique);
+}
+
+function buildJoinUrl(slug: string) {
+  if (PORTAL_BASE_URL) {
+    const baseUrl = PORTAL_BASE_URL.replace(/\/$/, '');
+    return baseUrl + '/client-portal/join/' + slug;
+  }
+  return '/client-portal/join/' + slug;
 }
 
 function generateClientToken(clientUser: typeof clientUsers.$inferSelect): string {
@@ -130,6 +160,119 @@ router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
 
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);
+
+// ==================== CLIENT INVITE / SELF-SERVE SIGNUP ====================
+
+router.get('/invite/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const [client] = await db
+      .select({
+        id: clientAccounts.id,
+        name: clientAccounts.name,
+        inviteDomains: clientAccounts.inviteDomains,
+        inviteEnabled: clientAccounts.inviteEnabled,
+        isActive: clientAccounts.isActive,
+      })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.inviteSlug, slug))
+      .limit(1);
+
+    if (!client || !client.inviteEnabled || !client.isActive) {
+      return res.status(404).json({ message: "Invite not found or disabled" });
+    }
+
+    return res.json({
+      clientName: client.name,
+      allowedDomains: client.inviteDomains ?? [],
+      joinUrl: buildJoinUrl(slug),
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get invite error:', error);
+    res.status(500).json({ message: "Failed to fetch invite details" });
+  }
+});
+
+router.post('/invite/:slug/signup', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { email, password, firstName, lastName } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    const domain = email.includes('@') ? email.split('@')[1].toLowerCase() : '';
+    if (!domain) {
+      return res.status(400).json({ message: "Invalid email" });
+    }
+
+    const [client] = await db
+      .select({
+        id: clientAccounts.id,
+        name: clientAccounts.name,
+        inviteDomains: clientAccounts.inviteDomains,
+        inviteEnabled: clientAccounts.inviteEnabled,
+        isActive: clientAccounts.isActive,
+      })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.inviteSlug, slug))
+      .limit(1);
+
+    if (!client || !client.inviteEnabled || !client.isActive) {
+      return res.status(404).json({ message: "Invite not found or disabled" });
+    }
+
+    const allowedDomains = client.inviteDomains ?? [];
+    if (allowedDomains.length === 0) {
+      return res.status(403).json({ message: "Self-serve signup is disabled for this client" });
+    }
+    if (!allowedDomains.map((d) => d.toLowerCase()).includes(domain)) {
+      return res.status(403).json({ message: "Email domain is not allowed for this invite" });
+    }
+
+    // Avoid duplicate user creation
+    const [existingUser] = await db
+      .select()
+      .from(clientUsers)
+      .where(eq(clientUsers.email, email.toLowerCase()))
+      .limit(1);
+
+    if (existingUser) {
+      return res.status(409).json({ message: "An account already exists for this email" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const [user] = await db
+      .insert(clientUsers)
+      .values({
+        clientAccountId: client.id,
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        firstName,
+        lastName,
+      })
+      .returning();
+
+    const token = generateClientToken(user);
+    return res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      client: {
+        id: client.id,
+        name: client.name,
+      },
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Invite signup error:', error);
+    res.status(500).json({ message: "Failed to complete signup" });
+  }
+});
 
 // ==================== CLIENT AUTHENTICATION ====================
 
@@ -661,10 +804,13 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     const accessList = await db
       .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
       .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId)
+          isNotNull(clientCampaignAccess.regularCampaignId),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
         )
       );
 
@@ -761,10 +907,13 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
     const accessList = await db
       .select({ regularCampaignId: clientCampaignAccess.regularCampaignId })
       .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId)
+          isNotNull(clientCampaignAccess.regularCampaignId),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
         )
       );
 
@@ -891,7 +1040,9 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId)
+          isNotNull(clientCampaignAccess.regularCampaignId),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
         )
       );
 
@@ -992,10 +1143,13 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     const [access] = await db
       .select()
       .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!)
+          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
         )
       )
       .limit(1);
@@ -1070,6 +1224,215 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
   } catch (error) {
     console.error('[CLIENT PORTAL] Get lead detail error:', error);
     res.status(500).json({ message: "Failed to fetch lead details" });
+  }
+});
+
+// ==================== LEAD COMMENTS (CLIENT NOTES) ====================
+
+// Get comments for a specific lead
+router.get('/qualified-leads/:leadId/comments', requireClientAuth, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Verify client has access to this lead
+    const [lead] = await db
+      .select({ campaignId: leads.campaignId })
+      .from(leads)
+      .where(eq(leads.id, leadId))
+      .limit(1);
+
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const [access] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ message: "You don't have access to this lead" });
+    }
+
+    // Get comments
+    const comments = await db
+      .select({
+        id: leadComments.id,
+        leadId: leadComments.leadId,
+        commentText: leadComments.commentText,
+        isInternal: leadComments.isInternal,
+        createdAt: leadComments.createdAt,
+        updatedAt: leadComments.updatedAt,
+        clientUserEmail: clientUsers.email,
+        clientUserFirstName: clientUsers.firstName,
+        clientUserLastName: clientUsers.lastName,
+      })
+      .from(leadComments)
+      .leftJoin(clientUsers, eq(leadComments.clientUserId, clientUsers.id))
+      .where(
+        and(
+          eq(leadComments.leadId, leadId),
+          eq(leadComments.clientAccountId, clientAccountId),
+          sql`${leadComments.deletedAt} IS NULL`
+        )
+      )
+      .orderBy(desc(leadComments.createdAt));
+
+    res.json(comments);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get lead comments error:', error);
+    res.status(500).json({ message: "Failed to fetch comments" });
+  }
+});
+
+// Add a comment to a lead
+router.post('/qualified-leads/:leadId/comments', requireClientAuth, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { commentText, isInternal = false } = req.body;
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const clientUserId = req.clientUser!.id;
+
+    if (!commentText || commentText.trim().length === 0) {
+      return res.status(400).json({ message: "Comment text is required" });
+    }
+
+    // Verify client has access to this lead
+    const [lead] = await db
+      .select({ campaignId: leads.campaignId })
+      .from(leads)
+      .where(eq(leads.id, leadId))
+      .limit(1);
+
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const [access] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          eq(clientCampaignAccess.regularCampaignId, lead.campaignId!),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!access) {
+      return res.status(403).json({ message: "You don't have access to this lead" });
+    }
+
+    // Create comment
+    const [comment] = await db
+      .insert(leadComments)
+      .values({
+        leadId,
+        clientAccountId,
+        clientUserId,
+        commentText: commentText.trim(),
+        isInternal,
+      })
+      .returning();
+
+    res.status(201).json(comment);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Add lead comment error:', error);
+    res.status(500).json({ message: "Failed to add comment" });
+  }
+});
+
+// Update a comment
+router.patch('/qualified-leads/:leadId/comments/:commentId', requireClientAuth, async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { commentText } = req.body;
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    if (!commentText || commentText.trim().length === 0) {
+      return res.status(400).json({ message: "Comment text is required" });
+    }
+
+    // Verify comment belongs to client and exists
+    const [existingComment] = await db
+      .select()
+      .from(leadComments)
+      .where(
+        and(
+          eq(leadComments.id, commentId),
+          eq(leadComments.clientAccountId, clientAccountId),
+          sql`${leadComments.deletedAt} IS NULL`
+        )
+      )
+      .limit(1);
+
+    if (!existingComment) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    // Update comment
+    const [updated] = await db
+      .update(leadComments)
+      .set({
+        commentText: commentText.trim(),
+        updatedAt: new Date(),
+      })
+      .where(eq(leadComments.id, commentId))
+      .returning();
+
+    res.json(updated);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Update lead comment error:', error);
+    res.status(500).json({ message: "Failed to update comment" });
+  }
+});
+
+// Delete a comment (soft delete)
+router.delete('/qualified-leads/:leadId/comments/:commentId', requireClientAuth, async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Verify comment belongs to client
+    const [existingComment] = await db
+      .select()
+      .from(leadComments)
+      .where(
+        and(
+          eq(leadComments.id, commentId),
+          eq(leadComments.clientAccountId, clientAccountId),
+          sql`${leadComments.deletedAt} IS NULL`
+        )
+      )
+      .limit(1);
+
+    if (!existingComment) {
+      return res.status(404).json({ message: "Comment not found" });
+    }
+
+    // Soft delete
+    await db
+      .update(leadComments)
+      .set({ deletedAt: new Date() })
+      .where(eq(leadComments.id, commentId));
+
+    res.json({ success: true, message: "Comment deleted" });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Delete lead comment error:', error);
+    res.status(500).json({ message: "Failed to delete comment" });
   }
 });
 
@@ -1240,9 +1603,26 @@ router.post('/admin/clients', requireAuth, requireRole('admin', 'campaign_manage
       createdBy: req.user!.userId,
     });
 
+    const inviteDomains = normalizeDomains(req.body.inviteDomains);
+    const fallbackDomain =
+      data.contactEmail && data.contactEmail.includes('@')
+        ? data.contactEmail.split('@')[1].toLowerCase()
+        : null;
+    const finalDomains =
+      inviteDomains.length > 0
+        ? inviteDomains
+        : fallbackDomain
+        ? [fallbackDomain]
+        : [];
+
     const [client] = await db
       .insert(clientAccounts)
-      .values(data)
+      .values({
+        ...data,
+        inviteDomains: finalDomains,
+        inviteSlug: generateInviteSlug(),
+        inviteEnabled: req.body.inviteEnabled ?? true,
+      })
       .returning();
 
     res.status(201).json(client);
@@ -1391,7 +1771,8 @@ router.patch('/admin/projects/:id', requireAuth, requireRole('admin', 'campaign_
 
 router.patch('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
-    const { name, contactEmail, contactPhone, companyName, notes, isActive } = req.body;
+    const { name, contactEmail, contactPhone, companyName, notes, isActive, inviteEnabled } = req.body;
+    const inviteDomains = req.body.inviteDomains !== undefined ? normalizeDomains(req.body.inviteDomains) : undefined;
 
     const [updated] = await db
       .update(clientAccounts)
@@ -1402,6 +1783,8 @@ router.patch('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_m
         companyName,
         notes,
         isActive,
+        ...(inviteEnabled !== undefined ? { inviteEnabled } : {}),
+        ...(inviteDomains !== undefined ? { inviteDomains } : {}),
         updatedAt: new Date(),
       })
       .where(eq(clientAccounts.id, req.params.id))
@@ -1415,6 +1798,62 @@ router.patch('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_m
   } catch (error) {
     console.error('[CLIENT PORTAL] Update client error:', error);
     res.status(500).json({ message: "Failed to update client" });
+  }
+});
+
+router.post('/admin/clients/:id/invite/regenerate', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    let inviteSlug = generateInviteSlug();
+    let attempts = 0;
+
+    // Ensure uniqueness
+    while (attempts < 5) {
+      const existing = await db
+        .select({ id: clientAccounts.id })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.inviteSlug, inviteSlug))
+        .limit(1);
+
+      if (existing.length === 0) break;
+      inviteSlug = generateInviteSlug();
+      attempts += 1;
+    }
+
+    const [updated] = await db
+      .update(clientAccounts)
+      .set({ inviteSlug, updatedAt: new Date() })
+      .where(eq(clientAccounts.id, req.params.id))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    res.json({
+      inviteSlug: updated.inviteSlug,
+      joinUrl: buildJoinUrl(updated.inviteSlug),
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Regenerate invite error:', error);
+    res.status(500).json({ message: "Failed to regenerate invite link" });
+  }
+});
+
+router.delete('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+  try {
+    const [deleted] = await db
+      .delete(clientAccounts)
+      .where(eq(clientAccounts.id, req.params.id))
+      .returning({ id: clientAccounts.id });
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Client not found" });
+    }
+
+    res.json({ success: true, deletedId: deleted.id });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Delete client error:', error);
+    res.status(500).json({ message: "Failed to delete client" });
   }
 });
 
@@ -1525,6 +1964,28 @@ router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admi
     };
 
     if (campaignType === 'regular') {
+      const [campaign] = await db
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      if (campaign.clientAccountId && campaign.clientAccountId !== req.params.clientId) {
+        return res.status(400).json({ message: "Campaign is linked to a different client account" });
+      }
+
+      if (!campaign.projectId) {
+        return res.status(400).json({ message: "Campaign must be linked to a project before granting access" });
+      }
+
+      if (campaign.approvalStatus !== 'published') {
+        return res.status(400).json({ message: "Campaign must be published before granting client access" });
+      }
+
       accessData.regularCampaignId = campaignId;
     } else {
       accessData.campaignId = campaignId;

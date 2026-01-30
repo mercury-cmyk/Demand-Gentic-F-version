@@ -47,6 +47,8 @@ interface LaunchData {
   scheduledTime?: string;
   timezone?: string;
   throttlingLimit?: number; // Max emails per hour for throttling (Demand Gen)
+  clientAccountId: string;
+  projectId: string;
 }
 
 type BuilderPage = "intent" | "template" | "audience";
@@ -205,6 +207,8 @@ export function SimpleCampaignBuilder({
         name: campaignIntent.campaignName,
         type: "email",
         status: launchData.sendType === "now" ? "active" : "scheduled",
+        clientAccountId: launchData.clientAccountId,
+        projectId: launchData.projectId,
         audienceRefs,
         emailSubject: template.subject,
         emailHtmlContent: template.htmlContent,

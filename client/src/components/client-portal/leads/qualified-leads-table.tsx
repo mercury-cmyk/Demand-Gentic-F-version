@@ -12,7 +12,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   ChevronLeft, ChevronRight, Search, Filter, Download, Eye, Headphones,
-  FileText, Loader2, UserCheck, ArrowUpDown, RefreshCw,
+  FileText, Loader2, UserCheck, ArrowUpDown, RefreshCw, MessageSquare, Sparkles,
+  TrendingUp, Building2,
 } from 'lucide-react';
 
 interface QualifiedLead {
@@ -30,6 +31,7 @@ interface QualifiedLead {
   qaStatus: string | null;
   createdAt: string | null;
   approvedAt: string | null;
+  commentCount?: number;
 }
 
 interface Campaign {
@@ -116,26 +118,43 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   const getScoreBadge = (score: string | null) => {
     if (!score) return null;
     const numScore = parseFloat(score);
-    if (numScore >= 80) return <Badge className="bg-green-100 text-green-800">{numScore.toFixed(0)}</Badge>;
-    if (numScore >= 60) return <Badge className="bg-yellow-100 text-yellow-800">{numScore.toFixed(0)}</Badge>;
-    return <Badge className="bg-red-100 text-red-800">{numScore.toFixed(0)}</Badge>;
+    if (numScore >= 80) return (
+      <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white border-0 shadow-sm">
+        <span className="font-bold">{numScore.toFixed(0)}</span>
+      </Badge>
+    );
+    if (numScore >= 60) return (
+      <Badge className="bg-gradient-to-r from-yellow-400 to-orange-400 text-white border-0 shadow-sm">
+        <span className="font-bold">{numScore.toFixed(0)}</span>
+      </Badge>
+    );
+    return (
+      <Badge className="bg-gradient-to-r from-red-400 to-pink-400 text-white border-0 shadow-sm">
+        <span className="font-bold">{numScore.toFixed(0)}</span>
+      </Badge>
+    );
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <CardTitle>Qualified Leads</CardTitle>
-          <CardDescription>
-            {total.toLocaleString()} QA-approved leads from your campaigns
+    <Card className="shadow-lg border-0 bg-gradient-to-br from-white to-blue-50/30">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
+        <div className="space-y-1.5">
+          <CardTitle className="text-2xl flex items-center gap-2">
+            <Sparkles className="h-6 w-6 text-blue-600" />
+            Qualified Leads
+          </CardTitle>
+          <CardDescription className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-green-600" />
+            <span className="font-semibold text-green-600">{total.toLocaleString()}</span>
+            <span className="text-muted-foreground">QA-approved leads from your campaigns</span>
           </CardDescription>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="relative w-64">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search leads..."
-              className="pl-9"
+              className="pl-10 bg-white border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -150,23 +169,39 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-48">
-              <Filter className="h-4 w-4 mr-2" />
+            <SelectTrigger className="w-52 bg-white border-gray-200">
+              <Filter className="h-4 w-4 mr-2 text-blue-600" />
               <SelectValue placeholder="All Campaigns" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Campaigns</SelectItem>
+              <SelectItem value="all">
+                <span className="font-medium">All Campaigns</span>
+              </SelectItem>
               {campaigns.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  {c.name} ({c.approvedLeadsCount})
+                  <div className="flex items-center justify-between w-full gap-2">
+                    <span>{c.name}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {c.approvedLeadsCount}
+                    </Badge>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="icon" onClick={() => refetch()}>
+          <Button 
+            variant="outline" 
+            size="icon" 
+            onClick={() => refetch()}
+            className="hover:bg-blue-50 hover:border-blue-300 transition-colors"
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button variant="outline" onClick={onExport}>
+          <Button 
+            variant="default" 
+            onClick={onExport}
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md"
+          >
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
@@ -174,124 +209,148 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="flex justify-center p-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <div className="flex justify-center p-16">
+            <div className="text-center space-y-3">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mx-auto" />
+              <p className="text-sm text-muted-foreground">Loading your leads...</p>
+            </div>
           </div>
         ) : leads.length === 0 ? (
-          <div className="text-center py-12">
-            <UserCheck className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="font-semibold mb-2">No Leads Found</h3>
-            <p className="text-muted-foreground">
+          <div className="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50/20 rounded-lg border-2 border-dashed">
+            <UserCheck className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <h3 className="font-semibold text-lg mb-2">No Leads Found</h3>
+            <p className="text-muted-foreground max-w-md mx-auto">
               {search || campaignFilter !== 'all'
-                ? 'No leads match your filters. Try adjusting your search.'
-                : 'QA-approved leads from your campaigns will appear here.'}
+                ? 'No leads match your current filters. Try adjusting your search criteria.'
+                : 'QA-approved leads from your campaigns will appear here once they are delivered.'}
             </p>
           </div>
         ) : (
           <>
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
+                <TableHeader className="bg-gradient-to-r from-gray-50 to-blue-50/50">
+                  <TableRow className="border-b-2 border-gray-200">
+                    <TableHead className="font-semibold">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8 data-[state=open]:bg-accent"
+                        className="-ml-3 h-8 hover:bg-white/80"
                         onClick={() => handleSort('accountName')}
                       >
                         Contact
                         <ArrowUpDown className="ml-2 h-4 w-4" />
                       </Button>
                     </TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>Campaign</TableHead>
-                    <TableHead>
+                    <TableHead className="font-semibold">Company</TableHead>
+                    <TableHead className="font-semibold">Campaign</TableHead>
+                    <TableHead className="font-semibold">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8"
+                        className="-ml-3 h-8 hover:bg-white/80"
                         onClick={() => handleSort('aiScore')}
                       >
                         AI Score
                         <ArrowUpDown className="ml-2 h-4 w-4" />
                       </Button>
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="font-semibold">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8"
+                        className="-ml-3 h-8 hover:bg-white/80"
                         onClick={() => handleSort('callDuration')}
                       >
                         Duration
                         <ArrowUpDown className="ml-2 h-4 w-4" />
                       </Button>
                     </TableHead>
-                    <TableHead>Assets</TableHead>
-                    <TableHead>
+                    <TableHead className="font-semibold">Assets</TableHead>
+                    <TableHead className="font-semibold">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="-ml-3 h-8"
+                        className="-ml-3 h-8 hover:bg-white/80"
                         onClick={() => handleSort('approvedAt')}
                       >
                         Approved
                         <ArrowUpDown className="ml-2 h-4 w-4" />
                       </Button>
                     </TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {leads.map((lead) => (
-                    <TableRow key={lead.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onViewDetails(lead.id)}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{lead.contactName || 'Unknown'}</p>
-                          <p className="text-xs text-muted-foreground">{lead.contactEmail || '-'}</p>
+                  {leads.map((lead, idx) => (
+                    <TableRow 
+                      key={lead.id} 
+                      className={`cursor-pointer transition-colors hover:bg-blue-50/50 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+                      onClick={() => onViewDetails(lead.id)}
+                    >
+                      <TableCell className="py-4">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-gray-900">{lead.contactName || 'Unknown'}</p>
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">{lead.contactEmail || '-'}</p>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{lead.accountName || '-'}</p>
+                      <TableCell className="py-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-blue-600" />
+                            <p className="font-medium text-gray-900">{lead.accountName || '-'}</p>
+                          </div>
                           <p className="text-xs text-muted-foreground">{lead.accountIndustry || '-'}</p>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{lead.campaignName || '-'}</span>
+                      <TableCell className="py-4">
+                        <Badge variant="outline" className="font-normal">
+                          {lead.campaignName || '-'}
+                        </Badge>
                       </TableCell>
-                      <TableCell>{getScoreBadge(lead.aiScore)}</TableCell>
-                      <TableCell className="font-mono text-sm">
+                      <TableCell className="py-4">{getScoreBadge(lead.aiScore)}</TableCell>
+                      <TableCell className="font-mono text-sm py-4">
                         {formatDuration(lead.callDuration)}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
+                      <TableCell className="py-4">
+                        <div className="flex gap-2">
                           {lead.hasRecording && (
-                            <Headphones className="h-4 w-4 text-blue-500" title="Has Recording" />
+                            <div className="flex items-center gap-1 text-xs">
+                              <Headphones className="h-4 w-4 text-blue-600" title="Has Recording" />
+                            </div>
                           )}
                           {lead.hasTranscript && (
-                            <FileText className="h-4 w-4 text-green-500" title="Has Transcript" />
+                            <div className="flex items-center gap-1 text-xs">
+                              <FileText className="h-4 w-4 text-green-600" title="Has Transcript" />
+                            </div>
+                          )}
+                          {(lead.commentCount || 0) > 0 && (
+                            <div className="flex items-center gap-1 text-xs">
+                              <MessageSquare className="h-4 w-4 text-orange-600" />
+                              <span className="text-orange-600 font-medium">{lead.commentCount}</span>
+                            </div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="text-sm text-muted-foreground py-4">
                         {lead.approvedAt
                           ? new Date(lead.approvedAt).toLocaleDateString()
                           : lead.createdAt
                           ? new Date(lead.createdAt).toLocaleDateString()
                           : '-'}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right py-4">
                         <Button
                           variant="ghost"
                           size="sm"
+                          className="hover:bg-blue-100 hover:text-blue-700"
                           onClick={(e) => {
                             e.stopPropagation();
                             onViewDetails(lead.id);
                           }}
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-4 w-4 mr-1.5" />
+                          View
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -300,23 +359,24 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
               </Table>
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, total)} of {total.toLocaleString()} leads
+            {/* Modern Pagination */}
+            <div className="flex items-center justify-between pt-6 border-t border-gray-200 mt-4">
+              <p className="text-sm text-muted-foreground font-medium">
+                Showing <span className="text-gray-900">{((page - 1) * pageSize) + 1}-{Math.min(page * pageSize, total)}</span> of <span className="text-gray-900">{total.toLocaleString()}</span> leads
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page === 1}
+                  className="hover:bg-blue-50"
                 >
                   <ChevronLeft className="h-4 w-4 mr-1" />
                   Previous
                 </Button>
-                <div className="flex items-center gap-1 px-2">
-                  <span className="text-sm">
+                <div className="flex items-center gap-1 px-3 py-1 bg-gray-100 rounded-md">
+                  <span className="text-sm font-semibold text-gray-700">
                     Page {page} of {totalPages}
                   </span>
                 </div>
@@ -325,6 +385,7 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                   size="sm"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
+                  className="hover:bg-blue-50"
                 >
                   Next
                   <ChevronRight className="h-4 w-4 ml-1" />

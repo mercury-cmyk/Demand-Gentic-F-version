@@ -366,6 +366,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Call disposition reports, agent performance, and AI call analytics',
       },
       {
+        id: 'call-recordings',
+        title: 'Call Recordings',
+        url: '/call-recordings',
+        icon: 'Headphones',
+        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
+        description: 'Browse, search, and playback all call recordings',
+      },
+      {
         id: 'reports',
         title: 'Reports',
         url: '/reports',

@@ -34,6 +34,7 @@ import { ClientAgentButton, ClientAgentPanel } from '@/components/client-portal/
 import {
   QualifiedLeadsTable,
   LeadDetailModal,
+  EnhancedLeadDetailModal,
   ExportLeadsDialog,
 } from '@/components/client-portal/leads';
 import {
@@ -43,7 +44,7 @@ import {
 import { CampaignSimulationPanel } from '@/components/client-portal/simulation/campaign-simulation-panel';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
-import { EmailTemplateGeneratorPanel } from '@/components/client-portal/email/email-template-generator-panel';
+import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 
 interface ClientUser {
@@ -2077,8 +2078,8 @@ export default function ClientPortalDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Qualified Lead Detail Modal */}
-      <LeadDetailModal
+      {/* Qualified Lead Detail Modal - Enhanced with Comments */}
+      <EnhancedLeadDetailModal
         leadId={selectedQualifiedLeadId}
         open={!!selectedQualifiedLeadId}
         onClose={() => setSelectedQualifiedLeadId(null)}
@@ -2113,8 +2114,8 @@ export default function ClientPortalDashboard() {
         }}
       />
 
-      {/* Email Template Generator Panel */}
-      <EmailTemplateGeneratorPanel
+      {/* Email Template Builder - Same structure as main email campaigns */}
+      <ClientEmailTemplateBuilder
         open={showEmailGenerator}
         onOpenChange={setShowEmailGenerator}
       />

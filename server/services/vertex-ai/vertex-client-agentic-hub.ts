@@ -228,7 +228,13 @@ export class VertexClientAgenticHub extends EventEmitter {
           )
         )
       )
-      .where(eq(campaigns.id, campaignId))
+      .where(
+        and(
+          eq(campaigns.id, campaignId),
+          eq(campaigns.approvalStatus, 'published'),
+          eq(campaigns.clientAccountId, this.context.clientAccountId)
+        )
+      )
       .limit(1);
 
     if (!record) {

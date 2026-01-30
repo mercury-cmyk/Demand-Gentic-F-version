@@ -296,8 +296,22 @@ router.post(
           return res.status(404).json({ error: "Campaign not found" });
         }
 
-        // For regular campaigns, you might want to add a separate linking table
-        // For now, return success indicating the campaign exists
+        if (campaign.clientAccountId && campaign.clientAccountId !== project.clientAccountId) {
+          return res.status(400).json({ error: "Campaign is linked to a different client account" });
+        }
+
+        if (campaign.projectId && campaign.projectId !== projectId) {
+          return res.status(400).json({ error: "Campaign is already linked to a different project" });
+        }
+
+        await db
+          .update(campaigns)
+          .set({
+            clientAccountId: project.clientAccountId,
+            projectId,
+            updatedAt: new Date(),
+          })
+          .where(eq(campaigns.id, campaignId));
       }
 
       res.status(201).json({

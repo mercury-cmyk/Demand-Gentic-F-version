@@ -197,7 +197,7 @@ router.get('/gemini/voices', requireAuth, async (req: Request, res: Response) =>
       isDefault: isGeminiDefault,
       model: process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio',  // Gemini 2.5 Flash Native Audio
       voices: voiceList,
-      defaultVoice: 'Kore',
+      defaultVoice: 'Fenrir',
       recommendedForSales: 'Vega',
       recommendedForB2B: 'Pegasus',
       timestamp: new Date().toISOString(),
@@ -265,7 +265,7 @@ router.get('/default', requireAuth, async (req: Request, res: Response) => {
       model: isGeminiDefault
         ? (process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio')
         : 'gpt-4o-realtime-preview-2024-12-17',
-      defaultVoice: isGeminiDefault ? 'Kore' : 'marin',
+      defaultVoice: isGeminiDefault ? 'Fenrir' : 'marin',
       costInfo: isGeminiDefault
         ? 'Gemini Live uses Google Cloud pricing - typically 50-70% lower than OpenAI Realtime'
         : 'OpenAI Realtime uses per-minute pricing',

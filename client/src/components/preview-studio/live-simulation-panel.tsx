@@ -588,10 +588,26 @@ export function LiveSimulationPanel({
       });
 
       if (!response.ok) {
-        throw new Error('TTS API request failed');
+        const errMsg = await parseErrorMessage(response, 'TTS generation').then(e => e.message);
+        throw new Error(`TTS API failed: ${errMsg}`);
+      }
+      
+      // Validate response is audio
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('audio')) {
+        console.warn(`[VoiceSim] Unexpected content-type: ${contentType}. Expected audio/*`);
       }
 
       const audioBlob = await response.blob();
+      
+      // Validate audio blob
+      if (audioBlob.size === 0) {
+        console.warn('[VoiceSim] Warning: TTS returned empty blob');
+        throw new Error('TTS returned empty audio');
+      }
+      
+      console.log(`[VoiceSim] Received audio blob: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+      
       const audioUrl = URL.createObjectURL(audioBlob);
       
       // Clean up previous audio element
@@ -602,6 +618,10 @@ export function LiveSimulationPanel({
 
       const audio = new Audio(audioUrl);
       ttsAudioRef.current = audio;
+      
+      // Ensure audio can be heard
+      audio.volume = 1.0;
+      audio.preload = 'auto';
 
       // Resume recognition after audio finishes
       audio.onended = () => {
@@ -621,10 +641,12 @@ export function LiveSimulationPanel({
         }, 300);
       };
 
-      audio.onerror = () => {
+      audio.onerror = (err: any) => {
         isSpeakingRef.current = false;
         URL.revokeObjectURL(audioUrl);
-        console.log('[VoiceSim] TTS audio error, restarting mic');
+        const errorCode = audio.error?.code || 'unknown';
+        const errorMsg = audio.error?.message || String(err);
+        console.error(`[VoiceSim] TTS audio error (${errorCode}): ${errorMsg}`);
         // Resume recognition even on error
         setTimeout(() => {
           if (recognitionRef.current && voiceSimStatusRef.current === 'active') {
@@ -634,8 +656,28 @@ export function LiveSimulationPanel({
           }
         }, 300);
       };
+      
+      audio.onloadstart = () => console.log('[VoiceSim] Audio loading started');
+      audio.oncanplay = () => console.log('[VoiceSim] Audio ready to play');
+      audio.onplaying = () => console.log('[VoiceSim] Audio playing');
 
-      await audio.play();
+      console.log('[VoiceSim] Attempting to play audio:', audioUrl.slice(0, 50) + '...');
+      const playPromise = audio.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.catch((err: any) => {
+          console.error('[VoiceSim] Play failed:', err);
+          isSpeakingRef.current = false;
+          // Resume recognition on play error
+          setTimeout(() => {
+            if (recognitionRef.current && voiceSimStatusRef.current === 'active') {
+              try {
+                recognitionRef.current.start();
+              } catch (e) {}
+            }
+          }, 300);
+        });
+      }
     } catch (error) {
       console.error('[VoiceSim] Server TTS failed:', error);
       isSpeakingRef.current = false;

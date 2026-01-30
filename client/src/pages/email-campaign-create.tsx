@@ -1,5 +1,6 @@
 import { useLocation } from "wouter";
 import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-builder/campaign-wizard";
+import { StepClientProject } from "@/components/campaign-builder/step-client-project";
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
 import { Step2EmailContentEnhanced } from "@/components/campaign-builder/step2-email-content-enhanced";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
@@ -13,6 +14,12 @@ export default function EmailCampaignCreatePage() {
   const { toast } = useToast();
 
   const steps: CampaignWizardStep[] = [
+    {
+      id: "client-project",
+      title: "Client & Project",
+      description: "Link this campaign to a client and project",
+      component: StepClientProject,
+    },
     {
       id: "audience",
       title: "Audience",
@@ -88,6 +95,8 @@ export default function EmailCampaignCreatePage() {
         name: data.name || `Email Campaign ${new Date().toISOString()}`,
         type: "email",
         status: data.action === "draft" ? "draft" : "active",
+        clientAccountId: data.clientAccountId,
+        projectId: data.projectId,
         audienceRefs,
         emailSubject: data.content?.subject,
         emailHtmlContent: data.content?.html,

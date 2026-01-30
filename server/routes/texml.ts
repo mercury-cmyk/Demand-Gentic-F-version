@@ -36,8 +36,8 @@ const aiCallHandler = (req: any, res: any) => {
 
   // CRITICAL FIX: Store full client_state in memory and only pass call_id in URL
   // This avoids URL length limits (~3KB base64 client_state was breaking ngrok WebSocket upgrades)
-  // Also determine the correct dialer path based on provider
-  let dialerPath = '/voice-dialer'; // Default to OpenAI
+  // Gemini-only routing: all TeXML calls go through the voice dialer
+  let dialerPath = '/voice-dialer';
   let finalWsUrl = '';
   let actualCallId: string | null = null;
 
@@ -48,26 +48,9 @@ const aiCallHandler = (req: any, res: any) => {
       const contextData = JSON.parse(decoded);
       actualCallId = contextData.call_id;
 
-      // CRITICAL: Determine dialer based on provider
-      // 'google', 'gemini', 'gemini_live' → /gemini-live-dialer
-      // 'openai' or 'openai_realtime' → /voice-dialer
-      const provider = contextData.provider?.toLowerCase() || '';
-      
-      // RESTORE LEGACY ROUTING: Force all TeXML calls to use /voice-dialer
-      // The /gemini-live-dialer endpoint is for SIP enforcement which isn't delivering audio logs
-      // voice-dialer.ts supports both OpenAI and Gemini providers
-      dialerPath = '/voice-dialer'; 
-      console.log(`[TeXML] Provider: ${provider || 'default'} → forcing routing to /voice-dialer (legacy mode)`);
-      
-      /* 
-      // Original routing logic - disabled to fix silent calls
-      if (provider.includes('google') || provider.includes('gemini')) {
-        dialerPath = '/gemini-live-dialer';
-        console.log(`[TeXML] Provider: ${provider} → routing to /gemini-live-dialer`);
-      } else {
-        console.log(`[TeXML] Provider: ${provider || 'default'} → routing to /voice-dialer`);
-      }
-      */
+      const provider = contextData.provider?.toLowerCase() || 'gemini_live';
+      dialerPath = '/voice-dialer';
+      console.log(`[TeXML] Provider: ${provider} → routing to /voice-dialer (Gemini-only)`);
 
       // Build WebSocket URL with correct dialer path
       const wsUrl = host.startsWith('wss://') || host.startsWith('ws://')

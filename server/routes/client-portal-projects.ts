@@ -7,6 +7,7 @@ import {
   clientActivityCosts,
   clientDeliveryLinks,
   verificationCampaigns,
+  campaigns,
   clientCampaignAccess,
   clientAccounts,
   clientPortalActivityLogs,
@@ -68,11 +69,23 @@ router.get('/', async (req: Request, res: Response) => {
     // Get campaign counts and total costs for each project
     const projectsWithStats = await Promise.all(
       projects.map(async (project) => {
-        // Count campaigns
+        // Count verification campaigns
         const [campaignCount] = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(clientProjectCampaigns)
           .where(eq(clientProjectCampaigns.projectId, project.id));
+
+        // Count regular campaigns linked to this project (published only)
+        const [regularCampaignCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(campaigns)
+          .where(
+            and(
+              eq(campaigns.projectId, project.id),
+              eq(campaigns.clientAccountId, clientAccountId),
+              eq(campaigns.approvalStatus, 'published')
+            )
+          );
 
         // Sum costs
         const [costSum] = await db
@@ -82,7 +95,7 @@ router.get('/', async (req: Request, res: Response) => {
 
         return {
           ...project,
-          campaignCount: campaignCount?.count || 0,
+          campaignCount: (campaignCount?.count || 0) + (regularCampaignCount?.count || 0),
           totalCost: parseFloat(costSum?.total || '0'),
         };
       })
@@ -188,7 +201,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // Get campaigns for this project
+    // Get verification campaigns for this project
     const campaigns = await db
       .select({
         id: verificationCampaigns.id,
@@ -202,6 +215,24 @@ router.get('/:id', async (req: Request, res: Response) => {
       )
       .where(eq(clientProjectCampaigns.projectId, projectId));
 
+    // Get regular campaigns for this project (published only)
+    const regularCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        approvalStatus: campaigns.approvalStatus,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(
+        and(
+          eq(campaigns.projectId, projectId),
+          eq(campaigns.clientAccountId, clientAccountId),
+          eq(campaigns.approvalStatus, 'published')
+        )
+      );
+
     // Get cost summary
     const [costSummary] = await db
       .select({
@@ -214,6 +245,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.json({
       ...project,
       campaigns,
+      regularCampaigns,
       costSummary: {
         totalCost: parseFloat(costSummary?.totalCost || '0'),
         activityCount: costSummary?.activityCount || 0,

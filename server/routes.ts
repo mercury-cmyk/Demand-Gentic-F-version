@@ -2,7 +2,7 @@ import type { Express } from "express";
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
-import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc } from "drizzle-orm";
+import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc, like } from "drizzle-orm";
 import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
@@ -63,6 +63,8 @@ import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
 import simulationsRouter from './routes/simulations';
+import voiceProviderRoutes from './routes/voice-provider-routes';
+import recordingsRouter from './routes/recordings';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -84,7 +86,7 @@ import { db } from "./db";
 import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, type InsertMailboxAccount } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, type InsertMailboxAccount } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -4591,6 +4593,36 @@ export function registerRoutes(app: Express) {
   app.post("/api/campaigns", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const { assignedAgents, ...campaignData } = req.body;
+
+      if (!campaignData.clientAccountId || !campaignData.projectId) {
+        return res.status(400).json({
+          message: "clientAccountId and projectId are required to create a campaign",
+        });
+      }
+
+      const [clientAccount] = await db
+        .select({ id: clientAccounts.id })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, campaignData.clientAccountId))
+        .limit(1);
+
+      if (!clientAccount) {
+        return res.status(404).json({ message: "Client account not found" });
+      }
+
+      const [project] = await db
+        .select({ id: clientProjects.id, clientAccountId: clientProjects.clientAccountId })
+        .from(clientProjects)
+        .where(eq(clientProjects.id, campaignData.projectId))
+        .limit(1);
+
+      if (!project) {
+        return res.status(404).json({ message: "Client project not found" });
+      }
+
+      if (project.clientAccountId !== campaignData.clientAccountId) {
+        return res.status(400).json({ message: "Project does not belong to the specified client account" });
+      }
       
       // Parse natural language rules once on save (performance optimization)
       // Treat falsy, whitespace-only, or empty strings as "no rules" to avoid cache sync issues
@@ -4716,6 +4748,52 @@ export function registerRoutes(app: Express) {
   app.patch("/api/campaigns/:id", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const updateData = { ...req.body };
+      // Approval fields are managed via the dedicated approval endpoint
+      delete updateData.approvalStatus;
+      delete updateData.approvedById;
+      delete updateData.approvedAt;
+      delete updateData.publishedAt;
+
+      const existingCampaign = await storage.getCampaign(req.params.id);
+      if (!existingCampaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      const hasClientUpdate = "clientAccountId" in updateData || "projectId" in updateData;
+      if (hasClientUpdate) {
+        const clientAccountId = updateData.clientAccountId ?? existingCampaign.clientAccountId;
+        const projectId = updateData.projectId ?? existingCampaign.projectId;
+
+        if (!clientAccountId || !projectId) {
+          return res.status(400).json({
+            message: "clientAccountId and projectId are required to update campaign linkage",
+          });
+        }
+
+        const [clientAccount] = await db
+          .select({ id: clientAccounts.id })
+          .from(clientAccounts)
+          .where(eq(clientAccounts.id, clientAccountId))
+          .limit(1);
+
+        if (!clientAccount) {
+          return res.status(404).json({ message: "Client account not found" });
+        }
+
+        const [project] = await db
+          .select({ id: clientProjects.id, clientAccountId: clientProjects.clientAccountId })
+          .from(clientProjects)
+          .where(eq(clientProjects.id, projectId))
+          .limit(1);
+
+        if (!project) {
+          return res.status(404).json({ message: "Client project not found" });
+        }
+
+        if (project.clientAccountId !== clientAccountId) {
+          return res.status(400).json({ message: "Project does not belong to the specified client account" });
+        }
+      }
       
       // Parse natural language rules once on update (performance optimization)
       if ('customQaRules' in updateData) {
@@ -4734,13 +4812,68 @@ export function registerRoutes(app: Express) {
       }
       
       const campaign = await storage.updateCampaign(req.params.id, updateData);
-      if (!campaign) {
-        return res.status(404).json({ message: "Campaign not found" });
-      }
       invalidateDashboardCache();
       res.json(campaign);
     } catch (error) {
       res.status(500).json({ message: "Failed to update campaign" });
+    }
+  });
+
+  app.patch("/api/campaigns/:id/approval", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
+    try {
+      const { approvalStatus } = req.body as { approvalStatus?: string };
+      const allowedStatuses = ['draft', 'in_review', 'approved', 'rejected', 'published'];
+
+      if (!approvalStatus || !allowedStatuses.includes(approvalStatus)) {
+        return res.status(400).json({ message: "Invalid approvalStatus" });
+      }
+
+      const campaign = await storage.getCampaign(req.params.id);
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      if (!campaign.clientAccountId || !campaign.projectId) {
+        return res.status(400).json({ message: "Campaign must be linked to a client and project before approval" });
+      }
+
+      const updateData: any = {
+        approvalStatus,
+        updatedAt: new Date(),
+      };
+
+      if (approvalStatus === 'approved') {
+        updateData.approvedById = req.user!.userId;
+        updateData.approvedAt = new Date();
+      }
+
+      if (approvalStatus === 'published') {
+        updateData.approvedById = req.user!.userId;
+        updateData.approvedAt = campaign.approvedAt || new Date();
+        updateData.publishedAt = new Date();
+      }
+
+      if (approvalStatus === 'rejected') {
+        updateData.approvedById = req.user!.userId;
+        updateData.approvedAt = new Date();
+        updateData.publishedAt = null;
+      }
+
+      const [updated] = await db
+        .update(campaigns)
+        .set(updateData)
+        .where(eq(campaigns.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      invalidateDashboardCache();
+      res.json(updated);
+    } catch (error) {
+      console.error('Campaign approval error:', error);
+      res.status(500).json({ message: "Failed to update campaign approval" });
     }
   });
 
@@ -4806,6 +4939,8 @@ export function registerRoutes(app: Express) {
           name: `${originalCampaign.name} (Copy)`,
           type: originalCampaign.type,
           status: 'draft', // Always create as draft
+          clientAccountId: originalCampaign.clientAccountId,
+          projectId: originalCampaign.projectId,
           audienceRefs: originalCampaign.audienceRefs,
           emailSubject: originalCampaign.emailSubject,
           emailHtmlContent: originalCampaign.emailHtmlContent,
@@ -9154,7 +9289,7 @@ export function registerRoutes(app: Express) {
         firstName: users.firstName,
         lastName: users.lastName,
         email: users.email,
-      }).from(users);
+      }).from(users).where(eq(users.role, 'agent'));
 
       res.json(agents);
     } catch (error) {
@@ -11231,6 +11366,33 @@ export function registerRoutes(app: Express) {
                     }
                   }
                 }
+
+                // 3. Update call_sessions table and store recording to S3/GCS
+                const { callSessions } = await import('@shared/schema');
+                const sessionsForCall = await db.select().from(callSessions).where(eq(callSessions.telnyxCallId, callControlId));
+
+                if (sessionsForCall && sessionsForCall.length > 0) {
+                  const { storeCallSessionRecording } = await import('./services/recording-storage');
+                  
+                  for (const session of sessionsForCall) {
+                    try {
+                      // Store recording to S3/GCS and update session record
+                      const result = await storeCallSessionRecording(
+                        session.id,
+                        recordingUrl,
+                        session.campaignId || undefined
+                      );
+                      
+                      if (result) {
+                        console.log(`[Telnyx Webhook] ✅ Stored call session ${session.id} recording to S3: ${result.s3Key}`);
+                      } else {
+                        console.log(`[Telnyx Webhook] ⚠️ Could not store call session ${session.id} recording to S3`);
+                      }
+                    } catch (sessionError) {
+                      console.error(`[Telnyx Webhook] Error storing call session ${session.id} recording:`, sessionError);
+                    }
+                  }
+                }
               }
             } catch (error) {
               console.error("[Telnyx Webhook] Error updating recording:", error);
@@ -12425,6 +12587,10 @@ Provide JSON response with:
 
   app.use("/api/simulations", simulationsRouter);
 
+  // ==================== VOICE PROVIDER ROUTES (TTS, Voice Discovery) ====================
+
+  app.use("/api/voice-providers", voiceProviderRoutes);
+
   // ==================== QUEUE MANAGEMENT ====================
 
   app.use("/api", queueRouter);
@@ -12435,6 +12601,9 @@ Provide JSON response with:
 
   // ==================== CALL CAMPAIGN REPORTING ROUTES ====================
   app.use('/api/reports/calls', reportingRoutes);
+
+  // ==================== CALL RECORDINGS ====================
+  app.use('/api/recordings', requireAuth, recordingsRouter);
 
   // ==================== ENGAGEMENT ANALYTICS ENDPOINT ====================
   app.get('/api/analytics/engagement', requireAuth, async (req, res) => {
@@ -13244,6 +13413,93 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('Error fetching queue status:', error);
       res.status(500).json({ message: "Failed to fetch queue status" });
+    }
+  });
+
+  // ==================== CONVERSATION QUALITY / QA ====================
+
+  // Get all conversations for QA review (call sessions with transcripts)
+  app.get("/api/qa/conversations", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { campaignId, type, search, limit = '100' } = req.query;
+      const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10)));
+
+      // Build conditions
+      const conditions: any[] = [];
+      
+      if (campaignId && campaignId !== 'all') {
+        conditions.push(eq(callSessions.campaignId, campaignId as string));
+      }
+
+      if (search) {
+        const searchPattern = `%${search}%`;
+        conditions.push(
+          or(
+            like(callSessions.aiTranscript, searchPattern),
+            like(callSessions.toNumberE164, searchPattern)
+          )
+        );
+      }
+
+      const whereClause = conditions.length ? and(...conditions) : undefined;
+
+      // Query call sessions (transcript optional)
+      const sessions = await db
+        .select({
+          id: callSessions.id,
+          campaignId: callSessions.campaignId,
+          campaignName: campaigns.name,
+          contactId: callSessions.contactId,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          contactEmail: contacts.email,
+          companyName: accounts.name,
+          status: callSessions.status,
+          disposition: callSessions.aiDisposition,
+          agentType: callSessions.agentType,
+          duration: callSessions.durationSec,
+          transcript: callSessions.aiTranscript,
+          analysis: callSessions.aiAnalysis,
+          recordingUrl: callSessions.recordingUrl,
+          createdAt: callSessions.startedAt,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(whereClause)
+        .orderBy(desc(callSessions.startedAt))
+        .limit(limitNum);
+
+      // Transform to expected format
+      const conversations = sessions.map(session => ({
+        id: session.id,
+        type: 'call' as const,
+        source: 'call_session' as const,
+        campaignId: session.campaignId || '',
+        campaignName: session.campaignName || 'Unknown Campaign',
+        contactId: session.contactId || undefined,
+        contactName: [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact',
+        contactEmail: session.contactEmail || undefined,
+        companyName: session.companyName || 'Unknown Company',
+        status: session.status || 'unknown',
+        disposition: session.disposition || undefined,
+        agentType: session.agentType,
+        duration: session.duration || undefined,
+        transcript: session.transcript || undefined,
+        analysis: session.analysis || undefined,
+        recordingUrl: session.recordingUrl || undefined,
+        createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
+        isTestCall: false,
+      }));
+
+      res.json({
+        conversations,
+        total: conversations.length,
+      });
+    } catch (error: any) {
+      console.error('Error fetching QA conversations:', error);
+      res.status(500).json({ message: "Failed to fetch conversations" });
     }
   });
 

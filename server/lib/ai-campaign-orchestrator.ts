@@ -692,6 +692,12 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
     console.log(`[AI Orchestrator] Campaign ${campaignId} has no AI settings`);
     return { initiated: 0, skipped: 0 };
   }
+  
+  // Log Gemini-only mode and voice configuration
+  const configuredVoice = aiSettings.persona?.voice || 'Puck';
+  console.log(`[AI Orchestrator] 🎤 Gemini-only mode enabled for campaign ${campaignId}`);
+  console.log(`[AI Orchestrator] 🔊 Voice: ${configuredVoice} (Gemini Live compatible)`);
+  console.log(`[AI Orchestrator] 📡 Webhook: ${process.env.PUBLIC_WEBHOOK_HOST || 'not set'}`);
 
   // Fetch assigned virtual agent for this campaign
   const virtualAgent = await getCampaignVirtualAgent(campaignId);

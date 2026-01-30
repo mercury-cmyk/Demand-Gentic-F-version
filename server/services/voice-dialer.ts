@@ -78,6 +78,14 @@ import {
   buildCampaignContextSection,
   buildContactContextSection,
 } from "./foundation-capabilities";
+import {
+  startRecording,
+  recordInboundAudio,
+  recordOutboundAudio,
+  stopRecordingAndUpload,
+  cancelRecording,
+  isRecordingActive,
+} from "./call-recording-manager";
 import { getOrganizationBrain } from "./agent-brain-service";
 import { analyzeConversationQuality } from "./conversation-quality-analyzer";
 import {
@@ -650,9 +658,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   });
 
   // Determine active voice provider
-  const voiceProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
-  const isGeminiActive = !voiceProvider.includes('openai');
-  const fallbackEnabled = process.env.VOICE_PROVIDER_FALLBACK === 'true';
+  const voiceProvider = 'google';
+  const isGeminiActive = true;
+  const fallbackEnabled = false;
   const geminiModel = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 
   console.log(`${LOG_PREFIX} ========================================`);
@@ -660,8 +668,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} Primary Provider: ${isGeminiActive ? '🟢 Google Gemini Live' : '🔵 OpenAI Realtime'}`);
   console.log(`${LOG_PREFIX} Model: ${isGeminiActive ? geminiModel : 'gpt-4o-realtime-preview'}`);
-  const fallbackTarget = process.env.VOICE_PROVIDER_FALLBACK_TARGET || 'openai';
-  console.log(`${LOG_PREFIX} Fallback: ${fallbackEnabled ? `✅ ${fallbackTarget === 'openai' ? 'OpenAI Realtime' : 'Gemini Live'}` : '❌ Disabled (Gemini-only mode)'}`);
+  const fallbackTarget = 'gemini';
+  console.log(`${LOG_PREFIX} Fallback: ❌ Disabled (Gemini-only mode)`);
   console.log(`${LOG_PREFIX} Cost Savings: ${isGeminiActive ? '~50-70% vs OpenAI Realtime' : 'N/A'}`);
   console.log(`${LOG_PREFIX} ========================================`);
   console.log(`${LOG_PREFIX} WebSocket server initialized on /voice-dialer`);
@@ -674,7 +682,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
     console.log(`${LOG_PREFIX} âœ… CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
     
     // Send a welcome message immediately to confirm connection
-    const activeProvider = (process.env.VOICE_PROVIDER?.toLowerCase() || 'google').includes('openai') ? 'OpenAI Realtime' : 'Gemini Live';
+    const activeProvider = 'Gemini Live';
     ws.send(JSON.stringify({
       type: "connection_established",
       message: `Connected to ${activeProvider} Voice Dialer Service`,
@@ -826,10 +834,11 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           const isTestSession = isTestCallFlag || isTestIdPattern;
 
           // Determine provider - default to Google Gemini Live (more cost-effective)
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'google').toString().toLowerCase();
-          // Check if openai is explicitly requested (handles 'openai', 'openai_realtime', etc.)
-          const isOpenAIRequested = requestedProvider.includes('openai');
-          const provider: 'openai' | 'google' = isOpenAIRequested ? 'openai' : 'google';
+          const requestedProvider = (customParams.provider || (urlParams as any).provider || 'gemini_live').toString().toLowerCase();
+          if (requestedProvider.includes('openai')) {
+            console.warn(`${LOG_PREFIX} OpenAI provider requested (${requestedProvider}) but is disabled. Forcing Gemini Live.`);
+          }
+          const provider: 'openai' | 'google' = 'google';
 
           if (isTestSession) {
             audioFormat = 'g711_ulaw';
@@ -1097,6 +1106,16 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           }
 
           activeSessions.set(sessionId!, session!);
+          
+          // Start recording for this call session
+          if (session!.callSessionId) {
+            startRecording(
+              sessionId!,
+              session!.callSessionId,
+              session!.campaignId || null,
+              session!.contactId || null
+            );
+          }
           
           // Persist session to Redis for cross-instance state sharing
           // This solves "invalid call control ID" in production with multiple instances
@@ -2157,6 +2176,9 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         return;
       }
 
+      // Record outbound audio for call recording
+      recordOutboundAudio(session.callId, event.audioBuffer);
+
       console.log(`${LOG_PREFIX} 🎤 Queuing ${event.audioBuffer.length} bytes for Telnyx (format: ${event.format || 'unknown'})`);
       enqueueTelnyxOutboundAudio(session, event.audioBuffer);
       ensureTelnyxOutboundPacer(session);
@@ -2538,6 +2560,9 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
         // Cost tracking: record outgoing audio
         recordAudioOutput(session.callId, audioBuffer.length);
+
+        // Record outbound audio for call recording
+        recordOutboundAudio(session.callId, audioBuffer);
 
         // Track audio playback time for truncation (G.711 ulaw: 8000 samples/sec, 1 byte/sample)
         // Each byte = 0.125ms of audio
@@ -4032,6 +4057,9 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
       const audioBuffer = Buffer.from(message.media.payload, 'base64');
       geminiProvider.sendAudio(audioBuffer);
 
+      // Record inbound audio for call recording
+      recordInboundAudio(session.callId, audioBuffer);
+
       // Track bytes for cost tracking
       const bytes = audioBuffer.length;
       session.audioBytesSent += bytes;
@@ -4068,6 +4096,9 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
 
     // DIAGNOSTIC: Decode audio to inspect chunk size and header bytes
     const audioBytes = Buffer.from(message.media.payload, 'base64');
+
+    // Record inbound audio for call recording
+    recordInboundAudio(session.callId, audioBytes);
 
     if (session.telnyxInboundFrames === 1) {
       const first8Hex = audioBytes.subarray(0, 8).toString('hex');
@@ -4150,6 +4181,13 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.telnyxOutboundBuffer = Buffer.alloc(0);
 
   console.log(`${LOG_PREFIX} Ending call: ${callId}, outcome: ${outcome}, disposition: ${session.detectedDisposition}`);
+
+  // Stop recording and upload to cloud storage (async, non-blocking)
+  if (isRecordingActive(callId)) {
+    stopRecordingAndUpload(callId).catch(err => {
+      console.error(`${LOG_PREFIX} Failed to upload recording for call ${callId}:`, err);
+    });
+  }
 
   // Finalize cost tracking and log detailed breakdown
   const costMetrics = finalizeCostTracking(callId);
@@ -4278,6 +4316,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // ✅ CRITICAL: Also create a call_sessions record and log intelligence for test calls
         // This ensures test calls are visible in the main call quality analytics
         try {
+          // For test calls, contactId is a fake ID like 'test-contact-xxx' which doesn't exist in DB
+          // Set to null to avoid FK constraint violation - test calls don't have real contacts
+          const contactIdForSession = isTestCall ? null : (session.contactId || null);
+          
           const [testCallSession] = await db.insert(callSessions).values({
             toNumberE164: session.calledNumber || '+1-test-call',
             startedAt: session.callStartedAt || session.startTime,
@@ -4285,20 +4327,21 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             durationSec: callDuration,
             status: 'completed' as const,
             agentType: 'ai' as const,
-            aiAgentId: session.virtualAgentId || 'openai-realtime',
-            aiConversationId: session.openaiSessionId || undefined,
+            aiAgentId: session.virtualAgentId || 'gemini-live',
+            aiConversationId: session.openaiSessionId || session.geminiSessionId || undefined,
             aiTranscript: fullTranscript || undefined,
             aiDisposition: disposition,
             campaignId: session.campaignId,
-            contactId: session.contactId || undefined,
+            contactId: contactIdForSession,
+            queueItemId: isTestCall ? `test-queue-${testCallId}` : session.queueItemId,
           }).returning();
 
           // Log comprehensive call intelligence for test calls
           const intelligenceResult = await logCallIntelligence({
             callSessionId: testCallSession.id,
-            dialerCallAttemptId: session.callAttemptId,
+            dialerCallAttemptId: isTestCall ? null : session.callAttemptId,
             campaignId: session.campaignId,
-            contactId: session.contactId,
+            contactId: contactIdForSession, // null for test calls to avoid FK issues
             qualityAnalysis: conversationQuality,
             fullTranscript,
           });

@@ -3,6 +3,8 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { ensureVoiceAgentControlLayer } from "./voice-agent-control-defaults";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { chat as vertexChat, generateText as vertexGenerateText } from "./vertex-ai/vertex-client";
 import {
   buildAccountContextSection,
   getOrBuildAccountIntelligence,
@@ -21,17 +23,79 @@ import {
 } from "./account-call-service";
 
 let openai: OpenAI | null = null;
+let gemini: GoogleGenerativeAI | null = null;
 
 function getOpenAI(): OpenAI {
-  if (!openai) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not configured");
+  throw new Error("OpenAI provider is disabled for voice agents.");
+}
+
+function getGemini(): GoogleGenerativeAI {
+  if (!gemini) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY or GOOGLE_AI_API_KEY is not configured");
     }
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    gemini = new GoogleGenerativeAI(apiKey);
   }
-  return openai;
+  return gemini;
+}
+
+async function generateGeminiChatResponse(
+  systemPrompt: string,
+  messages: Array<{ role: "ai" | "human"; text: string }>,
+  options: { maxTokens: number; temperature: number }
+): Promise<string> {
+  const chatMessages = messages.map((m) => ({
+    role: m.role === "ai" ? ("model" as const) : ("user" as const),
+    content: m.text,
+  }));
+
+  try {
+    const response = await vertexChat(systemPrompt, chatMessages, {
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+    });
+    if (response) {
+      return response;
+    }
+  } catch (error) {
+    console.warn("[AiVoiceAgent] Vertex AI chat failed, falling back to Gemini API:", error);
+  }
+
+  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash-001";
+  const model = getGemini().getGenerativeModel({
+    model: modelName,
+    systemInstruction: systemPrompt,
+  });
+
+  const history = chatMessages
+    .filter((m) => m.role === "user" || m.role === "model")
+    .map((m) => ({
+      role: m.role,
+      parts: [{ text: m.content }],
+    }));
+
+  const chat = model.startChat({ history });
+  const lastHuman = [...messages].reverse().find((m) => m.role === "human");
+  const fallbackUserMessage = lastHuman?.text || "Please continue the conversation.";
+  const result = await chat.sendMessage(fallbackUserMessage);
+  return result.response.text();
+}
+
+async function generateGeminiText(prompt: string, maxTokens: number): Promise<string> {
+  try {
+    const response = await vertexGenerateText(prompt, { maxTokens, temperature: 0.3 });
+    if (response) {
+      return response;
+    }
+  } catch (error) {
+    console.warn("[AiVoiceAgent] Vertex AI text generation failed, falling back to Gemini API:", error);
+  }
+
+  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash-001";
+  const model = getGemini().getGenerativeModel({ model: modelName });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
 }
 
 export interface AiAgentSettings {
@@ -40,7 +104,28 @@ export interface AiAgentSettings {
     companyName: string;
     role: string;
     // marin & cedar are highest quality, most natural voices (recommended)
-    voice: "alloy" | "ash" | "ballad" | "coral" | "echo" | "sage" | "shimmer" | "verse" | "marin" | "cedar" | "nova" | "fable" | "onyx";
+    voice:
+      | "alloy"
+      | "ash"
+      | "ballad"
+      | "coral"
+      | "echo"
+      | "sage"
+      | "shimmer"
+      | "verse"
+      | "marin"
+      | "cedar"
+      | "nova"
+      | "fable"
+      | "onyx"
+      | "Puck"
+      | "Charon"
+      | "Kore"
+      | "Fenrir"
+      | "Aoede"
+      | "Leda"
+      | "Orus"
+      | "Zephyr";
   };
   scripts: {
     opening: string;
@@ -315,20 +400,11 @@ IMPORTANT:
     try {
         const systemPrompt = await this.buildSystemPrompt();
       
-      const response = await getOpenAI().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...this.conversationHistory.map((m) => ({
-            role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
-            content: m.text,
-          })),
-        ],
-        max_tokens: 200,
-        temperature: 0.7,
-      });
-
-      const aiResponse = response.choices[0]?.message?.content || "";
+      const aiResponse = await generateGeminiChatResponse(
+        systemPrompt,
+        this.conversationHistory,
+        { maxTokens: 200, temperature: 0.7 }
+      );
       this.conversationHistory.push({ role: "ai", text: aiResponse });
       this.emit("transcript:ai", aiResponse);
 
@@ -467,22 +543,10 @@ IMPORTANT:
 
     let summary = "";
     try {
-      const summaryResponse = await getOpenAI().chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Summarize this sales call in 2-3 sentences. Include: who was reached, main outcome, and any follow-up actions needed.",
-          },
-          {
-            role: "user",
-            content: transcript,
-          },
-        ],
-        max_tokens: 150,
-      });
-      summary = summaryResponse.choices[0]?.message?.content || "Call completed.";
+      summary = await generateGeminiText(
+        `Summarize this sales call in 2-3 sentences. Include: who was reached, main outcome, and any follow-up actions needed.\n\n${transcript}`,
+        150
+      );
     } catch {
       summary = `Call ended with disposition: ${disposition}`;
     }

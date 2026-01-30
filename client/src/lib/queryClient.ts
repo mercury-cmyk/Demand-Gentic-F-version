@@ -14,7 +14,7 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-function getAuthHeaders(): HeadersInit {
+export function getAuthHeaders(): HeadersInit {
   const token = localStorage.getItem('authToken');
   const headers: HeadersInit = {};
   

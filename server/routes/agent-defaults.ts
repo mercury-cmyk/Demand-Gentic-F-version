@@ -83,7 +83,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         defaultSystemPrompt: SYSTEM_DEFAULT_PROMPT,
         defaultTrainingGuidelines: SYSTEM_DEFAULT_TRAINING,
         defaultVoiceProvider: 'google',
-        defaultVoice: 'Kore',
+        defaultVoice: 'Fenrir',
         isSystemDefault: true,
         updatedAt: null,
       });
@@ -135,7 +135,7 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
           defaultSystemPrompt: defaultSystemPrompt || SYSTEM_DEFAULT_PROMPT,
           defaultTrainingGuidelines: defaultTrainingGuidelines || SYSTEM_DEFAULT_TRAINING,
           defaultVoiceProvider: defaultVoiceProvider || 'google',
-          defaultVoice: defaultVoice || 'Kore',
+          defaultVoice: defaultVoice || 'Fenrir',
           updatedAt: new Date(),
         })
         .where(eq(agentDefaults.id, existing.id))
@@ -149,7 +149,7 @@ router.put('/', requireAuth, async (req: Request, res: Response) => {
           defaultSystemPrompt: defaultSystemPrompt || SYSTEM_DEFAULT_PROMPT,
           defaultTrainingGuidelines: defaultTrainingGuidelines || SYSTEM_DEFAULT_TRAINING,
           defaultVoiceProvider: defaultVoiceProvider || 'google',
-          defaultVoice: defaultVoice || 'Kore',
+          defaultVoice: defaultVoice || 'Fenrir',
         })
         .returning();
     }
@@ -186,7 +186,7 @@ router.post('/reset', requireAuth, async (req: Request, res: Response) => {
       defaultSystemPrompt: SYSTEM_DEFAULT_PROMPT,
       defaultTrainingGuidelines: SYSTEM_DEFAULT_TRAINING,
       defaultVoiceProvider: 'google',
-      defaultVoice: 'Kore',
+      defaultVoice: 'Fenrir',
       isSystemDefault: true,
       updatedAt: null,
       message: 'Reset to system defaults successfully',

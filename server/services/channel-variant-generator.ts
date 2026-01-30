@@ -159,7 +159,7 @@ Generate a comprehensive system prompt for the AI voice agent. Return as plain t
   // Default channel settings for voice
   const channelSettings: ChannelSettings = {
     voiceProvider: 'google',
-    voice: 'Kore', // Default Gemini voice
+    voice: 'Fenrir', // Default Gemini voice
     persona: {
       name: context.deliverables?.[0]?.name ? `${context.deliverables[0].name} Representative` : 'Sales Representative',
       companyName: 'Your Company', // Would be replaced with actual org name

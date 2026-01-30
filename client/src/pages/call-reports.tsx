@@ -40,6 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
 import { useAuth } from "@/contexts/AuthContext";
 import { AiCallAnalyticsPanel } from "@/pages/ai-call-analytics";
+import { getAuthHeaders } from "@/lib/queryClient";
 
 const COLORS = {
   qualified: 'hsl(var(--chart-2))',
@@ -49,12 +50,6 @@ const COLORS = {
   dnc_request: 'hsl(var(--destructive))',
   busy: 'hsl(var(--chart-5))',
   callback_requested: 'hsl(var(--primary))',
-};
-
-const QA_COLORS = {
-  approved: 'hsl(var(--chart-2))',
-  rejected: 'hsl(var(--destructive))',
-  pending_review: 'hsl(var(--chart-3))',
 };
 
 export default function CallReportsPage() {
@@ -108,6 +103,7 @@ export default function CallReportsPage() {
     queryKey: ['/api/campaigns'],
     queryFn: async () => {
       const response = await fetch('/api/campaigns', {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch campaigns');
@@ -124,6 +120,7 @@ export default function CallReportsPage() {
     queryKey: ['/api/reports/calls/queue/global', selectedCampaign],
     queryFn: async () => {
       const response = await fetch(`/api/reports/calls/queue/global${queueParams.toString() ? '?' + queueParams.toString() : ''}`, {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch queue stats');
@@ -136,6 +133,7 @@ export default function CallReportsPage() {
     queryKey: ['/api/agents'],
     queryFn: async () => {
       const response = await fetch('/api/agents', {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch agents');
@@ -153,6 +151,7 @@ export default function CallReportsPage() {
     queryKey: ['/api/reports/calls/global', dateRange, selectedCampaign],
     queryFn: async () => {
       const response = await fetch(`/api/reports/calls/global${globalParams.toString() ? '?' + globalParams.toString() : ''}`, {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch global stats');
@@ -168,6 +167,7 @@ export default function CallReportsPage() {
     queryKey: ['/api/reports/calls/campaign', selectedCampaign, dateRange],
     queryFn: async () => {
       const response = await fetch(`/api/reports/calls/campaign/${selectedCampaign}${campaignParams.toString() ? '?' + campaignParams.toString() : ''}`, {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch campaign stats');
@@ -186,6 +186,7 @@ export default function CallReportsPage() {
       if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
       
       const response = await fetch(`/api/reports/calls/agent/${selectedAgent}?${params}`, {
+        headers: getAuthHeaders(),
         credentials: 'include'
       });
       if (!response.ok) throw new Error('Failed to fetch agent stats');
@@ -201,17 +202,6 @@ export default function CallReportsPage() {
     if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
     if (selectedAgent !== 'all') params.append('agentId', selectedAgent);
     params.append('disposition', disposition);
-    
-    setLocation(`/call-reports/details?${params}`);
-  };
-  
-  const handleQAStatusClick = (status: string) => {
-    const params = new URLSearchParams();
-    if (dateRange.from) params.append('from', dateRange.from);
-    if (dateRange.to) params.append('to', dateRange.to);
-    if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
-    if (selectedAgent !== 'all') params.append('agentId', selectedAgent);
-    params.append('qaStatus', status);
     
     setLocation(`/call-reports/details?${params}`);
   };
@@ -302,7 +292,9 @@ export default function CallReportsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Agents</SelectItem>
-                      {agents.map((agent: any) => (
+                      {agents
+                        .filter((agent: any) => agent.role !== 'admin' && agent.role !== 'super_admin')
+                        .map((agent: any) => (
                         <SelectItem key={agent.id} value={agent.id}>
                           {agent.firstName} {agent.lastName}
                         </SelectItem>
@@ -498,61 +490,33 @@ export default function CallReportsPage() {
                 </CardContent>
               </Card>
               
-              {/* QA Stats */}
-              <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>QA Status Distribution</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {globalStats.qaStats.map((qa: any) => (
-                        <div 
-                          key={qa.qaStatus}
-                          className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors"
-                          onClick={() => handleQAStatusClick(qa.qaStatus)}
-                          data-testid={`qa-status-${qa.qaStatus}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant={qa.qaStatus === 'approved' ? 'default' : qa.qaStatus === 'rejected' ? 'destructive' : 'secondary'}>
-                              {qa.qaStatus}
-                            </Badge>
-                            <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                          </div>
-                          <span className="text-lg font-semibold">{qa.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Disposition Chart</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <PieChart>
-                        <Pie
-                          data={globalStats.dispositions}
-                          dataKey="count"
-                          nameKey="disposition"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          label
-                        >
-                          {globalStats.dispositions.map((entry: any, index: number) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[entry.disposition as keyof typeof COLORS] || '#ccc'} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
+              {/* Disposition Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Disposition Chart</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={globalStats.dispositions}
+                        dataKey="count"
+                        nameKey="disposition"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label
+                      >
+                        {globalStats.dispositions.map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[entry.disposition as keyof typeof COLORS] || '#ccc'} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
               
               {/* Campaign Breakdown */}
               <Card>

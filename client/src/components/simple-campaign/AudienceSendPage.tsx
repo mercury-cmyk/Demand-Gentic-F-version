@@ -35,6 +35,7 @@ import {
   Filter,
   List,
   Loader2,
+  Building2,
   CalendarClock,
   SlidersHorizontal,
   Lock,
@@ -73,6 +74,17 @@ interface ContactList {
   contactCount?: number;
 }
 
+interface ClientAccount {
+  id: string;
+  name: string;
+}
+
+interface ClientProject {
+  id: string;
+  name: string;
+  status: string;
+}
+
 interface AudienceSendPageProps {
   campaignIntent: CampaignIntent;
   template: TemplateData;
@@ -92,6 +104,8 @@ interface LaunchData {
   scheduledTime?: string;
   timezone?: string;
   throttlingLimit?: number;
+  clientAccountId: string;
+  projectId: string;
 }
 
 export function AudienceSendPage({
@@ -114,6 +128,14 @@ export function AudienceSendPage({
   const [loadingAudience, setLoadingAudience] = useState(true);
   const [audienceCount, setAudienceCount] = useState<number>(0);
   const [countingAudience, setCountingAudience] = useState(false);
+
+  // Client/project linkage
+  const [clientAccounts, setClientAccounts] = useState<ClientAccount[]>([]);
+  const [clientProjects, setClientProjects] = useState<ClientProject[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(false);
   
   // Send options state
   const [sendType, setSendType] = useState<"now" | "scheduled">("now");
@@ -155,6 +177,70 @@ export function AudienceSendPage({
     
     fetchAudienceOptions();
   }, []);
+
+  // Fetch client accounts
+  useEffect(() => {
+    let active = true;
+    const fetchClients = async () => {
+      setLoadingClients(true);
+      try {
+        const res = await apiRequest("GET", "/api/client-portal/admin/clients");
+        if (!res.ok) throw new Error("Failed to load clients");
+        const data = await res.json();
+        if (active) {
+          setClientAccounts(data || []);
+        }
+      } catch (error) {
+        console.error("Failed to load clients:", error);
+        if (active) setClientAccounts([]);
+      } finally {
+        if (active) setLoadingClients(false);
+      }
+    };
+    fetchClients();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch projects for selected client
+  useEffect(() => {
+    let active = true;
+    const fetchProjects = async () => {
+      if (!selectedClientId) {
+        setClientProjects([]);
+        setSelectedProjectId("");
+        return;
+      }
+      setLoadingProjects(true);
+      try {
+        const res = await apiRequest("GET", `/api/client-portal/admin/clients/${selectedClientId}`);
+        if (!res.ok) throw new Error("Failed to load projects");
+        const data = await res.json();
+        if (active) {
+          const projects = data?.projects || [];
+          setClientProjects(projects);
+          if (projects.length > 0) {
+            setSelectedProjectId((prev) => (prev && projects.some((p: ClientProject) => p.id === prev) ? prev : projects[0].id));
+          } else {
+            setSelectedProjectId("");
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load projects:", error);
+        if (active) {
+          setClientProjects([]);
+          setSelectedProjectId("");
+        }
+      } finally {
+        if (active) setLoadingProjects(false);
+      }
+    };
+    fetchProjects();
+    return () => {
+      active = false;
+    };
+  }, [selectedClientId]);
   
   // Get audience count when selection changes
   useEffect(() => {
@@ -259,6 +345,7 @@ export function AudienceSendPage({
   
   // Validation
   const isValid = useMemo(() => {
+    if (!selectedClientId || !selectedProjectId) return false;
     if (audienceType === "segment" && !selectedSegment) return false;
     if (audienceType === "list" && !selectedList) return false;
     if (audienceType === "filters" && (!appliedFilterGroup || (appliedFilterGroup.conditions?.length ?? 0) === 0)) return false;
@@ -266,7 +353,7 @@ export function AudienceSendPage({
     if (throttlingLimit !== undefined && throttlingLimit > 1000) return false;
     // Allow -1 (large audience estimate) or any positive count
     return audienceCount > 0 || audienceCount === -1;
-  }, [audienceType, selectedSegment, selectedList, appliedFilterGroup, sendType, scheduledDate, scheduledTime, audienceCount, throttlingLimit]);
+  }, [selectedClientId, selectedProjectId, audienceType, selectedSegment, selectedList, appliedFilterGroup, sendType, scheduledDate, scheduledTime, audienceCount, throttlingLimit]);
   
   // Get selected audience name
   const audienceName = useMemo(() => {
@@ -288,6 +375,8 @@ export function AudienceSendPage({
     setLaunching(true);
     try {
       await onLaunch({
+        clientAccountId: selectedClientId,
+        projectId: selectedProjectId,
         audienceType,
         audienceId: audienceType === "segment" ? selectedSegment : audienceType === "list" ? selectedList : undefined,
         audienceName,
@@ -341,6 +430,80 @@ export function AudienceSendPage({
       </div>
       
       <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
+        {/* Step 0: Client & Project */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                <Building2 className="w-4 h-4 text-slate-600" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Client & Project</CardTitle>
+                <CardDescription className="text-xs">Link this campaign to a client and project</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Client</Label>
+                {loadingClients ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading clients...
+                  </div>
+                ) : (
+                  <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select a client" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientAccounts.length === 0 ? (
+                        <div className="p-3 text-sm text-slate-500">No clients found</div>
+                      ) : (
+                        clientAccounts.map((client) => (
+                          <SelectItem key={client.id} value={client.id}>
+                            {client.name}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Project</Label>
+                {!selectedClientId ? (
+                  <p className="text-sm text-slate-500">Select a client first</p>
+                ) : loadingProjects ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading projects...
+                  </div>
+                ) : (
+                  <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select a project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientProjects.length === 0 ? (
+                        <div className="p-3 text-sm text-slate-500">No projects found</div>
+                      ) : (
+                        clientProjects.map((project) => (
+                          <SelectItem key={project.id} value={project.id}>
+                            {project.name} ({project.status})
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Step 1: Select Audience */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
@@ -717,6 +880,8 @@ export function AudienceSendPage({
                 <div className="flex items-center gap-2 text-amber-600">
                   <AlertCircle className="w-4 h-4" />
                   <span className="text-sm">
+                    {!selectedClientId && "Select a client"}
+                    {selectedClientId && !selectedProjectId && "Select a project"}
                     {audienceCount === 0 && "Select an audience"}
                     {sendType === "scheduled" && !scheduledDate && "Set a schedule date"}
                     {throttlingLimit !== undefined && throttlingLimit > 1000 && "Throttling limit too high"}

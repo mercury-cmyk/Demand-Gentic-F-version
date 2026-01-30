@@ -37,6 +37,7 @@ export function CampaignWizard({ campaignType, steps, onComplete, onCancel }: Ca
   const progress = ((currentStep + 1) / steps.length) * 100;
   const flowStages = ["Audience", "Messaging", "Agents", "Scheduling", "Compliance", "Launch"];
   const stageMap: Record<string, number> = {
+    "client-project": 0,
     audience: 0,
     content: 1,
     "dial-mode": 2,

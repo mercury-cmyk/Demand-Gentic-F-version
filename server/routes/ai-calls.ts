@@ -6,10 +6,11 @@ import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { isVoiceVariablePreflightError } from "../services/voice-variable-contract";
 import { validatePreflight, generatePreflightErrorResponse } from "../services/preflight-validator";
 import { z } from "zod";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "../db";
-import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns } from "@shared/schema";
+import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions } from "@shared/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
-// OpenAI is loaded lazily to avoid startup failures when not configured
+// Gemini is used for script generation; OpenAI runtime is disabled
 import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025 } from "../utils/business-hours";
 import { checkSuppressionBulk, getSuppressionReason } from "../lib/suppression.service";
 import { getBestPhoneForContact } from "../lib/phone-utils";
@@ -78,30 +79,28 @@ ${industry ? `Target Industry: ${industry}` : ''}
 
 Generate professional, natural-sounding scripts that will be used by an AI voice agent. Return ONLY a valid JSON object with these exact keys: opening, gatekeeper, pitch, objections, closing`;
 
-    const hasOpenAI = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
-    if (!hasOpenAI) {
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    if (!geminiApiKey) {
       return res.status(503).json({
         success: false,
-        message: "OpenAI is not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY to enable script generation."
+        message: "Gemini is not configured. Set GEMINI_API_KEY or GOOGLE_AI_API_KEY to enable script generation."
       });
     }
-    const openai = await import("../lib/" + "openai").then(m => m.default);
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.7,
-      response_format: { type: "json_object" },
-    });
 
-    const content = response.choices[0]?.message?.content;
+    const genAI = new GoogleGenerativeAI(geminiApiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001", systemInstruction: systemPrompt });
+    const response = await model.generateContent(userPrompt);
+
+    const content = response.response.text();
     if (!content) {
       throw new Error("No response from AI");
     }
 
-    const scripts = JSON.parse(content);
+    let jsonText = content.trim();
+    if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
+    }
+    const scripts = JSON.parse(jsonText);
     
     if (!scripts.opening || !scripts.gatekeeper || !scripts.pitch || !scripts.objections || !scripts.closing) {
       throw new Error("Invalid script structure returned");
@@ -704,7 +703,7 @@ router.post("/webhook", async (req, res) => {
   }
 });
 
-// Audio serving endpoint for OpenAI TTS audio files
+// Audio serving endpoint for legacy TTS audio files
 router.get("/audio/:audioId", (req, res) => {
   const { audioId } = req.params;
   const bridge = getTelnyxAiBridge();
@@ -762,7 +761,7 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
           name: "Sarah",
           companyName: "Pivotal B2B",
           role: "Business Development Representative",
-          voice: "alloy",
+          voice: "Puck",
         },
         scripts: {
           opening: `Hi, this is Sarah from Pivotal B2B. I'm reaching out to speak with ${contactFirstName} regarding a quick business opportunity. Is this a good time?`,
@@ -794,9 +793,7 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
     };
 
     // Determine provider - default to Gemini Live (same as production campaigns)
-    const defaultProvider = process.env.VOICE_PROVIDER?.toLowerCase() || 'google';
-    const isGemini = !defaultProvider.includes('openai');
-    const provider = isGemini ? 'gemini_live' : 'openai_realtime';
+    const provider = 'gemini_live';
 
     console.log("[AI Test Call] Initiating test call to:", phoneNumber);
     console.log("[AI Test Call] Using from number:", fromNumber);
@@ -856,36 +853,45 @@ router.get("/campaign/:campaignId/stats", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Campaign is not in AI agent mode" });
     }
 
-    const campaignLeads = await db.select().from(leads).where(eq(leads.campaignId, campaignId));
-    
-    const aiLeads = campaignLeads.filter((l) => {
-      const notes = l.notes || "";
-      const customFields = l.customFields as Record<string, any> | null;
-      return notes.includes("[AI Agent Call]") || customFields?.aiCallId;
-    });
+    // Query call_sessions directly for accurate AI call stats
+    const aiCallSessions = await db.select({
+      id: callSessions.id,
+      status: callSessions.status,
+      aiDisposition: callSessions.aiDisposition,
+      aiAnalysis: callSessions.aiAnalysis,
+    }).from(callSessions).where(
+      and(
+        eq(callSessions.campaignId, campaignId),
+        eq(callSessions.agentType, 'ai')
+      )
+    );
 
     const stats = {
-      totalAiCalls: aiLeads.length,
-      qualified: aiLeads.filter((l) => l.qaStatus === "approved").length,
-      handoffs: aiLeads.filter((l) => {
-        const cf = l.customFields as Record<string, any> | null;
-        return cf?.aiHandoff === true;
+      totalAiCalls: aiCallSessions.length,
+      qualified: aiCallSessions.filter((s) => {
+        const disposition = s.aiDisposition?.toLowerCase() || '';
+        return disposition.includes('qualified') || disposition === 'qualified_lead';
       }).length,
-      gatekeeperNavigations: aiLeads.filter((l) => {
-        const cf = l.customFields as Record<string, any> | null;
-        return cf?.aiPhase === "gatekeeper" || (cf?.aiGatekeeperAttempts && cf.aiGatekeeperAttempts > 0);
+      handoffs: aiCallSessions.filter((s) => {
+        const analysis = s.aiAnalysis as Record<string, any> | null;
+        return analysis?.handoff === true || analysis?.humanTransfer === true;
       }).length,
-      voicemails: aiLeads.filter((l) => {
-        const cf = l.customFields as Record<string, any> | null;
-        return cf?.aiDisposition === "voicemail";
+      gatekeeperNavigations: aiCallSessions.filter((s) => {
+        const analysis = s.aiAnalysis as Record<string, any> | null;
+        return analysis?.gatekeeperNavigated === true || analysis?.phase === 'gatekeeper';
       }).length,
-      noAnswer: aiLeads.filter((l) => {
-        const cf = l.customFields as Record<string, any> | null;
-        return cf?.aiDisposition === "no-answer";
+      voicemails: aiCallSessions.filter((s) => {
+        const disposition = s.aiDisposition?.toLowerCase() || '';
+        return disposition.includes('voicemail');
       }).length,
-      connected: aiLeads.filter((l) => {
-        const cf = l.customFields as Record<string, any> | null;
-        return cf?.aiDisposition === "connected" || cf?.aiPhase === "pitch" || cf?.aiPhase === "closing";
+      noAnswer: aiCallSessions.filter((s) => {
+        const disposition = s.aiDisposition?.toLowerCase() || '';
+        return disposition.includes('no_answer') || disposition.includes('no answer');
+      }).length,
+      connected: aiCallSessions.filter((s) => {
+        const disposition = s.aiDisposition?.toLowerCase() || '';
+        return disposition.includes('completed') || disposition.includes('connected') || 
+               disposition.includes('not_interested') || disposition.includes('callback');
       }).length,
     };
 
@@ -906,7 +912,7 @@ router.post("/test-voice", requireAuth, requireRole("admin"), async (req, res) =
 
     res.json({
       success: true,
-      message: "Voice test endpoint ready - requires OpenAI TTS integration",
+      message: "Voice test endpoint ready - Gemini-only runtime",
       voice,
       textLength: text.length,
     });
@@ -943,10 +949,10 @@ function getPublicWsUrl(req: any, path: string): string {
 }
 
 /**
- * Test endpoint for Voice Dialer calls (Gemini/OpenAI)
+ * Test endpoint for Voice Dialer calls (Gemini-only)
  * POST /api/ai/test-openai-realtime
  * 
- * This initiates a test call using the Voice Dialer (supports Gemini Live or OpenAI Realtime)
+ * This initiates a test call using the Voice Dialer (Gemini Live only)
  * by making a Telnyx call with media streaming to the /voice-dialer WebSocket
  */
 const testOpenAIRealtimeSchema = z.object({
@@ -961,6 +967,11 @@ const testOpenAIRealtimeSchema = z.object({
 
 router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
+    return res.status(410).json({
+      message: "OpenAI Realtime test calls are disabled. Use /api/ai-calls/test-gemini-live instead.",
+      provider: "gemini_live",
+    });
+
     const {
       phoneNumber,
       virtualAgentId,
@@ -1213,19 +1224,10 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       organizationName,
     } = testGeminiLiveSchema.parse(req.body);
 
-    const sipConfig = await storage.getDefaultSipTrunkConfig();
-    const sipProvider = (sipConfig?.provider || process.env.SIP_TRUNK_PROVIDER || "telnyx").toLowerCase();
-
-    if (sipProvider !== "telnyx") {
-      return res.status(400).json({
-        message: "Gemini Live Test currently supports Telnyx call control only.",
-      });
-    }
-
     const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = sipConfig?.callerIdNumber || process.env.TELNYX_FROM_NUMBER;
+    const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-    const connectionId = process.env.TELNYX_TEXML_APP_ID || sipConfig?.connectionId;
+    const connectionId = process.env.TELNYX_TEXML_APP_ID;
 
     if (!telnyxApiKey || !fromNumber || !geminiApiKey || !connectionId) {
       return res.status(500).json({ message: "Missing required configuration (Telnyx, Gemini, or Connection ID)" });
@@ -1274,7 +1276,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       system_prompt: systemPrompt,
       voice, // Dynamic voice selection for automatic synchronization
       agent_settings: settingsOverride,
-      provider: 'openai_realtime',
+      provider: 'gemini_live',
       // Contact context for DemandGentic.ai By Pivotal B2B identity
       contact_name: contactName,
       contact_first_name: contactFirstName,

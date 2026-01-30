@@ -23,6 +23,7 @@ import {
   virtualAgents,
   clientInvoices,
   clientBillingConfig,
+  clientReports,
   leads,
   verificationCampaigns,
 } from "@shared/schema";
@@ -39,6 +40,7 @@ import {
 } from "../services/vertex-ai/vertex-client-agentic-hub";
 import { GeminiLiveProvider } from "../services/voice-providers/gemini-live-provider";
 import { chat as vertexChat, streamChat, generateJSON } from "../services/vertex-ai";
+import { registerContent } from "../services/qa-gate-service";
 import {
   generateClientEmailContent,
   generateClientEmailSequence,
@@ -536,7 +538,55 @@ router.post("/reports/generate", async (req: Request, res: Response) => {
     };
 
     const result = await hub.generateCampaignReport(reportRequest);
-    res.json(result);
+
+    if (!result.success || !result.data) {
+      return res.status(500).json(result);
+    }
+
+    let campaignId: string | undefined;
+    let projectId: string | undefined;
+
+    if (Array.isArray(reportRequest.campaignIds) && reportRequest.campaignIds.length === 1) {
+      campaignId = reportRequest.campaignIds[0];
+      const [campaign] = await db
+        .select({ projectId: campaigns.projectId })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+      projectId = campaign?.projectId || undefined;
+    }
+
+    const [reportRecord] = await db
+      .insert(clientReports)
+      .values({
+        clientAccountId: context.clientAccountId,
+        campaignId: campaignId || null,
+        projectId: projectId || null,
+        reportName: result.data.title || `Campaign Report (${reportRequest.reportType})`,
+        reportType: reportRequest.reportType || "campaign_performance",
+        reportPeriodStart: reportRequest.dateRange?.start || null,
+        reportPeriodEnd: reportRequest.dateRange?.end || null,
+        reportData: result.data,
+        reportSummary: result.data.summary || null,
+        generatedBy: context.clientUserId,
+      })
+      .returning();
+
+    await registerContent('report', reportRecord.id, {
+      campaignId: campaignId || undefined,
+      clientAccountId: context.clientAccountId,
+      projectId: projectId || undefined,
+      createdBy: context.clientUserId,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        reportId: reportRecord.id,
+        status: "pending_review",
+      },
+      message: "Report generated and submitted for QA review",
+    });
   } catch (error: any) {
     console.error("[Client Agentic] Report generation error:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -799,73 +849,79 @@ router.get("/stats/overview", async (req: Request, res: Response) => {
     // Get regular campaign details with lead counts
     let regularCampaignStats: any[] = [];
     if (regularCampaignIds.length > 0) {
-      // Get campaign details
       const regularCampaignsData = await db
         .select()
         .from(campaigns)
-        .where(inArray(campaigns.id, regularCampaignIds));
-
-      // Get lead counts by status
-      const leadStats = await db
-        .select({
-          campaignId: leads.campaignId,
-          qaStatus: leads.qaStatus,
-          count: sql<number>`count(*)::int`,
-        })
-        .from(leads)
-        .where(inArray(leads.campaignId, regularCampaignIds))
-        .groupBy(leads.campaignId, leads.qaStatus);
-
-      // Get account counts per campaign
-      const accountCounts = await db
-        .select({
-          campaignId: leads.campaignId,
-          count: sql<number>`count(DISTINCT ${leads.accountName})::int`,
-        })
-        .from(leads)
         .where(
           and(
-            inArray(leads.campaignId, regularCampaignIds),
-            eq(leads.qaStatus, 'approved')
+            inArray(campaigns.id, regularCampaignIds),
+            eq(campaigns.approvalStatus, 'published'),
+            eq(campaigns.clientAccountId, clientAccountId)
           )
-        )
-        .groupBy(leads.campaignId);
+        );
 
-      const accountCountMap = accountCounts.reduce((acc, c) => {
-        if (c.campaignId) acc[c.campaignId] = c.count;
-        return acc;
-      }, {} as Record<string, number>);
+      const publishedRegularCampaignIds = regularCampaignsData.map(campaign => campaign.id);
 
-      // Aggregate lead stats by campaign
-      const leadStatsByCampaign = leadStats.reduce((acc, stat) => {
-        if (!stat.campaignId) return acc;
-        if (!acc[stat.campaignId]) {
-          acc[stat.campaignId] = {
-            total: 0,
-            approved: 0,
-            pending: 0,
-            rejected: 0,
-          };
-        }
-        acc[stat.campaignId].total += stat.count;
-        if (stat.qaStatus === 'approved' || stat.qaStatus === 'published') {
-          acc[stat.campaignId].approved += stat.count;
-        } else if (stat.qaStatus === 'new' || stat.qaStatus === 'under_review') {
-          acc[stat.campaignId].pending += stat.count;
-        } else if (stat.qaStatus === 'rejected') {
-          acc[stat.campaignId].rejected += stat.count;
-        }
-        return acc;
-      }, {} as Record<string, any>);
+      if (publishedRegularCampaignIds.length > 0) {
+        const leadStats = await db
+          .select({
+            campaignId: leads.campaignId,
+            qaStatus: leads.qaStatus,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(leads)
+          .where(inArray(leads.campaignId, publishedRegularCampaignIds))
+          .groupBy(leads.campaignId, leads.qaStatus);
 
-      regularCampaignStats = regularCampaignsData.map(campaign => ({
-        id: campaign.id,
-        name: campaign.name,
-        status: campaign.status,
-        type: 'regular',
-        leads: leadStatsByCampaign[campaign.id] || { total: 0, approved: 0, pending: 0, rejected: 0 },
-        accounts: accountCountMap[campaign.id] || 0,
-      }));
+        const accountCounts = await db
+          .select({
+            campaignId: leads.campaignId,
+            count: sql<number>`count(DISTINCT ${leads.accountName})::int`,
+          })
+          .from(leads)
+          .where(
+            and(
+              inArray(leads.campaignId, publishedRegularCampaignIds),
+              eq(leads.qaStatus, 'approved')
+            )
+          )
+          .groupBy(leads.campaignId);
+
+        const accountCountMap = accountCounts.reduce((acc, c) => {
+          if (c.campaignId) acc[c.campaignId] = c.count;
+          return acc;
+        }, {} as Record<string, number>);
+
+        const leadStatsByCampaign = leadStats.reduce((acc, stat) => {
+          if (!stat.campaignId) return acc;
+          if (!acc[stat.campaignId]) {
+            acc[stat.campaignId] = {
+              total: 0,
+              approved: 0,
+              pending: 0,
+              rejected: 0,
+            };
+          }
+          acc[stat.campaignId].total += stat.count;
+          if (stat.qaStatus === 'approved' || stat.qaStatus === 'published') {
+            acc[stat.campaignId].approved += stat.count;
+          } else if (stat.qaStatus === 'new' || stat.qaStatus === 'under_review') {
+            acc[stat.campaignId].pending += stat.count;
+          } else if (stat.qaStatus === 'rejected') {
+            acc[stat.campaignId].rejected += stat.count;
+          }
+          return acc;
+        }, {} as Record<string, any>);
+
+        regularCampaignStats = regularCampaignsData.map(campaign => ({
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          type: 'regular',
+          leads: leadStatsByCampaign[campaign.id] || { total: 0, approved: 0, pending: 0, rejected: 0 },
+          accounts: accountCountMap[campaign.id] || 0,
+        }));
+      }
     }
 
     // Get verification campaign stats

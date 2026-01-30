@@ -1,17 +1,17 @@
 /**
- * Unified Call Router - Routes ALL call types through SIP when enabled
+ * Unified Call Router - Routes ALL call types through TeXML + Telnyx API
  * 
  * Ensures consistent call routing for:
- * - AI calls (Gemini Live, OpenAI Realtime)
+ * - AI calls (Gemini Live)
  * - Campaign calls (auto-dialer, predictive dialer)
  * - Agent console calls (human-initiated)
  * - Test calls
  * 
- * When USE_SIP_CALLING=true, all calls MUST use SIP infrastructure.
+ * SIP calling is disabled. TeXML + Telnyx API is the only call transport.
  */
 
-import { initiateGeminiLiveCall, endGeminiLiveCall, type GeminiLiveCallRequest } from './gemini-live-sip-gateway';
-import { enforceGeminiLiveSIPOnly, preflightGeminiLiveSIPCheck } from './gemini-live-sip-enforcement';
+import { getTelnyxAiBridge } from './telnyx-ai-bridge';
+import type { AiAgentSettings, CallContext } from './ai-voice-agent';
 
 // Call type discriminator
 export type UnifiedCallType = 
@@ -50,129 +50,98 @@ export interface UnifiedCallResult {
   success: boolean;
   callId?: string;
   sipCallId?: string;
-  provider?: 'sip' | 'telnyx' | 'other';
+  provider?: 'telnyx' | 'other';
   status?: 'initiating' | 'ringing' | 'connected' | 'failed';
   error?: string;
   timestamp: Date;
 }
 
 /**
- * Route call through appropriate provider based on configuration
- * When USE_SIP_CALLING=true, all calls use SIP
- * When USE_SIP_CALLING=false, falls back to existing providers
+ * Route call through TeXML + Telnyx API (Gemini-only)
  */
 export async function routeUnifiedCall(request: UnifiedCallRequest): Promise<UnifiedCallResult> {
-  const useSIP = process.env.USE_SIP_CALLING === 'true';
-  
   console.log(`[Unified Call Router] Routing ${request.callType} call`, {
     to: request.toNumber,
     from: request.fromNumber,
-    useSIP,
     campaignId: request.campaignId,
     contactId: request.contactId,
   });
 
-  if (useSIP) {
-    return await routeViaSIP(request);
-  } else {
-    return await routeViaLegacyProvider(request);
-  }
+  return await routeViaTexml(request);
 }
 
 /**
- * Route call via SIP infrastructure (drachtio-srf + Gemini Live SIP Gateway)
+ * Route call via TeXML + Telnyx API (Gemini Live)
  */
-async function routeViaSIP(request: UnifiedCallRequest): Promise<UnifiedCallResult> {
+async function routeViaTexml(request: UnifiedCallRequest): Promise<UnifiedCallResult> {
   try {
-    // Pre-flight check - ensure SIP is ready
-    const preflight = await preflightGeminiLiveSIPCheck();
-    if (!preflight.ready) {
-      console.error('[Unified Call Router] SIP pre-flight check failed:', preflight.issues);
-      return {
-        success: false,
-        error: `SIP not ready: ${preflight.issues.join(', ')}`,
-        provider: 'sip',
-        status: 'failed',
-        timestamp: new Date(),
-      };
-    }
+    const bridge = getTelnyxAiBridge();
 
-    // Enforce SIP-only (throws if not properly configured)
-    enforceGeminiLiveSIPOnly();
+    const settings: AiAgentSettings = {
+      persona: {
+        name: "AI Agent",
+        companyName: request.callContext?.organizationName || "DemandGentic.ai",
+        role: "AI Assistant",
+        voice: (request.voiceName as AiAgentSettings["persona"]["voice"]) || "Puck",
+      },
+      scripts: {
+        opening: request.systemPrompt || "Hello, this is an AI assistant calling.",
+        gatekeeper: "This is an AI call routed via TeXML.",
+        pitch: request.systemPrompt || "This call is routed via TeXML using Gemini Live.",
+        objections: "I understand. Thank you for your time.",
+        closing: "Thanks for your time. Goodbye.",
+      },
+      handoff: {
+        enabled: false,
+        triggers: [],
+        transferNumber: "",
+      },
+      gatekeeperLogic: {
+        maxAttempts: 1,
+      },
+    };
 
-    // Map call types to SIP gateway
-    if (request.callType === 'gemini_live_ai' || request.callType === 'openai_realtime_ai') {
-      // AI calls via Gemini Live SIP Gateway
-      const geminiRequest: GeminiLiveCallRequest = {
-        toNumber: request.toNumber,
-        fromNumber: request.fromNumber,
-        campaignId: request.campaignId || 'unified-router',
-        contactId: request.contactId || 'unknown',
-        queueItemId: request.queueItemId || 'unknown',
-        systemPrompt: request.systemPrompt || 'You are a helpful AI assistant.',
-        voiceName: request.voiceName,
-        model: request.model,
-        maxCallDurationSeconds: request.maxCallDurationSeconds,
-        enableRecording: request.enableRecording,
-        callContext: request.callContext,
-      };
+    const context: CallContext = {
+      contactFirstName: request.callContext?.contactFirstName || "there",
+      contactLastName: request.callContext?.contactLastName || "",
+      contactTitle: request.callContext?.contactTitle || "",
+      contactEmail: request.callContext?.contactEmail || "",
+      companyName: request.callContext?.companyName || "your company",
+      phoneNumber: request.toNumber,
+      campaignId: request.campaignId || "unified-router",
+      queueItemId: request.queueItemId || "unified-router",
+      contactId: request.contactId || undefined,
+      agentFullName: settings.persona.name,
+      organizationName: request.callContext?.organizationName,
+      campaignObjective: request.callContext?.campaignObjective,
+      successCriteria: request.callContext?.successCriteria,
+      targetAudienceDescription: request.callContext?.targetAudienceDescription,
+      productServiceInfo: request.callContext?.productServiceInfo,
+      talkingPoints: request.callContext?.talkingPoints,
+      maxCallDurationSeconds: request.maxCallDurationSeconds,
+    };
 
-      const result = await initiateGeminiLiveCall(geminiRequest);
-      
-      return {
-        success: result.success,
-        callId: result.callId,
-        sipCallId: result.sipCallId,
-        provider: 'sip',
-        status: (result.status || 'failed') as 'initiating' | 'ringing' | 'connected' | 'failed',
-        error: result.error,
-        timestamp: result.timestamp,
-      };
-    } else if (request.callType === 'campaign_auto' || request.callType === 'agent_console' || request.callType === 'test_call') {
-      // Campaign and agent console calls also via SIP
-      // These typically don't need AI, but we route through SIP for consistency
-      const geminiRequest: GeminiLiveCallRequest = {
-        toNumber: request.toNumber,
-        fromNumber: request.fromNumber,
-        campaignId: request.campaignId || 'manual-call',
-        contactId: request.contactId || 'unknown',
-        queueItemId: request.queueItemId || 'unknown',
-        systemPrompt: request.systemPrompt || 'This is a human-initiated call.',
-        maxCallDurationSeconds: request.maxCallDurationSeconds || 1800, // 30 min default
-        enableRecording: request.enableRecording !== false, // Record by default
-        callContext: {
-          ...request.callContext,
-          callType: request.callType,
-          agentId: request.agentId,
-        },
-      };
+    const result = await bridge.initiateAiCall(
+      request.toNumber,
+      request.fromNumber,
+      settings,
+      context,
+      'gemini_live'
+    );
 
-      const result = await initiateGeminiLiveCall(geminiRequest);
-      
-      return {
-        success: result.success,
-        callId: result.callId,
-        sipCallId: result.sipCallId,
-        provider: 'sip',
-        status: (result.status || 'failed') as 'initiating' | 'ringing' | 'connected' | 'failed',
-        error: result.error,
-        timestamp: result.timestamp,
-      };
-    } else {
-      return {
-        success: false,
-        error: `Unknown call type: ${request.callType}`,
-        provider: 'sip',
-        status: 'failed',
-        timestamp: new Date(),
-      };
-    }
+    return {
+      success: true,
+      callId: result.callId,
+      provider: 'telnyx',
+      status: 'initiating',
+      timestamp: new Date(),
+    };
   } catch (error: any) {
-    console.error('[Unified Call Router] SIP routing failed:', error);
+    console.error('[Unified Call Router] TeXML routing failed:', error);
     return {
       success: false,
-      error: error.message || 'SIP routing failed',
-      provider: 'sip',
+      error: error.message || 'TeXML routing failed',
+      provider: 'telnyx',
       status: 'failed',
       timestamp: new Date(),
     };
@@ -180,40 +149,10 @@ async function routeViaSIP(request: UnifiedCallRequest): Promise<UnifiedCallResu
 }
 
 /**
- * Fallback to legacy providers (Telnyx, etc.) when SIP is disabled
- */
-async function routeViaLegacyProvider(request: UnifiedCallRequest): Promise<UnifiedCallResult> {
-  console.warn('[Unified Call Router] Using legacy provider (SIP disabled)');
-  
-  // This would route to existing Telnyx/WebRTC implementations
-  // For now, return error indicating SIP is required
-  return {
-    success: false,
-    error: 'SIP calling is disabled. Set USE_SIP_CALLING=true to enable.',
-    provider: 'other',
-    status: 'failed',
-    timestamp: new Date(),
-  };
-}
-
-/**
  * End a call (works with SIP or legacy providers)
  */
 export async function endUnifiedCall(callId: string, sipCallId?: string): Promise<boolean> {
-  const useSIP = process.env.USE_SIP_CALLING === 'true';
-  
-  if (useSIP && callId) {
-    try {
-      await endGeminiLiveCall(callId);
-      return true;
-    } catch (error) {
-      console.error('[Unified Call Router] Failed to end SIP call:', error);
-      return false;
-    }
-  }
-  
-  // Legacy provider hangup
-  console.warn('[Unified Call Router] Legacy call hangup not implemented');
+  console.warn('[Unified Call Router] Call hangup not implemented for TeXML bridge');
   return false;
 }
 
@@ -222,15 +161,16 @@ export async function endUnifiedCall(callId: string, sipCallId?: string): Promis
  */
 export function getCallRoutingStatus(): {
   sipEnabled: boolean;
-  provider: 'sip' | 'legacy';
+  provider: 'telnyx' | 'legacy';
   ready: boolean;
 } {
-  const sipEnabled = process.env.USE_SIP_CALLING === 'true';
+  const sipEnabled = false;
+  const texmlReady = !!process.env.TELNYX_API_KEY && !!process.env.TELNYX_TEXML_APP_ID;
   
   return {
     sipEnabled,
-    provider: sipEnabled ? 'sip' : 'legacy',
-    ready: sipEnabled, // Could add more checks here
+    provider: 'telnyx',
+    ready: texmlReady,
   };
 }
 
@@ -240,10 +180,5 @@ export function getCallRoutingStatus(): {
 export function initializeUnifiedCallRouter(): void {
   const status = getCallRoutingStatus();
   console.log('[Unified Call Router] Initialized', status);
-  
-  if (status.sipEnabled) {
-    console.log('[Unified Call Router] All calls will route through SIP infrastructure');
-  } else {
-    console.warn('[Unified Call Router] SIP disabled - using legacy providers');
-  }
+  console.log('[Unified Call Router] TeXML + Telnyx API is the only call transport');
 }

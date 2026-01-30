@@ -198,6 +198,15 @@ export const vectorDocumentTypeEnum = pgEnum('vector_document_type', [
 
 export const pipelineTypeEnum = pgEnum('pipeline_type', ['revenue', 'expansion', 'agency']);
 
+// Recording Status Enum - For call recording lifecycle
+export const recordingStatusEnum = pgEnum('recording_status', [
+  'pending',    // Recording not yet started
+  'recording',  // Currently recording
+  'uploading',  // Uploading to cloud storage
+  'stored',     // Successfully stored in S3/GCS
+  'failed'      // Recording failed
+]);
+
 export const pipelineCategoryEnum = pgEnum('pipeline_category', [
   'media_partnership',  // Media & Data Partnerships (CPL/CPC Model)
   'direct_sales'       // Direct Sales (Medium & Enterprise)
@@ -1248,6 +1257,14 @@ export const campaigns = pgTable("campaigns", {
   type: campaignTypeEnum("type").notNull(),
   name: text("name").notNull(),
   status: campaignStatusEnum("status").notNull().default('draft'),
+  // Client & project linkage (governed access)
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+  // Approval workflow for client visibility
+  approvalStatus: contentApprovalStatusEnum("approval_status").notNull().default('draft'),
+  approvedById: varchar("approved_by_id").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+  publishedAt: timestamp("published_at"),
   brandId: varchar("brand_id"),
   scheduleJson: jsonb("schedule_json"),
   assignedTeams: text("assigned_teams").array(),
@@ -1340,6 +1357,9 @@ export const campaigns = pgTable("campaigns", {
 }, (table) => ({
   statusIdx: index("campaigns_status_idx").on(table.status),
   typeIdx: index("campaigns_type_idx").on(table.type),
+  clientAccountIdx: index("campaigns_client_account_idx").on(table.clientAccountId),
+  projectIdx: index("campaigns_project_idx").on(table.projectId),
+  approvalStatusIdx: index("campaigns_approval_status_idx").on(table.approvalStatus),
   dialModeIdx: index("campaigns_dial_mode_idx").on(table.dialMode),
   deliveryTemplateIdx: index("campaigns_delivery_template_idx").on(table.deliveryTemplateId),
 }));
@@ -1635,7 +1655,7 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultSystemPrompt: text("default_system_prompt").notNull(),
   defaultTrainingGuidelines: jsonb("default_training_guidelines").notNull().$type<string[]>(),
   defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
-  defaultVoice: text("default_voice").notNull().default('Kore'),
+  defaultVoice: text("default_voice").notNull().default('Fenrir'),
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -1776,7 +1796,7 @@ export const virtualAgents = pgTable("virtual_agents", {
   description: text("description"),
   provider: text("provider").notNull().default('gemini_live'), // gemini_live, openai_realtime, elevenlabs, etc.
   externalAgentId: text("external_agent_id"), // Provider-specific agent ID
-  voice: aiVoiceEnum("voice").default('Kore'), // Default to Gemini voice (Google-first platform)
+  voice: aiVoiceEnum("voice").default('Fenrir'), // Default to Gemini voice (Google-first platform)
   systemPrompt: text("system_prompt"),
   firstMessage: text("first_message"),
   settings: jsonb("settings"), // Provider-specific settings (temperature, persona, etc.)
@@ -2191,6 +2211,30 @@ export const leadTagAssignmentsRelations = relations(leadTagAssignments, ({ one 
   assignedBy: one(users, { fields: [leadTagAssignments.assignedById], references: [users.id] }),
 }));
 
+// Lead Comments - Client portal comments and notes on leads
+export const leadComments = pgTable("lead_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  leadId: varchar("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+  commentText: text("comment_text").notNull(),
+  isInternal: boolean("is_internal").default(false), // Internal notes vs client-facing
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"), // Soft delete support
+}, (table) => ({
+  leadIdx: index("lead_comments_lead_idx").on(table.leadId),
+  clientAccountIdx: index("lead_comments_client_account_idx").on(table.clientAccountId),
+  createdAtIdx: index("lead_comments_created_at_idx").on(table.createdAt),
+  deletedAtIdx: index("lead_comments_deleted_at_idx").on(table.deletedAt),
+}));
+
+export const leadCommentsRelations = relations(leadComments, ({ one }) => ({
+  lead: one(leads, { fields: [leadComments.leadId], references: [leads.id] }),
+  clientAccount: one(clientAccounts, { fields: [leadComments.clientAccountId], references: [clientAccounts.id] }),
+  clientUser: one(clientUsers, { fields: [leadComments.clientUserId], references: [clientUsers.id] }),
+}));
+
 // Lead Verifications - LinkedIn Screenshot or On-Call Confirmation
 export const leadVerifications = pgTable("lead_verifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2401,6 +2445,13 @@ export const callSessions = pgTable("call_sessions", {
   status: callSessionStatusEnum("status").notNull().default('connecting'),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   
+  // Recording storage fields
+  recordingS3Key: text("recording_s3_key"), // S3/GCS key for permanent storage
+  recordingDurationSec: integer("recording_duration_sec"), // Duration of recording
+  recordingStatus: recordingStatusEnum("recording_status").default('pending'), // Recording lifecycle
+  recordingFormat: text("recording_format").default('mp3'), // Audio format (mp3/wav)
+  recordingFileSizeBytes: integer("recording_file_size_bytes"), // File size in bytes
+  
   // Unified agent type tracking (human or AI)
   agentType: agentTypeEnum("agent_type").notNull().default('human'),
   agentUserId: varchar("agent_user_id").references(() => users.id, { onDelete: 'set null' }), // Human agent
@@ -2424,6 +2475,7 @@ export const callSessions = pgTable("call_sessions", {
   campaignIdx: index("call_sessions_campaign_idx").on(table.campaignId),
   contactIdx: index("call_sessions_contact_idx").on(table.contactId),
   aiConversationIdx: index("call_sessions_ai_conversation_idx").on(table.aiConversationId),
+  recordingStatusIdx: index("call_sessions_recording_status_idx").on(table.recordingStatus),
 }));
 
 // Call Quality Records - Comprehensive logging of call quality analysis, conversation intelligence, issues, and recommendations
@@ -3076,13 +3128,15 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
 
 export const campaignsRelations = relations(campaigns, ({ one, many }) => ({
   owner: one(users, { fields: [campaigns.ownerId], references: [users.id] }),
+  clientAccount: one(clientAccounts, { fields: [campaigns.clientAccountId], references: [clientAccounts.id] }),
+  project: one(clientProjects, { fields: [campaigns.projectId], references: [clientProjects.id] }),
   emailMessages: many(emailMessages),
   calls: many(calls),
   leads: many(leads),
   orderLinks: many(orderCampaignLinks),
 }));
 
-export const leadsRelations = relations(leads, ({ one }) => ({
+export const leadsRelations = relations(leads, ({ one, many }) => ({
   contact: one(contacts, { fields: [leads.contactId], references: [contacts.id] }),
   campaign: one(campaigns, { fields: [leads.campaignId], references: [campaigns.id] }),
   callAttempt: one(dialerCallAttempts, { fields: [leads.callAttemptId], references: [dialerCallAttempts.id] }),
@@ -3090,6 +3144,7 @@ export const leadsRelations = relations(leads, ({ one }) => ({
   approvedBy: one(users, { fields: [leads.approvedById], references: [users.id] }),
   rejectedBy: one(users, { fields: [leads.rejectedById], references: [users.id] }),
   verification: one(leadVerifications, { fields: [leads.verificationId], references: [leadVerifications.id] }),
+  comments: many(leadComments),
 }));
 
 export const leadVerificationsRelations = relations(leadVerifications, ({ one }) => ({
@@ -3302,6 +3357,15 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertLeadCommentSchema = createInsertSchema(leadComments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLeadComment = z.infer<typeof insertLeadCommentSchema>;
+export type SelectLeadComment = typeof leadComments.$inferSelect;
 
 export const insertLeadVerificationSchema = createInsertSchema(leadVerifications).omit({
   id: true,
@@ -5013,6 +5077,12 @@ export const clientAccounts = pgTable("client_accounts", {
   contactPhone: text("contact_phone"),
   companyName: text("company_name"),
   notes: text("notes"),
+  inviteSlug: varchar("invite_slug")
+    .notNull()
+    .unique()
+    .default(sql`concat('join_', encode(gen_random_bytes(6), 'hex'))`),
+  inviteDomains: text("invite_domains").array().default(sql`ARRAY[]::text[]`),
+  inviteEnabled: boolean("invite_enabled").notNull().default(true),
   isActive: boolean("is_active").default(true).notNull(),
   // Visibility settings for the client dashboard
   visibilitySettings: jsonb("visibility_settings").$type<{
@@ -5034,6 +5104,7 @@ export const clientAccounts = pgTable("client_accounts", {
 }, (table) => ({
   nameIdx: index("client_accounts_name_idx").on(table.name),
   activeIdx: index("client_accounts_active_idx").on(table.isActive),
+  inviteSlugIdx: uniqueIndex("client_accounts_invite_slug_idx").on(table.inviteSlug),
 }));
 
 // Client Users - Separate auth for client portal login
@@ -5151,6 +5222,7 @@ export const clientAccountsRelations = relations(clientAccounts, ({ one, many })
   users: many(clientUsers),
   campaignAccess: many(clientCampaignAccess),
   orders: many(clientPortalOrders),
+  regularCampaigns: many(campaigns),
 }));
 
 export const clientUsersRelations = relations(clientUsers, ({ one, many }) => ({
@@ -5642,6 +5714,7 @@ export const clientProjectsRelations = relations(clientProjects, ({ one, many })
   clientAccount: one(clientAccounts, { fields: [clientProjects.clientAccountId], references: [clientAccounts.id] }),
   createdBy: one(users, { fields: [clientProjects.createdBy], references: [users.id] }),
   campaigns: many(clientProjectCampaigns),
+  regularCampaigns: many(campaigns),
   costs: many(clientActivityCosts),
   deliveryLinks: many(clientDeliveryLinks),
 }));

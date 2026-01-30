@@ -172,8 +172,8 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
     }).returning();
 
     // Determine provider FIRST (needed for WebSocket path)
-    // Determine provider - default to Google Gemini Live (same as production campaigns)
-    const effectiveProvider = 'openai';
+    // Determine provider - ENFORCE Google Gemini Live (same as production campaigns)
+    const effectiveProvider = 'google';
 
     // Build WebSocket URL for the OpenAI dialer
     const dialerPath = '/voice-dialer';
@@ -208,24 +208,25 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     // Custom parameters for the WebSocket connection
     // Support both OpenAI and Gemini voices
     const openaiVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar', 'echo', 'fable', 'nova', 'shimmer', 'onyx']);
-    const geminiVoices = new Set(['aoede', 'charon', 'fenrir', 'kore', 'puck', 'orion', 'vega', 'pegasus', 'ursa', 'nova', 'dipper', 'capella', 'orbit', 'lyra', 'eclipse']);
+    const geminiVoices = new Set(['aoede', 'charon', 'fenrir', 'kore', 'puck', 'orion', 'vega', 'pegasus', 'ursa', 'dipper', 'capella', 'orbit', 'lyra', 'eclipse']);
 
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
 
     // Select appropriate voice based on provider (effectiveProvider determined above)
+    // IMPORTANT: When provider is Gemini, ONLY use Gemini voices - don't fallback to OpenAI voices
     let voice: string;
     if (effectiveProvider === 'google') {
-      // Use Gemini voice if specified, otherwise default to 'Kore' (natural, friendly)
-      voice = geminiVoices.has(rawVoice) ? rawVoice : (openaiVoices.has(rawVoice) ? rawVoice : 'kore');
+      // Use Gemini voice if specified, otherwise default to 'Puck' (friendly, natural)
+      voice = geminiVoices.has(rawVoice) ? rawVoice : 'puck';
     } else {
       // Use OpenAI voice
       voice = openaiVoices.has(rawVoice) ? rawVoice : 'marin';
     }
 
     // Map provider selection to internal format
-    // client_state uses openai_realtime for legacy compatibility, session store uses openai
-    const providerForClientState = 'openai_realtime';
-    const providerForSession = 'openai';
+    // ENFORCED: Gemini-only runtime - no OpenAI fallback
+    const providerForClientState = 'gemini_live';
+    const providerForSession = 'google';
     console.log(`[Campaign Test Call] Using voice provider: ${effectiveProvider} (voice: ${voice})`);
 
     const customParams = {
@@ -292,14 +293,23 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
     // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
-    // Resolve webhook host with robust fallbacks to avoid 'localhost' in production
-    // Prefer explicit TeXML host override if provided
-    let webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
-    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
-      try {
-        const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
-        webhookHost = u.host; // demandgentic.ai
-      } catch {}
+    // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
+    // PRODUCTION: Use PUBLIC_TEXML_HOST or TELNYX_WEBHOOK_URL
+    let webhookHost = '';
+    
+    // In development, prefer the ngrok tunnel host
+    if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
+      webhookHost = process.env.PUBLIC_WEBHOOK_HOST;
+      console.log(`[Campaign Test Call] Using ngrok tunnel host: ${webhookHost}`);
+    } else {
+      // Production or fallback
+      webhookHost = env.PUBLIC_TEXML_HOST || env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || '';
+      if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
+        try {
+          const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
+          webhookHost = u.host;
+        } catch {}
+      }
     }
     
     // Ensure host doesn't have protocol

@@ -1,11 +1,44 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app } from '@/server';
+import { db } from '../../db';
+import { clientAccounts, clientProjects } from '../../../shared/schema';
+import { eq } from 'drizzle-orm';
 
 describe('Campaign API Endpoints', () => {
   let authToken: string;
   let campaignId: string;
   let senderProfileId: string;
+  let clientAccountId: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    const [clientAccount] = await db
+      .insert(clientAccounts)
+      .values({ name: 'Test Client Account' })
+      .returning();
+
+    clientAccountId = clientAccount.id;
+
+    const [clientProject] = await db
+      .insert(clientProjects)
+      .values({
+        clientAccountId,
+        name: 'Test Client Project',
+      })
+      .returning();
+
+    projectId = clientProject.id;
+  });
+
+  afterAll(async () => {
+    if (projectId) {
+      await db.delete(clientProjects).where(eq(clientProjects.id, projectId));
+    }
+    if (clientAccountId) {
+      await db.delete(clientAccounts).where(eq(clientAccounts.id, clientAccountId));
+    }
+  });
 
   beforeEach(async () => {
     // Setup: Create test user and get auth token
@@ -181,6 +214,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Test Campaign',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: {
             segments: ['segment-1']
           },
@@ -206,6 +241,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Draft Campaign',
           type: 'email',
           status: 'draft',
+          clientAccountId,
+          projectId,
           audienceRefs: {},
           emailSubject: 'Subject',
           emailHtmlContent: '<html></html>',
@@ -224,6 +261,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Test',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: {}, // Empty audience
           emailSubject: 'Subject',
           emailHtmlContent: '<html></html>',
@@ -242,6 +281,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Test',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: { segments: ['seg-1'] },
           // Missing emailSubject
           emailHtmlContent: '<html></html>',
@@ -259,6 +300,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Test',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: { segments: ['seg-1'] },
           emailSubject: 'Subject',
           // Missing emailHtmlContent
@@ -276,6 +319,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Scheduled Campaign',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: { segments: ['seg-1'] },
           emailSubject: 'Subject',
           emailHtmlContent: '<html></html>',
@@ -303,6 +348,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Campaign to Send',
           type: 'email',
           status: 'active',
+          clientAccountId,
+          projectId,
           audienceRefs: { segments: ['segment-1'] },
           emailSubject: 'Subject',
           emailHtmlContent: '<html></html>',
@@ -348,6 +395,8 @@ describe('Campaign API Endpoints', () => {
           name: 'Draft Campaign',
           type: 'email',
           status: 'draft',
+          clientAccountId,
+          projectId,
           audienceRefs: { segments: ['seg-1'] },
           emailSubject: 'Subject',
           emailHtmlContent: '<html></html>',

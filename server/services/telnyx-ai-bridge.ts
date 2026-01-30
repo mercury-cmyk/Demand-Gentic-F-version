@@ -134,7 +134,7 @@ export class TelnyxAiBridge extends EventEmitter {
   private peakConcurrent: number = 0;
   private readonly METRICS_WINDOW = 100; // Keep last 100 calls for metrics
   
-  // Audio cache for OpenAI TTS audio files (temporary storage)
+  // Audio cache for legacy TTS audio files (temporary storage)
   private audioCache: Map<string, Buffer> = new Map();
 
   constructor() {
@@ -258,9 +258,9 @@ export class TelnyxAiBridge extends EventEmitter {
     fromNumber: string,
     settings: AiAgentSettings,
     context: CallContext,
-    _provider: string = 'openai_realtime'
+    _provider: string = 'gemini_live'
   ): Promise<{ callId: string; callControlId: string }> {
-    const provider = 'openai_realtime';
+    const provider = 'gemini_live';
 
     // Global channel guard: wait for available Telnyx outbound slot
     const waitStart = Date.now();
@@ -275,7 +275,7 @@ export class TelnyxAiBridge extends EventEmitter {
       phoneNumber = this.formatToE164(phoneNumber);
       fromNumber = this.formatToE164(fromNumber);
 
-      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: OpenAI Realtime`);
+      console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
       
       const contactFullName = [context.contactFirstName, context.contactLastName]
         .filter(Boolean)
@@ -327,13 +327,11 @@ export class TelnyxAiBridge extends EventEmitter {
       // For TeXML outbound calls, prioritize TeXML App ID but fall back to Call Control App ID
       // Note: TeXML requires a TeXML Application ID created in Telnyx Portal
       const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
-      const callControlAppId = process.env.TELNYX_CALL_CONTROL_APP_ID || process.env.TELNYX_CONNECTION_ID;
       
       // Use TeXML API for automatic streaming setup via <Stream bidirectionalMode="rtp" />
-      // Extract just the hostname from TELNYX_WEBHOOK_URL (e.g., "demandgentic.ai" from "https://demandgentic.ai/api/webhooks/telnyx")
-      // Prefer explicit TeXML host override if provided
-      let webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST;
-
+      // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
+      // PRODUCTION: Use PUBLIC_TEXML_HOST or TELNYX_WEBHOOK_URL
+      
       // Helper to extract just the hostname from a URL (strips protocol and path)
       const extractHost = (urlString: string): string => {
         try {
@@ -345,14 +343,29 @@ export class TelnyxAiBridge extends EventEmitter {
         }
       };
 
-      // Strip protocol from environment variable if it contains one
-      if (webhookHost) {
-        webhookHost = extractHost(webhookHost);
-      } else if (this.webhookUrl) {
-        webhookHost = extractHost(this.webhookUrl);
+      let webhookHost = '';
+      
+      // In development, prioritize ngrok tunnel for local testing
+      if (process.env.NODE_ENV !== 'production' && process.env.PUBLIC_WEBHOOK_HOST) {
+        webhookHost = extractHost(process.env.PUBLIC_WEBHOOK_HOST);
+        console.log(`[TelnyxAiBridge] 🔧 Development mode - using ngrok tunnel: ${webhookHost}`);
+      } else {
+        // Production or fallback chain
+        webhookHost = process.env.PUBLIC_TEXML_HOST || process.env.PUBLIC_WEBHOOK_HOST || '';
+        if (webhookHost) {
+          webhookHost = extractHost(webhookHost);
+        } else if (this.webhookUrl) {
+          webhookHost = extractHost(this.webhookUrl);
+        }
       }
+      
       webhookHost = webhookHost || 'localhost';
-      const texmlUrl = `https://${webhookHost}/api/texml/ai-call`;
+      const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
+      const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
+      
+      // Log the webhook URL being used for campaign calls
+      console.log(`[TelnyxAiBridge] 📡 Using TeXML URL: ${texmlUrl}`);
+      console.log(`[TelnyxAiBridge] 🎯 Campaign: ${context.campaignId}, Contact: ${context.contactFirstName} at ${context.companyName}`);
 
       // Build comprehensive client_state for Gemini Live Dialer
       // This data will be passed through TeXML -> WebSocket connection
@@ -443,7 +456,7 @@ export class TelnyxAiBridge extends EventEmitter {
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
 
       let response: Response | undefined;
-      let useTexml = !!texmlAppId;
+      const useTexml = !!texmlAppId;
       
       if (useTexml) {
         // Build TeXML URL with client_state in query params (like test calls)
@@ -477,53 +490,12 @@ export class TelnyxAiBridge extends EventEmitter {
           }),
         });
         
-        // If TeXML app doesn't exist (404), fall back to Call Control API
+        // TeXML app must exist; do not fall back to other calling mechanisms
         if (response.status === 404) {
-          console.warn(`[TelnyxAiBridge] TeXML App ID ${texmlAppId} not found, falling back to Call Control API`);
-          useTexml = false;
+          throw new Error(`TeXML App ID ${texmlAppId} not found. TeXML-only calling is enforced.`);
         }
-      }
-      
-      // Fallback to Call Control API if TeXML not available or failed
-      if (!useTexml) {
-        if (!callControlAppId) {
-          throw new Error("No Telnyx Call Control App ID configured. Set TELNYX_CALL_CONTROL_APP_ID or TELNYX_TEXML_APP_ID");
-        }
-        
-        console.log(`[TelnyxAiBridge] Initiating Call Control call with:
-  - Connection ID: ${callControlAppId}
-  - From: ${fromNumber}
-  - To: ${phoneNumber}
-  - Provider: ${provider}`);
-        
-        response = await this.telnyxFetch("https://api.telnyx.com/v2/calls", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            connection_id: callControlAppId,
-            to: phoneNumber,
-            from: fromNumber,
-            client_state: clientStateB64,
-            // Prefer explicit webhook URL override for TeXML if provided
-            webhook_url: (process.env.TELNYX_WEBHOOK_URL || "").trim() || `https://${webhookHost}/api/webhooks/telnyx`,
-            // NOTE: Recording disabled to fix audio noise issue
-            // Recording was causing audio artifacts in the bidirectional stream
-            // Enable AMD (Answering Machine Detection)
-            answering_machine_detection: "detect_words",
-            answering_machine_detection_config: {
-              // Detect after machine beep message ends
-              after_greeting_silence_millis: 1200,
-              // Wait for machine to finish speaking
-              total_analysis_time_millis: 30000,
-              // Minimum speech for machine detection
-              initial_silence_timeout_millis: 5000,
-              // Speech threshold for machine
-              greeting_total_analysis_time_millis: 3500,
-            },
-          }),
-        });
+      } else {
+        throw new Error("TELNYX_TEXML_APP_ID is required. TeXML-only calling is enforced.");
       }
 
       if (!response) {
@@ -647,7 +619,7 @@ export class TelnyxAiBridge extends EventEmitter {
     call.isAnswered = true;
 
     // With TeXML, streaming is handled automatically via <Stream bidirectionalMode="rtp" />
-    // The opening message will be sent through the OpenAI Realtime WebSocket connection
+    // The opening message will be sent through the Gemini Live WebSocket connection
     // No need to call startMediaStreaming() or speakText() here
 
     await call.agent.startConversation();
@@ -767,17 +739,8 @@ export class TelnyxAiBridge extends EventEmitter {
             console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState})`);
           }
 
-          console.log(`[TelnyxAiBridge] Starting OpenAI realtime path for ${callId}`);
-          const openingMessage = agent.getOpeningMessage();
-          const voiceSetting = agent.getVoiceSetting();
-          await this.speakText(callControlId, openingMessage, voiceSetting);
+          console.log(`[TelnyxAiBridge] TeXML streaming active - AI audio handled by Gemini Live dialer for ${callId}`);
           await agent.startConversation();
-
-          // Wait for speak to finish, then start gathering
-          setTimeout(async () => {
-            console.log(`[TelnyxAiBridge] Starting gather after opening message for ${callId}`);
-            await this.startGather(callControlId);
-          }, 4000);
         }
 
         // Continue polling to track call end
@@ -819,26 +782,10 @@ export class TelnyxAiBridge extends EventEmitter {
         console.log(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping fallbacks`);
         return;
       }
-      console.warn(`[TelnyxAiBridge] Google TTS failed, attempting OpenAI fallback...`, error);
+      console.warn(`[TelnyxAiBridge] Google TTS failed, falling back to Telnyx TTS (OpenAI disabled)...`, error);
     }
 
-    // 2. Try OpenAI TTS (Secondary - if key exists)
-    const openaiApiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    if (openaiApiKey) {
-      try {
-        await this.speakWithOpenAI(callControlId, text, voice || "alloy", openaiApiKey);
-        return;
-      } catch (error: any) {
-        // If call has ended, don't bother with final fallback
-        if (error?.message?.includes('90018') || error?.message?.includes('already ended')) {
-          console.log(`[TelnyxAiBridge] Call ${callControlId} ended during TTS - skipping final fallback`);
-          return;
-        }
-        console.error(`[TelnyxAiBridge] OpenAI TTS failed:`, error);
-      }
-    }
-    
-    // 3. Fallback to Telnyx basic TTS (Last Resort)
+    // 2. Fallback to Telnyx basic TTS (Last Resort)
     console.log(`[TelnyxAiBridge] Using Telnyx basic TTS (fallback)`);
     await this.speakWithTelnyxTTS(callControlId, text, voice);
   }
@@ -846,13 +793,13 @@ export class TelnyxAiBridge extends EventEmitter {
   private async speakWithGoogle(callControlId: string, text: string, voice: string): Promise<void> {
     const ttsClient = new TextToSpeechClient();
     
-    // Map OpenAI/Gemini voice names to Google Cloud Journey/Studio voices
+    // Map Gemini voice names to Google Cloud Journey/Studio voices
     // alloy/shimmer/nova/aoede/kore -> Female Journey (F)
     // echo/fable/onyx/puck/charon -> Male Journey (D)
     const voiceLower = voice.toLowerCase();
     
     let googleVoice = "en-US-Journey-F"; // Default Female
-    // Male indicators found in OpenAI/Gemini voice names
+    // Male indicators found in Gemini voice names
     if (["echo", "fable", "onyx", "ash", "charon", "fenrir", "puck"].some(v => voiceLower.includes(v))) {
         googleVoice = "en-US-Journey-D"; // Male
     }
@@ -901,6 +848,7 @@ export class TelnyxAiBridge extends EventEmitter {
   }
 
   private async speakWithOpenAI(callControlId: string, text: string, voice: string, apiKey: string): Promise<void> {
+    throw new Error("OpenAI TTS is disabled for Gemini-only calling.");
     // OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
     const validVoices = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse"];
     const selectedVoice = validVoices.includes(voice) ? voice : "alloy";

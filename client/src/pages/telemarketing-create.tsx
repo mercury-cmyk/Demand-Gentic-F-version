@@ -3,6 +3,7 @@ import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-b
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
 import { Step2TelemarketingContent } from "@/components/campaign-builder/step2-telemarketing-content";
 import { Step0CampaignType } from "@/components/campaign-builder/step0-campaign-type";
+import { StepClientProject } from "@/components/campaign-builder/step-client-project";
 import { Step2bDialModeConfig } from "@/components/campaign-builder/step2b-dial-mode-config";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
 import { Step4Compliance } from "@/components/campaign-builder/step4-compliance";
@@ -22,6 +23,12 @@ export default function TelemarketingCreatePage() {
       title: "Type",
       description: "Select campaign objective",
       component: Step0CampaignType,
+    },
+    {
+      id: "client-project",
+      title: "Client & Project",
+      description: "Link this campaign to a client and project",
+      component: StepClientProject,
     },
     {
       id: "audience",
@@ -116,6 +123,8 @@ export default function TelemarketingCreatePage() {
         name: data.name || `Dialer Campaign ${new Date().toISOString()}`,
         type: data.type || "call",
         status: data.action === "draft" ? "draft" : "active",
+        clientAccountId: data.clientAccountId,
+        projectId: data.projectId,
         problemIntelligenceOrgId: data.organizationId || null,
         audienceRefs,
         callScript: data.content?.script,
