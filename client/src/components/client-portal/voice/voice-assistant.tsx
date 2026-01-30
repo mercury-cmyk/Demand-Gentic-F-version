@@ -1,16 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Mic, MicOff, Volume2, VolumeX, Loader2, Send, History, MessageSquare } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Mic, MicOff, Volume2, Loader2, Send, History, MessageSquare, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface VoiceAssistantProps {
@@ -221,29 +222,50 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
     );
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-primary" />
-            Demand Assistant
-          </DialogTitle>
-        </DialogHeader>
+  const conversation = history.flatMap((item) => [
+    { id: `${item.id}-user`, role: 'user' as const, text: item.transcript, intent: item.intent },
+    { id: `${item.id}-assistant`, role: 'assistant' as const, text: item.responseText, intent: item.intent },
+  ]);
+  const liveMessage =
+    response && {
+      id: 'live-response',
+      role: 'assistant' as const,
+      text: response.response.text,
+      intent: response.intent,
+      navigation: response.navigation,
+      audioUrl: response.response.audioUrl,
+    };
 
-        <div className="space-y-4">
-          {/* Voice mode toggles */}
-          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-            <div className="flex items-center gap-4">
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="sm:max-w-[420px] w-full p-0 border-l bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white flex flex-col shadow-2xl"
+      >
+        <SheetHeader className="p-4 pb-3 border-b border-white/5 bg-slate-950/80 backdrop-blur">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <SheetTitle className="text-base flex items-center gap-2 text-white">
+                <span className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <MessageSquare className="h-4 w-4 text-primary" />
+                </span>
+                Agentic Operator
+              </SheetTitle>
+              <p className="text-xs text-slate-300/80">Always-on chat for every user type.</p>
+            </div>
+            <div className="flex items-center gap-3 rounded-full bg-white/5 px-3 py-1">
+              <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-200">
+                <Sparkles className="h-3 w-3 text-amber-300" />
+                Live
+              </div>
               <div className="flex items-center gap-2">
                 <Switch
                   id="voice-input"
                   checked={voiceInputEnabled}
                   onCheckedChange={setVoiceInputEnabled}
                 />
-                <Label htmlFor="voice-input" className="text-xs flex items-center gap-1 cursor-pointer">
-                  <Mic className="h-3 w-3" />
-                  Voice Input
+                <Label htmlFor="voice-input" className="text-[11px] cursor-pointer">
+                  Mic
                 </Label>
               </div>
               <div className="flex items-center gap-2">
@@ -252,162 +274,183 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
                   checked={voiceOutputEnabled}
                   onCheckedChange={setVoiceOutputEnabled}
                 />
-                <Label htmlFor="voice-output" className="text-xs flex items-center gap-1 cursor-pointer">
-                  <Volume2 className="h-3 w-3" />
-                  Voice Response
+                <Label htmlFor="voice-output" className="text-[11px] cursor-pointer">
+                  Audio
                 </Label>
               </div>
             </div>
           </div>
+        </SheetHeader>
 
-          {/* Text input (always visible, primary interaction) */}
-          <form onSubmit={handleTextSubmit} className="flex gap-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Type your question or command..."
-              className="flex-1 px-3 py-2 border rounded-md text-sm bg-background"
-              disabled={isProcessing || isListening}
-              autoFocus
-            />
-            {voiceInputEnabled && (
-              <Button
-                type="button"
-                size="icon"
-                variant={isListening ? "destructive" : "outline"}
-                onClick={isListening ? stopListening : startListening}
-                disabled={isProcessing}
-              >
-                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              </Button>
-            )}
-            <Button
-              type="submit"
-              size="icon"
-              disabled={!transcript.trim() || isProcessing || isListening}
-            >
-              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
-          </form>
-
-          {/* Listening indicator */}
-          {isListening && (
-            <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-              </span>
-              Listening... speak now
-            </div>
-          )}
-
-          {/* Error message */}
-          {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 text-sm rounded-md">
-              {error}
-            </div>
-          )}
-
-          {/* Response display */}
-          {response && (
-            <div className="p-4 bg-muted rounded-lg space-y-2">
-              <div className="flex items-center justify-between">
-                {getIntentBadge(response.intent)}
-                <div className="flex items-center gap-2">
-                  {response.response.audioUrl && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => playAudio(response.response.audioUrl!)}
-                      title="Play audio response"
-                    >
-                      <Volume2 className="h-4 w-4 mr-1" />
-                      Play
-                    </Button>
-                  )}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {/* Conversation rail */}
+          <ScrollArea className="flex-1 px-4 py-3">
+            <div className="space-y-3">
+              {conversation.length === 0 && !liveMessage && (
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+                  <p className="font-medium mb-1">Ask anything to get started</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      'Spin up a call campaign for healthcare leads',
+                      'Summarize today’s pipeline health',
+                      'Draft an email sequence for renewals',
+                      'Show my open invoices',
+                    ].map((example) => (
+                      <button
+                        key={example}
+                        className="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/15 transition"
+                        onClick={() => {
+                          setTranscript(example);
+                          processCommand(example);
+                        }}
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <p className="text-sm">{response.response.text}</p>
-              {response.navigation && (
-                <p className="text-xs text-muted-foreground">
-                  Navigating to {response.navigation.path}...
-                </p>
+              )}
+
+              {conversation.map((message) => (
+                <div
+                  key={message.id}
+                  className={cn(
+                    'flex w-full',
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm border',
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground border-primary/50 rounded-br-sm'
+                        : 'bg-white/5 border-white/10 text-slate-50 rounded-bl-sm'
+                    )}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="outline" className="text-[10px] bg-black/20 border-white/10 capitalize">
+                        {message.intent || (message.role === 'user' ? 'prompt' : 'agent')}
+                      </Badge>
+                      {message.role === 'assistant' && message.navigation && (
+                        <span className="text-[11px] text-emerald-200">Navigating…</span>
+                      )}
+                    </div>
+                    <p className="leading-relaxed whitespace-pre-wrap">{message.text}</p>
+                  </div>
+                </div>
+              ))}
+
+              {liveMessage && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm border bg-white/5 border-white/10 text-slate-50 rounded-bl-sm">
+                    <div className="flex items-center gap-2 mb-1">
+                      {getIntentBadge(liveMessage.intent)}
+                      {liveMessage.audioUrl && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-white hover:text-primary"
+                          onClick={() => playAudio(liveMessage.audioUrl!)}
+                        >
+                          <Volume2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                    <p className="leading-relaxed whitespace-pre-wrap">{liveMessage.text}</p>
+                    {liveMessage.navigation && (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Navigating to {liveMessage.navigation.path}...
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 text-red-100 px-3 py-2 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {isListening && (
+                <div className="flex items-center gap-2 text-xs text-amber-200">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                  </span>
+                  Listening...
+                </div>
               )}
             </div>
-          )}
+          </ScrollArea>
 
-          {/* Example commands */}
-          {!response && !isListening && !isProcessing && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">Try saying:</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  'Go to my projects',
-                  "What's my spend this month?",
-                  'Show pending invoices',
-                  'Create a new order',
-                ].map((example) => (
-                  <button
-                    key={example}
-                    onClick={() => {
-                      setTranscript(example);
-                      processCommand(example);
-                    }}
-                    className="px-2 py-1 text-xs bg-muted hover:bg-muted/80 rounded-md transition-colors"
-                  >
-                    "{example}"
-                  </button>
-                ))}
+          {/* Composer */}
+          <div className="border-t border-white/10 p-4 space-y-2 bg-slate-950/80 backdrop-blur">
+            <form onSubmit={handleTextSubmit} className="flex gap-2">
+              <Input
+                ref={inputRef}
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                placeholder="Type to your operator..."
+                className="bg-white/5 border-white/10 text-white placeholder:text-slate-400 focus-visible:ring-primary/60"
+                disabled={isProcessing || isListening}
+              />
+              {voiceInputEnabled && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={isListening ? "destructive" : "secondary"}
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={isProcessing}
+                  className="w-11"
+                >
+                  {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                </Button>
+              )}
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!transcript.trim() || isProcessing || isListening}
+                className="w-11"
+              >
+                {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </form>
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <div className="flex items-center gap-2">
+                <History className="h-3.5 w-3.5" />
+                <span>{history.length} recent commands</span>
               </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[12px] px-2 text-white"
+                onClick={() => setShowHistory(!showHistory)}
+              >
+                {showHistory ? 'Hide' : 'Show'} history
+              </Button>
             </div>
-          )}
-
-          {/* History toggle */}
-          <div className="border-t pt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-between"
-              onClick={() => setShowHistory(!showHistory)}
-            >
-              <span className="flex items-center gap-2">
-                <History className="h-4 w-4" />
-                Recent Commands
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {history.length} commands
-              </span>
-            </Button>
-
             {showHistory && history.length > 0 && (
-              <ScrollArea className="h-40 mt-2">
-                <div className="space-y-2">
+              <ScrollArea className="h-28 mt-2 rounded-md border border-white/10 bg-white/5">
+                <div className="p-2 space-y-2">
                   {history.map((item) => (
-                    <div
+                    <button
                       key={item.id}
-                      className="p-2 bg-muted/50 rounded text-xs cursor-pointer hover:bg-muted"
+                      className="w-full text-left text-xs p-2 rounded-md hover:bg-white/10 transition flex items-start gap-2"
                       onClick={() => {
                         setTranscript(item.transcript);
                         processCommand(item.transcript);
                       }}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium truncate max-w-[200px]">
-                          "{item.transcript}"
-                        </span>
-                        <Badge
-                          variant={item.success ? 'default' : 'destructive'}
-                          className="text-[10px] h-4"
-                        >
-                          {item.intent}
-                        </Badge>
+                      <Badge className="text-[10px] px-1" variant={item.success ? 'default' : 'destructive'}>
+                        {item.intent}
+                      </Badge>
+                      <div className="flex-1 space-y-1">
+                        <p className="font-medium text-slate-100 line-clamp-1">{item.transcript}</p>
+                        <p className="text-slate-300/80 line-clamp-1">{item.responseText}</p>
                       </div>
-                      <p className="text-muted-foreground truncate">
-                        {item.responseText}
-                      </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </ScrollArea>
@@ -417,7 +460,7 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
 
         {/* Hidden audio element */}
         <audio ref={audioRef} className="hidden" />
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

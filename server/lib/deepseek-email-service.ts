@@ -1,6 +1,9 @@
 /**
  * DeepSeek AI Service for Email Template Generation
  * Uses DeepSeek API to improve email content while preserving layout/structure
+ * 
+ * NOTE: All email prompts are now centrally managed through the prompt management system.
+ * Prompts are loaded from the database with Redis caching and hardcoded fallbacks.
  */
 
 import OpenAI from 'openai';
@@ -13,6 +16,19 @@ import {
   type AccountMessagingBriefPayload,
   type AccountProfileData,
 } from '../services/account-messaging-service';
+
+// Import centralized email prompt service
+import {
+  loadDeepSeekEmailSystemPrompt,
+  loadDeepSeekEmailImprovementPrompt,
+  EMAIL_PROMPT_KEYS,
+} from '../services/email-prompt-service';
+
+// Import fallback prompts for synchronous access
+import {
+  EMAIL_GENERATION_PROMPT,
+  EMAIL_IMPROVEMENT_PROMPT,
+} from '../services/email-prompts';
 
 interface EmailContentRequest {
   currentHtml: string;

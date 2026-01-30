@@ -198,6 +198,46 @@ export const vectorDocumentTypeEnum = pgEnum('vector_document_type', [
 
 export const pipelineTypeEnum = pgEnum('pipeline_type', ['revenue', 'expansion', 'agency']);
 
+// ==================== PHASE: SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+
+// SMTP Provider Type Enum
+export const smtpProviderTypeEnum = pgEnum('smtp_provider_type', [
+  'gmail',      // Google Workspace Gmail
+  'outlook',    // Microsoft 365 Outlook/Exchange
+  'custom'      // Custom SMTP server
+]);
+
+// SMTP Auth Type Enum
+export const smtpAuthTypeEnum = pgEnum('smtp_auth_type', [
+  'oauth2',       // OAuth2 authentication (recommended for Gmail/Outlook)
+  'basic',        // Basic username/password
+  'app_password'  // App-specific password
+]);
+
+// Transactional Event Type Enum
+export const transactionalEventTypeEnum = pgEnum('transactional_event_type', [
+  'welcome',              // New user signup
+  'password_reset',       // Password reset request
+  'password_changed',     // Password successfully changed
+  'account_verification', // Email verification
+  'account_updated',      // Account settings changed
+  'notification',         // Generic notification
+  'lead_alert',           // New qualified lead notification
+  'campaign_completed',   // Campaign finished
+  'report_ready',         // Report generated
+  'invoice',              // Invoice/billing
+  'subscription_expiring',// Subscription warning
+  'two_factor_code'       // 2FA verification code
+]);
+
+// SMTP Verification Status Enum
+export const smtpVerificationStatusEnum = pgEnum('smtp_verification_status', [
+  'pending',      // Not yet verified
+  'verifying',    // Verification in progress
+  'verified',     // Successfully verified
+  'failed'        // Verification failed
+]);
+
 // Recording Status Enum - For call recording lifecycle
 export const recordingStatusEnum = pgEnum('recording_status', [
   'pending',    // Recording not yet started
@@ -2820,6 +2860,162 @@ export const emailSuppressionList = pgTable("email_suppression_list", {
   reasonIdx: index("email_suppression_reason_idx").on(table.reason),
   campaignIdx: index("email_suppression_campaign_idx").on(table.campaignId),
 }));
+
+// ==================== PHASE: SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+
+// SMTP Providers - Connect Google Workspace or Microsoft 365 accounts for transactional emails
+export const smtpProviders = pgTable("smtp_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(), // e.g., "Marketing Team Gmail", "Support Outlook"
+  providerType: smtpProviderTypeEnum("provider_type").notNull(),
+  authType: smtpAuthTypeEnum("auth_type").notNull(),
+
+  // OAuth2 Credentials (encrypted at rest)
+  clientId: text("client_id"),
+  clientSecretEncrypted: text("client_secret_encrypted"),
+  refreshTokenEncrypted: text("refresh_token_encrypted"),
+  accessTokenEncrypted: text("access_token_encrypted"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  tokenScopes: text("token_scopes").array(), // OAuth scopes granted
+
+  // SMTP Configuration (for custom providers)
+  smtpHost: text("smtp_host"),
+  smtpPort: integer("smtp_port"),
+  smtpSecure: boolean("smtp_secure").default(true),
+  smtpUsername: text("smtp_username"),
+  smtpPasswordEncrypted: text("smtp_password_encrypted"),
+
+  // Email Account Details
+  emailAddress: text("email_address").notNull(),
+  displayName: text("display_name"),
+  replyToAddress: text("reply_to_address"),
+
+  // Rate Limiting
+  dailySendLimit: integer("daily_send_limit").default(500),
+  hourlySendLimit: integer("hourly_send_limit").default(100),
+  sentToday: integer("sent_today").default(0),
+  sentThisHour: integer("sent_this_hour").default(0),
+  sentTodayResetAt: timestamp("sent_today_reset_at"),
+  sentHourResetAt: timestamp("sent_hour_reset_at"),
+
+  // Status & Verification
+  isActive: boolean("is_active").default(true),
+  isDefault: boolean("is_default").default(false),
+  verificationStatus: smtpVerificationStatusEnum("verification_status").default('pending'),
+  lastVerifiedAt: timestamp("last_verified_at"),
+  lastVerificationError: text("last_verification_error"),
+  lastUsedAt: timestamp("last_used_at"),
+
+  // Metadata
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  emailIdx: uniqueIndex("smtp_providers_email_unique_idx").on(table.emailAddress),
+  providerTypeIdx: index("smtp_providers_type_idx").on(table.providerType),
+  activeIdx: index("smtp_providers_active_idx").on(table.isActive),
+  defaultIdx: index("smtp_providers_default_idx").on(table.isDefault),
+}));
+
+// Transactional Email Templates - Event-triggered email templates
+export const transactionalEmailTemplates = pgTable("transactional_email_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventType: transactionalEventTypeEnum("event_type").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+
+  // Email Content
+  subject: text("subject").notNull(),
+  htmlContent: text("html_content").notNull(),
+  textContent: text("text_content"), // Plain text fallback
+
+  // Template Variables
+  variables: jsonb("variables").$type<{
+    name: string;
+    description: string;
+    required: boolean;
+    defaultValue?: string;
+  }[]>().default(sql`'[]'::jsonb`),
+
+  // SMTP Provider Assignment
+  smtpProviderId: varchar("smtp_provider_id").references(() => smtpProviders.id, { onDelete: 'set null' }),
+
+  // Status
+  isActive: boolean("is_active").default(true),
+  isDefault: boolean("is_default").default(false), // Default template for this event type
+
+  // Version Control
+  version: integer("version").default(1),
+
+  // Metadata
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  eventTypeIdx: index("transactional_templates_event_type_idx").on(table.eventType),
+  activeIdx: index("transactional_templates_active_idx").on(table.isActive),
+  defaultIdx: index("transactional_templates_default_idx").on(table.isDefault),
+  smtpProviderIdx: index("transactional_templates_smtp_provider_idx").on(table.smtpProviderId),
+}));
+
+// Transactional Email Logs - Audit trail for all transactional emails sent
+export const transactionalEmailLogs = pgTable("transactional_email_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateId: varchar("template_id").references(() => transactionalEmailTemplates.id, { onDelete: 'set null' }),
+  smtpProviderId: varchar("smtp_provider_id").references(() => smtpProviders.id, { onDelete: 'set null' }),
+
+  // Event Details
+  eventType: transactionalEventTypeEnum("event_type").notNull(),
+  triggerSource: text("trigger_source"), // e.g., "user_signup", "api_call", "scheduled_job"
+
+  // Recipient
+  recipientEmail: text("recipient_email").notNull(),
+  recipientUserId: varchar("recipient_user_id").references(() => users.id, { onDelete: 'set null' }),
+  recipientName: text("recipient_name"),
+
+  // Email Content (snapshot at send time)
+  subject: text("subject").notNull(),
+  htmlContentSnapshot: text("html_content_snapshot"), // Optional: store rendered HTML
+
+  // Variables Used
+  variablesUsed: jsonb("variables_used").$type<Record<string, string>>(),
+
+  // Status & Delivery
+  status: text("status").notNull().default('pending'), // pending, queued, sending, sent, delivered, failed, bounced
+  messageId: text("message_id"), // Provider's message ID
+
+  // Error Tracking
+  errorMessage: text("error_message"),
+  errorCode: text("error_code"),
+  retryCount: integer("retry_count").default(0),
+  maxRetries: integer("max_retries").default(3),
+
+  // Timing
+  queuedAt: timestamp("queued_at"),
+  sentAt: timestamp("sent_at"),
+  deliveredAt: timestamp("delivered_at"),
+  failedAt: timestamp("failed_at"),
+
+  // Metadata
+  metadata: jsonb("metadata").$type<{
+    ipAddress?: string;
+    userAgent?: string;
+    requestId?: string;
+    [key: string]: unknown;
+  }>(),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  templateIdx: index("transactional_logs_template_idx").on(table.templateId),
+  smtpProviderIdx: index("transactional_logs_smtp_provider_idx").on(table.smtpProviderId),
+  eventTypeIdx: index("transactional_logs_event_type_idx").on(table.eventType),
+  recipientEmailIdx: index("transactional_logs_recipient_email_idx").on(table.recipientEmail),
+  recipientUserIdx: index("transactional_logs_recipient_user_idx").on(table.recipientUserId),
+  statusIdx: index("transactional_logs_status_idx").on(table.status),
+  createdAtIdx: index("transactional_logs_created_at_idx").on(table.createdAt),
+}));
+
+// ==================== END SMTP TRANSACTIONAL EMAIL SYSTEM ====================
 
 // Call Scripts
 export const callScripts = pgTable("call_scripts", {
@@ -9644,4 +9840,64 @@ export type TitleMappingSource = 'manual' | 'ai' | 'system' | 'imported';
 export type IndustryLevel = 'sector' | 'industry' | 'sub_industry';
 export type SmiApproach = 'direct' | 'consultative' | 'educational' | 'peer-based';
 export type PriorityTier = 'high' | 'medium' | 'low';
+
+// ==================== SMTP TRANSACTIONAL EMAIL SYSTEM SCHEMAS ====================
+
+// SMTP Providers Insert Schema
+export const insertSmtpProviderSchema = createInsertSchema(smtpProviders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  sentToday: true,
+  sentThisHour: true,
+  sentTodayResetAt: true,
+  sentHourResetAt: true,
+  lastVerifiedAt: true,
+  lastUsedAt: true,
+});
+
+// Transactional Email Templates Insert Schema
+export const insertTransactionalEmailTemplateSchema = createInsertSchema(transactionalEmailTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Transactional Email Logs Insert Schema
+export const insertTransactionalEmailLogSchema = createInsertSchema(transactionalEmailLogs).omit({
+  id: true,
+  createdAt: true,
+  queuedAt: true,
+  sentAt: true,
+  deliveredAt: true,
+  failedAt: true,
+});
+
+// SMTP Transactional Email System Types
+export type SmtpProvider = typeof smtpProviders.$inferSelect;
+export type InsertSmtpProvider = z.infer<typeof insertSmtpProviderSchema>;
+
+export type TransactionalEmailTemplate = typeof transactionalEmailTemplates.$inferSelect;
+export type InsertTransactionalEmailTemplate = z.infer<typeof insertTransactionalEmailTemplateSchema>;
+
+export type TransactionalEmailLog = typeof transactionalEmailLogs.$inferSelect;
+export type InsertTransactionalEmailLog = z.infer<typeof insertTransactionalEmailLogSchema>;
+
+// SMTP Provider Type Enum Type
+export type SmtpProviderType = 'gmail' | 'outlook' | 'custom';
+export type SmtpAuthType = 'oauth2' | 'basic' | 'app_password';
+export type SmtpVerificationStatus = 'pending' | 'verifying' | 'verified' | 'failed';
+export type TransactionalEventType =
+  | 'welcome'
+  | 'password_reset'
+  | 'password_changed'
+  | 'account_verification'
+  | 'account_updated'
+  | 'notification'
+  | 'lead_alert'
+  | 'campaign_completed'
+  | 'report_ready'
+  | 'invoice'
+  | 'subscription_expiring'
+  | 'two_factor_code';
 

@@ -7,6 +7,9 @@
  *
  * This service allows users to see the exact system prompts and user prompts
  * that will be sent to each AI provider at runtime.
+ * 
+ * NOTE: Email prompts are now centrally managed through the prompt management system.
+ * Use email-prompt-service.ts for runtime prompt loading with database-first approach.
  */
 
 import { db } from "../db";
@@ -21,6 +24,25 @@ import {
   type AccountMessagingBriefPayload,
   type AccountProfileData,
 } from "./account-messaging-service";
+
+// Import centralized email prompt service for database-first prompt loading
+import {
+  loadDeepSeekEmailSystemPrompt,
+  loadDeepSeekEmailImprovementPrompt,
+  loadOpenAIEmailAnalysisPrompt,
+  loadOpenAIEmailRewritePrompt,
+  loadSubjectVariantsPrompt,
+  EMAIL_PROMPT_KEYS,
+} from "./email-prompt-service";
+
+// Import fallback prompts for synchronous access (deprecated - use async loaders)
+import {
+  EMAIL_GENERATION_PROMPT,
+  EMAIL_IMPROVEMENT_PROMPT,
+  EMAIL_ANALYSIS_PROMPT,
+  EMAIL_REWRITE_PROMPT,
+  SUBJECT_VARIANTS_PROMPT,
+} from "./email-prompts";
 
 // ==================== TYPES ====================
 
@@ -79,103 +101,67 @@ function generatePromptHash(prompt: string): string {
 
 /**
  * Get DeepSeek email generation system prompt
+ * 
+ * DEPRECATED: Use loadDeepSeekEmailSystemPrompt() from email-prompt-service.ts
+ * for database-first prompt loading with versioning and caching.
+ * 
+ * This synchronous function is maintained for backwards compatibility.
  */
 export function getDeepSeekEmailSystemPrompt(accountContext?: string): string {
-  return `You are an expert B2B demand generation strategist and copywriter.
-Your task is to generate email content that is:
-- Problem-led: Start with a real, account-relevant challenge or friction point.
-- Insight-driven: Offer a unique, non-obvious perspective or data point that demonstrates deep understanding of the account's reality.
-- Grounded in real demand-gen challenges: Address pipeline gaps, conversion friction, market shifts, or operational realities—never generic or promotional.
-- Account-aware and context-driven: Adapt tone, framing, and value to the specific account, referencing industry, recent events, or known pain points wherever possible.
-- Never promotional or pitch-oriented: Do NOT mention product features, company superiority, or calls to buy. The goal is to provoke thoughtful consideration and deliver relevance that feels earned.
-- Written as if by someone who deeply understands the account's world—clear, reasoned, and unexpectedly insightful.
-
-You will generate content for a structured email template. Keep each section appropriately sized:
-- Subject: 40-60 characters, problem/insight-led
-- Preheader: 40-100 characters, complements subject with context
-- Hero Title: 5-10 words, bold, challenge- or insight-focused
-- Hero Subtitle: 15-25 words, expands on the challenge or insight
-- Intro: 2-3 sentences, demonstrates understanding of the account's situation and frames the problem
-- Value Bullets: 3 points, each a relevant, account-aware insight or consideration (not features or generic benefits)
-- CTA Label: 2-4 words, action-oriented but NOT salesy (e.g., 'See Analysis', 'Explore Insight')
-- Closing Line: 1 sentence, professional, thoughtful sign-off
-
-${accountContext ? `${accountContext}\n` : ''}
-
-Respond ONLY with valid JSON.`;
+  // Use centralized prompt definition
+  const basePrompt = EMAIL_GENERATION_PROMPT;
+  
+  if (accountContext) {
+    return `${basePrompt}\n\n${accountContext}\n\nRespond ONLY with valid JSON.`;
+  }
+  
+  return basePrompt;
 }
 
 /**
  * Get DeepSeek email improvement system prompt
+ * 
+ * DEPRECATED: Use loadDeepSeekEmailImprovementPrompt() from email-prompt-service.ts
  */
 export function getDeepSeekEmailImprovementSystemPrompt(accountContext?: string): string {
-  return `You are an expert email marketing strategist and copywriter.
-Your task is to improve email content while PRESERVING the original:
-- HTML structure and layout
-- Color scheme and branding
-- Template format and sections
-
-Only improve the TEXT CONTENT by making it:
-- More compelling and action-oriented
-- Better targeted to the audience
-- More concise and scannable
-- Higher converting with stronger CTAs
-
-${accountContext ? `${accountContext}\n` : ''}
-
-You will analyze the current content and provide improved versions.
-Always respond with valid JSON.`;
+  // Use centralized prompt definition
+  const basePrompt = EMAIL_IMPROVEMENT_PROMPT;
+  
+  if (accountContext) {
+    return `${basePrompt}\n\n${accountContext}\n\nAlways respond with valid JSON.`;
+  }
+  
+  return basePrompt;
 }
 
 /**
  * Get OpenAI email analysis system prompt
+ * 
+ * DEPRECATED: Use loadOpenAIEmailAnalysisPrompt() from email-prompt-service.ts
  */
 export function getOpenAIEmailAnalysisSystemPrompt(): string {
-  return `You are an expert email marketing analyst and copywriter. Analyze the provided email and return a JSON evaluation with these fields:
-- overallScore: 0-100 rating of email effectiveness
-- tone: Description of the email's tone (e.g., "professional", "friendly", "urgent")
-- clarity: 0-100 rating of how clear and understandable the message is
-- professionalism: 0-100 rating of professional quality
-- sentiment: "positive", "neutral", or "negative"
-- suggestions: Array of 3-5 specific, actionable improvements
-
-Focus on business email best practices. Consider subject line effectiveness, call-to-action clarity, and overall messaging impact.
-
-Respond ONLY with valid JSON.`;
+  // Use centralized prompt definition
+  return EMAIL_ANALYSIS_PROMPT;
 }
 
 /**
  * Get OpenAI email rewrite system prompt
+ * 
+ * DEPRECATED: Use loadOpenAIEmailRewritePrompt() from email-prompt-service.ts
  */
 export function getOpenAIEmailRewriteSystemPrompt(): string {
-  return `You are an expert business email writer. Your task is to rewrite the provided email applying the specified improvements while maintaining the original intent and professional tone.
-
-Guidelines:
-- Keep the same overall structure unless specified otherwise
-- Improve clarity and readability
-- Make the call-to-action more compelling
-- Ensure professional tone throughout
-- Maintain the sender's voice
-
-Return the improved email as plain text (not JSON).`;
+  // Use centralized prompt definition
+  return EMAIL_REWRITE_PROMPT;
 }
 
 /**
  * Get DeepSeek subject variants system prompt
+ * 
+ * DEPRECATED: Use loadSubjectVariantsPrompt() from email-prompt-service.ts
  */
 export function getDeepSeekSubjectVariantsSystemPrompt(): string {
-  return `You are an email subject line optimization expert.
-Generate compelling subject lines that maximize open rates.
-Consider different psychological triggers:
-- Curiosity
-- Urgency
-- Value proposition
-- Personalization
-- Questions
-- Numbers/Statistics
-
-Each variant should have a different approach.
-Respond only with valid JSON.`;
+  // Use centralized prompt definition
+  return SUBJECT_VARIANTS_PROMPT;
 }
 
 /**
