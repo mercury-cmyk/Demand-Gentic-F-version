@@ -636,38 +636,61 @@ router.post("/telnyx", async (req, res) => {
     // Update calls table (for manual calls) - calls table doesn't have recordingStatus
     const updatedCalls = await db
       .update(calls)
-      .set({ 
+      .set({
         recordingUrl
       })
       .where(eq(calls.telnyxCallId, call_control_id))
       .returning({ id: calls.id });
 
-    const totalUpdated = updatedLeads.length + updatedCalls.length;
+    // Update call_sessions table (for AI calls and recordings dashboard)
+    // This is CRITICAL for the recordings dashboard which queries call_sessions
+    const updatedSessions = await db
+      .update(callSessions)
+      .set({
+        recordingUrl,
+        recordingStatus: 'completed'
+      })
+      .where(eq(callSessions.telnyxCallId, call_control_id))
+      .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
+
+    const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length;
 
     if (totalUpdated === 0) {
-      console.log(`[Telnyx Webhook] No matching lead/call found for call_control_id: ${call_control_id}`);
+      console.log(`[Telnyx Webhook] No matching lead/call/session found for call_control_id: ${call_control_id}`);
       // Still return 200 to prevent Telnyx from retrying
       return res.json({ status: "ok", updated: 0, message: "No matching records" });
     }
 
-    console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL`);
-    
+    console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length})`);
+
     // Store recordings permanently in S3 (async, don't block webhook response)
     if (isRecordingStorageEnabled()) {
+      // Import storeCallSessionRecording for call_sessions S3 storage
+      const { storeCallSessionRecording } = await import('../services/recording-storage');
+
       // Store lead recordings in background
       for (const lead of updatedLeads) {
         storeRecordingFromWebhook(lead.id, recordingUrl).catch((err) => {
           console.error(`[Telnyx Webhook] Failed to store recording in S3 for lead ${lead.id}:`, err);
         });
       }
-      console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead recording(s)`);
+
+      // Store call session recordings in background (for recordings dashboard)
+      for (const session of updatedSessions) {
+        storeCallSessionRecording(session.id, recordingUrl).catch((err) => {
+          console.error(`[Telnyx Webhook] Failed to store recording in S3 for call session ${session.id}:`, err);
+        });
+      }
+
+      console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)`);
     }
-    
-    return res.json({ 
-      status: "ok", 
+
+    return res.json({
+      status: "ok",
       updated: totalUpdated,
       leads: updatedLeads.length,
       calls: updatedCalls.length,
+      sessions: updatedSessions.length,
       s3Storage: isRecordingStorageEnabled() ? 'initiated' : 'disabled'
     });
 
