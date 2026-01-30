@@ -523,6 +523,8 @@ export default function AgentConsolePage() {
     toggleHold: webrtcToggleHold,
     isMuted: webrtcIsMuted,
     lastError: webrtcError,
+    telnyxCallId,
+    sendDTMF: webrtcSendDTMF,
     setAudioDevices,
     formatDuration: formatWebRTCDuration,
   } = useSIPWebRTC({
@@ -613,10 +615,26 @@ export default function AgentConsolePage() {
     // Set connecting status immediately so UI shows hang up button
     setCallStatus('connecting');
 
-    // BYPASS WebRTC entirely - use Call Control API (Telnyx REST API)
-    // This avoids all WebSocket connection issues, country whitelist errors, and NAT traversal problems
-    // Call Control API has higher reliability and works for all whitelisted countries
-    console.log('[AGENT CONSOLE] Using Call Control API (REST) for call to:', phoneNumber);
+    // Primary path: WebRTC softphone for in-browser audio
+    if (webrtcConnected && webrtcMakeCall) {
+      try {
+        console.log('[AGENT CONSOLE] Using WebRTC softphone for call to:', phoneNumber);
+        await webrtcMakeCall(phoneNumber);
+        return;
+      } catch (err) {
+        console.error('[AGENT CONSOLE] WebRTC call failed, falling back to Call Control API', err);
+        toast({
+          variant: 'destructive',
+          title: 'WebRTC issue',
+          description: 'Falling back to phone callback mode.',
+          duration: 6000,
+        });
+      }
+    } else {
+      console.log('[AGENT CONSOLE] WebRTC not connected - falling back to Call Control API');
+    }
+
+    // Fallback: Call Control REST API (will ring agent phone if configured)
     await apiMakeCall(phoneNumber, {
       campaignId: options?.campaignId || selectedCampaignId,
       contactId: options?.contactId,
@@ -708,6 +726,15 @@ export default function AgentConsolePage() {
 
   // Unified hold state - prefer WebRTC state when connected
   const isCurrentlyHeld = webrtcConnected && (webrtcCallState === 'active' || webrtcCallState === 'held') ? (webrtcCallState === 'held') : isHeld;
+
+  // Unified DTMF handler - prefer WebRTC when active
+  const handleSendDTMF = (digit: string) => {
+    if (webrtcConnected && webrtcCallState === 'active') {
+      webrtcSendDTMF?.(digit);
+    } else {
+      sendDTMF?.(digit);
+    }
+  };
 
   // Fetch agent queue data
   const { data: queueData = [], isLoading: queueLoading, refetch: refetchQueue, error: queueError, isFetching: queueFetching, isPlaceholderData } = useQuery<QueueItem[]>({
@@ -1177,8 +1204,12 @@ export default function AgentConsolePage() {
 
   // Mutation for creating call attempt when call connects
   const createCallAttemptMutation = useMutation({
-    mutationFn: async (attemptData: any) => {
+    mutationFn: async (attemptData: { campaignId: string; contactId: string; telnyxCallId: string; dialedNumber: string }) => {
       const response = await apiRequest('POST', '/api/call-attempts/start', attemptData);
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody?.message || 'Failed to create call attempt');
+      }
       return await response.json();
     },
     onSuccess: (data: { attemptId: string }) => {
@@ -1224,16 +1255,20 @@ export default function AgentConsolePage() {
 
   // Create call attempt when call becomes active
   useEffect(() => {
-    if (callStatus === 'active' && callControlId && !activeCallAttemptId && currentQueueItem) {
-      console.log('[CALL-ATTEMPT] Call became active, creating call attempt...');
+    const callIdForAttempt = telnyxCallId || callControlId || null;
+
+    if (callStatus === 'active' && callIdForAttempt && !activeCallAttemptId && currentQueueItem) {
+      console.log('[CALL-ATTEMPT] Call became active, creating call attempt...', { callId: callIdForAttempt });
       createCallAttemptMutation.mutate({
         campaignId: currentQueueItem.campaignId,
         contactId: switchedContact?.id || currentQueueItem.contactId,
-        callControlId: callControlId,
+        telnyxCallId: callIdForAttempt,
         dialedNumber: dialedPhoneNumber,
       });
+    } else if (callStatus === 'active' && !callIdForAttempt) {
+      console.warn('[CALL-ATTEMPT] Skipping call attempt creation: missing call identifier (likely Call Control fallback)');
     }
-  }, [callStatus, callControlId, activeCallAttemptId, currentQueueItem, switchedContact]);
+  }, [callStatus, telnyxCallId, callControlId, activeCallAttemptId, currentQueueItem, switchedContact, dialedPhoneNumber]);
 
   const handleContactSwitched = (newContact: { id: string; fullName: string }) => {
     setSwitchedContact(newContact);
@@ -1374,7 +1409,8 @@ export default function AgentConsolePage() {
       notes,
       qualificationData: Object.keys(qualificationData).length > 0 ? qualificationData : null,
       callbackRequested: disposition === 'callback-requested',
-      callControlId: callControlId, // Include Telnyx call ID for recording lookup
+      telnyxCallId: telnyxCallId || callControlId, // Prefer WebRTC call ID for recording lookup
+      callControlId: callControlId, // Retain for fallback compatibility
       dialedNumber: dialedPhoneNumber, // Include dialed phone number for recording sync
       callAttemptId: activeCallAttemptId, // Include call attempt ID for linking
       // Track contact switch if it happened
@@ -1996,7 +2032,7 @@ export default function AgentConsolePage() {
                               key={digit}
                               variant="outline"
                               size="icon"
-                              onClick={() => sendDTMF?.(digit)}
+                              onClick={() => handleSendDTMF(digit)}
                               className="bg-white/20 hover:bg-white/30 border-white/30 text-white text-base font-bold"
                               data-testid={`button-dtmf-${digit}`}
                             >
@@ -2169,14 +2205,14 @@ export default function AgentConsolePage() {
                           <div className="text-xs text-white/80 text-center mb-2 font-medium">Dial Extensions</div>
                           <div className="grid grid-cols-3 gap-2">
                             {['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'].map((digit) => (
-                              <Button
-                                key={digit}
-                                variant="outline"
-                                size="icon"
-                                onClick={() => sendDTMF?.(digit)}
-                                className="bg-white/20 hover:bg-white/30 border-white/30 text-white text-base font-bold"
-                                data-testid={`button-dtmf-${digit}`}
-                              >
+                            <Button
+                              key={digit}
+                              variant="outline"
+                              size="icon"
+                              onClick={() => handleSendDTMF(digit)}
+                              className="bg-white/20 hover:bg-white/30 border-white/30 text-white text-base font-bold"
+                              data-testid={`button-dtmf-${digit}`}
+                            >
                                 {digit}
                               </Button>
                             ))}

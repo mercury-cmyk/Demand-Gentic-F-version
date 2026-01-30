@@ -731,6 +731,91 @@ export const users = pgTable("users", {
   usernameIdx: index("users_username_idx").on(table.username),
 }));
 
+// ==================== PROMPT REGISTRY ====================
+
+// Prompt Type Enum
+export const promptTypeEnum = pgEnum('prompt_type', [
+  'foundational',  // Core agent behavior prompts
+  'system',        // System-level instructions
+  'specialized',   // Task-specific prompts
+  'template'       // User-editable templates
+]);
+
+// Prompt Scope Enum
+export const promptScopeEnum = pgEnum('prompt_scope', [
+  'global',        // Applies to all operations
+  'organization',  // Organization-specific
+  'campaign',      // Campaign-specific
+  'agent_type'     // Specific to agent type
+]);
+
+// Prompt Category Enum
+export const promptCategoryEnum = pgEnum('prompt_category', [
+  'voice',         // Voice call agents
+  'email',         // Email generation/analysis
+  'intelligence',  // Research and intelligence
+  'compliance',    // Compliance and governance
+  'system'         // System prompts
+]);
+
+// Prompt Registry table - stores all AI prompts
+export const promptRegistry = pgTable("prompt_registry", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  promptKey: varchar("prompt_key", { length: 100 }).notNull().unique(), // Unique identifier like 'email.generation'
+  name: text("name").notNull(),
+  description: text("description"),
+  promptType: promptTypeEnum("prompt_type").notNull().default('system'),
+  promptScope: promptScopeEnum("prompt_scope").notNull().default('agent_type'),
+  agentType: text("agent_type"), // 'voice', 'email', 'compliance', etc.
+  category: promptCategoryEnum("category"),
+  content: text("content").notNull(), // The actual prompt content
+  defaultContent: text("default_content").notNull(), // Original from codebase
+  isActive: boolean("is_active").notNull().default(true),
+  isLocked: boolean("is_locked").notNull().default(false), // Prevent editing
+  priority: integer("priority").notNull().default(50), // For ordering (0-100)
+  tags: jsonb("tags").$type<string[]>().default([]),
+  sourceFile: text("source_file"), // Where the prompt came from
+  sourceLine: integer("source_line"),
+  sourceExport: text("source_export"), // Export name from source file
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  promptKeyIdx: uniqueIndex("prompt_registry_key_idx").on(table.promptKey),
+  categoryIdx: index("prompt_registry_category_idx").on(table.category),
+  agentTypeIdx: index("prompt_registry_agent_type_idx").on(table.agentType),
+  activeIdx: index("prompt_registry_active_idx").on(table.isActive),
+}));
+
+// Prompt Versions table - tracks version history
+export const promptVersions = pgTable("prompt_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  promptId: varchar("prompt_id").notNull().references(() => promptRegistry.id, { onDelete: 'cascade' }),
+  version: integer("version").notNull(),
+  content: text("content").notNull(),
+  previousContent: text("previous_content"),
+  changeDescription: text("change_description"),
+  changedBy: varchar("changed_by").references(() => users.id, { onDelete: 'set null' }),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+  addedLines: integer("added_lines").default(0),
+  removedLines: integer("removed_lines").default(0),
+  modifiedLines: integer("modified_lines").default(0),
+}, (table) => ({
+  promptIdIdx: index("prompt_versions_prompt_id_idx").on(table.promptId),
+  versionIdx: index("prompt_versions_version_idx").on(table.promptId, table.version),
+}));
+
+// Insert schemas for prompt tables
+export const insertPromptRegistrySchema = createInsertSchema(promptRegistry);
+export const insertPromptVersionsSchema = createInsertSchema(promptVersions);
+
+export type InsertPromptRegistry = z.infer<typeof insertPromptRegistrySchema>;
+export type InsertPromptVersions = z.infer<typeof insertPromptVersionsSchema>;
+export type PromptRegistry = typeof promptRegistry.$inferSelect;
+export type PromptVersion = typeof promptVersions.$inferSelect;
+
 // User Roles junction table (many-to-many: users can have multiple roles)
 export const userRoles = pgTable("user_roles", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -742,6 +827,337 @@ export const userRoles = pgTable("user_roles", {
   userRoleIdx: uniqueIndex("user_roles_user_role_idx").on(table.userId, table.role), // Prevent duplicate role assignments
   userIdIdx: index("user_roles_user_id_idx").on(table.userId),
 }));
+
+// ==================== IAM (Identity & Access Management) ====================
+
+// IAM Entity Types - resources that can be accessed
+export const iamEntityTypeEnum = pgEnum('iam_entity_type', [
+  'account',
+  'project', 
+  'campaign',
+  'agent',
+  'call_session',
+  'recording',
+  'transcript',
+  'report',
+  'lead',
+  'delivery',
+  'domain',
+  'smtp',
+  'email_template',
+  'prompt',
+  'quality_review',
+  'audit_log',
+  'user',
+  'team',
+  'role',
+  'policy'
+]);
+
+// IAM Actions - operations that can be performed
+export const iamActionEnum = pgEnum('iam_action', [
+  'view',
+  'create',
+  'edit',
+  'delete',
+  'run',
+  'execute',
+  'approve',
+  'publish',
+  'assign',
+  'export',
+  'manage_settings',
+  'view_sensitive',
+  'manage_access'
+]);
+
+// IAM Scope Types - how access is scoped
+export const iamScopeTypeEnum = pgEnum('iam_scope_type', [
+  'all',           // All resources of this type
+  'assigned',      // Only assigned resources
+  'own',           // Only resources they created
+  'team',          // Resources assigned to their team
+  'account',       // Scoped to specific accounts
+  'project',       // Scoped to specific projects
+  'campaign',      // Scoped to specific campaigns
+  'organization'   // Scoped to organization
+]);
+
+// Grant Types
+export const iamGrantTypeEnum = pgEnum('iam_grant_type', [
+  'assignment',    // User is assigned to entity
+  'permission',    // User has permission over entity
+  'temporary',     // Time-bound access
+  'break_glass'    // Emergency access requiring reason
+]);
+
+// Access Request Status
+export const iamRequestStatusEnum = pgEnum('iam_request_status', [
+  'pending',
+  'approved',
+  'denied',
+  'expired',
+  'revoked'
+]);
+
+// Teams - grouping for users
+export const iamTeams = pgTable("iam_teams", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  parentTeamId: varchar("parent_team_id"), // For nested teams
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  orgIdx: index("iam_teams_org_idx").on(table.organizationId),
+  nameOrgIdx: uniqueIndex("iam_teams_name_org_idx").on(table.name, table.organizationId),
+}));
+
+// Team Members
+export const iamTeamMembers = pgTable("iam_team_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  isLead: boolean("is_lead").notNull().default(false), // Team lead can approve requests
+  joinedAt: timestamp("joined_at").notNull().defaultNow(),
+  addedBy: varchar("added_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  teamUserIdx: uniqueIndex("iam_team_members_team_user_idx").on(table.teamId, table.userId),
+  userIdx: index("iam_team_members_user_idx").on(table.userId),
+}));
+
+// IAM Roles - bundles of policies with friendly names
+export const iamRoles = pgTable("iam_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  isSystem: boolean("is_system").notNull().default(false), // System roles cannot be deleted
+  isDefault: boolean("is_default").notNull().default(false), // Assigned to new users
+  priority: integer("priority").notNull().default(0), // Higher priority = evaluated first
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  nameOrgIdx: uniqueIndex("iam_roles_name_org_idx").on(table.name, table.organizationId),
+  orgIdx: index("iam_roles_org_idx").on(table.organizationId),
+}));
+
+// IAM Policies - define entity + actions + scope + conditions
+export const iamPolicies = pgTable("iam_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  entityType: iamEntityTypeEnum("entity_type").notNull(),
+  actions: jsonb("actions").$type<string[]>().notNull(), // Array of actions from iamActionEnum
+  scopeType: iamScopeTypeEnum("scope_type").notNull().default('assigned'),
+  conditions: jsonb("conditions").$type<Record<string, any>>(), // e.g., { "report.visibility": "ClientPublished" }
+  fieldRules: jsonb("field_rules").$type<Record<string, any>>(), // Field-level access control
+  effect: text("effect").notNull().default('allow'), // 'allow' or 'deny'
+  isSystem: boolean("is_system").notNull().default(false),
+  priority: integer("priority").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  entityTypeIdx: index("iam_policies_entity_type_idx").on(table.entityType),
+  orgIdx: index("iam_policies_org_idx").on(table.organizationId),
+  activeIdx: index("iam_policies_active_idx").on(table.isActive),
+}));
+
+// Role-Policy junction (roles bundle multiple policies)
+export const iamRolePolicies = pgTable("iam_role_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roleId: varchar("role_id").notNull().references(() => iamRoles.id, { onDelete: 'cascade' }),
+  policyId: varchar("policy_id").notNull().references(() => iamPolicies.id, { onDelete: 'cascade' }),
+  addedAt: timestamp("added_at").notNull().defaultNow(),
+  addedBy: varchar("added_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  rolePolicyIdx: uniqueIndex("iam_role_policies_role_policy_idx").on(table.roleId, table.policyId),
+  roleIdx: index("iam_role_policies_role_idx").on(table.roleId),
+  policyIdx: index("iam_role_policies_policy_idx").on(table.policyId),
+}));
+
+// User-Role assignments (user can have multiple roles)
+export const iamUserRoles = pgTable("iam_user_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  roleId: varchar("role_id").notNull().references(() => iamRoles.id, { onDelete: 'cascade' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  assignedBy: varchar("assigned_by").references(() => users.id, { onDelete: 'set null' }),
+  expiresAt: timestamp("expires_at"), // Optional expiration
+}, (table) => ({
+  userRoleOrgIdx: uniqueIndex("iam_user_roles_user_role_org_idx").on(table.userId, table.roleId, table.organizationId),
+  userIdx: index("iam_user_roles_user_idx").on(table.userId),
+  roleIdx: index("iam_user_roles_role_idx").on(table.roleId),
+}));
+
+// Team-Role assignments (teams can have roles)
+export const iamTeamRoles = pgTable("iam_team_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  teamId: varchar("team_id").notNull().references(() => iamTeams.id, { onDelete: 'cascade' }),
+  roleId: varchar("role_id").notNull().references(() => iamRoles.id, { onDelete: 'cascade' }),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  assignedBy: varchar("assigned_by").references(() => users.id, { onDelete: 'set null' }),
+}, (table) => ({
+  teamRoleIdx: uniqueIndex("iam_team_roles_team_role_idx").on(table.teamId, table.roleId),
+  teamIdx: index("iam_team_roles_team_idx").on(table.teamId),
+}));
+
+// Entity Assignments - assigns users/teams to specific entities (accounts/projects/campaigns)
+export const iamEntityAssignments = pgTable("iam_entity_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Principal (who is assigned)
+  userId: varchar("user_id").references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").references(() => iamTeams.id, { onDelete: 'cascade' }),
+  // Entity (what is assigned)
+  entityType: iamEntityTypeEnum("entity_type").notNull(),
+  entityId: varchar("entity_id").notNull(),
+  // Assignment details
+  assignmentRole: text("assignment_role"), // e.g., 'owner', 'ae', 'qa', 'viewer'
+  isActive: boolean("is_active").notNull().default(true),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  assignedBy: varchar("assigned_by").references(() => users.id, { onDelete: 'set null' }),
+  expiresAt: timestamp("expires_at"),
+  notes: text("notes"),
+}, (table) => ({
+  userEntityIdx: index("iam_entity_assignments_user_entity_idx").on(table.userId, table.entityType, table.entityId),
+  teamEntityIdx: index("iam_entity_assignments_team_entity_idx").on(table.teamId, table.entityType, table.entityId),
+  entityIdx: index("iam_entity_assignments_entity_idx").on(table.entityType, table.entityId),
+}));
+
+// Access Grants - fine-grained permission grants on specific entities
+export const iamAccessGrants = pgTable("iam_access_grants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Principal
+  userId: varchar("user_id").references(() => users.id, { onDelete: 'cascade' }),
+  teamId: varchar("team_id").references(() => iamTeams.id, { onDelete: 'cascade' }),
+  // Entity
+  entityType: iamEntityTypeEnum("entity_type").notNull(),
+  entityId: varchar("entity_id"), // NULL = all entities of this type (within scope)
+  // Grant details
+  grantType: iamGrantTypeEnum("grant_type").notNull().default('permission'),
+  actions: jsonb("actions").$type<string[]>().notNull(), // Allowed actions
+  conditions: jsonb("conditions").$type<Record<string, any>>(), // Additional conditions
+  // Metadata
+  isActive: boolean("is_active").notNull().default(true),
+  grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  grantedBy: varchar("granted_by").references(() => users.id, { onDelete: 'set null' }),
+  expiresAt: timestamp("expires_at"),
+  reason: text("reason"), // Required for break-glass grants
+}, (table) => ({
+  userGrantIdx: index("iam_access_grants_user_idx").on(table.userId),
+  teamGrantIdx: index("iam_access_grants_team_idx").on(table.teamId),
+  entityGrantIdx: index("iam_access_grants_entity_idx").on(table.entityType, table.entityId),
+  activeIdx: index("iam_access_grants_active_idx").on(table.isActive),
+}));
+
+// Access Requests - approval workflow for access
+export const iamAccessRequests = pgTable("iam_access_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Requester
+  requesterId: varchar("requester_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // Requested entity
+  entityType: iamEntityTypeEnum("entity_type").notNull(),
+  entityId: varchar("entity_id"),
+  entityName: text("entity_name"), // Cached name for display
+  // Requested access
+  actions: jsonb("actions").$type<string[]>().notNull(),
+  requestedDuration: text("requested_duration"), // e.g., '7d', '30d', 'permanent'
+  reason: text("reason").notNull(),
+  // Workflow
+  status: iamRequestStatusEnum("status").notNull().default('pending'),
+  reviewerId: varchar("reviewer_id").references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  // Result
+  grantId: varchar("grant_id").references(() => iamAccessGrants.id, { onDelete: 'set null' }), // Created grant if approved
+  // Metadata
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),
+}, (table) => ({
+  requesterIdx: index("iam_access_requests_requester_idx").on(table.requesterId),
+  statusIdx: index("iam_access_requests_status_idx").on(table.status),
+  reviewerIdx: index("iam_access_requests_reviewer_idx").on(table.reviewerId),
+}));
+
+// IAM Audit Events - detailed audit trail for IAM changes
+export const iamAuditEvents = pgTable("iam_audit_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Actor
+  actorId: varchar("actor_id").references(() => users.id, { onDelete: 'set null' }),
+  actorType: text("actor_type").notNull().default('user'), // 'user', 'system', 'api'
+  actorIp: text("actor_ip"),
+  actorUserAgent: text("actor_user_agent"),
+  // Action
+  action: text("action").notNull(), // 'grant_created', 'role_assigned', 'policy_updated', etc.
+  entityType: iamEntityTypeEnum("entity_type"),
+  entityId: varchar("entity_id"),
+  // Target (who/what was affected)
+  targetUserId: varchar("target_user_id").references(() => users.id, { onDelete: 'set null' }),
+  targetTeamId: varchar("target_team_id").references(() => iamTeams.id, { onDelete: 'set null' }),
+  // Change details
+  beforeState: jsonb("before_state"),
+  afterState: jsonb("after_state"),
+  changeDescription: text("change_description"),
+  requestId: varchar("request_id"), // Link to access request if applicable
+  reason: text("reason"), // Required for sensitive operations
+  // Metadata
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'set null' }),
+}, (table) => ({
+  actorIdx: index("iam_audit_events_actor_idx").on(table.actorId),
+  actionIdx: index("iam_audit_events_action_idx").on(table.action),
+  entityIdx: index("iam_audit_events_entity_idx").on(table.entityType, table.entityId),
+  targetUserIdx: index("iam_audit_events_target_user_idx").on(table.targetUserId),
+  createdAtIdx: index("iam_audit_events_created_at_idx").on(table.createdAt),
+  orgIdx: index("iam_audit_events_org_idx").on(table.organizationId),
+}));
+
+// Insert schemas for IAM tables
+export const insertIamTeamSchema = createInsertSchema(iamTeams);
+export const insertIamTeamMemberSchema = createInsertSchema(iamTeamMembers);
+export const insertIamRoleSchema = createInsertSchema(iamRoles);
+export const insertIamPolicySchema = createInsertSchema(iamPolicies);
+export const insertIamRolePolicySchema = createInsertSchema(iamRolePolicies);
+export const insertIamUserRoleSchema = createInsertSchema(iamUserRoles);
+export const insertIamTeamRoleSchema = createInsertSchema(iamTeamRoles);
+export const insertIamEntityAssignmentSchema = createInsertSchema(iamEntityAssignments);
+export const insertIamAccessGrantSchema = createInsertSchema(iamAccessGrants);
+export const insertIamAccessRequestSchema = createInsertSchema(iamAccessRequests);
+export const insertIamAuditEventSchema = createInsertSchema(iamAuditEvents);
+
+export type IamTeam = typeof iamTeams.$inferSelect;
+export type IamTeamMember = typeof iamTeamMembers.$inferSelect;
+export type IamRole = typeof iamRoles.$inferSelect;
+export type IamPolicy = typeof iamPolicies.$inferSelect;
+export type IamRolePolicy = typeof iamRolePolicies.$inferSelect;
+export type IamUserRole = typeof iamUserRoles.$inferSelect;
+export type IamTeamRole = typeof iamTeamRoles.$inferSelect;
+export type IamEntityAssignment = typeof iamEntityAssignments.$inferSelect;
+export type IamAccessGrant = typeof iamAccessGrants.$inferSelect;
+export type IamAccessRequest = typeof iamAccessRequests.$inferSelect;
+export type IamAuditEvent = typeof iamAuditEvents.$inferSelect;
+
+export type InsertIamTeam = z.infer<typeof insertIamTeamSchema>;
+export type InsertIamTeamMember = z.infer<typeof insertIamTeamMemberSchema>;
+export type InsertIamRole = z.infer<typeof insertIamRoleSchema>;
+export type InsertIamPolicy = z.infer<typeof insertIamPolicySchema>;
+export type InsertIamEntityAssignment = z.infer<typeof insertIamEntityAssignmentSchema>;
+export type InsertIamAccessGrant = z.infer<typeof insertIamAccessGrantSchema>;
+export type InsertIamAccessRequest = z.infer<typeof insertIamAccessRequestSchema>;
+export type InsertIamAuditEvent = z.infer<typeof insertIamAuditEventSchema>;
 
 // Custom Field Definitions table
 export const customFieldDefinitions = pgTable("custom_field_definitions", {
@@ -3016,6 +3432,691 @@ export const transactionalEmailLogs = pgTable("transactional_email_logs", {
 }));
 
 // ==================== END SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+
+// ==================== PHASE 2: DOMAIN MANAGEMENT & DELIVERABILITY ====================
+
+// Enums for Domain Management
+export const domainPurposeEnum = pgEnum('domain_purpose', ['marketing', 'transactional', 'both']);
+export const warmupPhaseEnum = pgEnum('warmup_phase', ['not_started', 'phase_1', 'phase_2', 'phase_3', 'completed', 'paused']);
+export const blacklistStatusEnum = pgEnum('blacklist_status', ['clean', 'listed', 'pending_check']);
+
+// Extended Domain Configuration - Additional settings for domain_auth
+export const domainConfiguration = pgTable("domain_configuration", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainAuthId: integer("domain_auth_id").notNull().references(() => domainAuth.id, { onDelete: 'cascade' }).unique(),
+
+  // Secure Verification
+  secureCode: text("secure_code").notNull().unique(), // Unique verification code
+  subdomain: text("subdomain"), // e.g., "mail" for mail.example.com
+  parentDomain: text("parent_domain"), // e.g., "example.com"
+  domainPurpose: domainPurposeEnum("domain_purpose").default('both').notNull(),
+
+  // Generated DNS Records (to show users what to configure)
+  generatedSpfRecord: text("generated_spf_record"),
+  generatedDkimSelector: text("generated_dkim_selector"),
+  generatedDkimRecord: text("generated_dkim_record"),
+  generatedDmarcRecord: text("generated_dmarc_record"),
+  generatedTrackingCname: text("generated_tracking_cname"),
+
+  // Validation Timestamps
+  spfVerifiedAt: timestamp("spf_verified_at"),
+  dkimVerifiedAt: timestamp("dkim_verified_at"),
+  dmarcVerifiedAt: timestamp("dmarc_verified_at"),
+  trackingVerifiedAt: timestamp("tracking_verified_at"),
+
+  // Permissions
+  allowMarketing: boolean("allow_marketing").default(true).notNull(),
+  allowTransactional: boolean("allow_transactional").default(true).notNull(),
+  requiresManualApproval: boolean("requires_manual_approval").default(false).notNull(),
+
+  // Mailgun Integration
+  mailgunDomainId: text("mailgun_domain_id"),
+  mailgunApiKey: text("mailgun_api_key"), // Encrypted
+  mailgunRegion: text("mailgun_region").default('US'), // 'US' or 'EU'
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  domainAuthIdx: index("domain_config_domain_auth_idx").on(table.domainAuthId),
+  secureCodeIdx: index("domain_config_secure_code_idx").on(table.secureCode),
+}));
+
+// Domain Health Scores - Tracks deliverability health over time
+export const domainHealthScores = pgTable("domain_health_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainAuthId: integer("domain_auth_id").notNull().references(() => domainAuth.id, { onDelete: 'cascade' }),
+
+  // Overall Score (0-100)
+  overallScore: integer("overall_score").notNull().default(0),
+
+  // Component Scores (0-100 each)
+  authenticationScore: integer("authentication_score").default(0), // SPF, DKIM, DMARC compliance
+  reputationScore: integer("reputation_score").default(0), // Sender reputation
+  engagementScore: integer("engagement_score").default(0), // Open/click rates
+  blacklistScore: integer("blacklist_score").default(100), // 100 = clean, decreases if listed
+
+  // Engagement Metrics
+  bounceRate: real("bounce_rate").default(0), // Percentage (0-100)
+  complaintRate: real("complaint_rate").default(0), // Spam complaint rate
+  unsubscribeRate: real("unsubscribe_rate").default(0),
+  openRate: real("open_rate").default(0),
+  clickRate: real("click_rate").default(0),
+
+  // Volume Metrics
+  totalSent7Days: integer("total_sent_7_days").default(0),
+  totalSent30Days: integer("total_sent_30_days").default(0),
+  totalBounced7Days: integer("total_bounced_7_days").default(0),
+  totalComplaints7Days: integer("total_complaints_7_days").default(0),
+
+  // Blacklist Status
+  blacklistedOn: text("blacklisted_on").array(), // Array of RBL names where listed
+  lastBlacklistCheck: timestamp("last_blacklist_check"),
+
+  // Warmup Status
+  warmupPhase: warmupPhaseEnum("warmup_phase").default('not_started').notNull(),
+  warmupStartedAt: timestamp("warmup_started_at"),
+  warmupCompletedAt: timestamp("warmup_completed_at"),
+  dailySendTarget: integer("daily_send_target").default(50), // Current daily limit during warmup
+  dailySendActual: integer("daily_send_actual").default(0), // Sent today
+
+  // AI-Generated Recommendations
+  recommendations: jsonb("recommendations").$type<{
+    priority: 'critical' | 'high' | 'medium' | 'low';
+    category: string;
+    title: string;
+    description: string;
+    actionUrl?: string;
+  }[]>(),
+
+  // Scoring Metadata
+  scoredAt: timestamp("scored_at").notNull().defaultNow(),
+  scoreVersion: integer("score_version").default(1), // Algorithm version
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  domainAuthIdx: index("domain_health_domain_auth_idx").on(table.domainAuthId),
+  overallScoreIdx: index("domain_health_overall_score_idx").on(table.overallScore),
+  warmupPhaseIdx: index("domain_health_warmup_phase_idx").on(table.warmupPhase),
+  scoredAtIdx: index("domain_health_scored_at_idx").on(table.scoredAt),
+}));
+
+// Blacklist Monitors - Tracks domain/IP blacklist status across multiple RBLs
+export const blacklistMonitors = pgTable("blacklist_monitors", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainAuthId: integer("domain_auth_id").references(() => domainAuth.id, { onDelete: 'cascade' }),
+
+  // What we're monitoring
+  monitorType: text("monitor_type").notNull(), // 'domain' or 'ip'
+  monitorValue: text("monitor_value").notNull(), // The domain or IP address
+
+  // RBL Information
+  rblName: text("rbl_name").notNull(), // e.g., 'spamhaus_sbl', 'barracuda', 'spamcop'
+  rblDisplayName: text("rbl_display_name").notNull(), // Human-readable name
+  rblCategory: text("rbl_category").notNull(), // 'spam', 'phishing', 'malware', 'policy'
+
+  // Status
+  status: blacklistStatusEnum("status").default('pending_check').notNull(),
+  isListed: boolean("is_listed").default(false).notNull(),
+  listedSince: timestamp("listed_since"),
+  delistedAt: timestamp("delisted_at"),
+  listingReason: text("listing_reason"), // Reason for listing if available
+
+  // Checking Schedule
+  lastCheckedAt: timestamp("last_checked_at"),
+  nextCheckAt: timestamp("next_check_at"),
+  checkFrequencyHours: integer("check_frequency_hours").default(24).notNull(),
+  consecutiveCleanChecks: integer("consecutive_clean_checks").default(0), // For confidence scoring
+
+  // Alerting
+  alertsEnabled: boolean("alerts_enabled").default(true).notNull(),
+  lastAlertSentAt: timestamp("last_alert_sent_at"),
+  alertEmailOverride: text("alert_email_override"), // Send alerts to specific email
+
+  // Delisting Efforts
+  delistingRequested: boolean("delisting_requested").default(false),
+  delistingRequestedAt: timestamp("delisting_requested_at"),
+  delistingUrl: text("delisting_url"), // URL to request delisting
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  domainAuthIdx: index("blacklist_monitors_domain_auth_idx").on(table.domainAuthId),
+  monitorValueIdx: index("blacklist_monitors_monitor_value_idx").on(table.monitorValue),
+  rblNameIdx: index("blacklist_monitors_rbl_name_idx").on(table.rblName),
+  statusIdx: index("blacklist_monitors_status_idx").on(table.status),
+  isListedIdx: index("blacklist_monitors_is_listed_idx").on(table.isListed),
+  nextCheckIdx: index("blacklist_monitors_next_check_idx").on(table.nextCheckAt),
+}));
+
+// Blacklist Check History - Audit trail of all blacklist checks
+export const blacklistCheckHistory = pgTable("blacklist_check_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  monitorId: varchar("monitor_id").notNull().references(() => blacklistMonitors.id, { onDelete: 'cascade' }),
+
+  // Check Result
+  wasListed: boolean("was_listed").notNull(),
+  listingReason: text("listing_reason"),
+  responseTime: integer("response_time_ms"), // How long the check took
+  rawResponse: text("raw_response"), // Raw API/DNS response for debugging
+
+  // Metadata
+  checkSource: text("check_source").default('scheduled'), // 'scheduled', 'manual', 'webhook'
+  checkedAt: timestamp("checked_at").notNull().defaultNow(),
+}, (table) => ({
+  monitorIdx: index("blacklist_history_monitor_idx").on(table.monitorId),
+  checkedAtIdx: index("blacklist_history_checked_at_idx").on(table.checkedAt),
+  wasListedIdx: index("blacklist_history_was_listed_idx").on(table.wasListed),
+}));
+
+// Domain Warmup Schedule - Tracks warmup progress day by day
+export const domainWarmupSchedule = pgTable("domain_warmup_schedule", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainAuthId: integer("domain_auth_id").notNull().references(() => domainAuth.id, { onDelete: 'cascade' }),
+
+  // Schedule
+  day: integer("day").notNull(), // Day 1, 2, 3... of warmup
+  scheduledDate: timestamp("scheduled_date").notNull(),
+  targetVolume: integer("target_volume").notNull(), // How many to send
+
+  // Actual Results
+  actualVolume: integer("actual_volume").default(0),
+  delivered: integer("delivered").default(0),
+  bounced: integer("bounced").default(0),
+  complaints: integer("complaints").default(0),
+  opens: integer("opens").default(0),
+
+  // Status
+  status: text("status").default('pending').notNull(), // 'pending', 'in_progress', 'completed', 'skipped'
+  completedAt: timestamp("completed_at"),
+  notes: text("notes"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  domainAuthIdx: index("warmup_schedule_domain_auth_idx").on(table.domainAuthId),
+  scheduledDateIdx: index("warmup_schedule_date_idx").on(table.scheduledDate),
+  statusIdx: index("warmup_schedule_status_idx").on(table.status),
+  dayIdx: index("warmup_schedule_day_idx").on(table.day),
+}));
+
+// ==================== END PHASE 2: DOMAIN MANAGEMENT & DELIVERABILITY ====================
+
+// ==================== PHASE 3: UNIFIED EMAIL AGENT ARCHITECTURE ====================
+
+// Enums for Unified Email Agent
+export const emailProviderEnum = pgEnum('email_provider', ['gemini', 'gpt4o', 'deepseek', 'openai', 'anthropic']);
+export const emailGenerationStatusEnum = pgEnum('email_generation_status', ['pending', 'processing', 'completed', 'failed', 'cached']);
+
+// Email Generation Logs - Comprehensive tracking of all AI email generation
+export const emailGenerationLogs = pgTable("email_generation_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Request Context
+  requestId: varchar("request_id").notNull(), // Unique request identifier for tracing
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+
+  // Generation Context
+  generationType: text("generation_type").notNull(), // 'campaign', 'follow_up', 'transactional', 'personalized', 'batch'
+  requestSource: text("request_source").notNull(), // 'campaign_send', 'client_portal', 'agentic_hub', 'api', 'preview'
+
+  // AI Provider Details
+  provider: emailProviderEnum("provider").notNull(),
+  model: text("model").notNull(), // e.g., 'gemini-2.0-flash', 'gpt-4o', 'deepseek-chat'
+  fallbackUsed: boolean("fallback_used").default(false).notNull(),
+  fallbackReason: text("fallback_reason"), // Why fallback was triggered
+
+  // Prompt Information
+  promptVersion: text("prompt_version").default('1.0'), // Foundational prompt version
+  layersApplied: text("layers_applied").array(), // ['foundational', 'org_intelligence', 'campaign_context', 'personalization']
+  systemPromptTokens: integer("system_prompt_tokens"),
+  userPromptTokens: integer("user_prompt_tokens"),
+
+  // Input Context (stored for debugging/replay)
+  inputContext: jsonb("input_context").$type<{
+    campaignType?: string;
+    campaignName?: string;
+    objective?: string;
+    targetAudience?: string;
+    valueProposition?: string;
+    callToAction?: string;
+    contactIndustry?: string;
+    contactTitle?: string;
+    contactCompany?: string;
+    organizationContext?: string;
+    additionalInstructions?: string;
+  }>(),
+
+  // Generated Output
+  generatedSubject: text("generated_subject"),
+  generatedPreheader: text("generated_preheader"),
+  generatedHtmlContent: text("generated_html_content"),
+  generatedTextContent: text("generated_text_content"),
+  mergeFieldsUsed: text("merge_fields_used").array(),
+
+  // Performance Metrics
+  latencyMs: integer("latency_ms"), // Time to generate
+  tokenUsage: jsonb("token_usage").$type<{
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cachedTokens?: number;
+  }>(),
+  estimatedCost: real("estimated_cost"), // Estimated cost in USD
+
+  // Quality & Compliance
+  complianceChecks: jsonb("compliance_checks").$type<{
+    spamScore?: number;
+    hasUnsubscribe: boolean;
+    hasPhysicalAddress: boolean;
+    hasPrivacyLink: boolean;
+    characterCount: number;
+    linkCount: number;
+    imageCount: number;
+    passedAllChecks: boolean;
+    warnings?: string[];
+  }>(),
+  compliancePassed: boolean("compliance_passed").default(true),
+
+  // Status
+  status: emailGenerationStatusEnum("status").default('pending').notNull(),
+  errorMessage: text("error_message"),
+  errorCode: text("error_code"),
+
+  // Caching
+  cacheKey: text("cache_key"), // For deduplication/caching similar requests
+  cachedFromId: varchar("cached_from_id"), // If this was served from cache, reference to original
+
+  // Timestamps
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  requestIdIdx: index("email_gen_request_id_idx").on(table.requestId),
+  campaignIdx: index("email_gen_campaign_idx").on(table.campaignId),
+  accountIdx: index("email_gen_account_idx").on(table.accountId),
+  contactIdx: index("email_gen_contact_idx").on(table.contactId),
+  providerIdx: index("email_gen_provider_idx").on(table.provider),
+  statusIdx: index("email_gen_status_idx").on(table.status),
+  generationTypeIdx: index("email_gen_type_idx").on(table.generationType),
+  requestSourceIdx: index("email_gen_source_idx").on(table.requestSource),
+  requestedAtIdx: index("email_gen_requested_at_idx").on(table.requestedAt),
+  cacheKeyIdx: index("email_gen_cache_key_idx").on(table.cacheKey),
+}));
+
+// Provider Configuration - Track provider health and routing preferences
+export const emailProviderConfig = pgTable("email_provider_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Provider Identity
+  provider: emailProviderEnum("provider").notNull().unique(),
+  displayName: text("display_name").notNull(),
+
+  // Configuration
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  isPrimary: boolean("is_primary").default(false).notNull(), // Primary provider
+  priority: integer("priority").default(1).notNull(), // Lower = higher priority for fallback
+  maxRetries: integer("max_retries").default(3),
+
+  // Rate Limits
+  requestsPerMinute: integer("requests_per_minute").default(60),
+  tokensPerMinute: integer("tokens_per_minute").default(100000),
+  currentRequestsThisMinute: integer("current_requests_this_minute").default(0),
+  currentTokensThisMinute: integer("current_tokens_this_minute").default(0),
+  rateLimitResetAt: timestamp("rate_limit_reset_at"),
+
+  // Health Monitoring
+  isHealthy: boolean("is_healthy").default(true).notNull(),
+  lastHealthCheck: timestamp("last_health_check"),
+  consecutiveFailures: integer("consecutive_failures").default(0),
+  averageLatencyMs: integer("average_latency_ms"),
+  errorRate: real("error_rate").default(0), // Percentage
+
+  // Cost Tracking
+  costPerInputToken: real("cost_per_input_token"), // USD
+  costPerOutputToken: real("cost_per_output_token"), // USD
+  monthlyBudget: real("monthly_budget"),
+  monthlySpend: real("monthly_spend").default(0),
+  budgetResetAt: timestamp("budget_reset_at"),
+
+  // Model Configuration
+  defaultModel: text("default_model").notNull(),
+  availableModels: text("available_models").array(),
+  defaultTemperature: real("default_temperature").default(0.7),
+  defaultMaxTokens: integer("default_max_tokens").default(4000),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ==================== END PHASE 3: UNIFIED EMAIL AGENT ARCHITECTURE ====================
+
+// ==================== PHASE 4: ENHANCED DRAG-AND-DROP EMAIL BUILDER ====================
+
+// Enums for Email Builder
+export const emailBlockTypeEnum = pgEnum('email_block_type', [
+  'text', 'heading', 'image', 'button', 'divider', 'spacer',
+  'columns', 'hero', 'card', 'social', 'footer', 'header',
+  'list', 'quote', 'video', 'countdown', 'product'
+]);
+export const imageSourceEnum = pgEnum('image_source', ['upload', 'ai_generated', 'url', 'stock']);
+
+// Brand Kits - Store brand colors, fonts, logos for consistent email design
+export const brandKits = pgTable("brand_kits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Identity
+  name: text("name").notNull(),
+  isDefault: boolean("is_default").default(false).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+
+  // Company Information
+  companyName: text("company_name").notNull(),
+  companyAddress: text("company_address"), // For email footer (CAN-SPAM)
+  companyPhone: text("company_phone"),
+  companyWebsite: text("company_website"),
+
+  // Brand Colors
+  colors: jsonb("colors").$type<{
+    primary: string;       // Main brand color (hex)
+    secondary: string;     // Secondary accent color
+    accent: string;        // Highlight/CTA color
+    background: string;    // Email background
+    text: string;          // Main text color
+    textLight: string;     // Secondary text color
+    link: string;          // Link color
+    headerBg: string;      // Header background
+    footerBg: string;      // Footer background
+  }>().notNull(),
+
+  // Typography
+  typography: jsonb("typography").$type<{
+    headingFont: string;   // e.g., "Arial, Helvetica, sans-serif"
+    bodyFont: string;      // e.g., "Georgia, Times, serif"
+    headingSize: number;   // Base heading size in px
+    bodySize: number;      // Base body size in px
+    lineHeight: number;    // e.g., 1.5
+  }>().notNull(),
+
+  // Logo
+  logoImageId: varchar("logo_image_id"), // Reference to email_builder_images
+  logoUrl: text("logo_url"),
+  logoWidth: integer("logo_width").default(150),
+  logoAlt: text("logo_alt").default('Company Logo'),
+
+  // Social Links
+  socialLinks: jsonb("social_links").$type<{
+    facebook?: string;
+    twitter?: string;
+    linkedin?: string;
+    instagram?: string;
+    youtube?: string;
+    tiktok?: string;
+  }>(),
+
+  // Button Styles
+  buttonStyles: jsonb("button_styles").$type<{
+    borderRadius: number;   // e.g., 4
+    paddingX: number;       // Horizontal padding
+    paddingY: number;       // Vertical padding
+    fontSize: number;
+    fontWeight: string;     // e.g., "bold"
+    textTransform: string;  // e.g., "uppercase", "none"
+  }>(),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  nameIdx: index("brand_kits_name_idx").on(table.name),
+  isDefaultIdx: index("brand_kits_is_default_idx").on(table.isDefault),
+}));
+
+// Email Builder Templates - Save complete email designs
+export const emailBuilderTemplates = pgTable("email_builder_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Template Identity
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category").default('custom'), // 'welcome', 'newsletter', 'promotional', 'transactional', 'custom'
+  thumbnail: text("thumbnail"), // Preview image URL
+
+  // Template Configuration
+  brandKitId: varchar("brand_kit_id").references(() => brandKits.id, { onDelete: 'set null' }),
+  width: integer("width").default(600), // Email width in px
+  backgroundColor: text("background_color").default('#f4f4f4'),
+
+  // Block Structure (stored as JSON for flexibility)
+  blocks: jsonb("blocks").$type<Array<{
+    id: string;
+    type: string;
+    sortOrder: number;
+    content: Record<string, unknown>;
+    styles: Record<string, unknown>;
+    mobileStyles?: Record<string, unknown>;
+    isVisible: boolean;
+    hideOnMobile?: boolean;
+    hideOnDesktop?: boolean;
+  }>>().default([]),
+
+  // Metadata
+  isPublic: boolean("is_public").default(false), // Available in template library
+  usageCount: integer("usage_count").default(0),
+  lastUsedAt: timestamp("last_used_at"),
+
+  // Version Control
+  version: integer("version").default(1),
+  parentTemplateId: varchar("parent_template_id"), // For versioning/forking
+
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  nameIdx: index("email_builder_templates_name_idx").on(table.name),
+  categoryIdx: index("email_builder_templates_category_idx").on(table.category),
+  brandKitIdx: index("email_builder_templates_brand_kit_idx").on(table.brandKitId),
+  createdByIdx: index("email_builder_templates_created_by_idx").on(table.createdBy),
+}));
+
+// Email Builder Blocks - Individual content blocks for templates
+export const emailBuilderBlocks = pgTable("email_builder_blocks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateId: varchar("template_id").notNull().references(() => emailBuilderTemplates.id, { onDelete: 'cascade' }),
+
+  // Block Type
+  blockType: emailBlockTypeEnum("block_type").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+
+  // Content (varies by block type)
+  content: jsonb("content").$type<{
+    // Text/Heading blocks
+    text?: string;
+    html?: string;
+
+    // Image blocks
+    imageId?: string;
+    imageUrl?: string;
+    alt?: string;
+    linkUrl?: string;
+
+    // Button blocks
+    buttonText?: string;
+    buttonUrl?: string;
+    buttonStyle?: 'primary' | 'secondary' | 'outline';
+
+    // Columns blocks
+    columnCount?: number;
+    columnRatio?: string; // e.g., "50-50", "33-33-33", "60-40"
+    columnBlocks?: Array<{
+      id: string;
+      type: string;
+      content: Record<string, unknown>;
+    }>;
+
+    // Hero blocks
+    heroTitle?: string;
+    heroSubtitle?: string;
+    heroImageUrl?: string;
+    heroCta?: { text: string; url: string };
+
+    // Social blocks
+    socialLinks?: Array<{ platform: string; url: string }>;
+
+    // List blocks
+    items?: string[];
+    listStyle?: 'bullet' | 'number' | 'check';
+
+    // Video blocks
+    videoUrl?: string;
+    videoThumbnail?: string;
+
+    // Product blocks
+    productName?: string;
+    productPrice?: string;
+    productImage?: string;
+    productDescription?: string;
+    productUrl?: string;
+
+    // Generic
+    [key: string]: unknown;
+  }>().notNull(),
+
+  // Desktop Styles
+  styles: jsonb("styles").$type<{
+    backgroundColor?: string;
+    paddingTop?: number;
+    paddingBottom?: number;
+    paddingLeft?: number;
+    paddingRight?: number;
+    marginTop?: number;
+    marginBottom?: number;
+    borderRadius?: number;
+    borderColor?: string;
+    borderWidth?: number;
+    textAlign?: 'left' | 'center' | 'right';
+    fontSize?: number;
+    fontWeight?: string;
+    color?: string;
+    lineHeight?: number;
+    width?: string | number;
+    maxWidth?: number;
+    [key: string]: unknown;
+  }>().default({}),
+
+  // Mobile-specific Styles (override desktop)
+  mobileStyles: jsonb("mobile_styles").$type<Record<string, unknown>>().default({}),
+
+  // Visibility
+  isVisible: boolean("is_visible").default(true).notNull(),
+  hideOnMobile: boolean("hide_on_mobile").default(false).notNull(),
+  hideOnDesktop: boolean("hide_on_desktop").default(false).notNull(),
+
+  // Personalization
+  conditionalLogic: jsonb("conditional_logic").$type<{
+    field?: string;
+    operator?: 'equals' | 'not_equals' | 'contains' | 'exists';
+    value?: string;
+  }>(),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  templateIdx: index("email_builder_blocks_template_idx").on(table.templateId),
+  sortOrderIdx: index("email_builder_blocks_sort_order_idx").on(table.sortOrder),
+  blockTypeIdx: index("email_builder_blocks_type_idx").on(table.blockType),
+}));
+
+// Email Builder Images - Store and manage images for email builder
+export const emailBuilderImages = pgTable("email_builder_images", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Source Information
+  source: imageSourceEnum("source").notNull(),
+  originalUrl: text("original_url"), // Original/source URL
+  storedUrl: text("stored_url").notNull(), // Our hosted URL (S3/CDN)
+  thumbnailUrl: text("thumbnail_url"), // Smaller preview
+
+  // File Information
+  fileName: text("file_name"),
+  mimeType: text("mime_type").default('image/png'),
+  width: integer("width"),
+  height: integer("height"),
+  sizeBytes: integer("size_bytes"),
+
+  // AI Generation Details (if source = 'ai_generated')
+  aiPrompt: text("ai_prompt"),
+  aiModel: text("ai_model"), // e.g., 'imagen-3', 'dall-e-3'
+  aiGenerationId: text("ai_generation_id"),
+  aiStyle: text("ai_style"), // Style parameters used
+
+  // Metadata
+  altText: text("alt_text"),
+  caption: text("caption"),
+  tags: text("tags").array(),
+
+  // Usage Tracking
+  usageCount: integer("usage_count").default(0),
+  lastUsedAt: timestamp("last_used_at"),
+
+  // Organization
+  folderId: varchar("folder_id"),
+  isPublic: boolean("is_public").default(false),
+
+  uploadedBy: varchar("uploaded_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  sourceIdx: index("email_builder_images_source_idx").on(table.source),
+  uploadedByIdx: index("email_builder_images_uploaded_by_idx").on(table.uploadedBy),
+  tagsIdx: index("email_builder_images_tags_idx").on(table.tags),
+}));
+
+// AI Image Generation Jobs - Track Imagen 3 generation requests
+export const aiImageGenerationJobs = pgTable("ai_image_generation_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Request
+  prompt: text("prompt").notNull(),
+  negativePrompt: text("negative_prompt"),
+  style: text("style"), // 'photorealistic', 'illustration', 'abstract', etc.
+  aspectRatio: text("aspect_ratio").default('1:1'), // '1:1', '16:9', '4:3', '9:16'
+  numberOfImages: integer("number_of_images").default(1),
+
+  // Model Configuration
+  model: text("model").default('imagen-3'),
+  modelVersion: text("model_version"),
+  parameters: jsonb("parameters").$type<{
+    guidanceScale?: number;
+    seed?: number;
+    safetyFilterLevel?: string;
+    [key: string]: unknown;
+  }>(),
+
+  // Results
+  status: text("status").notNull().default('pending'), // 'pending', 'processing', 'completed', 'failed'
+  generatedImages: jsonb("generated_images").$type<Array<{
+    imageId: string;
+    url: string;
+    width: number;
+    height: number;
+  }>>(),
+  errorMessage: text("error_message"),
+
+  // Timing & Cost
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  durationMs: integer("duration_ms"),
+  estimatedCost: real("estimated_cost"),
+
+  requestedBy: varchar("requested_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("ai_image_jobs_status_idx").on(table.status),
+  requestedByIdx: index("ai_image_jobs_requested_by_idx").on(table.requestedBy),
+  createdAtIdx: index("ai_image_jobs_created_at_idx").on(table.createdAt),
+}));
+
+// ==================== END PHASE 4: ENHANCED DRAG-AND-DROP EMAIL BUILDER ====================
 
 // Call Scripts
 export const callScripts = pgTable("call_scripts", {
@@ -9900,4 +11001,513 @@ export type TransactionalEventType =
   | 'invoice'
   | 'subscription_expiring'
   | 'two_factor_code';
+
+// ==================== PHASE 2: DOMAIN MANAGEMENT & DELIVERABILITY SCHEMAS ====================
+
+// Domain Configuration Insert Schema
+export const insertDomainConfigurationSchema = createInsertSchema(domainConfiguration).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  spfVerifiedAt: true,
+  dkimVerifiedAt: true,
+  dmarcVerifiedAt: true,
+  trackingVerifiedAt: true,
+});
+
+// Domain Health Scores Insert Schema
+export const insertDomainHealthScoreSchema = createInsertSchema(domainHealthScores).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  scoredAt: true,
+});
+
+// Blacklist Monitors Insert Schema
+export const insertBlacklistMonitorSchema = createInsertSchema(blacklistMonitors).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastCheckedAt: true,
+  lastAlertSentAt: true,
+});
+
+// Blacklist Check History Insert Schema
+export const insertBlacklistCheckHistorySchema = createInsertSchema(blacklistCheckHistory).omit({
+  id: true,
+  checkedAt: true,
+});
+
+// Domain Warmup Schedule Insert Schema
+export const insertDomainWarmupScheduleSchema = createInsertSchema(domainWarmupSchedule).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+// Phase 2 Types
+export type DomainConfiguration = typeof domainConfiguration.$inferSelect;
+export type InsertDomainConfiguration = z.infer<typeof insertDomainConfigurationSchema>;
+
+export type DomainHealthScore = typeof domainHealthScores.$inferSelect;
+export type InsertDomainHealthScore = z.infer<typeof insertDomainHealthScoreSchema>;
+
+export type BlacklistMonitor = typeof blacklistMonitors.$inferSelect;
+export type InsertBlacklistMonitor = z.infer<typeof insertBlacklistMonitorSchema>;
+
+export type BlacklistCheckHistory = typeof blacklistCheckHistory.$inferSelect;
+export type InsertBlacklistCheckHistory = z.infer<typeof insertBlacklistCheckHistorySchema>;
+
+export type DomainWarmupSchedule = typeof domainWarmupSchedule.$inferSelect;
+export type InsertDomainWarmupSchedule = z.infer<typeof insertDomainWarmupScheduleSchema>;
+
+// Phase 2 Enum Types
+export type DomainPurpose = 'marketing' | 'transactional' | 'both';
+export type WarmupPhase = 'not_started' | 'phase_1' | 'phase_2' | 'phase_3' | 'completed' | 'paused';
+export type BlacklistStatus = 'clean' | 'listed' | 'pending_check';
+
+// ==================== PHASE 3: UNIFIED EMAIL AGENT SCHEMAS ====================
+
+// Email Generation Logs Insert Schema
+export const insertEmailGenerationLogSchema = createInsertSchema(emailGenerationLogs).omit({
+  id: true,
+  createdAt: true,
+  requestedAt: true,
+  completedAt: true,
+});
+
+// Email Provider Config Insert Schema
+export const insertEmailProviderConfigSchema = createInsertSchema(emailProviderConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  currentRequestsThisMinute: true,
+  currentTokensThisMinute: true,
+  monthlySpend: true,
+});
+
+// Phase 3 Types
+export type EmailGenerationLog = typeof emailGenerationLogs.$inferSelect;
+export type InsertEmailGenerationLog = z.infer<typeof insertEmailGenerationLogSchema>;
+
+export type EmailProviderConfig = typeof emailProviderConfig.$inferSelect;
+export type InsertEmailProviderConfig = z.infer<typeof insertEmailProviderConfigSchema>;
+
+// Phase 3 Enum Types
+export type EmailProvider = 'gemini' | 'gpt4o' | 'deepseek' | 'openai' | 'anthropic';
+export type EmailGenerationStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cached';
+
+// ==================== PHASE 4: ENHANCED EMAIL BUILDER SCHEMAS ====================
+
+// Brand Kits Insert Schema
+export const insertBrandKitSchema = createInsertSchema(brandKits).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Email Builder Templates Insert Schema
+export const insertEmailBuilderTemplateSchema = createInsertSchema(emailBuilderTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+  lastUsedAt: true,
+});
+
+// Email Builder Blocks Insert Schema
+export const insertEmailBuilderBlockSchema = createInsertSchema(emailBuilderBlocks).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Email Builder Images Insert Schema
+export const insertEmailBuilderImageSchema = createInsertSchema(emailBuilderImages).omit({
+  id: true,
+  createdAt: true,
+  usageCount: true,
+  lastUsedAt: true,
+});
+
+// AI Image Generation Jobs Insert Schema
+export const insertAiImageGenerationJobSchema = createInsertSchema(aiImageGenerationJobs).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  completedAt: true,
+  durationMs: true,
+});
+
+// Phase 4 Types
+export type BrandKit = typeof brandKits.$inferSelect;
+export type InsertBrandKit = z.infer<typeof insertBrandKitSchema>;
+
+export type EmailBuilderTemplate = typeof emailBuilderTemplates.$inferSelect;
+export type InsertEmailBuilderTemplate = z.infer<typeof insertEmailBuilderTemplateSchema>;
+
+export type EmailBuilderBlock = typeof emailBuilderBlocks.$inferSelect;
+export type InsertEmailBuilderBlock = z.infer<typeof insertEmailBuilderBlockSchema>;
+
+export type EmailBuilderImage = typeof emailBuilderImages.$inferSelect;
+export type InsertEmailBuilderImage = z.infer<typeof insertEmailBuilderImageSchema>;
+
+export type AiImageGenerationJob = typeof aiImageGenerationJobs.$inferSelect;
+export type InsertAiImageGenerationJob = z.infer<typeof insertAiImageGenerationJobSchema>;
+
+// Phase 4 Enum Types
+export type EmailBlockType =
+  | 'text' | 'heading' | 'image' | 'button' | 'divider' | 'spacer'
+  | 'columns' | 'hero' | 'card' | 'social' | 'footer' | 'header'
+  | 'list' | 'quote' | 'video' | 'countdown' | 'product';
+export type ImageSource = 'upload' | 'ai_generated' | 'url' | 'stock';
+
+// ==================== RESEARCH & ANALYSIS AGENT TABLES ====================
+
+// Analysis Type Enum
+export const analysisTypeEnum = pgEnum('analysis_type', [
+  'lead_quality',
+  'email_quality',
+  'call_quality',
+  'communication_quality',
+  'engagement',
+  'account_health',
+  'next_best_action'
+]);
+
+// Score Tier Enum
+export const scoreTierEnum = pgEnum('score_tier', [
+  'exceptional',
+  'good',
+  'acceptable',
+  'below_standard',
+  'critical'
+]);
+
+// Health Status Enum
+export const healthStatusEnum = pgEnum('health_status', [
+  'thriving',
+  'healthy',
+  'at_risk',
+  'critical'
+]);
+
+// NBA Status Enum
+export const nbaStatusEnum = pgEnum('nba_status', [
+  'pending',
+  'in_progress',
+  'completed',
+  'skipped',
+  'expired'
+]);
+
+// NBA Action Type Enum
+export const nbaActionTypeEnum = pgEnum('nba_action_type', [
+  'contact',
+  'message',
+  'offer',
+  'follow_up',
+  'escalate'
+]);
+
+// Research Analysis Records - Comprehensive logging of all analysis operations
+export const researchAnalysisRecords = pgTable("research_analysis_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Entity being analyzed
+  entityType: varchar("entity_type", { length: 50 }).notNull(),
+  entityId: varchar("entity_id", { length: 255 }).notNull(),
+
+  // Analysis context
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  organizationId: varchar("organization_id"),
+  analysisType: varchar("analysis_type", { length: 50 }).notNull(),
+
+  // Module and model info
+  moduleId: varchar("module_id", { length: 100 }).notNull(),
+  moduleVersion: varchar("module_version", { length: 20 }).notNull(),
+  scoringModelId: varchar("scoring_model_id", { length: 100 }),
+  scoringModelVersion: varchar("scoring_model_version", { length: 20 }),
+
+  // Results
+  overallScore: integer("overall_score"),
+  scoreTier: varchar("score_tier", { length: 20 }),
+  scoreComponents: jsonb("score_components"),
+  scoreFactors: jsonb("score_factors"),
+  confidenceScore: numeric("confidence_score", { precision: 5, scale: 4 }),
+
+  // Findings
+  findings: jsonb("findings"),
+  findingsCount: integer("findings_count").default(0),
+  criticalFindingsCount: integer("critical_findings_count").default(0),
+
+  // Recommendations
+  recommendations: jsonb("recommendations"),
+  recommendationsCount: integer("recommendations_count").default(0),
+
+  // Evidence
+  evidence: jsonb("evidence"),
+
+  // Configuration used
+  configurationApplied: jsonb("configuration_applied"),
+
+  // Execution metadata
+  executionDurationMs: integer("execution_duration_ms"),
+  aiModelUsed: varchar("ai_model_used", { length: 100 }),
+  aiTokensUsed: integer("ai_tokens_used"),
+  dataSourcesUsed: jsonb("data_sources_used"),
+
+  // Status
+  status: varchar("status", { length: 20 }).default('completed'),
+  errorMessage: text("error_message"),
+
+  // Audit
+  triggeredBy: varchar("triggered_by", { length: 50 }),
+  triggeredByUserId: varchar("triggered_by_user_id").references(() => users.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  entityIdx: index("research_analysis_entity_idx").on(table.entityType, table.entityId),
+  campaignIdx: index("research_analysis_campaign_idx").on(table.campaignId),
+  typeIdx: index("research_analysis_type_idx").on(table.analysisType),
+  scoreIdx: index("research_analysis_score_idx").on(table.overallScore),
+  createdIdx: index("research_analysis_created_idx").on(table.createdAt),
+}));
+
+// Scoring Model Configurations - Store custom scoring model configurations
+export const scoringModelConfigurations = pgTable("scoring_model_configurations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Model identification
+  modelType: varchar("model_type", { length: 50 }).notNull(),
+  modelName: varchar("model_name", { length: 100 }).notNull(),
+  modelVersion: varchar("model_version", { length: 20 }).default('1.0.0'),
+
+  // Scope
+  organizationId: varchar("organization_id"),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'cascade' }),
+  isDefault: boolean("is_default").default(false),
+
+  // Configuration
+  weights: jsonb("weights").notNull(),
+  thresholds: jsonb("thresholds").notNull(),
+  normalization: varchar("normalization", { length: 20 }).default('linear'),
+  customRules: jsonb("custom_rules"),
+
+  // Metadata
+  description: text("description"),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+
+  // Soft delete
+  isActive: boolean("is_active").default(true),
+}, (table) => ({
+  typeIdx: index("scoring_model_type_idx").on(table.modelType),
+  orgIdx: index("scoring_model_org_idx").on(table.organizationId),
+  campaignIdx: index("scoring_model_campaign_idx").on(table.campaignId),
+}));
+
+// Account Health Scores - Track account health over time
+export const accountHealthScores = pgTable("account_health_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  accountId: varchar("account_id").notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+
+  // Scores
+  overallHealthScore: integer("overall_health_score").notNull(),
+  fitScore: integer("fit_score"),
+  engagementScore: integer("engagement_score"),
+  intentScore: integer("intent_score"),
+  relationshipScore: integer("relationship_score"),
+  riskScore: integer("risk_score"),
+
+  // Score breakdown
+  scoreComponents: jsonb("score_components"),
+  scoreFactors: jsonb("score_factors"),
+
+  // Health indicators
+  healthStatus: varchar("health_status", { length: 20 }),
+  trend: varchar("trend", { length: 20 }),
+  trendVelocity: numeric("trend_velocity", { precision: 5, scale: 4 }),
+
+  // Risk factors
+  riskFactors: jsonb("risk_factors"),
+
+  // Opportunities
+  opportunities: jsonb("opportunities"),
+
+  // Metadata
+  scoringModelId: varchar("scoring_model_id"),
+  analysisId: varchar("analysis_id").references(() => researchAnalysisRecords.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  accountIdx: index("account_health_account_idx").on(table.accountId),
+  campaignIdx: index("account_health_campaign_idx").on(table.campaignId),
+  scoreIdx: index("account_health_score_idx").on(table.overallHealthScore),
+  statusIdx: index("account_health_status_idx").on(table.healthStatus),
+  createdIdx: index("account_health_created_idx").on(table.createdAt),
+}));
+
+// Next Best Action Records - Store NBA recommendations
+export const nextBestActionRecords = pgTable("next_best_action_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Context
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'cascade' }),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+
+  // Recommendation
+  actionType: varchar("action_type", { length: 50 }).notNull(),
+  actionChannel: varchar("action_channel", { length: 20 }),
+  actionDescription: text("action_description").notNull(),
+  actionDetails: jsonb("action_details"),
+
+  // Prioritization
+  priority: varchar("priority", { length: 20 }).notNull(),
+  expectedImpact: varchar("expected_impact", { length: 255 }),
+  effortLevel: varchar("effort_level", { length: 20 }),
+  successProbability: numeric("success_probability", { precision: 5, scale: 4 }),
+
+  // Scoring factors
+  contributingFactors: jsonb("contributing_factors"),
+
+  // Status tracking
+  status: varchar("status", { length: 20 }).default('pending'),
+  assignedTo: varchar("assigned_to").references(() => users.id, { onDelete: 'set null' }),
+  completedAt: timestamp("completed_at"),
+  completionNotes: text("completion_notes"),
+  outcome: varchar("outcome", { length: 50 }),
+
+  // Validity
+  validFrom: timestamp("valid_from").defaultNow(),
+  validUntil: timestamp("valid_until"),
+
+  // Audit
+  generatedByAnalysisId: varchar("generated_by_analysis_id").references(() => researchAnalysisRecords.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  contactIdx: index("nba_contact_idx").on(table.contactId),
+  accountIdx: index("nba_account_idx").on(table.accountId),
+  campaignIdx: index("nba_campaign_idx").on(table.campaignId),
+  statusIdx: index("nba_status_idx").on(table.status),
+  priorityIdx: index("nba_priority_idx").on(table.priority),
+  validIdx: index("nba_valid_idx").on(table.validFrom, table.validUntil),
+}));
+
+// Engagement Analysis Records - Track engagement metrics over time
+export const engagementAnalysisRecords = pgTable("engagement_analysis_records", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  contactId: varchar("contact_id").notNull().references(() => contacts.id, { onDelete: 'cascade' }),
+  accountId: varchar("account_id").references(() => accounts.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+
+  // Analysis period
+  analysisPeriodStart: timestamp("analysis_period_start").notNull(),
+  analysisPeriodEnd: timestamp("analysis_period_end").notNull(),
+
+  // Engagement metrics
+  overallEngagementScore: integer("overall_engagement_score"),
+
+  // Sentiment analysis
+  sentiment: varchar("sentiment", { length: 20 }),
+  sentimentScore: numeric("sentiment_score", { precision: 5, scale: 4 }),
+  sentimentTrajectory: varchar("sentiment_trajectory", { length: 20 }),
+
+  // Intent signals
+  intentScore: integer("intent_score"),
+  intentSignals: jsonb("intent_signals"),
+
+  // Momentum
+  momentumScore: integer("momentum_score"),
+  momentumDirection: varchar("momentum_direction", { length: 20 }),
+
+  // Channel breakdown
+  channelEngagement: jsonb("channel_engagement"),
+
+  // Activity summary
+  totalInteractions: integer("total_interactions"),
+  emailOpens: integer("email_opens"),
+  emailClicks: integer("email_clicks"),
+  emailReplies: integer("email_replies"),
+  callsConnected: integer("calls_connected"),
+  meetingsScheduled: integer("meetings_scheduled"),
+
+  // Behavioral patterns
+  engagementPatterns: jsonb("engagement_patterns"),
+  anomalies: jsonb("anomalies"),
+
+  // Predictions
+  engagementForecast: jsonb("engagement_forecast"),
+  churnRiskScore: numeric("churn_risk_score", { precision: 5, scale: 4 }),
+
+  // Metadata
+  analysisId: varchar("analysis_id").references(() => researchAnalysisRecords.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  contactIdx: index("engagement_contact_idx").on(table.contactId),
+  accountIdx: index("engagement_account_idx").on(table.accountId),
+  campaignIdx: index("engagement_campaign_idx").on(table.campaignId),
+  periodIdx: index("engagement_period_idx").on(table.analysisPeriodStart, table.analysisPeriodEnd),
+  scoreIdx: index("engagement_score_idx").on(table.overallEngagementScore),
+  createdIdx: index("engagement_created_idx").on(table.createdAt),
+}));
+
+// ==================== RESEARCH & ANALYSIS INSERT SCHEMAS ====================
+
+export const insertResearchAnalysisRecordSchema = createInsertSchema(researchAnalysisRecords).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertScoringModelConfigurationSchema = createInsertSchema(scoringModelConfigurations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAccountHealthScoreSchema = createInsertSchema(accountHealthScores).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertNextBestActionRecordSchema = createInsertSchema(nextBestActionRecords).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertEngagementAnalysisRecordSchema = createInsertSchema(engagementAnalysisRecords).omit({
+  id: true,
+  createdAt: true,
+});
+
+// ==================== RESEARCH & ANALYSIS TYPES ====================
+
+export type ResearchAnalysisRecord = typeof researchAnalysisRecords.$inferSelect;
+export type InsertResearchAnalysisRecord = z.infer<typeof insertResearchAnalysisRecordSchema>;
+
+export type ScoringModelConfiguration = typeof scoringModelConfigurations.$inferSelect;
+export type InsertScoringModelConfiguration = z.infer<typeof insertScoringModelConfigurationSchema>;
+
+export type AccountHealthScoreRecord = typeof accountHealthScores.$inferSelect;
+export type InsertAccountHealthScoreRecord = z.infer<typeof insertAccountHealthScoreSchema>;
+
+export type NextBestActionRecord = typeof nextBestActionRecords.$inferSelect;
+export type InsertNextBestActionRecord = z.infer<typeof insertNextBestActionRecordSchema>;
+
+export type EngagementAnalysisRecord = typeof engagementAnalysisRecords.$inferSelect;
+export type InsertEngagementAnalysisRecord = z.infer<typeof insertEngagementAnalysisRecordSchema>;
 

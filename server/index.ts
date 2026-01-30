@@ -147,6 +147,16 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Database initialization failed (non-blocking):', err);
   }
 
+  // Auto-sync prompt definitions to database (ensures prompts are available)
+  try {
+    const { syncPromptDefinitions } = await import("./services/prompt-management-service");
+    const { ALL_PROMPT_DEFINITIONS } = await import("./services/prompt-loader");
+    const results = await syncPromptDefinitions(ALL_PROMPT_DEFINITIONS, null);
+    console.log(`[STARTUP] Prompt sync complete: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`);
+  } catch (err) {
+    console.error('[STARTUP] Prompt sync failed (non-blocking):', err);
+  }
+
   // Initialize Unified Audio Configuration (must run before voice services)
   // This ensures ALL call types (test/production) use identical audio settings
   try {

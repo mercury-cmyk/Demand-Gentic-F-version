@@ -13,6 +13,7 @@ export const NAVIGATION_DOMAINS = {
   DATA_VERIFICATION: 'data-verification',
   ANALYTICS: 'analytics',
   OPERATIONS: 'operations',
+  IAM: 'iam',
   SETTINGS: 'settings',
 } as const;
 
@@ -414,6 +415,83 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
   },
 
   // ============================================
+  // IAM - IDENTITY & ACCESS MANAGEMENT
+  // ============================================
+  {
+    id: 'iam',
+    label: 'Access Control',
+    domain: NAVIGATION_DOMAINS.IAM,
+    roles: [USER_ROLES.ADMIN],
+    description: 'Identity & access management, permissions, and audit',
+    items: [
+      {
+        id: 'iam-hub',
+        title: 'IAM',
+        icon: 'ShieldCheck',
+        roles: [USER_ROLES.ADMIN],
+        items: [
+          {
+            id: 'iam-overview',
+            title: 'Overview',
+            url: '/iam',
+            roles: [USER_ROLES.ADMIN],
+            description: 'IAM dashboard and quick actions',
+          },
+          {
+            id: 'iam-users',
+            title: 'Users',
+            url: '/iam/users',
+            roles: [USER_ROLES.ADMIN],
+            description: 'User access management',
+          },
+          {
+            id: 'iam-teams',
+            title: 'Teams',
+            url: '/iam/teams',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Team management',
+          },
+          {
+            id: 'iam-roles',
+            title: 'Roles',
+            url: '/iam/roles',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Role configuration',
+          },
+          {
+            id: 'iam-policies',
+            title: 'Policies',
+            url: '/iam/policies',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Permission policies',
+          },
+          {
+            id: 'iam-grants',
+            title: 'Access Grants',
+            url: '/iam/grants',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Direct access grants',
+          },
+          {
+            id: 'iam-requests',
+            title: 'Access Requests',
+            url: '/iam/requests',
+            roles: ALL_ROLES,
+            description: 'Request and approve access',
+          },
+          {
+            id: 'iam-audit',
+            title: 'Audit Log',
+            url: '/iam/audit',
+            roles: [USER_ROLES.ADMIN],
+            description: 'IAM audit trail',
+          },
+        ],
+      },
+    ],
+  },
+
+  // ============================================
   // SETTINGS DOMAIN (NEW HUB)
   // ============================================
   {
@@ -467,6 +545,48 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/cloud-logs',
             roles: [USER_ROLES.ADMIN],
             description: 'Monitor cloud logs and system health',
+          },
+          {
+            id: 'settings-smtp-providers',
+            title: 'SMTP Providers',
+            url: '/settings/smtp-providers',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Configure SMTP providers for transactional emails',
+          },
+          {
+            id: 'settings-transactional-templates',
+            title: 'Transactional Templates',
+            url: '/settings/transactional-templates',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Manage transactional email templates',
+          },
+          {
+            id: 'settings-domain-management',
+            title: 'Domain Management',
+            url: '/settings/domain-management',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Configure sending domains and DNS records',
+          },
+          {
+            id: 'settings-deliverability',
+            title: 'Deliverability',
+            url: '/settings/deliverability',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Monitor email deliverability and blacklists',
+          },
+          {
+            id: 'settings-brand-kits',
+            title: 'Brand Kits',
+            url: '/settings/brand-kits',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Manage brand colors, fonts, and styles for emails',
+          },
+          {
+            id: 'settings-email-builder',
+            title: 'Email Builder',
+            url: '/email-builder',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Build emails with drag-and-drop blocks',
           },
         ],
       },

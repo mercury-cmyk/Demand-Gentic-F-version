@@ -47,6 +47,12 @@ import emailTrackingRouter from './routes/email-tracking-routes';
 import campaignEmailRouter from './routes/campaign-email-routes';
 import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
+import smtpProvidersRouter from './routes/smtp-providers';
+import transactionalTemplatesRouter from './routes/transactional-templates';
+import domainManagementRouter from './routes/domain-management';
+import deliverabilityRouter from './routes/deliverability';
+import unifiedEmailRoutes from './routes/unified-email-routes';
+import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
@@ -65,6 +71,8 @@ import healthRouter from './routes/health';
 import simulationsRouter from './routes/simulations';
 import voiceProviderRoutes from './routes/voice-provider-routes';
 import recordingsRouter from './routes/recordings';
+import iamRouter from './routes/iam';
+import researchAnalysisRouter from './routes/research-analysis-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -12591,6 +12599,14 @@ Provide JSON response with:
 
   app.use("/api/voice-providers", voiceProviderRoutes);
 
+  // ==================== IAM - IDENTITY & ACCESS MANAGEMENT ====================
+
+  app.use("/api/iam", iamRouter);
+
+  // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================
+
+  app.use("/api/research", researchAnalysisRouter);
+
   // ==================== QUEUE MANAGEMENT ====================
 
   app.use("/api", queueRouter);
@@ -12879,6 +12895,17 @@ Provide JSON response with:
 
   // ==================== MERGE TAGS ====================
   app.use('/api/merge-tags', requireAuth, mergeTagsRouter);
+
+  // ==================== SMTP TRANSACTIONAL EMAIL SYSTEM ====================
+  app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
+  app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);
+  app.use('/api/transactional', requireAuth, transactionalTemplatesRouter);
+  app.use('/api/domains', requireAuth, domainManagementRouter);
+  app.use('/api/deliverability', requireAuth, deliverabilityRouter);
+  app.use('/api/email', requireAuth, unifiedEmailRoutes);
+
+  // ==================== EMAIL BUILDER (DRAG & DROP) ====================
+  app.use('/api/email-builder', requireAuth, emailBuilderRouter);
 
   // ==================== ADMIN DATA MANAGEMENT ====================
 

@@ -14,13 +14,14 @@
  */
 
 import { BaseAgent } from './base-agent';
-import type { 
-  AgentKnowledgeSection, 
-  AgentExecutionInput, 
+import type {
+  AgentKnowledgeSection,
+  AgentExecutionInput,
   AgentExecutionOutput,
-  AgentCampaignContext 
+  AgentCampaignContext
 } from './types';
 import OpenAI from 'openai';
+import { unifiedEmailRouter, type EmailGenerationRequest, type EmailGenerationResponse } from '../unified-email-router';
 
 // ==================== FOUNDATIONAL PROMPT ====================
 
@@ -615,6 +616,208 @@ Transactional emails should be:
       contactContext: context.recipientName ? { contactId: '', firstName: context.recipientName } : undefined,
       additionalInstructions,
     });
+  }
+
+  // =============================================================================
+  // UNIFIED ROUTER INTEGRATION (Multi-Provider Support)
+  // =============================================================================
+
+  /**
+   * Generate email using the unified router with multi-provider support.
+   * This is the recommended method for new integrations.
+   *
+   * Providers tried in order: Gemini (primary) -> GPT-4o (fallback) -> DeepSeek (emergency)
+   */
+  async generateCampaignEmailUnified(
+    campaignContext: AgentCampaignContext,
+    options?: {
+      accountId?: string;
+      contactId?: string;
+      contactContext?: {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        company?: string;
+        title?: string;
+        industry?: string;
+      };
+      organizationContext?: string;
+      additionalInstructions?: string;
+      requestSource?: 'campaign_send' | 'client_portal' | 'agentic_hub' | 'api' | 'preview';
+      preferredProvider?: 'gemini' | 'gpt4o' | 'deepseek';
+      allowFallback?: boolean;
+      useCache?: boolean;
+    }
+  ): Promise<EmailGenerationResponse> {
+    const request: EmailGenerationRequest = {
+      requestSource: options?.requestSource || 'api',
+      generationType: 'campaign',
+      campaignId: campaignContext.campaignId,
+      accountId: options?.accountId,
+      contactId: options?.contactId,
+      campaignContext: {
+        campaignType: campaignContext.campaignType,
+        campaignName: campaignContext.campaignName,
+        objective: campaignContext.objective,
+        targetAudience: campaignContext.targetAudience,
+        valueProposition: campaignContext.valueProposition,
+        callToAction: campaignContext.callToAction,
+        landingPageUrl: campaignContext.landingPageUrl,
+      },
+      contactContext: options?.contactContext,
+      organizationContext: options?.organizationContext,
+      additionalInstructions: options?.additionalInstructions,
+      preferredProvider: options?.preferredProvider,
+      allowFallback: options?.allowFallback ?? true,
+      useCache: options?.useCache ?? true,
+    };
+
+    return unifiedEmailRouter.generateEmail(request);
+  }
+
+  /**
+   * Generate personalized emails for multiple contacts in batch.
+   * Uses the unified router for efficient parallel processing.
+   */
+  async generateBatchEmails(
+    campaignContext: AgentCampaignContext,
+    contacts: Array<{
+      contactId: string;
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      company?: string;
+      title?: string;
+      industry?: string;
+    }>,
+    options?: {
+      organizationContext?: string;
+      additionalInstructions?: string;
+      requestSource?: 'campaign_send' | 'client_portal' | 'agentic_hub' | 'api' | 'preview';
+      preferredProvider?: 'gemini' | 'gpt4o' | 'deepseek';
+    }
+  ): Promise<Map<string, EmailGenerationResponse>> {
+    const baseRequest = {
+      requestSource: options?.requestSource || 'campaign_send',
+      generationType: 'personalized' as const,
+      campaignId: campaignContext.campaignId,
+      campaignContext: {
+        campaignType: campaignContext.campaignType,
+        campaignName: campaignContext.campaignName,
+        objective: campaignContext.objective,
+        targetAudience: campaignContext.targetAudience,
+        valueProposition: campaignContext.valueProposition,
+        callToAction: campaignContext.callToAction,
+        landingPageUrl: campaignContext.landingPageUrl,
+      },
+      organizationContext: options?.organizationContext,
+      additionalInstructions: options?.additionalInstructions,
+      preferredProvider: options?.preferredProvider,
+      allowFallback: true,
+    };
+
+    return unifiedEmailRouter.generateBatchEmails(baseRequest, contacts);
+  }
+
+  /**
+   * Generate a follow-up email using the unified router
+   */
+  async generateFollowUpEmailUnified(
+    campaignContext: AgentCampaignContext,
+    previousEmailContext: string,
+    followUpNumber: number,
+    options?: {
+      contactContext?: {
+        firstName?: string;
+        lastName?: string;
+        company?: string;
+        title?: string;
+        industry?: string;
+      };
+      organizationContext?: string;
+      preferredProvider?: 'gemini' | 'gpt4o' | 'deepseek';
+    }
+  ): Promise<EmailGenerationResponse> {
+    const additionalInstructions = `
+This is follow-up email #${followUpNumber} in a sequence.
+Previous email context: ${previousEmailContext}
+Generate a follow-up that:
+- References the previous outreach naturally
+- Provides new value or angle
+- Maintains consistency with prior messaging
+- Increases urgency appropriately for follow-up #${followUpNumber}
+`;
+
+    const request: EmailGenerationRequest = {
+      requestSource: 'campaign_send',
+      generationType: 'follow_up',
+      campaignId: campaignContext.campaignId,
+      campaignContext: {
+        campaignType: campaignContext.campaignType,
+        campaignName: campaignContext.campaignName,
+        objective: campaignContext.objective,
+        targetAudience: campaignContext.targetAudience,
+        valueProposition: campaignContext.valueProposition,
+        callToAction: campaignContext.callToAction,
+        landingPageUrl: campaignContext.landingPageUrl,
+      },
+      contactContext: options?.contactContext,
+      organizationContext: options?.organizationContext,
+      additionalInstructions,
+      preferredProvider: options?.preferredProvider,
+      allowFallback: true,
+    };
+
+    return unifiedEmailRouter.generateEmail(request);
+  }
+
+  /**
+   * Convert unified router response to legacy AgentExecutionOutput format
+   * for backward compatibility with existing code
+   */
+  convertToAgentOutput(response: EmailGenerationResponse): AgentExecutionOutput {
+    if (!response.success) {
+      return {
+        success: false,
+        content: '',
+        error: response.error,
+        metadata: {
+          agentId: this.id,
+          agentName: this.name,
+          timestamp: new Date().toISOString(),
+          layersApplied: [],
+        },
+      };
+    }
+
+    // Format the content in the expected structure
+    const content = `---SUBJECT---
+${response.subject || ''}
+---PREHEADER---
+${response.preheader || ''}
+---HTML---
+${response.htmlContent || ''}
+---TEXT---
+${response.textContent || ''}
+---MERGE_FIELDS---
+${(response.mergeFieldsUsed || []).join(', ')}`;
+
+    return {
+      success: true,
+      content,
+      metadata: {
+        agentId: this.id,
+        agentName: this.name,
+        timestamp: new Date().toISOString(),
+        layersApplied: ['foundational_prompt', 'unified_router'],
+        provider: response.provider,
+        model: response.model,
+        fallbackUsed: response.fallbackUsed,
+        tokenUsage: response.tokenUsage,
+        latencyMs: response.latencyMs,
+        complianceChecks: response.complianceChecks,
+      },
+    };
   }
 }
 

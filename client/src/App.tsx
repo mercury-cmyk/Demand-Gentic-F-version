@@ -116,6 +116,22 @@ import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
 import PromptManagementPage from "@/pages/prompt-management";
+import SmtpProvidersPage from "@/pages/smtp-providers";
+import TransactionalTemplatesPage from "@/pages/transactional-templates";
+import DomainManagementPage from "@/pages/domain-management";
+import DeliverabilityDashboardPage from "@/pages/deliverability-dashboard";
+import BrandKitsPage from "@/pages/brand-kits";
+import { EmailBuilderDnD } from "@/components/email-builder/EmailBuilderDnD";
+
+// IAM - Identity & Access Management
+import IamOverview from "@/pages/iam/iam-overview";
+import IamUsers from "@/pages/iam/iam-users";
+import IamTeams from "@/pages/iam/iam-teams";
+import IamRoles from "@/pages/iam/iam-roles";
+import IamPolicies from "@/pages/iam/iam-policies";
+import IamGrants from "@/pages/iam/iam-grants";
+import IamRequests from "@/pages/iam/iam-requests";
+import IamAudit from "@/pages/iam/iam-audit";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -344,6 +360,23 @@ function AuthenticatedApp() {
               <Route path="/settings/background-jobs" component={SettingsPage} />
               <Route path="/settings/compliance" component={SettingsPage} />
               <Route path="/settings/super-org" component={SuperOrgSettingsPage} />
+              <Route path="/settings/smtp-providers" component={SmtpProvidersPage} />
+              <Route path="/settings/transactional-templates" component={TransactionalTemplatesPage} />
+              <Route path="/settings/domain-management" component={DomainManagementPage} />
+              <Route path="/settings/deliverability" component={DeliverabilityDashboardPage} />
+              <Route path="/settings/brand-kits" component={BrandKitsPage} />
+              <Route path="/email-builder" component={() => <EmailBuilderDnD />} />
+              <Route path="/email-builder/:templateId" component={() => <EmailBuilderDnD />} />
+
+              {/* IAM - Identity & Access Management */}
+              <Route path="/iam" component={IamOverview} />
+              <Route path="/iam/users" component={IamUsers} />
+              <Route path="/iam/teams" component={IamTeams} />
+              <Route path="/iam/roles" component={IamRoles} />
+              <Route path="/iam/policies" component={IamPolicies} />
+              <Route path="/iam/grants" component={IamGrants} />
+              <Route path="/iam/requests" component={IamRequests} />
+              <Route path="/iam/audit" component={IamAudit} />
 
               {/* Legacy settings routes (kept for backwards compatibility) */}
               <Route path="/user-management" component={UsersSettingsPage} />

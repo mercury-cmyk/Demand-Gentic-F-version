@@ -43,6 +43,16 @@ export {
   DATA_MANAGEMENT_AGENT_KNOWLEDGE_SECTIONS,
 } from './core-data-management-agent';
 
+export {
+  CoreResearchAnalysisAgent,
+  coreResearchAnalysisAgent,
+} from './core-research-analysis-agent';
+
+export {
+  RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT,
+  RESEARCH_ANALYSIS_KNOWLEDGE_SECTIONS,
+} from './prompts/research-analysis-prompt';
+
 // ==================== GOVERNANCE ====================
 export { 
   agentGovernance, 

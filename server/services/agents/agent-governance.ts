@@ -12,6 +12,8 @@ import { coreEmailAgent, EMAIL_AGENT_FOUNDATIONAL_PROMPT } from './core-email-ag
 import { coreVoiceAgent, VOICE_AGENT_FOUNDATIONAL_PROMPT } from './core-voice-agent';
 import { coreComplianceAgent, COMPLIANCE_AGENT_FOUNDATIONAL_PROMPT } from './core-compliance-agent';
 import { coreDataManagementAgent, DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT } from './core-data-management-agent';
+import { coreResearchAnalysisAgent } from './core-research-analysis-agent';
+import { RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT } from './prompts/research-analysis-prompt';
 
 // ==================== GOVERNANCE TYPES ====================
 
@@ -74,12 +76,14 @@ class AgentGovernanceService {
     this.registerAgent(coreVoiceAgent);
     this.registerAgent(coreComplianceAgent);
     this.registerAgent(coreDataManagementAgent);
+    this.registerAgent(coreResearchAnalysisAgent);
 
     // Register with central registry
     agentRegistry.register(coreEmailAgent);
     agentRegistry.register(coreVoiceAgent);
     agentRegistry.register(coreComplianceAgent);
     agentRegistry.register(coreDataManagementAgent);
+    agentRegistry.register(coreResearchAnalysisAgent);
 
     this.initialized = true;
     console.log('[AgentGovernance] Initialization complete. Registered agents:', this.records.size);
@@ -245,6 +249,7 @@ class AgentGovernanceService {
       chat: 0,
       governance: 0,
       data: 0,
+      research: 0,
     };
 
     let lockedCount = 0;
@@ -320,6 +325,16 @@ export const GOVERNANCE_POLICIES = {
   },
 
   /**
+   * All research, analysis, and QA operations must go through the Core Research Analysis Agent
+   */
+  RESEARCH_ANALYSIS_SINGLE_SOURCE_OF_TRUTH: {
+    id: 'research_analysis_single_source',
+    description: 'All quality control, scoring, and analysis operations must use the Core Research Analysis Agent',
+    enforcement: 'mandatory',
+    violation: 'QA and analysis operations outside Core Research Analysis Agent are prohibited',
+  },
+
+  /**
    * Foundational prompts require governance approval to update
    */
   PROMPT_UPDATE_APPROVAL: {
@@ -374,6 +389,13 @@ export const FOUNDATIONAL_PROMPTS = {
     channel: 'data' as AgentChannel,
     prompt: DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT,
     version: createHash('md5').update(DATA_MANAGEMENT_AGENT_FOUNDATIONAL_PROMPT).digest('hex').slice(0, 8),
+  },
+  core_research_analysis_agent: {
+    id: 'core_research_analysis_agent',
+    name: 'Core Research & Analysis Agent',
+    channel: 'research' as AgentChannel,
+    prompt: RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT,
+    version: createHash('md5').update(RESEARCH_ANALYSIS_FOUNDATIONAL_PROMPT).digest('hex').slice(0, 8),
   },
 } as const;
 
