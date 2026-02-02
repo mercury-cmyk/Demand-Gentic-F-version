@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { verifyApiKey, verifyHmac } from "../lib/webhookVerify";
 import { db } from "../db";
-import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog, campaignTestCalls } from "@shared/schema";
+import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog, campaignTestCalls, dialerCallAttempts } from "@shared/schema";
 import { z } from "zod";
 import crypto from "crypto";
 import { eq, or, and, sql } from "drizzle-orm";
@@ -55,7 +55,9 @@ async function handleTestCallEvent(eventType: string, payload: any, clientState:
         console.log(`[Telnyx Webhook] Test call ${testCallId} AMD result: ${amdResult}`);
         await db.update(campaignTestCalls)
           .set({
-            metadata: sql`COALESCE(metadata, '{}'::jsonb) || ${JSON.stringify({ amdResult })}::jsonb`,
+            customVariables: sql`COALESCE(${campaignTestCalls.customVariables}, '{}'::jsonb) || ${JSON.stringify(
+              { amdResult }
+            )}::jsonb`,
             updatedAt: new Date(),
           })
           .where(eq(campaignTestCalls.id, testCallId));
@@ -447,6 +449,23 @@ router.post("/telnyx", async (req, res) => {
           }
         }
 
+        // Update call_sessions record with hangup status
+        // This ensures agent console calls show as completed in recordings dashboard
+        if (payload.call_control_id) {
+          try {
+            await db
+              .update(callSessions)
+              .set({
+                status: 'completed',
+                endedAt: new Date(),
+              })
+              .where(eq(callSessions.telnyxCallId, payload.call_control_id));
+            console.log(`[Telnyx Webhook] Updated call_sessions for hangup: ${payload.call_control_id}`);
+          } catch (err) {
+            console.error(`[Telnyx Webhook] Failed to update call_sessions on hangup:`, err);
+          }
+        }
+
         await bridge.handleSimpleWebhookEvent('hangup', payload);
         return res.json({ status: "ok", event_type: eventType });
       }
@@ -624,11 +643,12 @@ router.post("/telnyx", async (req, res) => {
     const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
 
     // Update leads table
+    // Set recordingStatus to 'pending' - storeRecordingFromWebhook() will update to 'stored' or 'failed'
     const updatedLeads = await db
       .update(leads)
-      .set({ 
+      .set({
         recordingUrl,
-        recordingStatus: 'completed'
+        recordingStatus: 'pending'
       })
       .where(eq(leads.telnyxCallId, call_control_id))
       .returning({ id: leads.id });
@@ -644,16 +664,30 @@ router.post("/telnyx", async (req, res) => {
 
     // Update call_sessions table (for AI calls and recordings dashboard)
     // This is CRITICAL for the recordings dashboard which queries call_sessions
+    // NOTE: We set recordingStatus to 'pending' here - the storeCallSessionRecording()
+    // function will update it to 'stored' or 'failed' after S3 upload completes.
+    // This prevents false 'stored' status when S3 upload fails.
     const updatedSessions = await db
       .update(callSessions)
       .set({
         recordingUrl,
-        recordingStatus: 'completed'
+        recordingStatus: 'pending'
       })
       .where(eq(callSessions.telnyxCallId, call_control_id))
       .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
 
-    const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length;
+    // Update dialer_call_attempts table (for human agent calls)
+    // This ensures recordings are linked to the call attempt for lead creation
+    const updatedCallAttempts = await db
+      .update(dialerCallAttempts)
+      .set({
+        recordingUrl,
+        updatedAt: new Date()
+      })
+      .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))
+      .returning({ id: dialerCallAttempts.id });
+
+    const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length + updatedCallAttempts.length;
 
     if (totalUpdated === 0) {
       console.log(`[Telnyx Webhook] No matching lead/call/session found for call_control_id: ${call_control_id}`);
@@ -661,7 +695,7 @@ router.post("/telnyx", async (req, res) => {
       return res.json({ status: "ok", updated: 0, message: "No matching records" });
     }
 
-    console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length})`);
+    console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length}, callAttempts: ${updatedCallAttempts.length})`);
 
     // Store recordings permanently in S3 (async, don't block webhook response)
     if (isRecordingStorageEnabled()) {
@@ -691,6 +725,7 @@ router.post("/telnyx", async (req, res) => {
       leads: updatedLeads.length,
       calls: updatedCalls.length,
       sessions: updatedSessions.length,
+      callAttempts: updatedCallAttempts.length,
       s3Storage: isRecordingStorageEnabled() ? 'initiated' : 'disabled'
     });
 
@@ -868,18 +903,23 @@ router.post("/telnyx-failover", async (req, res) => {
     console.log(`[Telnyx Failover] Headers:`, JSON.stringify(relevantHeaders));
     
     // Store in activity log for later analysis
+    const telnyxFailoverEntityId =
+      payload.call_session_id || payload.call_control_id || payload.CallSid || crypto.randomUUID();
     try {
       await db.insert(activityLog).values({
-        id: crypto.randomUUID(),
-        type: 'webhook_failover',
-        description: `Telnyx failover: ${eventType}`,
-        metadata: {
-          eventType,
+        entityType: 'call_session',
+        entityId: telnyxFailoverEntityId,
+        eventType: 'note_added',
+        payload: {
+          context: 'telnyx_failover',
+          rawEventType: eventType,
           callControlId: payload.call_control_id || payload.CallSid,
-          timestamp,
-          payload: req.body,
+          callSessionId: payload.call_session_id,
+          body: req.body,
           headers: relevantHeaders,
+          timestamp,
         },
+        createdBy: null,
         createdAt: new Date(),
       });
     } catch (dbError) {
@@ -917,18 +957,21 @@ router.post("/texml/ai-call-failover", async (req, res) => {
     console.log(`[TeXML Failover] Payload:`, JSON.stringify(req.body).substring(0, 1000));
     
     // Log to activity log
+    const texmlFailoverEntityId = req.body.CallSid || req.body.callSid || crypto.randomUUID();
     try {
       await db.insert(activityLog).values({
-        id: crypto.randomUUID(),
-        type: 'texml_failover',
-        description: `TeXML failover received`,
-        metadata: {
-          timestamp,
-          payload: req.body,
-          callSid: req.body.CallSid,
+        entityType: 'call_session',
+        entityId: texmlFailoverEntityId,
+        eventType: 'note_added',
+        payload: {
+          context: 'texml_failover',
+          callSid: req.body.CallSid || req.body.callSid,
           from: req.body.From,
           to: req.body.To,
+          body: req.body,
+          timestamp,
         },
+        createdBy: null,
         createdAt: new Date(),
       });
     } catch (dbError) {

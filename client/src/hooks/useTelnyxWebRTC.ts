@@ -19,6 +19,12 @@ interface UseSIPWebRTCProps {
   sipWebSocket?: string;
   onCallStateChange?: (state: CallState) => void;
   onCallEnd?: () => void;
+  /**
+   * Enable restrictive network mode for countries like Pakistan, China, etc.
+   * Forces all WebRTC traffic through TURN relay servers on port 443 (HTTPS)
+   * This bypasses ISP blocks on UDP and WebRTC traffic.
+   */
+  restrictiveNetworkMode?: boolean;
 }
 
 export function useSIPWebRTC({
@@ -27,6 +33,7 @@ export function useSIPWebRTC({
   sipWebSocket,
   onCallStateChange,
   onCallEnd,
+  restrictiveNetworkMode = false,
 }: UseSIPWebRTCProps = {}) {
   const [client, setClient] = useState<TelnyxRTC | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
@@ -244,11 +251,102 @@ export function useSIPWebRTC({
       console.log('Connection details:', {
         login: sipUsername,
         hasPassword: !!sipPassword,
+        restrictiveNetworkMode,
         timestamp: new Date().toISOString(),
       });
       console.log('SDK version:', (TelnyxRTC as any).version || '2.25.10');
 
-      // Initialize TelnyxRTC with TURN relay configuration for NAT traversal
+      // Build comprehensive ICE server list for global connectivity
+      // This configuration helps agents in restrictive networks (Pakistan, Afghanistan, etc.)
+      
+      // For restrictive networks (Pakistan, etc.), ONLY use TURN servers on port 443
+      // These ISPs block UDP traffic and non-443 TCP ports
+      const iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> = [];
+
+      if (restrictiveNetworkMode) {
+        console.log('[ICE] 🌐 RESTRICTIVE NETWORK MODE ENABLED - Using TURN relay only on port 443');
+        
+        // PRIORITY 1: Metered.ca TURN (excellent Asia/Pakistan coverage, port 443 TCP/TLS)
+        iceServers.push({
+          urls: [
+            'turns:a.relay.metered.ca:443',  // TLS on 443 - looks like HTTPS
+            'turn:a.relay.metered.ca:443?transport=tcp',  // TCP on 443
+            'turns:b.relay.metered.ca:443',  // Backup server
+            'turn:b.relay.metered.ca:443?transport=tcp',
+          ],
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        });
+
+        // PRIORITY 2: Telnyx TURN on 443 (TCP only)
+        iceServers.push({
+          urls: [
+            'turn:turn.telnyx.com:443?transport=tcp',
+            'turns:turn.telnyx.com:443',
+          ],
+          username: sipUsername,
+          credential: sipPassword,
+        });
+
+        // PRIORITY 3: OpenRelay public TURN (port 443 only)
+        iceServers.push({
+          urls: [
+            'turns:openrelay.metered.ca:443',
+            'turn:openrelay.metered.ca:443?transport=tcp',
+          ],
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        });
+        
+      } else {
+        // Standard mode - use full ICE server list
+        // 1. Google STUN servers (free, excellent global coverage)
+        iceServers.push(
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+        );
+
+        // 2. Telnyx STUN
+        iceServers.push({ urls: 'stun:stun.telnyx.com:3478' });
+
+        // 3. Telnyx TURN - all transports
+        iceServers.push({
+          urls: [
+            'turn:turn.telnyx.com:3478',
+            'turn:turn.telnyx.com:3478?transport=tcp',
+            'turn:turn.telnyx.com:443?transport=tcp',
+            'turns:turn.telnyx.com:443',
+          ],
+          username: sipUsername,
+          credential: sipPassword,
+        });
+
+        // 4. Metered.ca TURN servers (better global coverage)
+        iceServers.push({
+          urls: [
+            'turn:a.relay.metered.ca:80',
+            'turn:a.relay.metered.ca:80?transport=tcp',
+            'turn:a.relay.metered.ca:443',
+            'turn:a.relay.metered.ca:443?transport=tcp',
+            'turns:a.relay.metered.ca:443',
+          ],
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        });
+
+        // 5. Additional public STUN servers for NAT detection
+        iceServers.push(
+          { urls: 'stun:stun.stunprotocol.org:3478' },
+          { urls: 'stun:stun.voip.blackberry.com:3478' },
+        );
+      }
+
+      console.log('[ICE] Using', iceServers.length, 'ICE server configs for', restrictiveNetworkMode ? 'restrictive network' : 'standard mode');
+
+      // Initialize TelnyxRTC with comprehensive TURN relay configuration for NAT traversal
       telnyxClient = new TelnyxRTC({
         login: sipUsername,
         password: sipPassword,
@@ -257,35 +355,32 @@ export function useSIPWebRTC({
         ringbackFile: undefined,
         debug: true,
         debugOutput: 'console',
-        // ICE configuration with TURN relay for better NAT traversal
-        iceServers: [
-          { urls: 'stun:stun.telnyx.com:3478' },
-          {
-            urls: 'turn:turn.telnyx.com:3478',
-            username: sipUsername,
-            credential: sipPassword,
-          },
-          {
-            urls: 'turn:turn.telnyx.com:443?transport=tcp',
-            username: sipUsername,
-            credential: sipPassword,
-          },
-        ],
+        // Comprehensive ICE configuration with multiple TURN relays for global connectivity
+        iceServers,
         // Prefetch ICE candidates for faster connection
         prefetchIceCandidates: true,
+        // For restrictive networks, force all traffic through TURN relay
+        // This prevents direct P2P connections which are often blocked
+        ...(restrictiveNetworkMode && { iceTransportPolicy: 'relay' }),
       } as any);
+
 
       console.log('TelnyxRTC instance created, connecting...');
 
-      // Set connection timeout (60 seconds) - increased from 30s for better reliability
+      // Set connection timeout - longer for restrictive networks (Pakistan, etc.)
+      // Pakistan ISPs have higher latency and connection times through TURN relays
+      const timeoutMs = restrictiveNetworkMode ? 90000 : 60000; // 90s for restrictive, 60s for normal
       connectionTimeout = setTimeout(() => {
         console.error('=== TELNYX CONNECTION TIMEOUT ===');
-        console.error('Connection failed to establish within 60 seconds');
+        console.error(`Connection failed to establish within ${timeoutMs / 1000} seconds`);
+        console.error('Network mode:', restrictiveNetworkMode ? 'RESTRICTIVE' : 'STANDARD');
         setIsConnected(false);
         toast({
           variant: "destructive",
           title: "Connection Timeout",
-          description: "Unable to connect to calling service. Falling back to Call Control API mode.",
+          description: restrictiveNetworkMode 
+            ? "Unable to connect via TURN relay. Your network may be blocking VoIP. Try using a VPN."
+            : "Unable to connect to calling service. Falling back to Call Control API mode.",
           duration: 10000,
         });
 

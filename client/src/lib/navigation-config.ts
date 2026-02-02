@@ -214,13 +214,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         id: 'revenue-pipeline',
         title: 'Revenue & Pipeline',
         icon: 'KanbanSquare',
-        roles: ALL_ROLES,
+        roles: MANAGEMENT_ROLES,
         items: [
           {
             id: 'pipeline',
             title: 'Pipeline',
             url: '/pipeline',
-            roles: ALL_ROLES,
+            roles: MANAGEMENT_ROLES,
           },
           {
             id: 'opportunities',
@@ -297,7 +297,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'Conversation Quality',
         url: '/conversation-quality',
         icon: 'MessageSquare',
-        roles: QA_ROLES,
+        roles: MANAGEMENT_ROLES,
         description: 'Call quality analysis and scoring',
       },
     ],
@@ -485,6 +485,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/iam/audit',
             roles: [USER_ROLES.ADMIN],
             description: 'IAM audit trail',
+          },
+          {
+            id: 'iam-secrets',
+            title: 'Secrets',
+            url: '/iam/secrets',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Central secret manager',
           },
         ],
       },

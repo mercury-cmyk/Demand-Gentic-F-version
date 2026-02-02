@@ -153,6 +153,7 @@ export async function getRecordingUrl(
 /**
  * Store a recording immediately when webhook arrives
  * Called from the Telnyx webhook handler
+ * Updates recordingStatus to 'stored' on success or 'failed' on failure
  */
 export async function storeRecordingFromWebhook(
   leadId: string,
@@ -164,14 +165,24 @@ export async function storeRecordingFromWebhook(
   }
 
   const s3Key = await downloadAndStoreRecording(recordingUrl, leadId);
-  
+
   if (s3Key) {
-    // Update lead with S3 key
+    // Update lead with S3 key and mark as stored
     await db.update(leads)
-      .set({ recordingS3Key: s3Key })
+      .set({
+        recordingS3Key: s3Key,
+        recordingStatus: 'stored',
+      })
       .where(eq(leads.id, leadId));
+    console.log(`[RecordingStorage] ✅ Lead ${leadId} recording stored at ${s3Key}`);
+  } else {
+    // Mark as failed if S3 upload didn't work
+    await db.update(leads)
+      .set({ recordingStatus: 'failed' })
+      .where(eq(leads.id, leadId));
+    console.log(`[RecordingStorage] ❌ Lead ${leadId} recording storage failed`);
   }
-  
+
   return s3Key;
 }
 

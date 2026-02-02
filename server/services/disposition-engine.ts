@@ -18,6 +18,7 @@ import {
   leads,
   globalDnc,
   contacts,
+  accounts,
   campaigns,
   governanceActionsLog,
   qcWorkQueue,
@@ -110,10 +111,12 @@ export async function processDisposition(
       .where(eq(campaigns.id, callAttempt.campaignId))
       .limit(1);
 
-    const campaignConfig = campaign ? (campaign as unknown as { config?: Partial<CampaignRules> }).config : undefined;
+    // Safely extract campaign config, handling null/undefined values
+    const rawConfig = campaign ? (campaign as unknown as { config?: Partial<CampaignRules> | null }).config : null;
+    const campaignConfig: Partial<CampaignRules> = (rawConfig && typeof rawConfig === 'object') ? rawConfig : {};
     const rules: CampaignRules = {
       ...DEFAULT_CAMPAIGN_RULES,
-      ...(campaignConfig || {})
+      ...campaignConfig
     };
 
     // Process based on disposition type
@@ -208,10 +211,10 @@ async function processQualifiedLead(
   // This allows manual agents to mark ANY call as qualified without duration gates.
   const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20; // Minimal threshold - mostly just spam filter
   const callDuration = callAttempt.callDurationSeconds || 0;
-  
+
   // Determine if call should be flagged for review based on duration
   const isShortDurationCall = callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
-  
+
   if (isShortDurationCall) {
     console.warn(`[DispositionEngine] ⚠️ SHORT DURATION: Call ${callAttempt.id} marked as qualified_lead but duration (${callDuration}s) is below preferred threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Flagging for QA review.`);
     result.actions.push(`⚠️ Call duration ${callDuration}s is short - flagged for priority QA review`);
@@ -221,7 +224,7 @@ async function processQualifiedLead(
   if (callAttempt.queueItemId) {
     await db
       .update(campaignQueue)
-      .set({ 
+      .set({
         status: 'done',
         agentId: null,
         virtualAgentId: null,
@@ -232,29 +235,35 @@ async function processQualifiedLead(
     result.actions.push('Updated queue item to done');
   }
 
-  // Fetch contact info for lead record
+  // Fetch contact info for lead record (join with accounts for company name)
   const [contact] = await db
     .select({
       fullName: contacts.fullName,
       firstName: contacts.firstName,
       lastName: contacts.lastName,
       email: contacts.email,
-      companyName: contacts.companyName,
+      companyName: accounts.name,  // accounts.name is the company name
     })
     .from(contacts)
+    .leftJoin(accounts, eq(contacts.accountId, accounts.id))
     .where(eq(contacts.id, callAttempt.contactId))
     .limit(1);
 
   // Build contact name from available fields
-  const contactName = contact?.fullName || 
-    (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` : 
+  const contactName = contact?.fullName ||
+    (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` :
      contact?.firstName || contact?.lastName || 'Unknown');
   const qaStatus = isShortDurationCall ? 'under_review' : 'new';
-  const qaDecision = isShortDurationCall 
+  const qaDecision = isShortDurationCall
     ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). AI marked as qualified but requires manual verification.`
     : null;
 
-  // Create lead record with contact info
+  // Determine source based on agent type for full auditability
+  const agentSource = callAttempt.agentType === 'ai' 
+    ? `Source: ai_agent | Virtual Agent: ${callAttempt.virtualAgentId || 'unknown'}`
+    : `Source: human_agent | Agent: ${callAttempt.humanAgentId || 'unknown'}`;
+
+  // Create lead record with contact info and source tracking
   const [newLead] = await db
     .insert(leads)
     .values({
@@ -270,6 +279,7 @@ async function processQualifiedLead(
       dialedNumber: callAttempt.phoneDialed,
       recordingUrl: callAttempt.recordingUrl,
       callDuration: callAttempt.callDurationSeconds,
+      notes: agentSource, // Track agent type and ID for full auditability
     })
     .returning({ id: leads.id });
 
@@ -870,10 +880,10 @@ async function logGovernanceAction(data: {
 }
 
 /**
- * Validate that a disposition is one of the canonical 6 values
+ * Validate that a disposition is one of the canonical values (includes needs_review)
  */
 export function isValidCanonicalDisposition(value: string): value is CanonicalDisposition {
-  return ['qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data'].includes(value);
+  return ['qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data', 'needs_review'].includes(value);
 }
 
 /**

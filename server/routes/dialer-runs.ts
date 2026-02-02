@@ -706,10 +706,10 @@ router.post("/call-attempts/:id/disposition", async (req, res) => {
   try {
     const { disposition, notes } = req.body;
 
-    // Validate disposition is one of the 6 canonical values
+    // Validate disposition is one of the canonical values
     if (!disposition || !isValidCanonicalDisposition(disposition)) {
       return res.status(400).json({ 
-        error: "Invalid disposition. Must be one of: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data"
+        error: "Invalid disposition. Must be one of: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data, needs_review"
       });
     }
 

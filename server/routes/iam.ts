@@ -17,7 +17,7 @@ router.use(requireAuth);
 
 // ==================== Dashboard / Stats ====================
 
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/stats', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const stats = await iamService.getIamStats();
     res.json(stats);
@@ -35,7 +35,7 @@ const createTeamSchema = z.object({
   organizationId: z.string().uuid().optional()
 });
 
-router.get('/teams', async (req: Request, res: Response) => {
+router.get('/teams', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const organizationId = req.query.organizationId as string;
     const teams = await iamService.getTeams(organizationId);
@@ -46,7 +46,7 @@ router.get('/teams', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/teams/:id', async (req: Request, res: Response) => {
+router.get('/teams/:id', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const teams = await iamService.getTeams();
     const team = teams.find(t => t.id === req.params.id);
@@ -126,7 +126,7 @@ const createRoleSchema = z.object({
   policyIds: z.array(z.string().uuid()).optional()
 });
 
-router.get('/roles', async (req: Request, res: Response) => {
+router.get('/roles', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const organizationId = req.query.organizationId as string;
     const roles = await iamService.getRoles(organizationId);
@@ -173,7 +173,7 @@ const createPolicySchema = z.object({
     'account', 'project', 'campaign', 'agent', 'call_session',
     'recording', 'transcript', 'report', 'lead', 'delivery',
     'domain', 'smtp', 'email_template', 'prompt', 'quality_review',
-    'audit_log', 'user', 'team', 'role', 'policy'
+    'audit_log', 'user', 'team', 'role', 'policy', 'secret'
   ]),
   actions: z.array(z.enum([
     'view', 'create', 'edit', 'delete', 'run', 'execute',
@@ -186,7 +186,7 @@ const createPolicySchema = z.object({
   effect: z.enum(['allow', 'deny']).optional()
 });
 
-router.get('/policies', async (req: Request, res: Response) => {
+router.get('/policies', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const organizationId = req.query.organizationId as string;
     const policies = await iamService.getPolicies(organizationId);
@@ -230,7 +230,7 @@ const createGrantSchema = z.object({
     'account', 'project', 'campaign', 'agent', 'call_session',
     'recording', 'transcript', 'report', 'lead', 'delivery',
     'domain', 'smtp', 'email_template', 'prompt', 'quality_review',
-    'audit_log', 'user', 'team', 'role', 'policy'
+    'audit_log', 'user', 'team', 'role', 'policy', 'secret'
   ]),
   entityId: z.string().uuid().optional(),
   grantType: z.enum(['permission', 'temporary', 'delegated', 'inherited']).optional(),
@@ -246,7 +246,7 @@ const createGrantSchema = z.object({
   message: 'Either userId or teamId must be provided'
 });
 
-router.get('/grants', async (req: Request, res: Response) => {
+router.get('/grants', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const filters = {
       userId: req.query.userId as string,
@@ -254,7 +254,7 @@ router.get('/grants', async (req: Request, res: Response) => {
       entityType: req.query.entityType as iamService.IamEntityType,
       entityId: req.query.entityId as string
     };
-    
+
     const grants = await iamService.getAccessGrants(filters);
     res.json(grants);
   } catch (error) {
@@ -297,7 +297,7 @@ const assignEntitySchema = z.object({
     'account', 'project', 'campaign', 'agent', 'call_session',
     'recording', 'transcript', 'report', 'lead', 'delivery',
     'domain', 'smtp', 'email_template', 'prompt', 'quality_review',
-    'audit_log', 'user', 'team', 'role', 'policy'
+    'audit_log', 'user', 'team', 'role', 'policy', 'secret'
   ]),
   entityId: z.string().uuid(),
   assignmentRole: z.string().optional(),
@@ -339,7 +339,7 @@ const createAccessRequestSchema = z.object({
     'account', 'project', 'campaign', 'agent', 'call_session',
     'recording', 'transcript', 'report', 'lead', 'delivery',
     'domain', 'smtp', 'email_template', 'prompt', 'quality_review',
-    'audit_log', 'user', 'team', 'role', 'policy'
+    'audit_log', 'user', 'team', 'role', 'policy', 'secret'
   ]),
   entityId: z.string().uuid().optional(),
   entityName: z.string().optional(),
@@ -508,6 +508,81 @@ router.get('/check', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to check permission' });
   }
 });
+
+// ==================== User Role Management ====================
+
+const assignUserRoleSchema = z.object({
+  roleId: z.string().uuid(),
+  organizationId: z.string().uuid().optional()
+});
+
+router.post('/users/:userId/roles',
+  requireRole('admin'),
+  auditLog('user', 'user_role_assign'),
+  async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const data = assignUserRoleSchema.parse(req.body);
+      const assignedBy = (req as any).userId;
+      
+      const result = await iamService.assignUserToRole(
+        userId,
+        data.roleId,
+        assignedBy,
+        data.organizationId
+      );
+      
+      res.status(201).json({ success: true, ...result });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', details: error.errors });
+      }
+      console.error('[IAM] Error assigning role:', error);
+      res.status(500).json({ error: error.message || 'Failed to assign role' });
+    }
+  }
+);
+
+router.delete('/users/:userId/roles/:roleId',
+  requireRole('admin'),
+  auditLog('user', 'user_role_remove'),
+  async (req: Request, res: Response) => {
+    try {
+      const { userId, roleId } = req.params;
+      const organizationId = req.query.organizationId as string | undefined;
+      
+      await iamService.removeUserFromRole(userId, roleId, organizationId);
+      
+      res.json({ success: true, message: 'Role removed' });
+    } catch (error) {
+      console.error('[IAM] Error removing role:', error);
+      res.status(500).json({ error: 'Failed to remove role' });
+    }
+  }
+);
+
+router.get('/users/:userId/roles',
+  async (req: Request, res: Response) => {
+    try {
+      const requestingUserId = (req as any).userId;
+      const targetUserId = req.params.userId;
+      const userRole = (req as any).userRole;
+      const organizationId = req.query.organizationId as string | undefined;
+
+      // Users can only view their own roles unless admin
+      if (targetUserId !== requestingUserId && userRole !== 'admin') {
+        return res.status(403).json({ error: 'Cannot view other users\' roles' });
+      }
+
+      const roles = await iamService.getUserIamRoles(targetUserId, organizationId);
+
+      res.json(roles);
+    } catch (error) {
+      console.error('[IAM] Error getting user roles:', error);
+      res.status(500).json({ error: 'Failed to get user roles' });
+    }
+  }
+);
 
 // ==================== System Operations ====================
 

@@ -18,12 +18,20 @@ import { IncomingMessage } from 'http';
 import { Buffer } from 'buffer';
 import { GoogleAuth } from 'google-auth-library';
 import { db } from "../db";
-import { contacts, campaigns, campaignQueue, type CanonicalDisposition } from "@shared/schema";
+import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
 import { audioQualityMonitor } from "./audio-quality-monitor";
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711 } from "./voice-providers/audio-transcoder";
 import { peekAmdResult, consumeAmdResult } from "./voice-dialer";
 import { processDisposition } from "./disposition-engine";
+import { analyzeConversationQuality } from "./conversation-quality-analyzer";
+import { logCallIntelligence } from "./call-intelligence-logger";
+import {
+  startRecording,
+  recordInboundAudio,
+  recordOutboundAudio,
+  stopRecordingAndUpload
+} from "./call-recording-manager";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -640,6 +648,15 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let aiTranscript: string = "";
   let callContext: CallContext = {};
 
+  // TRANSCRIPT ACCUMULATION: Capture both agent and contact speech
+  // Uses Gemini's output_audio_transcription and input_audio_transcription features
+  interface TranscriptTurn {
+    role: 'agent' | 'contact';
+    text: string;
+    timestamp: number;
+  }
+  const transcriptTurns: TranscriptTurn[] = [];
+
   // CRITICAL FIX: Parse critical IDs from URL client_state IMMEDIATELY at connection time
   // This ensures we have queueItemId/callAttemptId even if connection closes before 'start' event
   // This prevents queue items from getting stuck in 'in_progress' state
@@ -981,6 +998,18 @@ CRITICAL RULES:
                 cleanup();
               }, maxDurationMs);
             }
+            
+            // 🎙️ START RECORDING: Initialize call recording when call is answered
+            // This captures both inbound (contact) and outbound (AI) audio for later playback
+            if (callId) {
+              startRecording(
+                callId,
+                callId, // Use callId as sessionId if no actual session yet
+                callContext.campaignId || null,
+                callContext.contactId || null
+              );
+              console.log(`[Gemini Live] 🎙️ Call recording started for ${callId}`);
+            }
 
             // CRITICAL: Wait for AMD (Answering Machine Detection) result before speaking
             // This prevents the AI from speaking to voicemail, IVR, or automated systems
@@ -1149,6 +1178,12 @@ CRITICAL RULES:
             // Gemini expects LINEAR PCM audio, NOT ulaw-encoded.
             // We must decode G.711 to PCM and upsample from 8kHz to 16kHz.
             const g711Buffer = Buffer.from(msg.media.payload, 'base64');
+            
+            // 🎙️ RECORD INBOUND: Capture contact audio for call recording
+            if (callId) {
+              recordInboundAudio(callId, g711Buffer);
+            }
+            
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, 'ulaw');
             const pcm16kBase64 = pcm16kBuffer.toString('base64');
 
@@ -1193,6 +1228,159 @@ CRITICAL RULES:
             totalData: (metrics.totalBytesSent / 1024).toFixed(2) + 'KB',
             backpressureEvents: metrics.bufferBackpressureEvents,
           });
+
+          // SAVE TRANSCRIPT: Update call attempt with full transcript
+          if (callContext.callAttemptId && transcriptTurns.length > 0) {
+            try {
+              // Build full transcript string from turns
+              const fullTranscript = transcriptTurns
+                .sort((a, b) => a.timestamp - b.timestamp)
+                .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
+                .join('\n');
+              
+              // Also build the AI portion separately for backwards compatibility
+              const aiOnlyTranscript = transcriptTurns
+                .filter(t => t.role === 'agent')
+                .map(t => t.text)
+                .join(' ');
+              
+              console.log(`[Gemini Live] 📝 Saving transcript: ${transcriptTurns.length} turns, ${fullTranscript.length} chars`);
+              
+              // Save directly to dialerCallAttempts (has fullTranscript and aiTranscript fields)
+              await db.update(dialerCallAttempts)
+                .set({
+                  fullTranscript: fullTranscript,
+                  aiTranscript: aiOnlyTranscript || undefined,
+                })
+                .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
+              
+              console.log(`[Gemini Live] ✅ Transcript saved to call attempt ${callContext.callAttemptId}`);
+              
+              // Get additional call attempt info for creating call session
+              const [attemptDetails] = await db.select({
+                callSessionId: dialerCallAttempts.callSessionId,
+                phoneDialed: dialerCallAttempts.phoneDialed,
+                callStartedAt: dialerCallAttempts.callStartedAt,
+                contactId: dialerCallAttempts.contactId,
+                campaignId: dialerCallAttempts.campaignId,
+                virtualAgentId: dialerCallAttempts.virtualAgentId,
+                queueItemId: dialerCallAttempts.queueItemId,
+              })
+                .from(dialerCallAttempts)
+                .where(eq(dialerCallAttempts.id, callContext.callAttemptId))
+                .limit(1);
+              
+              let callSessionId: string | null = attemptDetails?.callSessionId || null;
+              
+              // ✅ CRITICAL: If no call session exists, CREATE one now
+              // This ensures all Gemini Live campaign calls are tracked in call_sessions
+              if (!callSessionId && attemptDetails) {
+                try {
+                  const callDurationSec = Math.round((Date.now() - metrics.startTime) / 1000);
+                  const [newSession] = await db.insert(callSessions).values({
+                    telnyxCallId: callControlId || undefined,
+                    toNumberE164: attemptDetails.phoneDialed || callContext.phoneNumber || 'unknown',
+                    startedAt: attemptDetails.callStartedAt || new Date(metrics.startTime),
+                    endedAt: new Date(),
+                    durationSec: callDurationSec,
+                    status: 'completed' as const,
+                    agentType: 'ai' as const,
+                    aiAgentId: attemptDetails.virtualAgentId || 'gemini-live',
+                    aiTranscript: fullTranscript,
+                    aiDisposition: (callContext.disposition || 'completed') as CanonicalDisposition,
+                    campaignId: attemptDetails.campaignId || callContext.campaignId,
+                    contactId: attemptDetails.contactId || callContext.contactId || null,
+                    queueItemId: attemptDetails.queueItemId || callContext.queueItemId || null,
+                  }).returning();
+                  
+                  callSessionId = newSession.id;
+                  
+                  // Link the new call session back to the call attempt
+                  await db.update(dialerCallAttempts)
+                    .set({ callSessionId: newSession.id })
+                    .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
+                  
+                  console.log(`[Gemini Live] ✅ Created new call session ${callSessionId} for campaign call visibility`);
+                } catch (createError) {
+                  console.error(`[Gemini Live] ❌ Failed to create call session:`, createError);
+                }
+              } else if (callSessionId) {
+                // Update existing call session with transcript
+                await db.update(callSessions)
+                  .set({
+                    aiTranscript: fullTranscript,
+                  })
+                  .where(eq(callSessions.id, callSessionId));
+                console.log(`[Gemini Live] ✅ Transcript saved to existing call session ${callSessionId}`);
+              }
+              
+              // Run post-call analysis if we have a valid call session
+              if (callSessionId && fullTranscript && fullTranscript.length > 50) {
+                // AUTO-TRIGGER: Post-call quality analysis (non-blocking)
+                // Run in background to not delay call cleanup
+                setImmediate(async () => {
+                  try {
+                    console.log(`[Gemini Live] 📊 Auto-triggering post-call analysis for session ${callSessionId}`);
+                    const analysisResult = await analyzeConversationQuality({
+                      transcript: fullTranscript,
+                      interactionType: 'live_call',
+                      analysisStage: 'post_call',
+                      callDurationSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
+                      disposition: callContext.disposition || undefined,
+                      campaignId: callContext.campaignId || undefined,
+                    });
+
+                    if (analysisResult.status === 'ok') {
+                      // Store analysis results in call session
+                      await db.update(callSessions)
+                        .set({
+                          aiAnalysis: {
+                            overallScore: analysisResult.overallScore,
+                            summary: analysisResult.summary,
+                            qualityDimensions: analysisResult.qualityDimensions,
+                            campaignAlignment: analysisResult.campaignAlignment,
+                            dispositionReview: analysisResult.dispositionReview,
+                            issues: analysisResult.issues,
+                            recommendations: analysisResult.recommendations,
+                            breakdowns: analysisResult.breakdowns,
+                            performanceGaps: analysisResult.performanceGaps,
+                            analyzedAt: analysisResult.metadata.analyzedAt,
+                          } as any,
+                        })
+                        .where(eq(callSessions.id, callSessionId!));
+                      console.log(`[Gemini Live] ✅ Post-call analysis saved for session ${callSessionId}, score: ${analysisResult.overallScore}`);
+                      
+                      // ✅ CRITICAL: Log comprehensive call intelligence for centralized dashboard visibility
+                      // This ensures Gemini Live campaign calls appear in Conversation Intelligence
+                      const intelligenceResult = await logCallIntelligence({
+                        callSessionId: callSessionId!,
+                        dialerCallAttemptId: callContext.callAttemptId,
+                        campaignId: callContext.campaignId,
+                        contactId: callContext.contactId,
+                        qualityAnalysis: analysisResult,
+                        fullTranscript,
+                      });
+                      
+                      if (intelligenceResult.success) {
+                        console.log(`[Gemini Live] ✅ Call intelligence logged: ${intelligenceResult.recordId}`);
+                      } else {
+                        console.warn(`[Gemini Live] ⚠️ Failed to log call intelligence: ${intelligenceResult.error}`);
+                      }
+                    } else {
+                      console.warn(`[Gemini Live] ⚠️ Post-call analysis returned status: ${analysisResult.status}`);
+                    }
+                  } catch (analysisError) {
+                    console.error(`[Gemini Live] ❌ Post-call analysis failed:`, analysisError);
+                    // Non-critical, don't throw
+                  }
+                });
+              }
+            } catch (transcriptError) {
+              console.error('[Gemini Live] ❌ Failed to save transcript:', transcriptError);
+            }
+          } else if (transcriptTurns.length === 0) {
+            console.log('[Gemini Live] ⚠️ No transcript turns captured - transcription may not be working');
+          }
 
           // End quality monitoring
           if (callId) {
@@ -1251,6 +1439,8 @@ CRITICAL RULES:
               }
 
               console.log(`[Gemini Live] 📊 Fallback disposition: ${fallbackDisposition} - ${fallbackReason}`);
+              // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
+              callContext.disposition = fallbackDisposition;
               await processDisposition(callContext.callAttemptId, fallbackDisposition, 'gemini_live_fallback');
               dispositionProcessed = true;
 
@@ -1268,6 +1458,38 @@ CRITICAL RULES:
               }
             } catch (fallbackError) {
               console.error('[Gemini Live] ❌ Failed to process fallback disposition:', fallbackError);
+            }
+          }
+          
+          // 🎙️ STOP RECORDING: Finalize and upload recording to cloud storage
+          if (callId) {
+            try {
+              const recordingS3Key = await stopRecordingAndUpload(callId);
+              if (recordingS3Key) {
+                console.log(`[Gemini Live] 🎙️ Recording uploaded: ${recordingS3Key}`);
+                
+                // Update call session with recording key if we have one
+                if (callContext.callAttemptId) {
+                  const [attemptDetails] = await db.select({
+                    callSessionId: dialerCallAttempts.callSessionId,
+                  })
+                    .from(dialerCallAttempts)
+                    .where(eq(dialerCallAttempts.id, callContext.callAttemptId))
+                    .limit(1);
+                  
+                  if (attemptDetails?.callSessionId) {
+                    await db.update(callSessions)
+                      .set({
+                        recordingS3Key: recordingS3Key,
+                        recordingStatus: 'stored',
+                      })
+                      .where(eq(callSessions.id, attemptDetails.callSessionId));
+                    console.log(`[Gemini Live] 🎙️ Recording linked to call session ${attemptDetails.callSessionId}`);
+                  }
+                }
+              }
+            } catch (recordingError) {
+              console.error('[Gemini Live] ❌ Failed to upload recording:', recordingError);
             }
           }
 
@@ -1512,6 +1734,10 @@ CRITICAL RULES:
               }
             }
           },
+          // CRITICAL: Enable transcription of both AI output and user input
+          // This provides full transcript of the conversation for analysis
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
           systemInstruction: {
             parts: [{ text: systemPrompt }]
           }
@@ -1562,7 +1788,51 @@ CRITICAL RULES:
           }
         }
 
-        console.log('[Gemini Live] 📥 Message received:', JSON.stringify(response).substring(0, 200));
+        // DEBUG: Log message types to identify transcription message structure
+        const msgKeys = Object.keys(response || {});
+        console.log('[Gemini Live] 📥 Message keys:', msgKeys.join(', '));
+        console.log('[Gemini Live] 📥 Message received:', JSON.stringify(response).substring(0, 300));
+
+        // CAPTURE TRANSCRIPTION: Handle output_transcription (AI speech) and input_transcription (user speech)
+        // These are sent when outputAudioTranscription/inputAudioTranscription are enabled in setup
+        // NOTE: Transcription can be at top level OR inside serverContent depending on Gemini API version
+        const serverContentTranscript = response.serverContent || response.server_content;
+        
+        // AI agent's speech transcription - check BOTH top-level and nested in serverContent
+        const outputTranscription = 
+          response.outputTranscription || 
+          response.output_transcription || 
+          serverContentTranscript?.outputTranscription || 
+          serverContentTranscript?.output_transcription;
+        if (outputTranscription?.text) {
+          const agentText = outputTranscription.text.trim();
+          if (agentText) {
+            transcriptTurns.push({
+              role: 'agent',
+              text: agentText,
+              timestamp: Date.now()
+            });
+            console.log(`[Gemini Live] 📝 Agent transcript: "${agentText.substring(0, 50)}..."`);
+          }
+        }
+        
+        // User/contact's speech transcription - check BOTH top-level and nested in serverContent
+        const inputTranscription = 
+          response.inputTranscription || 
+          response.input_transcription || 
+          serverContentTranscript?.inputTranscription || 
+          serverContentTranscript?.input_transcription;
+        if (inputTranscription?.text) {
+          const contactText = inputTranscription.text.trim();
+          if (contactText) {
+            transcriptTurns.push({
+              role: 'contact',
+              text: contactText,
+              timestamp: Date.now()
+            });
+            console.log(`[Gemini Live] 📝 Contact transcript: "${contactText.substring(0, 50)}..."`);
+          }
+        }
 
         // Handle Audio Output from Gemini
         if (response.serverContent?.modelTurn?.parts) {
@@ -1624,6 +1894,11 @@ CRITICAL RULES:
                 }
 
                 const g711Base64 = g711Buffer.toString('base64');
+                
+                // 🎙️ RECORD OUTBOUND: Capture AI audio for call recording
+                if (callId) {
+                  recordOutboundAudio(callId, g711Buffer);
+                }
 
                 // DEBUG: Log outgoing audio size
                 console.log(`[Gemini Live] 📤 Sending to Telnyx: ${g711Buffer.length} bytes (G.711 ulaw)`);
@@ -1763,6 +2038,9 @@ CRITICAL RULES:
                   const canonicalDisposition = mapToCanonicalDisposition(disposition);
                   console.log(`[Gemini Live] 📊 Processing disposition: ${disposition} -> ${canonicalDisposition}`);
 
+                  // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
+                  callContext.disposition = canonicalDisposition;
+
                   await processDisposition(callContext.callAttemptId, canonicalDisposition, 'gemini_live_ai');
                   dispositionProcessed = true;
                   console.log(`[Gemini Live] ✅ Disposition processed successfully`);
@@ -1783,7 +2061,51 @@ CRITICAL RULES:
                   console.error('[Gemini Live] ❌ Failed to process disposition:', dispError);
                 }
               } else if (!callContext.callAttemptId) {
-                console.warn('[Gemini Live] ⚠️ No callAttemptId available - disposition not saved to database');
+                // CRITICAL FIX: Create call attempt on-the-fly if missing for qualified leads
+                // This ensures AI-generated leads are NEVER lost due to missing callAttemptId
+                const canonicalDisposition = mapToCanonicalDisposition(disposition);
+                if (canonicalDisposition === 'qualified_lead' && callContext.contactId && callContext.campaignId) {
+                  console.warn('[Gemini Live] ⚠️ No callAttemptId - creating on-the-fly for qualified_lead');
+                  try {
+                    const [newAttempt] = await db
+                      .insert(dialerCallAttempts)
+                      .values({
+                        campaignId: callContext.campaignId,
+                        contactId: callContext.contactId,
+                        queueItemId: callContext.queueItemId || null,
+                        agentType: 'ai',
+                        virtualAgentId: callContext.virtualAgentId || null,
+                        phoneDialed: callContext.phoneNumber || 'unknown',
+                        attemptNumber: 1,
+                        callStartedAt: new Date(metrics.startTime),
+                        callEndedAt: new Date(),
+                        callDurationSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
+                        connected: true,
+                        disposition: canonicalDisposition,
+                        dispositionProcessed: false,
+                        notes: `AI qualified_lead - callAttemptId created on-the-fly | Notes: ${notes || 'N/A'}`,
+                      })
+                      .returning();
+                    
+                    if (newAttempt) {
+                      callContext.callAttemptId = newAttempt.id;
+                      // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
+                      callContext.disposition = canonicalDisposition;
+                      console.log(`[Gemini Live] ✅ Created on-the-fly callAttempt: ${newAttempt.id}`);
+                      
+                      // Now process the disposition through the engine to create the lead
+                      await processDisposition(newAttempt.id, canonicalDisposition, 'gemini_live_ai_recovery');
+                      dispositionProcessed = true;
+                      console.log(`[Gemini Live] ✅ Disposition processed (recovery mode) - lead should be created`);
+                    }
+                  } catch (recoveryErr) {
+                    console.error('[Gemini Live] ❌ Failed to create on-the-fly callAttempt:', recoveryErr);
+                  }
+                } else {
+                  // Store disposition in callContext even when we can't save to DB
+                  callContext.disposition = canonicalDisposition;
+                  console.warn(`[Gemini Live] ⚠️ No callAttemptId available - disposition ${canonicalDisposition} not saved to database`);
+                }
               }
             }
 
@@ -1965,6 +2287,8 @@ CRITICAL RULES:
         }
 
         console.log(`[Gemini Live] 📊 Error fallback disposition: ${fallbackDisposition} - ${fallbackReason}`);
+        // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
+        callContext.disposition = fallbackDisposition;
         await processDisposition(callContext.callAttemptId, fallbackDisposition, 'gemini_live_error');
         dispositionProcessed = true;
 
@@ -2044,6 +2368,8 @@ CRITICAL RULES:
         }
 
         console.log(`[Gemini Live] 📊 Fallback disposition (close): ${fallbackDisposition} - ${fallbackReason}`);
+        // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
+        callContext.disposition = fallbackDisposition;
         await processDisposition(callContext.callAttemptId, fallbackDisposition, 'gemini_live_close');
         dispositionProcessed = true;
 

@@ -32,6 +32,10 @@ async function runMigration() {
     console.log('🚀 Starting migration: client invite links + domain guardrails');
     await client.query('BEGIN');
 
+    // Ensure pgcrypto extension exists for gen_random_bytes
+    console.log('• Ensuring pgcrypto extension');
+    await client.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
+
     // Add invite_slug
     if (!(await columnExists('client_accounts', 'invite_slug'))) {
       console.log('• Adding invite_slug column');

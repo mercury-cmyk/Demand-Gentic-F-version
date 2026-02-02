@@ -12,6 +12,7 @@ import {
   campaigns,
   contacts
 } from "@shared/schema";
+import { normalizeDisposition } from "./disposition-normalizer";
 
 export interface DispositionResult {
   success: boolean;
@@ -283,7 +284,7 @@ async function createQualifiedLead(params: {
       customFields: params.agentType === 'ai' ? {
         aiAgentCall: true,
         aiAgentName: aiAgentName,
-        aiDisposition: params.dispositionLabel,
+        aiDisposition: normalizeDisposition(params.dispositionLabel),
         aiCallSessionId: params.callSessionId,
         aiAnalysis: params.analysis,
       } : undefined,

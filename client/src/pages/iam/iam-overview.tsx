@@ -223,6 +223,12 @@ export default function IamOverview() {
                 Edit Policies
               </Button>
             </Link>
+            <Link href="/iam/secrets">
+              <Button variant="outline" className="w-full justify-start">
+                <Key className="h-4 w-4 mr-2" />
+                Manage Secrets
+              </Button>
+            </Link>
             <Link href="/iam/audit">
               <Button variant="outline" className="w-full justify-start">
                 <History className="h-4 w-4 mr-2" />

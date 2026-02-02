@@ -48,6 +48,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useToast } from '@/hooks/use-toast';
+
+// Available system roles (must match userRoleEnum in schema.ts)
+const SYSTEM_ROLES = [
+  { id: 'admin', name: 'Admin', description: 'Full system access' },
+  { id: 'campaign_manager', name: 'Campaign Manager', description: 'Manage campaigns, analytics, pipeline, and conversation quality' },
+  { id: 'quality_analyst', name: 'Quality Analyst', description: 'QA review, leads, call recordings, and reports' },
+  { id: 'agent', name: 'Agent', description: 'Agent console, leads review, and dashboard' },
+  { id: 'data_ops', name: 'Data Ops', description: 'Data management, accounts, contacts, and verification' },
+  { id: 'content_creator', name: 'Content Creator', description: 'Content creation and marketing' },
+];
 
 interface User {
   id: string;
@@ -55,7 +67,8 @@ interface User {
   email: string;
   firstName?: string;
   lastName?: string;
-  role: string;
+  role: string; // Legacy single role
+  roles?: string[]; // Multi-role support
   isActive: boolean;
   createdAt: string;
   lastLogin?: string;
@@ -77,11 +90,13 @@ interface Role {
 
 export default function IamUsers() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [showAssignRoleModal, setShowAssignRoleModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState<string>('');
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
 
   // Fetch users from existing endpoint
   const { data: users, isLoading } = useQuery<User[]>({
@@ -99,6 +114,63 @@ export default function IamUsers() {
     enabled: !!selectedUser && showPermissionsModal,
   });
 
+  // Mutation to assign IAM role (advanced permissions)
+  const assignRoleMutation = useMutation({
+    mutationFn: async ({ userId, roleId }: { userId: string; roleId: string }) => {
+      const res = await fetch(`/api/iam/users/${userId}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ roleId }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to assign role');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setShowAssignRoleModal(false);
+      setSelectedRole('');
+      setSelectedUser(null);
+    },
+  });
+
+  // Mutation to update system roles (multi-role support)
+  const updateRolesMutation = useMutation({
+    mutationFn: async ({ userId, roles }: { userId: string; roles: string[] }) => {
+      const res = await fetch(`/api/users/${userId}/roles`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ roles }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to update roles');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      setShowAssignRoleModal(false);
+      setSelectedRoles([]);
+      setSelectedUser(null);
+      toast({
+        title: 'Roles Updated',
+        description: 'User roles have been updated successfully.',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   const filteredUsers = users?.filter(user => {
     const query = searchQuery.toLowerCase();
     return (
@@ -112,8 +184,10 @@ export default function IamUsers() {
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
       case 'admin': return 'destructive';
+      case 'campaign_manager': return 'default';
       case 'quality_analyst': return 'default';
       case 'agent': return 'secondary';
+      case 'data_ops': return 'outline';
       case 'content_creator': return 'outline';
       default: return 'secondary';
     }
@@ -215,9 +289,13 @@ export default function IamUsers() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getRoleBadgeVariant(user.role)}>
-                        {user.role.replace(/_/g, ' ')}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1">
+                        {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map((role) => (
+                          <Badge key={role} variant={getRoleBadgeVariant(role)}>
+                            {role.replace(/_/g, ' ')}
+                          </Badge>
+                        ))}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {user.isActive !== false ? (
@@ -257,10 +335,13 @@ export default function IamUsers() {
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             setSelectedUser(user);
+                            // Initialize with current roles
+                            const currentRoles = user.roles && user.roles.length > 0 ? user.roles : [user.role];
+                            setSelectedRoles(currentRoles);
                             setShowAssignRoleModal(true);
                           }}>
                             <Shield className="h-4 w-4 mr-2" />
-                            Assign IAM Role
+                            Manage Roles
                           </DropdownMenuItem>
                           <DropdownMenuItem asChild>
                             <Link href={`/iam/grants?userId=${user.id}`}>
@@ -334,44 +415,74 @@ export default function IamUsers() {
         </DialogContent>
       </Dialog>
 
-      {/* Assign Role Modal */}
-      <Dialog open={showAssignRoleModal} onOpenChange={setShowAssignRoleModal}>
-        <DialogContent>
+      {/* Manage Roles Modal */}
+      <Dialog open={showAssignRoleModal} onOpenChange={(open) => {
+        setShowAssignRoleModal(open);
+        if (!open) {
+          setSelectedRoles([]);
+          setSelectedUser(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Assign IAM Role</DialogTitle>
+            <DialogTitle>Manage User Roles</DialogTitle>
             <DialogDescription>
-              Assign an IAM role to {selectedUser?.username}
+              Select the roles for {selectedUser?.firstName || selectedUser?.username}.
+              Users can have multiple roles to access different parts of the application.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Select Role</label>
-              <Select value={selectedRole} onValueChange={setSelectedRole}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a role..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles?.map(role => (
-                    <SelectItem key={role.id} value={role.id}>
-                      {role.name}
-                      {role.description && (
-                        <span className="text-muted-foreground ml-2">
-                          - {role.description}
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-3">
+              <label className="text-sm font-medium">System Roles</label>
+              <div className="border rounded-md p-4 space-y-3">
+                {SYSTEM_ROLES.map((role) => (
+                  <div key={role.id} className="flex items-start space-x-3">
+                    <Checkbox
+                      id={`role-${role.id}`}
+                      checked={selectedRoles.includes(role.id)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedRoles([...selectedRoles, role.id]);
+                        } else {
+                          setSelectedRoles(selectedRoles.filter(r => r !== role.id));
+                        }
+                      }}
+                    />
+                    <div className="grid gap-1.5 leading-none">
+                      <label
+                        htmlFor={`role-${role.id}`}
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                      >
+                        {role.name}
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        {role.description}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {selectedRoles.length === 0 && (
+                <p className="text-sm text-destructive">
+                  Please select at least one role
+                </p>
+              )}
             </div>
-            
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowAssignRoleModal(false)}>
                 Cancel
               </Button>
-              <Button disabled={!selectedRole}>
-                Assign Role
+              <Button
+                disabled={selectedRoles.length === 0 || updateRolesMutation.isPending}
+                onClick={() => {
+                  if (selectedUser && selectedRoles.length > 0) {
+                    updateRolesMutation.mutate({ userId: selectedUser.id, roles: selectedRoles });
+                  }
+                }}
+              >
+                {updateRolesMutation.isPending ? 'Saving...' : 'Save Roles'}
               </Button>
             </div>
           </div>

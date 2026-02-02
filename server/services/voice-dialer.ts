@@ -79,7 +79,10 @@ import {
   buildContactContextSection,
 } from "./foundation-capabilities";
 import {
-  startRecording,
+  loadCampaignQualificationContext,
+  determineSmartDisposition,
+} from "./smart-disposition-analyzer";
+import {
   recordInboundAudio,
   recordOutboundAudio,
   stopRecordingAndUpload,
@@ -102,6 +105,7 @@ import {
   getUniversalKnowledgeForProvider,
   type AssembledProviderPrompt,
 } from "./provider-prompt-assembly";
+import { normalizeDisposition } from "./disposition-normalizer";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -727,7 +731,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           if (urlCallId && !url.searchParams.get('client_state')) {
             try {
               const { getPendingCallState } = await import('./pending-call-state');
-              const storedContext = getPendingCallState(urlCallId);
+              const storedContext = await getPendingCallState(urlCallId);
               if (storedContext) {
                 customParams = storedContext;
                 console.log(`${LOG_PREFIX} ✅ Retrieved call context from pending-call-state for ${urlCallId}`);
@@ -819,6 +823,21 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           const queueItemId = customParams.queue_item_id || urlParams.queue_item_id;
           const callAttemptId = customParams.call_attempt_id || urlParams.call_attempt_id;
           const contactId = customParams.contact_id || urlParams.contact_id;
+
+          // CRITICAL: Extract Telnyx call_control_id for recording webhook matching
+          // This ID is used by Telnyx in webhooks (recording.completed, call.hangup, etc.)
+          const telnyxCallControlId = message.call_control_id ||
+            message.start?.call_control_id ||
+            customParams.call_control_id ||
+            customParams.telnyx_call_id ||
+            (message as any).CallSid ||
+            url.searchParams.get('call_control_id') ||
+            url.searchParams.get('CallSid') ||
+            null;
+
+          if (telnyxCallControlId) {
+            console.log(`${LOG_PREFIX} 📞 Telnyx call_control_id captured: ${telnyxCallControlId}`);
+          }
 
           console.log(`${LOG_PREFIX} 🔍 Raw customParams keys:`, Object.keys(customParams));
           console.log(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
@@ -918,6 +937,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               callAttemptId: callAttemptId || '',
               contactId: contactId || '',
               calledNumber: (customParams as any).called_number || (urlParams as any).called_number || null,
+              telnyxCallControlId: telnyxCallControlId || null, // CRITICAL: For recording webhook matching
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || validationResult.virtualAgentId || '',
               isTestSession,
@@ -1017,6 +1037,7 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
               callAttemptId: callAttemptId || '',
               contactId: contactId || '',
               calledNumber: (customParams as any).called_number || (urlParams as any).called_number || null,
+              telnyxCallControlId: telnyxCallControlId || null, // CRITICAL: For recording webhook matching
               provider,
               virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || '',
               isTestSession,
@@ -1106,17 +1127,10 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           }
 
           activeSessions.set(sessionId!, session!);
-          
-          // Start recording for this call session
-          if (session!.callSessionId) {
-            startRecording(
-              sessionId!,
-              session!.callSessionId,
-              session!.campaignId || null,
-              session!.contactId || null
-            );
-          }
-          
+
+          // NOTE: Recording is handled by Telnyx automatically when TeXML <Record> is used
+          // The recording webhook (recording.completed) will update the call session with the URL
+
           // Persist session to Redis for cross-instance state sharing
           // This solves "invalid call control ID" in production with multiple instances
           await setCallSession({
@@ -1508,7 +1522,7 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         try {
           if (session.contactId) {
             await db.insert(callSessions).values({
-              telnyxCallId: session.callId,
+              telnyxCallId: session.telnyxCallControlId || session.callId, // Prefer telnyx ID for webhook matching
               campaignId: session.campaignId,
               contactId: session.contactId,
               status: 'failed',
@@ -2253,8 +2267,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 // Handle Gemini function calls
 async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: string, args: Record<string, any>): Promise<any> {
   const LOG_PREFIX = '[Voice-Dialer]';
+  
+  // DIAGNOSTIC: Log ALL function calls from AI for debugging disposition issues
+  console.log(`${LOG_PREFIX} [Gemini] 🔧 AI Tool Call: ${name}`, JSON.stringify(args).substring(0, 200));
+  
   switch (name) {
     case 'submit_disposition': {
+      console.log(`${LOG_PREFIX} [Gemini] ✅ AI called submit_disposition with: disposition=${args.disposition}, confidence=${args.confidence}, reason=${args.reason?.substring(0, 100)}`);
+      
       // CRITICAL: Prevent repeated disposition submissions (AI spam loop protection)
       if (session.detectedDisposition) {
         console.log(`${LOG_PREFIX} [Gemini] Disposition already set to ${session.detectedDisposition}, ignoring duplicate submit_disposition call`);
@@ -4213,10 +4233,60 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     : '';
 
   let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome, session);
+  let ivrDetected = false;
+
+  // DIAGNOSTIC: Log whether AI called submit_disposition or fallback was used
+  if (session.detectedDisposition) {
+    console.log(`${LOG_PREFIX} ✅ Disposition from AI submit_disposition: ${disposition}`);
+  } else {
+    console.log(`${LOG_PREFIX} ⚠️ AI did NOT call submit_disposition - using fallback mapOutcomeToDisposition: ${disposition} (outcome=${outcome}, transcripts=${session.transcripts.length})`);
+  }
+
+  // Check for voicemail in transcript
   if (disposition === 'no_answer' && fullTranscript && isVoicemailTranscript(fullTranscript)) {
     console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript, overriding disposition to voicemail`);
     disposition = 'voicemail';
   }
+
+  // Check for IVR/auto-attendant system (keep as no_answer but log for analytics)
+  if ((disposition === 'no_answer' || !session.detectedDisposition) && fullTranscript && isIvrAutoAttendantTranscript(fullTranscript)) {
+    ivrDetected = true;
+    console.log(`${LOG_PREFIX} IVR/Auto-attendant detected in transcript - call reached phone system, marking as no_answer for retry`);
+    disposition = 'no_answer'; // IVR calls should be retried
+  }
+
+  // ==================== SMART DISPOSITION ANALYSIS ====================
+  // Apply campaign-specific qualification criteria to improve disposition accuracy
+  // This catches qualified leads that were incorrectly marked as no_answer/voicemail
+  if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession) {
+    try {
+      const campaignContext = await loadCampaignQualificationContext(session.campaignId);
+      
+      if (campaignContext) {
+        const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+        const smartResult = determineSmartDisposition(
+          disposition,
+          session.transcripts,
+          campaignContext,
+          callDuration
+        );
+
+        if (smartResult.shouldOverride) {
+          console.log(`${LOG_PREFIX} 🎯 Smart disposition override: ${disposition} → ${smartResult.suggestedDisposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
+          console.log(`${LOG_PREFIX}   Reason: ${smartResult.reasoning}`);
+          if (smartResult.positiveSignals.length > 0) {
+            console.log(`${LOG_PREFIX}   Positive signals: ${smartResult.positiveSignals.join(', ')}`);
+          }
+          disposition = smartResult.suggestedDisposition;
+        } else {
+          console.log(`${LOG_PREFIX} Smart disposition agrees with current: ${disposition} (confidence: ${smartResult.confidence.toFixed(2)})`);
+        }
+      }
+    } catch (smartDispError) {
+      console.error(`${LOG_PREFIX} Smart disposition analysis failed, keeping original:`, smartDispError);
+    }
+  }
+
   let dispositionProcessed = false;
   let dispositionResult: Awaited<ReturnType<typeof processDisposition>> | null = null;
 
@@ -4321,6 +4391,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           const contactIdForSession = isTestCall ? null : (session.contactId || null);
           
           const [testCallSession] = await db.insert(callSessions).values({
+            telnyxCallId: session.telnyxCallControlId || undefined, // For recording webhook matching
             toNumberE164: session.calledNumber || '+1-test-call',
             startedAt: session.callStartedAt || session.startTime,
             endedAt: new Date(),
@@ -4328,9 +4399,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             status: 'completed' as const,
             agentType: 'ai' as const,
             aiAgentId: session.virtualAgentId || 'gemini-live',
-            aiConversationId: session.openaiSessionId || session.geminiSessionId || undefined,
+            aiConversationId: session.openaiSessionId || undefined,
             aiTranscript: fullTranscript || undefined,
-            aiDisposition: disposition,
+            aiDisposition: normalizeDisposition(disposition),
             campaignId: session.campaignId,
             contactId: contactIdForSession,
             queueItemId: isTestCall ? `test-queue-${testCallId}` : session.queueItemId,
@@ -4339,9 +4410,9 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
           // Log comprehensive call intelligence for test calls
           const intelligenceResult = await logCallIntelligence({
             callSessionId: testCallSession.id,
-            dialerCallAttemptId: isTestCall ? null : session.callAttemptId,
+            dialerCallAttemptId: isTestCall ? undefined : session.callAttemptId,
             campaignId: session.campaignId,
-            contactId: contactIdForSession, // null for test calls to avoid FK issues
+            contactId: contactIdForSession || undefined, // undefined for test calls to avoid FK issues
             qualityAnalysis: conversationQuality,
             fullTranscript,
           });
@@ -4459,7 +4530,7 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
                 aiConversationId: (session as any).openaiSessionId || undefined,
                 aiTranscript: fullTranscript || undefined,
                 aiAnalysis: aiAnalysis as any,
-                aiDisposition: disposition,
+                aiDisposition: normalizeDisposition(disposition),
                 campaignId: validCampaignId,
                 contactId: validContactId,
                 queueItemId: validQueueItemId,
@@ -4694,6 +4765,51 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
       .some((t) => declinePatterns.some((pattern) => pattern.test(t.text)));
   }
 
+  /**
+   * Detect interest signals in transcripts that indicate a qualified_lead
+   * These are signals that the prospect is engaged and interested
+   */
+  function hasInterestSignals(transcripts: OpenAIRealtimeSession["transcripts"]): boolean {
+    const interestPatterns = [
+      // Direct interest expressions
+      /sounds interesting/i,
+      /tell me more/i,
+      /i'd like to/i,
+      /i would like to/i,
+      /send me (an email|more info|information|details)/i,
+      /email me/i,
+      /send it over/i,
+      /that would be great/i,
+      /yes.*(please|sure)/i,
+      /sure.*(send|email)/i,
+      // Questions about the product/service (shows engagement)
+      /how (does|do) (it|you)/i,
+      /what (does|do) (it|you)/i,
+      /can you (tell|explain|share)/i,
+      /how much/i,
+      /what's the price/i,
+      /what's the cost/i,
+      /when can/i,
+      // Scheduling interest
+      /schedule.*call/i,
+      /set up.*meeting/i,
+      /book.*time/i,
+      /next week/i,
+      /follow up/i,
+      /call me back/i,
+      /callback/i,
+      // Positive affirmations with content
+      /that makes sense/i,
+      /i (see|understand) what you mean/i,
+      /we (are|were) actually looking/i,
+      /we've been thinking about/i,
+    ];
+
+    return transcripts
+      .filter((t) => t.role === "user")
+      .some((t) => interestPatterns.some((pattern) => pattern.test(t.text)));
+  }
+
   function buildRealtimeTranscriptSnapshot(session: OpenAIRealtimeSession): string {
     const turns = session.transcripts.slice(-20);
     let text = turns
@@ -4760,6 +4876,8 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
 
     if (userTexts.length === 0) return true;
     if (hasExplicitDecline(transcripts)) return false;
+    // IMPORTANT: If there are interest signals, this is NOT minimal interaction
+    if (hasInterestSignals(transcripts)) return false;
 
     const minimalPatterns = [
       /^hi\b/i,
@@ -4904,10 +5022,23 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
             return 'not_interested';
           }
 
+          // QUALIFIED LEAD DETECTION: Check for interest signals in transcripts
+          // This catches cases where AI didn't call submit_disposition but prospect showed clear interest
+          if (hasUserTranscripts && identityConfirmed && hasInterestSignals(session.transcripts)) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected and identity confirmed - marking as qualified_lead`);
+            return 'qualified_lead';
+          }
+
           // If we have distinct user transcripts with identity confirmed, treat as not_interested
           if (hasUserTranscripts && identityConfirmed) {
             console.log(`${LOG_PREFIX} Outcome '${outcome}' with user transcripts and identity confirmed - marking as not_interested (likely user hangup)`);
             return 'not_interested';
+          }
+
+          // Check for interest signals even without identity confirmation (still valuable lead)
+          if (hasUserTranscripts && hasInterestSignals(session.transcripts)) {
+            console.log(`${LOG_PREFIX} Outcome '${outcome}' with INTEREST SIGNALS detected (identity not confirmed) - marking as qualified_lead`);
+            return 'qualified_lead';
           }
 
           // If we have transcripts but no identity confirmation, check for explicit decline
@@ -4919,6 +5050,75 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
         // PHASE 3: Default to no_answer for unknowns (no transcripts, no interaction)
         return 'no_answer';
     }
+  }
+
+  /**
+   * Detect if transcript contains IVR/auto-attendant system messages
+   * These calls should be marked as 'no_answer' but with proper identification
+   * for analytics purposes
+   */
+  function isIvrAutoAttendantTranscript(transcript: string): boolean {
+    if (!transcript) return false;
+    const lower = transcript.toLowerCase();
+
+    // IVR/Auto-attendant detection phrases
+    const ivrPhrases = [
+      // Hold/queue messages
+      'please stay on the line',
+      'stay on the line',
+      'please hold',
+      'please wait',
+      'your call is important',
+      'all representatives are busy',
+      'all agents are busy',
+      'all operators are busy',
+      'currently experiencing higher than normal call volume',
+      'estimated wait time',
+      'you are caller number',
+      'your call will be answered',
+      'in the order received',
+      'next available representative',
+      'next available agent',
+      // IVR menu options
+      'press 1',
+      'press 2',
+      'press one',
+      'press two',
+      'for sales',
+      'for support',
+      'for billing',
+      'for customer service',
+      'for english',
+      'para español',
+      'to speak with',
+      'to reach',
+      'main menu',
+      'dial by name',
+      'dial by extension',
+      'enter your',
+      'enter the extension',
+      // Company greetings (without voicemail indicators)
+      'thank you for calling',
+      'thanks for calling',
+      'welcome to',
+      'you have reached',
+      // Transfer messages
+      'your call is being transferred',
+      'transferring your call',
+      'connecting you',
+      'one moment please',
+      // Garbled transcription patterns (common with IVR systems)
+      'mark broccoli', // Misheard "your call will be"
+      'thanks mark', // Misheard greeting
+    ];
+
+    // Check for IVR patterns
+    const hasIvrPattern = ivrPhrases.some(phrase => lower.includes(phrase));
+
+    // Also check for press + number patterns (common IVR)
+    const hasPressNumberPattern = /press\s*\d/i.test(lower) || /press\s*(one|two|three|four|five|six|seven|eight|nine|zero)/i.test(lower);
+
+    return hasIvrPattern || hasPressNumberPattern;
   }
 
   function isVoicemailTranscript(transcript: string): boolean {
@@ -5069,6 +5269,19 @@ async function scheduleEngagedCallTranscription(options: {
   }
 }
 
+/**
+ * Check if callAttemptId is a valid database record ID (not a fallback/generated ID).
+ * Fallback IDs start with 'attempt-' or 'test-attempt-' and are not in the dialer_call_attempts table.
+ */
+function isValidDbCallAttemptId(callAttemptId: string | null | undefined): boolean {
+  if (!callAttemptId) return false;
+  // Fallback IDs are timestamp-based and won't exist in the database
+  if (callAttemptId.startsWith('attempt-') || callAttemptId.startsWith('test-attempt-')) {
+    return false;
+  }
+  return true;
+}
+
 async function handlePostCallArtifacts(params: {
   callAttemptId: string;
   campaignId: string;
@@ -5092,6 +5305,9 @@ async function handlePostCallArtifacts(params: {
       return;
     }
 
+    // Use null for FK columns when callAttemptId is a fallback/generated ID
+    const validCallAttemptId = isValidDbCallAttemptId(params.callAttemptId) ? params.callAttemptId : null;
+
     const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
     const recap = buildAutoCallRecap({
       contactName: contact.fullName || contact.firstName || undefined,
@@ -5110,7 +5326,7 @@ async function handlePostCallArtifacts(params: {
     await recordCallMemoryNotes({
       accountId: contact.accountId,
       contactId: params.contactId,
-      callAttemptId: params.callAttemptId,
+      callAttemptId: validCallAttemptId,
       summary: recap.text,
       payload: {
         disposition: params.disposition,
@@ -5143,7 +5359,7 @@ async function handlePostCallArtifacts(params: {
       accountId: contact.accountId,
       contactId: params.contactId,
       campaignId: params.campaignId,
-      callAttemptId: params.callAttemptId,
+      callAttemptId: validCallAttemptId,
       payload: followupEmail,
     });
   } catch (error) {
@@ -5838,10 +6054,18 @@ Once they confirm identity, do NOT immediately launch into the company name or p
 - If you need to hang up, simply say a polite goodbye and then trigger the hangup action silently.
 - Do NOT say "I will now submit the disposition" or "logging call outcome". Just do it.
 
-### 3. HANG UP & DISPOSITION PROTOCOL
-- Hang up immediately when the conversation is naturally over or the user asks to end.
-- Use the 'submit_disposition' tool to log the outcome, then the 'hangup' tool.
-- If the user is not interested, be polite, log it, and hang up. Do not pester.
+### 3. DISPOSITION & HANG UP PROTOCOL (MANDATORY - ALWAYS EXECUTE)
+**CRITICAL: You MUST call 'submit_disposition' BEFORE EVERY call ends - NO EXCEPTIONS.**
+- Call submit_disposition with the appropriate disposition code:
+  * 'qualified_lead': Person showed interest (asked questions, requested info, agreed to follow-up)
+  * 'not_interested': Person explicitly declined or said "not interested"
+  * 'do_not_call': Person asked to be removed from the calling list
+  * 'voicemail': You reached a voicemail system
+  * 'no_answer': Nobody answered or only heard silence/beeps
+  * 'invalid_data': ONLY if explicitly told "wrong number" or "doesn't work here"
+- THEN call 'end_call' to hang up
+- If the user hangs up on you, IMMEDIATELY call submit_disposition before the call terminates
+- Even short calls require a disposition - use your best judgment based on what happened
 
 ### 4. CONVERSATION STYLE & TONE (HUMAN-LIKE)
 - **Be Curious & Warm:** Sound like a real person, not a robot. Use a little smile in your voice.
@@ -5935,10 +6159,18 @@ Once they confirm identity, do NOT immediately launch into the company name or p
 - If you need to hang up, simply say a polite goodbye and then trigger the hangup action silently.
 - Do NOT say "I will now submit the disposition" or "logging call outcome". Just do it.
 
-### 3. HANG UP & DISPOSITION PROTOCOL
-- Hang up immediately when the conversation is naturally over or the user asks to end.
-- Use the 'submit_disposition' tool to log the outcome, then the 'hangup' tool.
-- If the user is not interested, be polite, log it, and hang up. Do not pester.
+### 3. DISPOSITION & HANG UP PROTOCOL (MANDATORY - ALWAYS EXECUTE)
+**CRITICAL: You MUST call 'submit_disposition' BEFORE EVERY call ends - NO EXCEPTIONS.**
+- Call submit_disposition with the appropriate disposition code:
+  * 'qualified_lead': Person showed interest (asked questions, requested info, agreed to follow-up)
+  * 'not_interested': Person explicitly declined or said "not interested"
+  * 'do_not_call': Person asked to be removed from the calling list
+  * 'voicemail': You reached a voicemail system
+  * 'no_answer': Nobody answered or only heard silence/beeps
+  * 'invalid_data': ONLY if explicitly told "wrong number" or "doesn't work here"
+- THEN call 'end_call' to hang up
+- If the user hangs up on you, IMMEDIATELY call submit_disposition before the call terminates
+- Even short calls require a disposition - use your best judgment based on what happened
 
 ### 4. CONVERSATION STYLE & TONE (HUMAN-LIKE)
 - **Be Curious & Warm:** Sound like a real person, not a robot. Use a little smile in your voice.

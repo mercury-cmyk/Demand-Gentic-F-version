@@ -396,6 +396,15 @@ export default function AgentConsolePage() {
 
   // Audio Device Settings state
   const [showAudioSettings, setShowAudioSettings] = useState(false);
+  
+  // Restrictive Network Mode (for Pakistan, China, etc.)
+  const [restrictiveNetworkMode, setRestrictiveNetworkMode] = useState(() => {
+    // Load from localStorage on initial render
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('telnyx_restrictive_network_mode') === 'true';
+    }
+    return false;
+  });
 
   // Fetch agent's active campaign assignment
   const { data: activeCampaign } = useQuery<{
@@ -530,6 +539,7 @@ export default function AgentConsolePage() {
   } = useSIPWebRTC({
     sipUri,
     sipPassword: sipTrunkConfig?.sipPassword,
+    restrictiveNetworkMode, // Enable for Pakistan, China, etc.
     onCallStateChange: (state) => {
       console.log('[AGENT CONSOLE] WebRTC call state changed to:', state);
     },
@@ -544,8 +554,9 @@ export default function AgentConsolePage() {
       webrtcConnected,
       webrtcCallState,
       webrtcError,
+      restrictiveNetworkMode,
     });
-  }, [webrtcConnected, webrtcCallState, webrtcError]);
+  }, [webrtcConnected, webrtcCallState, webrtcError, restrictiveNetworkMode]);
 
   // Sync WebRTC call status with component callStatus
   useEffect(() => {
@@ -1439,10 +1450,22 @@ export default function AgentConsolePage() {
       return <Badge variant="destructive" data-testid="badge-not-connected">Disconnected</Badge>;
     }
 
+    // Show restrictive network mode indicator
+    const networkIndicator = restrictiveNetworkMode ? (
+      <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 ml-2" title="Using TURN relay for Pakistan/restricted networks">
+        🌐 Relay
+      </Badge>
+    ) : null;
+
     switch (callStatus) {
       case 'idle':
         // Show mode in badge - using direct mode (calls prospect directly)
-        return <Badge className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-lg" data-testid="badge-call-idle">Ready</Badge>;
+        return (
+          <div className="flex items-center gap-1">
+            <Badge className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0 shadow-lg" data-testid="badge-call-idle">Ready</Badge>
+            {networkIndicator}
+          </div>
+        );
       case 'connecting':
         return <Badge variant="outline" className="bg-white/10 text-white border-white/20" data-testid="badge-call-connecting">Connecting...</Badge>;
       case 'ringing':
@@ -2627,6 +2650,11 @@ export default function AgentConsolePage() {
       <AudioDeviceSettings 
         open={showAudioSettings}
         onOpenChange={setShowAudioSettings}
+        initialRestrictiveMode={restrictiveNetworkMode}
+        onNetworkModeChanged={(mode) => {
+          console.log('[AUDIO SETTINGS] Network mode changed:', mode);
+          setRestrictiveNetworkMode(mode);
+        }}
         onDevicesSelected={(micId, speakerId) => {
           console.log('[AUDIO SETTINGS] Devices selected:', { micId, speakerId });
           // Apply to the active WebRTC session and persist via the component

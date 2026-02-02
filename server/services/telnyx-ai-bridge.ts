@@ -987,7 +987,7 @@ export class TelnyxAiBridge extends EventEmitter {
     const duration = Date.now() - call.startTime.getTime();
     const phase = call.agent.getCurrentPhase();
     const gatekeeperAttempts = call.agent.getGatekeeperAttempts();
-    const disposition = this.mapPhaseToDisposition(call.disposition || "completed", phase);
+    const disposition = this.mapPhaseToDisposition(call.disposition || "completed", phase, transcript);
 
     try {
       const queueItem = await storage.getQueueItemById(call.queueItemId);
@@ -1060,32 +1060,186 @@ export class TelnyxAiBridge extends EventEmitter {
     this.activeCalls.delete(callId);
   }
 
-  private mapPhaseToDisposition(disposition: string, phase: string): string {
+  private mapPhaseToDisposition(disposition: string, phase: string, transcript?: string): string {
     // Handle explicit AI agent dispositions first
     if (disposition === "qualified_lead" || disposition === "qualified" || disposition === "handoff") {
       return "qualified";
     }
     if (disposition === "voicemail") return "voicemail";
-    if (disposition === "not_interested") return "not_interested";
     if (disposition === "do_not_call" || disposition === "dnc_request") return "do_not_call";
     if (disposition === "invalid_data" || disposition === "wrong_number") return "invalid_data";
     if (disposition === "no_answer") return "no-answer";
     // Handle callback requests as qualified (they showed interest!)
     if (disposition === "callback_requested" || disposition === "callback") return "qualified";
 
+    // FIX: Only mark as not_interested if explicit negative keywords are found in transcript
+    const hasExplicitRejection = this.hasExplicitNegativeKeywords(transcript);
+    const qualityScore = this.calculateEngagementScore(transcript);
+
+    // If disposition was marked as not_interested, verify with transcript analysis
+    if (disposition === "not_interested") {
+      // Override not_interested if high engagement score and no explicit rejection
+      if (qualityScore >= 60 && !hasExplicitRejection) {
+        console.log(`[TelnyxAiBridge] 🔄 Overriding not_interested due to high engagement (${qualityScore}) and no explicit rejection`);
+        return "needs_review";
+      }
+      return "not_interested";
+    }
+
     // Fall back to phase-based inference
     // BUG FIX: "closing" phase means prospect engaged through the full pitch - likely qualified
     if (phase === "closing") return "qualified";
-    // FIX: "pitch" phase means we connected and pitched - if no disposition, likely not interested
-    // Previously returned "needs_review" which caused retry loops
-    if (phase === "pitch") return "not_interested";
+
+    // For pitch and objection_handling phases, check for explicit rejection
+    // FIX: Don't automatically mark as not_interested without explicit negative keywords
+    if (phase === "pitch" || phase === "objection_handling") {
+      if (hasExplicitRejection) {
+        console.log(`[TelnyxAiBridge] ❌ Marking as not_interested - explicit rejection found in transcript`);
+        return "not_interested";
+      }
+      // High engagement means potential interest - needs human review
+      if (qualityScore >= 50) {
+        console.log(`[TelnyxAiBridge] 📊 High engagement score (${qualityScore}) in ${phase} phase - marking for review`);
+        return "needs_review";
+      }
+      // Low engagement without explicit rejection - still needs review
+      console.log(`[TelnyxAiBridge] ⚠️ No explicit rejection in ${phase} phase - marking for review`);
+      return "needs_review";
+    }
+
     if (phase === "gatekeeper") return "no-answer";
-    // FIX: "objection_handling" means prospect objected - they're not interested
-    // Previously returned "needs_review" causing wasted retries
-    if (phase === "objection_handling") return "not_interested";
-    // Default for unknown phases with human contact - likely not interested
-    // This prevents wasted retry cycles on prospects who already declined
-    return "not_interested";
+    // Treat early hangups with minimal interaction as no-answer so they can retry
+    if (phase === "opening") return "no-answer";
+
+    // Default: Unknown phases without explicit rejection should be reviewed, not dismissed
+    if (hasExplicitRejection) {
+      return "not_interested";
+    }
+    console.log(`[TelnyxAiBridge] ⚠️ Unknown phase "${phase}" - marking for review instead of auto-dismissing`);
+    return "needs_review";
+  }
+
+  /**
+   * Check for explicit negative keywords that indicate genuine disinterest
+   * FIX: Only mark as not_interested if prospect explicitly says they don't want to be contacted
+   */
+  private hasExplicitNegativeKeywords(transcript?: string): boolean {
+    if (!transcript) return false;
+
+    const lowerTranscript = transcript.toLowerCase();
+
+    // Explicit rejection phrases - must be clear and unambiguous
+    const explicitRejectionPhrases = [
+      "not interested",
+      "no thank you",
+      "no thanks",
+      "don't call me",
+      "do not call me",
+      "stop calling",
+      "remove me from",
+      "take me off",
+      "unsubscribe",
+      "don't want",
+      "do not want",
+      "not looking for",
+      "already have",
+      "we're good",
+      "we are good",
+      "please don't contact",
+      "please do not contact",
+      "i'm not the right person",
+      "i am not the right person",
+      "wrong person",
+      "don't need",
+      "do not need",
+      "never call",
+      "hang up",
+      "go away",
+      "leave me alone",
+      "i said no",
+      "i already said no",
+      "goodbye",
+      "bye bye",
+      "not for us",
+      "not for me",
+      "we don't do that",
+      "we do not do that",
+    ];
+
+    for (const phrase of explicitRejectionPhrases) {
+      if (lowerTranscript.includes(phrase)) {
+        console.log(`[TelnyxAiBridge] 🚫 Found explicit rejection phrase: "${phrase}"`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Calculate engagement score from transcript to detect genuine interest
+   * Higher scores indicate more engagement, which suggests potential interest
+   */
+  private calculateEngagementScore(transcript?: string): number {
+    if (!transcript) return 0;
+
+    let score = 0;
+    const lowerTranscript = transcript.toLowerCase();
+
+    // Length-based scoring - longer conversations indicate more engagement
+    const wordCount = transcript.split(/\s+/).length;
+    if (wordCount > 100) score += 20;
+    else if (wordCount > 50) score += 10;
+    else if (wordCount > 25) score += 5;
+
+    // Question count - prospect asking questions shows interest
+    const questionCount = (transcript.match(/\?/g) || []).length;
+    score += Math.min(questionCount * 5, 25); // Max 25 points for questions
+
+    // Positive engagement indicators
+    const positiveIndicators = [
+      "tell me more",
+      "how does that work",
+      "what do you mean",
+      "interesting",
+      "sounds good",
+      "that's good",
+      "that is good",
+      "i'd like",
+      "i would like",
+      "can you explain",
+      "send me",
+      "email me",
+      "call me back",
+      "when can",
+      "how much",
+      "what's the price",
+      "what is the price",
+      "what's the cost",
+      "who is this",
+      "what company",
+      "let me think",
+      "maybe",
+      "possibly",
+      "perhaps",
+      "i might",
+      "we might",
+      "could be",
+      "let me check",
+      "hold on",
+      "wait a minute",
+      "one moment",
+      "give me a second",
+    ];
+
+    for (const indicator of positiveIndicators) {
+      if (lowerTranscript.includes(indicator)) {
+        score += 10;
+      }
+    }
+
+    // Cap score at 100
+    return Math.min(score, 100);
   }
 
   // Map internal disposition to canonical disposition enum values

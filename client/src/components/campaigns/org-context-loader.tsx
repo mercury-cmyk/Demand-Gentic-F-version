@@ -79,7 +79,9 @@ export function OrgContextLoader({
     queryKey: ['organizations'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/organizations');
-      return res.json();
+      const data = await res.json();
+      // API returns { organizations: [...] }, extract the array
+      return data.organizations || [];
     },
   });
 

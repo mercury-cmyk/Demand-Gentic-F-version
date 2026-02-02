@@ -29,7 +29,8 @@ import { getOrganizationById } from '../services/problem-intelligence/organizati
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 20; // Max 20 concurrent calls
+const DEFAULT_MAX_CONCURRENT_CALLS = 20; // Max 20 concurrent calls per campaign unless overridden
+const GLOBAL_MAX_CONCURRENT_CALLS = 50; // System-wide maximum concurrent call channels
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
 const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
@@ -383,8 +384,13 @@ interface OrchestratorJobResult {
   message?: string;
 }
 
+interface ProcessCampaignOptions {
+  maxNewCalls?: number;
+}
+
 let orchestratorQueue: Queue<OrchestratorJobData> | null = null;
 let orchestratorWorker: Worker<OrchestratorJobData> | null = null;
+let lastCampaignStartIndex = 0;
 
 /**
  * Get the assigned virtual agent for a campaign
@@ -432,6 +438,13 @@ async function getInProgressCount(campaignId: string): Promise<number> {
       eq(campaignQueue.campaignId, campaignId),
       eq(campaignQueue.status, 'in_progress')
     ));
+  return result[0]?.count || 0;
+}
+
+async function getGlobalInProgressCount(): Promise<number> {
+  const result = await db.select({ count: sql<number>`count(*)::int` })
+    .from(campaignQueue)
+    .where(eq(campaignQueue.status, 'in_progress'));
   return result[0]?.count || 0;
 }
 
@@ -671,7 +684,7 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
 /**
  * Process a single campaign - initiate calls to maintain concurrency
  */
-async function processCampaign(campaignId: string): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
+async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
   const campaign = await storage.getCampaign(campaignId);
   if (!campaign) {
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);
@@ -730,9 +743,13 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
   // Get current in-progress count
   const inProgressCount = await getInProgressCount(campaignId);
   const maxConcurrent = (aiSettings as any).maxConcurrentCalls || DEFAULT_MAX_CONCURRENT_CALLS;
-  const slotsAvailable = maxConcurrent - inProgressCount;
+  const campaignSlots = Math.max(0, maxConcurrent - inProgressCount);
+  const requestedSlots = typeof options?.maxNewCalls === 'number'
+    ? Math.max(0, Math.floor(options.maxNewCalls))
+    : campaignSlots;
+  const slotsAvailable = Math.min(campaignSlots, requestedSlots);
 
-  console.log(`[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress, ${slotsAvailable} slots available`);
+  console.log(`[AI Orchestrator] Campaign ${campaignId}: ${inProgressCount}/${maxConcurrent} in progress, ${campaignSlots} campaign slots, ${slotsAvailable} allowed by request`);
 
   if (slotsAvailable <= 0) {
     return { initiated: 0, skipped: 0 };
@@ -1222,11 +1239,27 @@ async function processCampaign(campaignId: string): Promise<{ initiated: number;
 
         // POST-LOCK UPDATE: Add the actual conversation ID for webhook matching
         await db.execute(sql`
-          UPDATE campaign_queue 
+          UPDATE campaign_queue
           SET updated_at = NOW(),
               enqueued_reason = COALESCE(enqueued_reason, '') || ' ai_conv:' || ${conversationId}
           WHERE id = ${item.id}
         `);
+
+        // CRITICAL: Store the Telnyx call_control_id in dialerCallAttempts for recording webhook matching
+        // Without this, recording.completed webhooks cannot find the matching call
+        const telnyxCallId = callResult?.callControlId || callResult?.callId || conversationId;
+        if (callAttemptId && telnyxCallId) {
+          try {
+            await db.update(dialerCallAttempts).set({
+              telnyxCallId: telnyxCallId,
+              callStartedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(dialerCallAttempts.id, callAttemptId));
+            console.log(`[AI Orchestrator] Updated call attempt ${callAttemptId} with telnyxCallId: ${telnyxCallId}`);
+          } catch (updateErr) {
+            console.error(`[AI Orchestrator] Failed to update call attempt with telnyxCallId:`, updateErr);
+          }
+        }
 
         return { success: true, itemId: item.id, conversationId };
       } catch (error: any) {
@@ -1361,21 +1394,54 @@ async function orchestratorTick(): Promise<OrchestratorJobResult> {
     const campaigns = await storage.getCampaigns({ status: 'active', dialMode: 'ai_agent' });
     
     if (campaigns.length === 0) {
+      lastCampaignStartIndex = 0;
       return { processed: true, message: 'No active AI campaigns' };
     }
 
-    console.log(`[AI Orchestrator] Processing ${campaigns.length} active AI campaign(s)${stuckReset > 0 ? ` (watchdog freed ${stuckReset} slots)` : ''}`);
+    const globalInProgress = await getGlobalInProgressCount();
+    let availableGlobalSlots = Math.max(0, GLOBAL_MAX_CONCURRENT_CALLS - globalInProgress);
+
+    const perCampaignShare = Math.max(1, Math.floor(GLOBAL_MAX_CONCURRENT_CALLS / Math.max(campaigns.length, 1)));
+    const startIndex = campaigns.length > 0 ? lastCampaignStartIndex % campaigns.length : 0;
+    const orderedCampaigns = campaigns.length > 0
+      ? [...campaigns.slice(startIndex), ...campaigns.slice(0, startIndex)]
+      : campaigns;
+    lastCampaignStartIndex = campaigns.length > 0 ? (startIndex + 1) % campaigns.length : 0;
+
+    console.log(`[AI Orchestrator] Processing ${campaigns.length} active AI campaign(s)${stuckReset > 0 ? ` (watchdog freed ${stuckReset} slots)` : ''} (global ${globalInProgress}/${GLOBAL_MAX_CONCURRENT_CALLS}, share ${perCampaignShare}, start index ${startIndex})`);
+
+    if (availableGlobalSlots <= 0) {
+      console.log('[AI Orchestrator] Pausing tick - global concurrency limit reached');
+      return { processed: true, message: 'Global concurrency limit reached; waiting for slots to free' };
+    }
 
     let totalInitiated = 0;
-    for (const campaign of campaigns) {
-      const result = await processCampaign(campaign.id);
+    let processedCampaigns = 0;
+
+    for (const campaign of orderedCampaigns) {
+      if (availableGlobalSlots <= 0) {
+        console.log('[AI Orchestrator] Global slots exhausted, skipping remaining campaigns for this tick');
+        break;
+      }
+
+      const slotsToRequest = Math.min(perCampaignShare, availableGlobalSlots);
+      if (slotsToRequest <= 0) break;
+
+      const result = await processCampaign(campaign.id, { maxNewCalls: slotsToRequest });
       totalInitiated += result.initiated;
+      availableGlobalSlots = Math.max(0, availableGlobalSlots - result.initiated);
+      processedCampaigns += 1;
+
+      if (result.fatalError) {
+        console.log(`[AI Orchestrator] Campaign ${campaign.id} halted due to fatal error`);
+        continue;
+      }
     }
 
     return { 
       processed: true, 
       callsInitiated: totalInitiated,
-      message: `Processed ${campaigns.length} campaigns, initiated ${totalInitiated} calls`
+      message: `Processed ${processedCampaigns}/${campaigns.length} campaigns, global slots left: ${availableGlobalSlots}`
     };
   } catch (error) {
     console.error('[AI Orchestrator] Tick error:', error);
@@ -1411,7 +1477,12 @@ export function initializeAiCampaignOrchestrator(): void {
       if (job.data.type === 'tick') {
         return orchestratorTick();
       } else if (job.data.type === 'campaign-replenish' && job.data.campaignId) {
-        const result = await processCampaign(job.data.campaignId);
+        const globalSlots = Math.max(0, GLOBAL_MAX_CONCURRENT_CALLS - (await getGlobalInProgressCount()));
+        if (globalSlots <= 0) {
+          console.log(`[AI Orchestrator] Replenish skipped for ${job.data.campaignId} - global limit reached`);
+          return { processed: true, callsInitiated: 0, message: 'Global concurrency limit reached' };
+        }
+        const result = await processCampaign(job.data.campaignId, { maxNewCalls: globalSlots });
         return { processed: true, callsInitiated: result.initiated };
       }
       return { processed: false, message: 'Unknown job type' };

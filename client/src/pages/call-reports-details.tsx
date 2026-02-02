@@ -32,7 +32,7 @@ export default function CallReportsDetailsPage() {
   const [limit] = useState(50);
   
   // Fetch call details
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['/api/reports/calls/details', filters, page, limit],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -42,7 +42,15 @@ export default function CallReportsDetailsPage() {
       params.append('page', page.toString());
       params.append('limit', limit.toString());
       
-      const response = await fetch(`/api/reports/calls/details?${params}`);
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(`/api/reports/calls/details?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch calls: ${response.status}`);
+      }
       return response.json();
     },
   });
@@ -183,10 +191,16 @@ export default function CallReportsDetailsPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {data?.pagination.total || 0} Calls Found
+            {data?.pagination?.total ?? 0} Calls Found
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {error ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p>Failed to load call details. Please try again.</p>
+            </div>
+          ) : (
+            <>
           <DataTable
             data={data?.calls || []}
             columns={columns}
@@ -221,6 +235,8 @@ export default function CallReportsDetailsPage() {
                 </Button>
               </div>
             </div>
+          )}
+            </>
           )}
         </CardContent>
       </Card>

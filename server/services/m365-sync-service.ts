@@ -216,8 +216,27 @@ export class M365SyncService {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Graph API request failed: ${response.status} - ${error}`);
+      const errorText = await response.text();
+      let errorData: { error?: { code?: string; message?: string } } = {};
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        // Not JSON, use raw text
+      }
+
+      // Handle specific Graph API errors gracefully
+      const errorCode = errorData?.error?.code;
+      if (errorCode === "MailboxNotEnabledForRESTAPI") {
+        throw new Error(`MAILBOX_NOT_ENABLED: ${errorData?.error?.message || "Mailbox is not enabled for REST API (may be on-premise, inactive, or missing Exchange Online license)"}`);
+      }
+      if (errorCode === "ResourceNotFound" || response.status === 404) {
+        throw new Error(`MAILBOX_NOT_FOUND: Mailbox or resource not found`);
+      }
+      if (errorCode === "OrganizationFromTenantGuidNotFound") {
+        throw new Error(`TENANT_NOT_FOUND: The M365 tenant was not found or is no longer valid`);
+      }
+
+      throw new Error(`Graph API request failed: ${response.status} - ${errorText}`);
     }
 
     const data: GraphResponse = await response.json();
@@ -349,6 +368,23 @@ export class M365SyncService {
         totalErrors += result.errors;
         console.log(`[M365Sync] Synced ${result.synced} emails for ${mailboxAccount.mailboxEmail}`);
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // Handle known configuration issues gracefully
+        if (errorMessage.startsWith("MAILBOX_NOT_ENABLED:")) {
+          console.warn(`[M365Sync] ⚠️ Skipping mailbox ${mailboxAccount.mailboxEmail}: Not enabled for REST API (on-premise, inactive, or missing Exchange Online license)`);
+          // Don't count as error - this is a configuration issue, not a sync failure
+          continue;
+        }
+        if (errorMessage.startsWith("MAILBOX_NOT_FOUND:")) {
+          console.warn(`[M365Sync] ⚠️ Skipping mailbox ${mailboxAccount.mailboxEmail}: Mailbox not found`);
+          continue;
+        }
+        if (errorMessage.startsWith("TENANT_NOT_FOUND:")) {
+          console.warn(`[M365Sync] ⚠️ Skipping mailbox ${mailboxAccount.mailboxEmail}: Tenant not found or invalid`);
+          continue;
+        }
+
         console.error(`[M365Sync] Error syncing mailbox ${mailboxAccount.mailboxEmail}:`, error);
         totalErrors++;
       }

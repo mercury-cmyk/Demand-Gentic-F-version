@@ -378,7 +378,7 @@ export interface IStorage {
 
   // Selection Contexts (for bulk operations)
   getSelectionContext(id: string, userId: string): Promise<SelectionContext | undefined>;
-  createSelectionContext(context: InsertSelectionContext): Promise<SelectionContext>;
+  createSelectionContext(context: InsertSelectionContext & { expiresAt: Date }): Promise<SelectionContext>;
   deleteSelectionContext(id: string, userId: string): Promise<boolean>;
   deleteExpiredSelectionContexts(): Promise<number>;
 
@@ -430,7 +430,7 @@ export interface IStorage {
   // ==================== CONTENT STUDIO ====================
   getContentAssets(): Promise<ContentAsset[]>;
   getContentAsset(id: string): Promise<ContentAsset | null>;
-  createContentAsset(data: InsertContentAsset): Promise<ContentAsset>;
+  createContentAsset(data: InsertContentAsset & { ownerId: string }): Promise<ContentAsset>;
   updateContentAsset(id: string, data: Partial<InsertContentAsset>): Promise<ContentAsset | null>;
   deleteContentAsset(id: string): Promise<boolean>;
 
@@ -2494,14 +2494,22 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Auto-create Lead for qualified dispositions
-      // CRITICAL FIX: Never create leads for voicemail dispositions
+      // CRITICAL FIX: Never create leads for voicemail or other non-qualifying dispositions
+      // Use canonical disposition names: qualified_lead (not just 'qualified')
+      const QUALIFYING_DISPOSITIONS = ['qualified_lead', 'qualified', 'lead'];
+      const NON_QUALIFYING_DISPOSITIONS = ['voicemail', 'no_answer', 'not_interested', 'do_not_call', 'invalid_data', 'needs_review'];
+      const isQualifyingDisposition = QUALIFYING_DISPOSITIONS.includes(call.disposition || '');
+      const isNonQualifying = NON_QUALIFYING_DISPOSITIONS.includes(call.disposition || '');
+      
       console.log('[LEAD CREATION] Checking disposition for lead creation:', {
         disposition: call.disposition,
         contactId: call.contactId,
-        shouldCreateLead: call.disposition === 'qualified' && !!call.contactId,
+        isQualifyingDisposition,
+        isNonQualifying,
+        shouldCreateLead: isQualifyingDisposition && !isNonQualifying && !!call.contactId,
       });
 
-      if (call.disposition === 'qualified' && call.contactId && call.disposition !== 'voicemail') {
+      if (isQualifyingDisposition && !isNonQualifying && call.contactId) {
         console.log('[LEAD CREATION] ✅ Qualified disposition detected - creating lead for contact:', call.contactId);
 
         // Get contact info
@@ -4156,7 +4164,7 @@ export class DatabaseStorage implements IStorage {
     return context || undefined;
   }
 
-  async createSelectionContext(insertContext: InsertSelectionContext): Promise<SelectionContext> {
+  async createSelectionContext(insertContext: InsertSelectionContext & { expiresAt: Date }): Promise<SelectionContext> {
     const [context] = await db.insert(selectionContexts).values(insertContext as any).returning();
     return context;
   }
@@ -4634,7 +4642,7 @@ export class DatabaseStorage implements IStorage {
     return result[0] || null;
   }
 
-  async createContentAsset(data: InsertContentAsset): Promise<ContentAsset> {
+  async createContentAsset(data: InsertContentAsset & { ownerId: string }): Promise<ContentAsset> {
     const result = await db.insert(contentAssets).values(data as any).returning();
     return result[0];
   }

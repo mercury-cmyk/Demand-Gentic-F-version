@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -13,6 +13,9 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { CommandPalette } from "@/components/patterns/command-palette";
 import { DeprecatedRedirect } from "@/components/deprecated-redirect";
 import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
+import { canAccessRoute } from "@/lib/route-permissions";
+import { Shield, ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import LandingPage from "@/pages/landing";
@@ -132,6 +135,7 @@ import IamPolicies from "@/pages/iam/iam-policies";
 import IamGrants from "@/pages/iam/iam-grants";
 import IamRequests from "@/pages/iam/iam-requests";
 import IamAudit from "@/pages/iam/iam-audit";
+import IamSecrets from "@/pages/iam/iam-secrets";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -180,6 +184,38 @@ const normalizeRoles = (roles: unknown): string[] => {
 
   return normalized;
 };
+
+// Route guard component that checks permissions based on current route
+function RouteGuard({ children, userRoles }: { children: React.ReactNode; userRoles: string[] }) {
+  const [location, setLocation] = useLocation();
+
+  // Check if user can access the current route
+  const hasAccess = canAccessRoute(userRoles, location);
+
+  if (!hasAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] p-8">
+        <div className="bg-destructive/10 p-4 rounded-full mb-6">
+          <Shield className="h-12 w-12 text-destructive" />
+        </div>
+        <h1 className="text-2xl font-bold text-foreground mb-2">Access Denied</h1>
+        <p className="text-muted-foreground text-center max-w-md mb-6">
+          You don't have permission to access this page.
+          Your current role{userRoles.length > 1 ? 's' : ''}: <strong>{userRoles.join(', ')}</strong>
+        </p>
+        <p className="text-sm text-muted-foreground mb-6">
+          Please contact your administrator if you believe you should have access.
+        </p>
+        <Button onClick={() => setLocation('/')} variant="outline">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Go to Dashboard
+        </Button>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
 
 const parseJwtPayload = (token: string): Record<string, unknown> | null => {
   const parts = token.split(".");
@@ -231,6 +267,7 @@ function AuthenticatedApp() {
             userRoles={resolvedUserRoles}
           />
           <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
+            <RouteGuard userRoles={resolvedUserRoles}>
             <Switch>
               <Route path="/" component={Dashboard} />
               
@@ -377,6 +414,7 @@ function AuthenticatedApp() {
               <Route path="/iam/grants" component={IamGrants} />
               <Route path="/iam/requests" component={IamRequests} />
               <Route path="/iam/audit" component={IamAudit} />
+              <Route path="/iam/secrets" component={IamSecrets} />
 
               {/* Legacy settings routes (kept for backwards compatibility) */}
               <Route path="/user-management" component={UsersSettingsPage} />
@@ -476,6 +514,7 @@ function AuthenticatedApp() {
               {/* 404 */}
               <Route component={NotFound} />
             </Switch>
+            </RouteGuard>
           </main>
         </div>
       </div>

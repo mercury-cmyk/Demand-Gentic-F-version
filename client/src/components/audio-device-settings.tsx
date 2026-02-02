@@ -3,7 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mic, Volume2, Settings } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Mic, Volume2, Settings, Globe, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface AudioDevice {
@@ -16,23 +17,28 @@ interface AudioDeviceSettingsProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDevicesSelected?: (micId: string | null, speakerId: string | null) => void;
+  onNetworkModeChanged?: (restrictiveMode: boolean) => void;
+  initialRestrictiveMode?: boolean;
 }
 
-export function AudioDeviceSettings({ open, onOpenChange, onDevicesSelected }: AudioDeviceSettingsProps) {
+export function AudioDeviceSettings({ open, onOpenChange, onDevicesSelected, onNetworkModeChanged, initialRestrictiveMode = false }: AudioDeviceSettingsProps) {
   const [microphones, setMicrophones] = useState<AudioDevice[]>([]);
   const [speakers, setSpeakers] = useState<AudioDevice[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>("");
   const [selectedSpeaker, setSelectedSpeaker] = useState<string>("");
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [restrictiveNetworkMode, setRestrictiveNetworkMode] = useState(initialRestrictiveMode);
   const { toast } = useToast();
 
   // Load saved preferences from localStorage
   useEffect(() => {
     const savedMic = localStorage.getItem('telnyx_microphone_id');
     const savedSpeaker = localStorage.getItem('telnyx_speaker_id');
+    const savedNetworkMode = localStorage.getItem('telnyx_restrictive_network_mode');
     
     if (savedMic) setSelectedMic(savedMic);
     if (savedSpeaker) setSelectedSpeaker(savedSpeaker);
+    if (savedNetworkMode === 'true') setRestrictiveNetworkMode(true);
   }, []);
 
   // Request microphone permission and enumerate devices
@@ -137,14 +143,25 @@ export function AudioDeviceSettings({ open, onOpenChange, onDevicesSelected }: A
       localStorage.setItem('telnyx_speaker_id', selectedSpeaker);
     }
     
+    // Save network mode
+    localStorage.setItem('telnyx_restrictive_network_mode', String(restrictiveNetworkMode));
+    
     // Notify parent component
     onDevicesSelected?.(selectedMic || null, selectedSpeaker || null);
+    onNetworkModeChanged?.(restrictiveNetworkMode);
     
     toast({
-      description: "Audio device settings saved",
+      description: restrictiveNetworkMode 
+        ? "Settings saved. Restrictive network mode enabled - page will reload."
+        : "Audio device settings saved",
     });
     
     onOpenChange(false);
+    
+    // If network mode changed, need to reload to reinitialize WebRTC
+    if (restrictiveNetworkMode !== initialRestrictiveMode) {
+      setTimeout(() => window.location.reload(), 1000);
+    }
   };
 
   // Test microphone (show volume indicator)
@@ -279,6 +296,34 @@ export function AudioDeviceSettings({ open, onOpenChange, onDevicesSelected }: A
                     )}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Restrictive Network Mode - for Pakistan, China, etc. */}
+              <div className="space-y-3 p-4 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-800">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="restrictive-network" className="flex items-center gap-2 cursor-pointer">
+                    <Globe className="h-4 w-4 text-amber-600" />
+                    <span className="font-medium">Restrictive Network Mode</span>
+                  </Label>
+                  <Switch
+                    id="restrictive-network"
+                    checked={restrictiveNetworkMode}
+                    onCheckedChange={setRestrictiveNetworkMode}
+                    data-testid="switch-restrictive-network"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enable this if you're in Pakistan, China, or other countries where VoIP is blocked.
+                  This routes all voice traffic through secure relay servers on port 443 (HTTPS).
+                </p>
+                {restrictiveNetworkMode && (
+                  <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900 p-2 rounded">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    <span>
+                      Page will reload to apply network changes. Connection may take longer (~90 seconds).
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

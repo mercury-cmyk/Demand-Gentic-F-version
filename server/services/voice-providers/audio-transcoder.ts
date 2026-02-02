@@ -153,6 +153,51 @@ export function pcm8kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 }
 
 /**
+ * Soft noise gate to reduce background noise
+ * Uses a soft knee to avoid harsh gating artifacts
+ * Only affects samples below the threshold, preserving speech
+ *
+ * @param pcmBuffer - Input PCM audio buffer (16-bit LE)
+ * @param threshold - Noise floor threshold (0-32767, default 150 for telephony)
+ * @param ratio - Reduction ratio for samples below threshold (0-1, default 0.3)
+ * @returns Noise-gated PCM buffer
+ */
+function softNoiseGate(pcmBuffer: Buffer, threshold: number = 150, ratio: number = 0.3): Buffer {
+  const samples = pcmBuffer.length / 2;
+  if (samples === 0) return pcmBuffer;
+
+  // Calculate RMS energy to detect if there's actual speech
+  let sumSquared = 0;
+  for (let i = 0; i < samples; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2);
+    sumSquared += sample * sample;
+  }
+  const rms = Math.sqrt(sumSquared / samples);
+
+  // If RMS is above threshold, this chunk has speech - don't gate
+  // Only apply gating to quiet chunks (background noise)
+  if (rms > threshold * 2) {
+    return pcmBuffer;
+  }
+
+  // Apply soft gating to reduce noise in quiet sections
+  const output = Buffer.alloc(pcmBuffer.length);
+  for (let i = 0; i < samples; i++) {
+    let sample = pcmBuffer.readInt16LE(i * 2);
+    const absSample = Math.abs(sample);
+
+    if (absSample < threshold) {
+      // Soft reduction for samples below threshold
+      sample = Math.round(sample * ratio);
+    }
+
+    output.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
+  }
+
+  return output;
+}
+
+/**
  * Remove DC offset from audio buffer
  * DC offset causes clicking and pops, especially at chunk boundaries
  *
@@ -379,41 +424,61 @@ export function resamplePcm(
  * Convert G.711 (8kHz) to PCM 16kHz for Gemini Live API input
  * This is the main function for Telnyx -> Gemini audio path
  *
- * Simplified processing - G.711 decode + upsample only
- * Upsampling (increasing sample rate) doesn't cause aliasing,
- * so no filtering needed. Keep processing minimal to avoid artifacts.
+ * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
+ * 1. G.711 decode
+ * 2. Soft noise gate to reduce background interference from prospect's phone
+ * 3. Upsample to 16kHz (no aliasing risk with upsampling)
  */
 export function g711ToPcm16k(g711Buffer: Buffer, format: G711Format): Buffer {
   // Step 1: Decode G.711 to PCM 8kHz
   const pcm8k = g711ToPcm8k(g711Buffer, format);
 
-  // Step 2: Upsample to 16kHz with linear interpolation
+  // Step 2: Apply soft noise gate to reduce background noise from prospect
+  // This helps Gemini focus on speech without interference
+  const gatedPcm = softNoiseGate(pcm8k, 120, 0.25);
+
+  // Step 3: Upsample to 16kHz with linear interpolation
   // No filtering needed for upsampling (no aliasing risk)
-  const pcm16k = resamplePcm(pcm8k, 8000, 16000);
+  const pcm16k = resamplePcm(gatedPcm, 8000, 16000);
 
   return pcm16k;
 }
 
 /**
- * Simple 3:1 decimation with averaging (no FIR filter)
- * Takes every 3rd sample but averages the 3 input samples to reduce aliasing
- * Much simpler and avoids filter edge artifacts
+ * Improved 3:1 decimation with weighted averaging (Gaussian-like kernel)
+ * Uses a 5-point weighted average centered on each output sample
+ * This provides better anti-aliasing than simple 3-point averaging
+ * while avoiding the chunk boundary artifacts of full FIR filters
+ *
+ * Kernel: [0.1, 0.25, 0.3, 0.25, 0.1] (normalized Gaussian-like weights)
  */
 function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
   const inputSamples = inputBuffer.length / 2;
   const outputSamples = Math.floor(inputSamples / 3);
   const outputBuffer = Buffer.alloc(outputSamples * 2);
 
+  // Gaussian-like kernel weights (sum = 1.0)
+  const weights = [0.10, 0.25, 0.30, 0.25, 0.10];
+  const halfKernel = 2; // 5-point kernel, 2 samples on each side
+
   for (let i = 0; i < outputSamples; i++) {
-    const srcIdx = i * 3;
-    // Average 3 input samples to reduce aliasing
+    const centerIdx = i * 3 + 1; // Center of the 3-sample group
     let sum = 0;
-    let count = 0;
-    for (let j = 0; j < 3 && srcIdx + j < inputSamples; j++) {
-      sum += inputBuffer.readInt16LE((srcIdx + j) * 2);
-      count++;
+    let weightSum = 0;
+
+    // Apply weighted average with 5-point kernel
+    for (let k = -halfKernel; k <= halfKernel; k++) {
+      const srcIdx = centerIdx + k;
+      if (srcIdx >= 0 && srcIdx < inputSamples) {
+        const sample = inputBuffer.readInt16LE(srcIdx * 2);
+        const weight = weights[k + halfKernel];
+        sum += sample * weight;
+        weightSum += weight;
+      }
     }
-    const avg = Math.round(sum / count);
+
+    // Normalize by actual weight sum (handles edge cases)
+    const avg = weightSum > 0 ? Math.round(sum / weightSum) : 0;
     outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, avg)), i * 2);
   }
 
@@ -424,15 +489,21 @@ function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
  * Convert PCM 24kHz (Gemini output) to G.711 (8kHz) for Telnyx
  * This is the main function for Gemini -> Telnyx audio path
  *
- * SIMPLIFIED: Uses simple decimation with averaging instead of FIR filter
- * to avoid chunk boundary artifacts that cause noise
+ * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
+ * 1. Soft noise gate to reduce background interference
+ * 2. Improved weighted decimation (Gaussian kernel) for better anti-aliasing
+ * 3. Encode to G.711
  */
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
-  // Step 1: Simple 3:1 decimation with averaging (24kHz → 8kHz)
-  // This avoids the FIR filter edge effects that cause noise
-  const pcm8k = simpleDecimate3to1(pcmBuffer);
+  // Step 1: Apply soft noise gate to reduce background noise/interference
+  // This helps with intermittent noise issues some calls experience
+  const gatedPcm = softNoiseGate(pcmBuffer, 150, 0.3);
 
-  // Step 2: Encode to G.711
+  // Step 2: Improved 3:1 decimation with Gaussian-weighted averaging (24kHz → 8kHz)
+  // Uses 5-point weighted kernel for better anti-aliasing without chunk boundary issues
+  const pcm8k = simpleDecimate3to1(gatedPcm);
+
+  // Step 3: Encode to G.711
   return pcm8kToG711(pcm8k, format);
 }
 

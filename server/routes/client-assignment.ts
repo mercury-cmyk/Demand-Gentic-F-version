@@ -25,6 +25,7 @@ import {
   clientProjectCampaigns,
   campaigns,
   verificationCampaigns,
+  clientCampaignAccess,
 } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -284,6 +285,26 @@ router.post(
           campaignId,
           assignedBy: (req as any).user?.userId,
         });
+
+        // Also grant client access to the campaign for simulation/email generation
+        const existingAccess = await db
+          .select()
+          .from(clientCampaignAccess)
+          .where(
+            and(
+              eq(clientCampaignAccess.clientAccountId, project.clientAccountId),
+              eq(clientCampaignAccess.campaignId, campaignId)
+            )
+          )
+          .limit(1);
+
+        if (!existingAccess.length) {
+          await db.insert(clientCampaignAccess).values({
+            clientAccountId: project.clientAccountId,
+            campaignId,
+            grantedBy: (req as any).user?.userId,
+          });
+        }
       } else {
         // Regular campaign
         const [campaign] = await db
@@ -312,6 +333,26 @@ router.post(
             updatedAt: new Date(),
           })
           .where(eq(campaigns.id, campaignId));
+
+        // Also grant client access to the regular campaign for simulation/email generation
+        const existingRegularAccess = await db
+          .select()
+          .from(clientCampaignAccess)
+          .where(
+            and(
+              eq(clientCampaignAccess.clientAccountId, project.clientAccountId),
+              eq(clientCampaignAccess.regularCampaignId, campaignId)
+            )
+          )
+          .limit(1);
+
+        if (!existingRegularAccess.length) {
+          await db.insert(clientCampaignAccess).values({
+            clientAccountId: project.clientAccountId,
+            regularCampaignId: campaignId,
+            grantedBy: (req as any).user?.userId,
+          });
+        }
       }
 
       res.status(201).json({

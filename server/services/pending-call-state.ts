@@ -1,95 +1,204 @@
-/**
- * In-memory store for pending call state.
- * 
- * This is used to pass call context from the TeXML endpoint to the voice-dialer WebSocket
- * without putting the entire context in the URL (which causes issues with URL length limits).
- * 
- * Flow:
- * 1. TeXML endpoint stores context here with call_id as key
- * 2. TeXML returns WebSocket URL with only call_id parameter
- * 3. Voice-dialer retrieves context from here when WebSocket connects
- * 4. Context is automatically cleaned up after TTL expires
- */
+import Redis from "ioredis";
+import {
+  getRedisConnectionOptions,
+  getRedisUrl,
+  isRedisConfigured,
+} from "../lib/redis-config";
+
+const STATE_TTL_MS = 5 * 60 * 1000;
+const STATE_TTL_SECONDS = Math.max(1, Math.floor(STATE_TTL_MS / 1000));
+const REDIS_KEY_PREFIX = "pending_call_state:";
 
 interface PendingCallState {
   context: Record<string, any>;
   createdAt: number;
 }
 
-// TTL for pending call state (5 minutes - calls should connect much faster)
-const STATE_TTL_MS = 5 * 60 * 1000;
-
-// Cleanup interval (every minute)
+const pendingCallState = new Map<string, PendingCallState>();
 const CLEANUP_INTERVAL_MS = 60 * 1000;
 
-// In-memory store for pending call state
-const pendingCallState = new Map<string, PendingCallState>();
-
-// Start cleanup interval
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+let redisClient: Redis | null = null;
+let redisAvailable = false;
+let redisInitPromise: Promise<void> | null = null;
+
+async function initializeRedis(): Promise<void> {
+  if (!isRedisConfigured()) {
+    console.log("[PendingCallState] Redis not configured - using in-memory store.");
+    return;
+  }
+
+  if (redisClient || redisInitPromise) {
+    return redisInitPromise ?? Promise.resolve();
+  }
+
+  const redisUrl = getRedisUrl();
+  if (!redisUrl) {
+    return;
+  }
+
+  redisInitPromise = (async () => {
+    try {
+      redisClient = new Redis(redisUrl, getRedisConnectionOptions());
+      redisClient.on("error", (err) => {
+        console.warn("[PendingCallState] Redis error:", err?.message || err);
+        redisAvailable = false;
+      });
+      await redisClient.ping();
+      redisAvailable = true;
+      console.log("[PendingCallState] Redis connected - pending call context will survive restarts.");
+    } catch (error) {
+      console.warn(
+        "[PendingCallState] Redis connection failed - falling back to in-memory store:",
+        error
+      );
+      redisClient?.disconnect();
+      redisClient = null;
+      redisAvailable = false;
+    } finally {
+      redisInitPromise = null;
+    }
+  })();
+
+  return redisInitPromise;
+}
 
 function startCleanupInterval(): void {
   if (cleanupInterval) return;
-  
+
   cleanupInterval = setInterval(() => {
     const now = Date.now();
     let cleaned = 0;
-    
-    for (const [callId, state] of pendingCallState) {
+
+    for (const [callId, state] of pendingCallState.entries()) {
       if (now - state.createdAt > STATE_TTL_MS) {
         pendingCallState.delete(callId);
         cleaned++;
       }
     }
-    
+
     if (cleaned > 0) {
-      console.log(`[PendingCallState] Cleaned up ${cleaned} expired entries. Remaining: ${pendingCallState.size}`);
+      console.log(
+        `[PendingCallState] Cleaned ${cleaned} expired entries. Remaining: ${pendingCallState.size}`
+      );
     }
   }, CLEANUP_INTERVAL_MS);
 }
 
-// Start cleanup on module load
 startCleanupInterval();
+initializeRedis().catch((err) => {
+  console.error("[PendingCallState] Redis init error:", err);
+});
 
-/**
- * Store call context for later retrieval by voice-dialer
- */
-export function storePendingCallState(callId: string, context: Record<string, any>): void {
+function buildRedisKey(callId: string): string {
+  return `${REDIS_KEY_PREFIX}${callId}`;
+}
+
+function storeInMemory(callId: string, context: Record<string, any>): void {
   pendingCallState.set(callId, {
     context,
     createdAt: Date.now(),
   });
-  console.log(`[PendingCallState] Stored state for call ${callId}. Total pending: ${pendingCallState.size}`);
+  console.log(
+    `[PendingCallState] Stored state for call ${callId}. Total pending: ${pendingCallState.size}`
+  );
+}
+
+async function removeFromRedis(callId: string): Promise<void> {
+  if (!redisAvailable || !redisClient) return;
+  try {
+    await redisClient.del(buildRedisKey(callId));
+  } catch (error) {
+    console.warn("[PendingCallState] Failed to delete Redis key:", error);
+  }
+}
+
+async function readFromRedis(callId: string, consume: boolean): Promise<Record<string, any> | null> {
+  if (!redisAvailable || !redisClient) return null;
+  try {
+    const raw = await redisClient.get(buildRedisKey(callId));
+    if (!raw) {
+      return null;
+    }
+    if (consume) {
+      await redisClient.del(buildRedisKey(callId));
+    }
+    const parsed = JSON.parse(raw);
+    return parsed;
+  } catch (error) {
+    console.warn("[PendingCallState] Redis lookup failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Store call context for later retrieval by voice-dialer
+ */
+export async function storePendingCallState(
+  callId: string,
+  context: Record<string, any>
+): Promise<void> {
+  storeInMemory(callId, context);
+
+  if (redisAvailable && redisClient) {
+    try {
+      await redisClient.setex(buildRedisKey(callId), STATE_TTL_SECONDS, JSON.stringify(context));
+      console.log(`[PendingCallState] Persisted state for ${callId} in Redis.`);
+    } catch (error) {
+      console.warn(`[PendingCallState] Redis setex failed for ${callId}:`, error);
+    }
+  }
 }
 
 /**
  * Retrieve and optionally consume call context
- * @param callId The call ID to look up
- * @param consume If true, removes the state after retrieval (default: true)
  */
-export function getPendingCallState(callId: string, consume: boolean = true): Record<string, any> | null {
-  const state = pendingCallState.get(callId);
-  
-  if (!state) {
-    console.log(`[PendingCallState] No state found for call ${callId}`);
-    return null;
+export async function getPendingCallState(
+  callId: string,
+  consume: boolean = true
+): Promise<Record<string, any> | null> {
+  const memoryState = pendingCallState.get(callId);
+  if (memoryState) {
+    if (consume) {
+      pendingCallState.delete(callId);
+      removeFromRedis(callId).catch(() => {});
+      console.log(`[PendingCallState] Retrieved and consumed state for ${callId} (memory).`);
+    } else {
+      console.log(`[PendingCallState] Retrieved state for ${callId} (memory, not consumed).`);
+    }
+    return memoryState.context;
   }
-  
-  if (consume) {
-    pendingCallState.delete(callId);
-    console.log(`[PendingCallState] Retrieved and consumed state for call ${callId}. Remaining: ${pendingCallState.size}`);
-  } else {
-    console.log(`[PendingCallState] Retrieved state for call ${callId} (not consumed)`);
+
+  const redisState = await readFromRedis(callId, consume);
+  if (redisState) {
+    if (!consume) {
+      storeInMemory(callId, redisState);
+    }
+    console.log(`[PendingCallState] Retrieved state for ${callId} from Redis.`);
+    return redisState;
   }
-  
-  return state.context;
+
+  console.log(`[PendingCallState] No state found for call ${callId}`);
+  return null;
 }
 
 /**
  * Check if state exists for a call ID
  */
-export function hasPendingCallState(callId: string): boolean {
-  return pendingCallState.has(callId);
+export async function hasPendingCallState(callId: string): Promise<boolean> {
+  if (pendingCallState.has(callId)) {
+    return true;
+  }
+  if (!redisAvailable || !redisClient) {
+    return false;
+  }
+  try {
+    const exists = await redisClient.exists(buildRedisKey(callId));
+    return exists > 0;
+  } catch (error) {
+    console.warn("[PendingCallState] Redis exists check failed:", error);
+    return false;
+  }
 }
 
 /**

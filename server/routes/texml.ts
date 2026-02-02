@@ -14,7 +14,7 @@ const router = Router();
  * IMPORTANT: We store the full client_state in memory and only pass call_id in the URL
  * to avoid URL length limits that can cause ngrok/proxy WebSocket upgrade failures.
  */
-const aiCallHandler = (req: any, res: any) => {
+const aiCallHandler = async (req: any, res: any) => {
   console.log("[TeXML] Received request:", req.method, req.body, req.query);
 
   // Extract parameters from either body (POST) or query (GET)
@@ -59,7 +59,11 @@ const aiCallHandler = (req: any, res: any) => {
 
       if (actualCallId) {
         // Store full context for retrieval when WebSocket connects
-        storePendingCallState(actualCallId, contextData);
+        try {
+          await storePendingCallState(actualCallId, contextData);
+        } catch (error) {
+          console.error(`[TeXML] Failed to persist pending call state for ${actualCallId}:`, error);
+        }
         // Only pass call_id in URL (short, safe for WebSocket upgrade)
         finalWsUrl = `${wsUrl}?call_id=${encodeURIComponent(actualCallId)}`;
         console.log(`[TeXML] Stored context for call ${actualCallId}, URL length now: ${finalWsUrl.length}`);

@@ -23,7 +23,7 @@ export type IamEntityType =
   | 'account' | 'project' | 'campaign' | 'agent' | 'call_session'
   | 'recording' | 'transcript' | 'report' | 'lead' | 'delivery'
   | 'domain' | 'smtp' | 'email_template' | 'prompt' | 'quality_review'
-  | 'audit_log' | 'user' | 'team' | 'role' | 'policy';
+  | 'audit_log' | 'user' | 'team' | 'role' | 'policy' | 'secret';
 
 export type IamAction = 
   | 'view' | 'create' | 'edit' | 'delete' | 'run' | 'execute'
@@ -871,6 +871,84 @@ export const SYSTEM_POLICY_TEMPLATES = [
     isSystem: true
   }
 ];
+
+// ==================== User Role Assignment ====================
+
+export async function assignUserToRole(
+  userId: string,
+  roleId: string,
+  assignedBy: string,
+  organizationId?: string
+) {
+  // Check if role exists
+  const [role] = await db.select().from(iamRoles).where(eq(iamRoles.id, roleId));
+  if (!role) {
+    throw new Error('Role not found');
+  }
+  
+  // Check if user exists
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Insert or update the assignment
+  const id = uuidv4();
+  await db.insert(iamUserRoles).values({
+    id,
+    userId,
+    roleId,
+    organizationId: organizationId || null,
+    assignedBy,
+    assignedAt: new Date()
+  }).onConflictDoUpdate({
+    target: [iamUserRoles.userId, iamUserRoles.roleId, iamUserRoles.organizationId],
+    set: {
+      assignedBy,
+      assignedAt: new Date()
+    }
+  });
+
+  return { id, roleName: role.name };
+}
+
+export async function removeUserFromRole(
+  userId: string,
+  roleId: string,
+  organizationId?: string
+) {
+  const conditions = [
+    eq(iamUserRoles.userId, userId),
+    eq(iamUserRoles.roleId, roleId)
+  ];
+  
+  if (organizationId) {
+    conditions.push(eq(iamUserRoles.organizationId, organizationId));
+  } else {
+    conditions.push(isNull(iamUserRoles.organizationId));
+  }
+
+  await db.delete(iamUserRoles).where(and(...conditions));
+}
+
+export async function getUserIamRoles(userId: string, organizationId?: string) {
+  const conditions = [eq(iamUserRoles.userId, userId)];
+  if (organizationId) {
+    conditions.push(or(eq(iamUserRoles.organizationId, organizationId), isNull(iamUserRoles.organizationId))!);
+  }
+  
+  return db.select({
+    id: iamUserRoles.id,
+    roleId: iamUserRoles.roleId,
+    roleName: iamRoles.name,
+    roleDescription: iamRoles.description,
+    assignedAt: iamUserRoles.assignedAt,
+    organizationId: iamUserRoles.organizationId
+  })
+  .from(iamUserRoles)
+  .leftJoin(iamRoles, eq(iamUserRoles.roleId, iamRoles.id))
+  .where(and(...conditions));
+}
 
 export async function seedSystemPolicies(createdBy: string) {
   for (const template of SYSTEM_POLICY_TEMPLATES) {

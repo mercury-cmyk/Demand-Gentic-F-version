@@ -4,7 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FilterBuilder } from "@/components/filter-builder";
 import type { FilterGroup } from "@shared/filter-types";
@@ -578,6 +578,49 @@ export default function LeadsPage() {
     },
   });
 
+  // Publish lead mutation - moves from approved to published (available in project management)
+  const publishMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest('POST', `/api/leads/${id}/publish`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      toast({
+        title: "Lead Published",
+        description: "Lead published to project management",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to publish lead",
+      });
+    },
+  });
+
+  // Bulk publish leads mutation
+  const publishBulkMutation = useMutation({
+    mutationFn: async (leadIds: string[]) => {
+      return await apiRequest('POST', '/api/leads/publish-bulk', { leadIds });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setSelectedLeads([]);
+      toast({
+        title: "Leads Published",
+        description: `${data.publishedCount} lead(s) published to project management`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to bulk publish leads",
+      });
+    },
+  });
+
   const syncRecordingMutation = useMutation({
     mutationFn: async (leadId: string) => {
       return await apiRequest('POST', `/api/leads/${leadId}/sync-recording`, {});
@@ -698,7 +741,7 @@ export default function LeadsPage() {
         </Badge>
       );
     }
-    if (lead.qaStatus === 'approved') {
+    if (lead.qaStatus === 'approved' || lead.qaStatus === 'published') {
       return (
         <Badge variant="secondary" data-testid={`badge-pending-delivery-${lead.id}`}>
           Pending Delivery
@@ -717,10 +760,20 @@ export default function LeadsPage() {
         </Badge>
       );
     }
+    // Show "Ready to Submit" for published leads
+    if (lead.qaStatus === 'published' && !lead.submittedToClient) {
+      return (
+        <Badge variant="outline" className="bg-success/10 text-success border-success/20" data-testid={`badge-ready-submit-${lead.id}`}>
+          <Globe className="h-3 w-3 mr-1" />
+          Ready to Submit
+        </Badge>
+      );
+    }
+    // Show "Pending Publish" for approved leads (not yet published)
     if (lead.qaStatus === 'approved' && !lead.submittedToClient) {
       return (
-        <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20" data-testid={`badge-pending-submission-${lead.id}`}>
-          Pending Submission
+        <Badge variant="outline" className="bg-warning/10 text-warning border-warning/20" data-testid={`badge-pending-publish-${lead.id}`}>
+          Pending Publish
         </Badge>
       );
     }
@@ -1257,7 +1310,21 @@ export default function LeadsPage() {
                           <Eye className="mr-1 h-4 w-4" />
                           Details
                         </Button>
-                        {lead.qaStatus === 'approved' && !lead.submittedToClient && (
+                        {/* Publish button - for approved leads that aren't published yet */}
+                        {lead.qaStatus === 'approved' && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => publishMutation.mutate(lead.id)}
+                            disabled={publishMutation.isPending}
+                            data-testid={`button-publish-${lead.id}`}
+                          >
+                            <Globe className="mr-1 h-4 w-4" />
+                            Publish
+                          </Button>
+                        )}
+                        {/* Submit to Client - for published leads only */}
+                        {lead.qaStatus === 'published' && !lead.submittedToClient && (
                           <Button
                             size="sm"
                             variant="default"
@@ -1268,7 +1335,7 @@ export default function LeadsPage() {
                             Submit to Client
                           </Button>
                         )}
-                        {lead.qaStatus === 'approved' && !lead.deliveredAt && (
+                        {(lead.qaStatus === 'approved' || lead.qaStatus === 'published') && !lead.deliveredAt && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1279,7 +1346,7 @@ export default function LeadsPage() {
                             Mark Delivered
                           </Button>
                         )}
-                        {!isAgentOnly && lead.qaStatus === 'approved' && (
+                        {!isAgentOnly && (lead.qaStatus === 'approved' || lead.qaStatus === 'published') && (
                           <Button
                             size="sm"
                             variant="outline"

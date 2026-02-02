@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { 
-  Mic, 
-  Play, 
-  Pause, 
-  Download, 
-  Search, 
+import {
+  Mic,
+  Play,
+  Pause,
+  Download,
+  Search,
   Clock,
   Calendar,
   Phone,
@@ -24,13 +24,24 @@ import {
   HardDrive,
   Loader2,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  FileText,
+  Filter,
+  Cloud,
+  Database,
+  Layers,
+  Hash,
+  Star,
+  UserPlus,
+  Send,
+  Zap
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 // Recording status badge colors
 const STATUS_COLORS: Record<string, string> = {
@@ -45,6 +56,12 @@ const STATUS_COLORS: Record<string, string> = {
 const AGENT_TYPE_COLORS: Record<string, string> = {
   ai: 'bg-purple-600',
   human: 'bg-blue-600',
+};
+
+// Source badge colors
+const SOURCE_COLORS: Record<string, string> = {
+  local: 'bg-blue-500',
+  telnyx: 'bg-orange-500',
 };
 
 // Format duration in minutes:seconds
@@ -78,20 +95,32 @@ function formatDate(dateStr: string | null | undefined): string {
 
 interface Recording {
   id: string;
+  telnyxCallId?: string | null;
   campaignId: string | null;
   campaignName: string | null;
   contactId: string | null;
   contactName: string | null;
   contactPhone: string | null;
+  fromNumber?: string | null;
+  toNumber?: string | null;
   agentType: string | null;
   disposition: string | null;
   recordingStatus: string | null;
+  durationSec?: number | null; // Call duration in seconds
   recordingDurationSec: number | null;
   recordingFileSizeBytes: number | null;
   recordingFormat: string | null;
+  recordingUrl?: string | null;
+  recordingS3Key?: string | null; // GCS storage key (if stored permanently)
   startedAt: string | null;
   endedAt: string | null;
-  transcript: string | null;
+  transcript?: string | null;
+  hasTranscript?: boolean;
+  hasRecording?: boolean;
+  source?: string;
+  // Lead tracking
+  leadId?: string | null; // If this recording is already linked to a lead
+  leadQaStatus?: string | null; // QA status of linked lead
 }
 
 interface RecordingsResponse {
@@ -112,7 +141,7 @@ interface RecordingStats {
 }
 
 // Audio player component with full controls
-function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: () => void }) {
+function AudioPlayer({ recordingId, recordingUrl, onClose }: { recordingId: string; recordingUrl?: string | null; onClose: () => void }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -122,21 +151,15 @@ function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: (
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch presigned URL for this recording
-  const { data: urlData, isLoading: urlLoading, error: urlError } = useQuery({
-    queryKey: ['/api/recordings', recordingId, 'url'],
-    queryFn: async () => {
-      const response = await apiRequest('GET', `/api/recordings/${recordingId}/url`);
-      return response.json();
-    },
-  });
+  // Always use our stream endpoint to proxy the audio (bypasses CORS issues with Telnyx)
+  const audioUrl = `/api/recordings/${recordingId}/stream`;
 
   useEffect(() => {
-    if (urlData?.url && audioRef.current) {
-      audioRef.current.src = urlData.url;
+    if (audioUrl && audioRef.current) {
+      audioRef.current.src = audioUrl;
       audioRef.current.load();
     }
-  }, [urlData?.url]);
+  }, [audioUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -194,7 +217,8 @@ function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: (
     setVolume(value[0]);
   };
 
-  if (urlLoading) {
+  // Only show loading if we're setting up audio
+  if (isLoading && !audioUrl) {
     return (
       <div className="flex items-center justify-center p-4 bg-muted rounded-lg">
         <Loader2 className="h-5 w-5 animate-spin mr-2" />
@@ -203,7 +227,7 @@ function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: (
     );
   }
 
-  if (urlError || error || !urlData?.url) {
+  if (error) {
     return (
       <div className="flex items-center justify-center p-4 bg-destructive/10 rounded-lg text-destructive">
         <AlertCircle className="h-5 w-5 mr-2" />
@@ -277,7 +301,7 @@ function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: (
             size="sm"
             asChild
           >
-            <a href={urlData.url} download target="_blank" rel="noopener noreferrer">
+            <a href={audioUrl} download target="_blank" rel="noopener noreferrer">
               <Download className="h-4 w-4 mr-1" />
               Download
             </a>
@@ -293,13 +317,23 @@ function AudioPlayer({ recordingId, onClose }: { recordingId: string; onClose: (
 
 export default function CallRecordingsPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isAdmin = user?.role === 'admin' || user?.role === 'campaign_manager';
   
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
+  const [phoneFilter, setPhoneFilter] = useState('');
+  const [callIdFilter, setCallIdFilter] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
+  const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [minDurationSec, setMinDurationSec] = useState('');
+  const [maxDurationSec, setMaxDurationSec] = useState('');
   const [page, setPage] = useState(1);
   const [expandedRecording, setExpandedRecording] = useState<string | null>(null);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const limit = 20;
 
   // Fetch campaigns for filter
@@ -313,27 +347,47 @@ export default function CallRecordingsPage() {
 
   const callCampaigns = campaigns.filter((c: any) => c.type === 'call');
 
-  // Build query params
+  // Build query params - now using the /all endpoint
   const buildQueryParams = () => {
     const params = new URLSearchParams();
     params.append('page', page.toString());
     params.append('limit', limit.toString());
+    params.append('source', selectedSource);
     if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
     if (searchQuery.trim()) params.append('search', searchQuery.trim());
+    if (phoneFilter.trim()) params.append('phoneNumber', phoneFilter.trim());
+    if (callIdFilter.trim()) params.append('callId', callIdFilter.trim());
+    if (startDate) params.append('startDate', new Date(startDate).toISOString());
+    if (endDate) params.append('endDate', new Date(endDate).toISOString());
+    const parsedMin = Number(minDurationSec);
+    if (minDurationSec && !Number.isNaN(parsedMin)) {
+      params.append('minDurationSec', Math.max(0, Math.round(parsedMin)).toString());
+    }
+    const parsedMax = Number(maxDurationSec);
+    if (maxDurationSec && !Number.isNaN(parsedMax)) {
+      params.append('maxDurationSec', Math.max(0, Math.round(parsedMax)).toString());
+    }
     return params.toString();
   };
 
-  // Fetch recordings
-  const { 
-    data: recordingsData, 
-    isLoading: recordingsLoading, 
-    refetch: refetchRecordings 
+  // Auto-refresh state - poll every 10 seconds for real-time updates
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+
+  // Fetch recordings from unified endpoint with auto-refresh
+  const {
+    data: recordingsData,
+    isLoading: recordingsLoading,
+    refetch: refetchRecordings
   } = useQuery<RecordingsResponse>({
-    queryKey: ['/api/recordings', page, selectedCampaign, searchQuery],
+    queryKey: ['/api/recordings/all', page, selectedCampaign, searchQuery, phoneFilter, callIdFilter, selectedSource, startDate, endDate, minDurationSec, maxDurationSec],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/recordings?${buildQueryParams()}`);
+      const response = await apiRequest('GET', `/api/recordings/all?${buildQueryParams()}`);
       return response.json();
     },
+    // Auto-refresh every 10 seconds when enabled
+    refetchInterval: autoRefreshEnabled ? AUTO_REFRESH_INTERVAL : false,
+    refetchIntervalInBackground: false, // Only refresh when tab is active
   });
 
   // Fetch stats
@@ -345,13 +399,96 @@ export default function CallRecordingsPage() {
     },
   });
 
+  // Sync recordings from Telnyx mutation
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const body: any = {};
+      if (startDate) body.startDate = startDate;
+      if (endDate) body.endDate = endDate;
+      if (phoneFilter.trim()) body.phoneNumber = phoneFilter.trim();
+      
+      const response = await apiRequest('POST', '/api/recordings/telnyx/sync', body);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Sync Complete',
+        description: `Synced ${data.data?.newRecordings || 0} new recordings from Telnyx`,
+      });
+      refetchRecordings();
+      queryClient.invalidateQueries({ queryKey: ['/api/recordings'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Failed to sync recordings from Telnyx',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Transcribe recording mutation
+  const transcribeMutation = useMutation({
+    mutationFn: async ({ recordingId, source }: { recordingId: string; source?: string }) => {
+      const response = await apiRequest('POST', `/api/recordings/${recordingId}/transcribe`, { source });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Transcription Started',
+        description: 'The recording is being transcribed. Check back in a few minutes.',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Transcription Failed',
+        description: error.message || 'Failed to start transcription',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Push to Qualified Lead mutation
+  const pushToLeadMutation = useMutation({
+    mutationFn: async ({ recordingId, notes }: { recordingId: string; notes?: string }) => {
+      const response = await apiRequest('POST', `/api/recordings/${recordingId}/push-to-lead`, { notes });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Lead Created',
+        description: `Recording has been pushed to QA as a qualified lead (ID: ${data.leadId?.substring(0, 8)}...)`,
+      });
+      // Refresh to update the recording's lead status
+      refetchRecordings();
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Failed to Create Lead',
+        description: error.message || 'Could not push recording to qualified lead',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const recordings = recordingsData?.recordings || [];
   const pagination = recordingsData?.pagination;
 
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [selectedCampaign, searchQuery]);
+  }, [
+    selectedCampaign,
+    searchQuery,
+    phoneFilter,
+    callIdFilter,
+    selectedSource,
+    startDate,
+    endDate,
+    minDurationSec,
+    maxDurationSec,
+  ]);
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -363,13 +500,37 @@ export default function CallRecordingsPage() {
             Call Recordings
           </h1>
           <p className="text-muted-foreground mt-1">
-            Browse, search, and playback all call recordings
+            Browse, search, and playback all call recordings from Telnyx
           </p>
         </div>
-        <Button onClick={() => refetchRecordings()} variant="outline">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex gap-2 items-center">
+          {/* Auto-refresh indicator */}
+          <Button
+            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            variant={autoRefreshEnabled ? "default" : "outline"}
+            size="sm"
+            title={autoRefreshEnabled ? "Auto-refresh ON (every 10s)" : "Auto-refresh OFF"}
+          >
+            <Zap className={`h-4 w-4 mr-1 ${autoRefreshEnabled ? 'text-yellow-300' : ''}`} />
+            {autoRefreshEnabled ? 'Live' : 'Paused'}
+          </Button>
+          <Button
+            onClick={() => syncMutation.mutate()}
+            variant="outline"
+            disabled={syncMutation.isPending}
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Cloud className="h-4 w-4 mr-2" />
+            )}
+            Sync from Telnyx
+          </Button>
+          <Button onClick={() => refetchRecordings()} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -428,36 +589,167 @@ export default function CallRecordingsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex flex-wrap gap-4 items-end">
-            <div className="flex-1 min-w-[300px]">
-              <label className="text-sm font-medium mb-2 block">Search</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="space-y-4">
+            {/* Primary Filters Row */}
+            <div className="flex flex-wrap gap-4 items-end">
+              <div className="flex-1 min-w-[250px]">
+                <label className="text-sm font-medium mb-2 block">Search</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by contact name or agent..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="min-w-[180px]">
+                <label className="text-sm font-medium mb-2 block flex items-center gap-1">
+                  <Phone className="h-3 w-3" /> Phone Number
+                </label>
                 <Input
-                  placeholder="Search by contact name, phone, or agent..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
+                  placeholder="Filter by phone..."
+                  value={phoneFilter}
+                  onChange={(e) => setPhoneFilter(e.target.value)}
                 />
               </div>
+
+              <div className="min-w-[180px]">
+                <label className="text-sm font-medium mb-2 block flex items-center gap-1">
+                  <Hash className="h-3 w-3" /> Call ID
+                </label>
+                <Input
+                  placeholder="Telnyx Call ID..."
+                  value={callIdFilter}
+                  onChange={(e) => setCallIdFilter(e.target.value)}
+                />
+              </div>
+
+              <div className="min-w-[150px]">
+                <label className="text-sm font-medium mb-2 block">Source</label>
+                <Select value={selectedSource} onValueChange={setSelectedSource}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Sources" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      <span className="flex items-center gap-2">
+                        <Layers className="h-3 w-3" /> All Sources
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="local">
+                      <span className="flex items-center gap-2">
+                        <Database className="h-3 w-3" /> Local Database
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="telnyx">
+                      <span className="flex items-center gap-2">
+                        <Cloud className="h-3 w-3" /> Telnyx API
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              >
+                <Filter className="h-4 w-4 mr-1" />
+                {showAdvancedFilters ? 'Hide' : 'More'} Filters
+              </Button>
             </div>
 
-            <div className="min-w-[200px]">
-              <label className="text-sm font-medium mb-2 block">Campaign</label>
-              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Campaigns" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Campaigns</SelectItem>
-                  {callCampaigns.map((campaign: any) => (
-                    <SelectItem key={campaign.id} value={campaign.id}>
-                      {campaign.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Advanced Filters Row */}
+            {showAdvancedFilters && (
+              <div className="flex flex-wrap gap-4 items-end pt-2 border-t">
+                <div className="min-w-[160px]">
+                  <label className="text-sm font-medium mb-2 block">Campaign</label>
+                  <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All Campaigns" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Campaigns</SelectItem>
+                      {callCampaigns.map((campaign: any) => (
+                        <SelectItem key={campaign.id} value={campaign.id}>
+                          {campaign.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="min-w-[160px]">
+                  <label className="text-sm font-medium mb-2 block flex items-center gap-1">
+                    <Calendar className="h-3 w-3" /> Start Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="min-w-[160px]">
+                  <label className="text-sm font-medium mb-2 block flex items-center gap-1">
+                    <Calendar className="h-3 w-3" /> End Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="min-w-[160px]">
+                  <label className="text-sm font-medium mb-1 block flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Min Duration (sec)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="Filter shorter calls"
+                    value={minDurationSec}
+                    onChange={(e) => setMinDurationSec(e.target.value)}
+                  />
+                </div>
+
+                <div className="min-w-[160px]">
+                  <label className="text-sm font-medium mb-1 block flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> Max Duration (sec)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="Cap long calls"
+                    value={maxDurationSec}
+                    onChange={(e) => setMaxDurationSec(e.target.value)}
+                  />
+                </div>
+
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setPhoneFilter('');
+                    setCallIdFilter('');
+                    setSelectedCampaign('all');
+                    setSelectedSource('all');
+                    setStartDate('');
+                    setEndDate('');
+                    setMinDurationSec('');
+                    setMaxDurationSec('');
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -495,16 +787,29 @@ export default function CallRecordingsPage() {
                       <div className="flex items-center gap-2 mb-2">
                         <Phone className="h-4 w-4 text-muted-foreground" />
                         <span className="font-medium truncate">
-                          {recording.contactName || 'Unknown Contact'}
+                          {recording.contactName || recording.toNumber || recording.contactPhone || 'Unknown Contact'}
                         </span>
-                        {recording.contactPhone && (
+                        {(recording.contactPhone || recording.toNumber) && recording.contactName && (
                           <span className="text-muted-foreground text-sm">
-                            ({recording.contactPhone})
+                            ({recording.contactPhone || recording.toNumber})
+                          </span>
+                        )}
+                        {/* Show Telnyx call ID if available */}
+                        {recording.telnyxCallId && (
+                          <span className="text-xs text-muted-foreground font-mono truncate max-w-[150px]" title={recording.telnyxCallId}>
+                            ID: {recording.telnyxCallId.substring(0, 12)}...
                           </span>
                         )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        {/* From/To numbers for Telnyx recordings */}
+                        {recording.fromNumber && (
+                          <Badge variant="outline" className="text-xs font-mono">
+                            From: {recording.fromNumber}
+                          </Badge>
+                        )}
+                        
                         {recording.campaignName && (
                           <Badge variant="outline" className="text-xs">
                             {recording.campaignName}
@@ -513,8 +818,8 @@ export default function CallRecordingsPage() {
                         
                         {recording.agentType && (
                           <Badge className={`text-xs text-white ${AGENT_TYPE_COLORS[recording.agentType] || 'bg-gray-500'}`}>
-                            {recording.agentType === 'ai_agent' && <Bot className="h-3 w-3 mr-1" />}
-                            {recording.agentType === 'human_agent' && <User className="h-3 w-3 mr-1" />}
+                            {recording.agentType === 'ai' && <Bot className="h-3 w-3 mr-1" />}
+                            {recording.agentType === 'human' && <User className="h-3 w-3 mr-1" />}
                             {recording.agentType.replace('_', ' ')}
                           </Badge>
                         )}
@@ -528,6 +833,14 @@ export default function CallRecordingsPage() {
                         {recording.disposition && (
                           <Badge variant="secondary" className="text-xs">
                             {recording.disposition.replace(/_/g, ' ')}
+                          </Badge>
+                        )}
+
+                        {/* Transcript indicator */}
+                        {recording.hasTranscript && (
+                          <Badge variant="outline" className="text-xs text-green-600 border-green-600">
+                            <FileText className="h-3 w-3 mr-1" />
+                            Transcribed
                           </Badge>
                         )}
                       </div>
@@ -553,9 +866,76 @@ export default function CallRecordingsPage() {
                       </div>
                     </div>
 
-                    {/* Right side - Play button */}
-                    <div className="flex items-center gap-2">
-                      {recording.recordingStatus === 'stored' ? (
+                    {/* Right side - Actions */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Source badge */}
+                      {recording.source && (
+                        <Badge className={`text-xs text-white ${SOURCE_COLORS[recording.source] || 'bg-gray-500'}`}>
+                          {recording.source === 'local' ? (
+                            <><Database className="h-3 w-3 mr-1" /> Local</>
+                          ) : (
+                            <><Cloud className="h-3 w-3 mr-1" /> Telnyx</>
+                          )}
+                        </Badge>
+                      )}
+
+                      {/* Lead status badge or Push to Lead button */}
+                      {recording.leadId ? (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${
+                            recording.leadQaStatus === 'approved' ? 'text-green-600 border-green-600' :
+                            recording.leadQaStatus === 'rejected' ? 'text-red-600 border-red-600' :
+                            'text-yellow-600 border-yellow-600'
+                          }`}
+                        >
+                          <Star className="h-3 w-3 mr-1" />
+                          Lead ({recording.leadQaStatus || 'pending'})
+                        </Badge>
+                      ) : (
+                        recording.campaignId && recording.contactId && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => pushToLeadMutation.mutate({ recordingId: recording.id })}
+                            disabled={pushToLeadMutation.isPending}
+                            title="Push this recording to QA as a qualified lead"
+                            className="text-green-600 border-green-600 hover:bg-green-50"
+                          >
+                            {pushToLeadMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Send className="h-4 w-4 mr-1" />
+                                Push to QA
+                              </>
+                            )}
+                          </Button>
+                        )
+                      )}
+
+                      {/* Transcribe button - only show if no transcript */}
+                      {!recording.hasTranscript && recording.hasRecording !== false && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => transcribeMutation.mutate({
+                            recordingId: recording.id,
+                            source: recording.source
+                          })}
+                          disabled={transcribeMutation.isPending}
+                          title="Transcribe this recording"
+                        >
+                          {transcribeMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <FileText className="h-4 w-4" />
+                          )}
+                        </Button>
+                      )}
+
+                      {/* Play button */}
+                      {recording.recordingStatus === 'stored' || recording.hasRecording ? (
                         <Button
                           variant={expandedRecording === recording.id ? "secondary" : "outline"}
                           size="sm"
@@ -591,18 +971,59 @@ export default function CallRecordingsPage() {
                     <div className="mt-4">
                       <AudioPlayer
                         recordingId={recording.id}
+                        // Use direct URL in these cases:
+                        // 1. GCS storage (recordingS3Key present) - permanent URL
+                        // 2. Telnyx source - URL was just fetched from Telnyx API
+                        // Only fetch fresh URL for local recordings without GCS storage
+                        recordingUrl={
+                          recording.recordingS3Key 
+                            ? recording.recordingUrl 
+                            : recording.source === 'telnyx' 
+                              ? recording.recordingUrl 
+                              : undefined
+                        }
                         onClose={() => setExpandedRecording(null)}
                       />
                       
                       {/* Show transcript if available */}
-                      {recording.transcript && (
+                      {recording.hasTranscript && (
                         <div className="mt-4 p-3 bg-muted/50 rounded-lg">
-                          <h4 className="text-sm font-medium mb-2">Transcript</h4>
+                          <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Transcript
+                          </h4>
                           <ScrollArea className="h-32">
                             <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                              {recording.transcript}
+                              {recording.transcript || 'Transcript available - click to expand'}
                             </p>
                           </ScrollArea>
+                        </div>
+                      )}
+
+                      {/* Show transcribe button in expanded view if no transcript */}
+                      {!recording.hasTranscript && (
+                        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">
+                              No transcript available
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => transcribeMutation.mutate({ 
+                                recordingId: recording.id, 
+                                source: recording.source 
+                              })}
+                              disabled={transcribeMutation.isPending}
+                            >
+                              {transcribeMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <FileText className="h-4 w-4 mr-1" />
+                              )}
+                              Transcribe Recording
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>

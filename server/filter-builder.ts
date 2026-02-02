@@ -143,17 +143,39 @@ const SPECIAL_HANDLING_FIELDS = [
  */
 export function buildFilterQuery(filterGroup: FilterGroup, table: TableType): SQL | undefined {
   if (!filterGroup.conditions || filterGroup.conditions.length === 0) {
+    console.log('[FILTER_BUILDER] No conditions provided, returning undefined');
     return undefined;
   }
 
-  const conditions = filterGroup.conditions
-    .map(condition => buildCondition(condition, table))
-    .filter(Boolean) as SQL[];
+  console.log('[FILTER_BUILDER] Building filter query with', filterGroup.conditions.length, 'conditions');
+
+  const conditionResults = filterGroup.conditions.map((condition, index) => {
+    const result = buildCondition(condition, table);
+    if (!result) {
+      console.warn(`[FILTER_BUILDER] Condition ${index + 1} returned undefined:`, {
+        field: condition.field,
+        operator: condition.operator,
+        values: condition.values,
+        valueCount: condition.values?.length || 0
+      });
+    } else {
+      console.log(`[FILTER_BUILDER] Condition ${index + 1} built successfully:`, {
+        field: condition.field,
+        operator: condition.operator,
+        valueCount: condition.values?.length || 0
+      });
+    }
+    return result;
+  });
+
+  const conditions = conditionResults.filter(Boolean) as SQL[];
 
   if (conditions.length === 0) {
+    console.warn('[FILTER_BUILDER] All conditions returned undefined - no valid SQL generated');
     return undefined;
   }
 
+  console.log('[FILTER_BUILDER] Built', conditions.length, 'valid SQL conditions with logic:', filterGroup.logic);
   return filterGroup.logic === 'AND' ? and(...conditions) : or(...conditions);
 }
 
@@ -162,9 +184,23 @@ export function buildFilterQuery(filterGroup: FilterGroup, table: TableType): SQ
  */
 function buildCondition(condition: FilterCondition, table: TableType): SQL | undefined {
   const { field, operator, values: rawValues, value } = condition as any;
-  
+
   // Handle both 'values' (array) and 'value' (singular) formats from different FilterBuilder versions
   const values: (string | number)[] = rawValues || (value !== undefined && value !== '' ? [value] : []);
+
+  console.log(`[FILTER_BUILDER] Processing condition: field='${field}', operator='${operator}', values=`, values);
+
+  // Validate field
+  if (!field || typeof field !== 'string') {
+    console.error('[FILTER_BUILDER] Invalid field - field is empty or not a string');
+    return undefined;
+  }
+
+  // Validate operator
+  if (!operator || typeof operator !== 'string') {
+    console.error('[FILTER_BUILDER] Invalid operator - operator is empty or not a string');
+    return undefined;
+  }
 
   // Skip special handling fields (not yet implemented)
   if (SPECIAL_HANDLING_FIELDS.includes(field)) {
@@ -174,6 +210,7 @@ function buildCondition(condition: FilterCondition, table: TableType): SQL | und
 
   // Get the actual column name
   const columnName = getColumnName(field, table);
+  console.log(`[FILTER_BUILDER] Field '${field}' mapped to column '${columnName}'`);
   
   // Check if this is a company field on contacts (requires JOIN)
   const isCompanyField = table === contacts && COMPANY_FIELDS.includes(field);
@@ -358,9 +395,13 @@ function buildRegularFieldCondition(
   isArrayField: boolean
 ): SQL | undefined {
   const column = (table as any)[columnName];
-  
+
   if (!column) {
-    console.warn(`Field ${field} (mapped to ${columnName}) not found in table`);
+    // Get table name for better error reporting
+    const tableName = table === accounts ? 'accounts' : table === contacts ? 'contacts' : table === leads ? 'leads' : 'campaigns';
+    const availableColumns = Object.keys(table).filter(k => !k.startsWith('_')).slice(0, 20);
+    console.error(`[FILTER_BUILDER] Field '${field}' (mapped to '${columnName}') NOT FOUND in ${tableName} table`);
+    console.error(`[FILTER_BUILDER] Available columns (first 20): ${availableColumns.join(', ')}`);
     return undefined;
   }
 

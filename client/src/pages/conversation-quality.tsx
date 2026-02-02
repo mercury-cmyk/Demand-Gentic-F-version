@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   MessageSquare,
   Phone,
@@ -53,7 +54,37 @@ interface ConversationRecord {
   duration?: number;
   transcript?: string;
   transcriptTurns?: TranscriptTurn[];
-  analysis?: any;
+  analysis?: {
+    overallScore?: number;
+    testResult?: string;
+    summary?: string;
+    performanceMetrics?: {
+      identityConfirmed?: boolean;
+      gatekeeperHandled?: boolean;
+      pitchDelivered?: boolean;
+      objectionHandled?: boolean;
+      closingAttempted?: boolean;
+      conversationFlow?: string;
+      rapportBuilding?: string;
+    };
+    qualityDimensions?: {
+      engagement?: number;
+      clarity?: number;
+      empathy?: number;
+      objectionHandling?: number;
+      qualification?: number;
+      closing?: number;
+    };
+    issues?: any[];
+    recommendations?: any[];
+    suggestions?: any[];
+    dispositionReview?: {
+      assignedDisposition?: string;
+      expectedDisposition?: string;
+      isAccurate?: boolean;
+      notes?: string[];
+    };
+  };
   detectedIssues?: any[];
   callSummary?: string;
   testResult?: string;
@@ -243,6 +274,8 @@ export default function ConversationQualityPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedSource, setSelectedSource] = useState<string>('all');
+  const [selectedDisposition, setSelectedDisposition] = useState<string>('all');
+  const [showOnlyWithTranscripts, setShowOnlyWithTranscripts] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedConversation, setSelectedConversation] = useState<ConversationRecord | null>(null);
 
@@ -268,17 +301,35 @@ export default function ConversationQualityPage() {
 
   const allConversations: ConversationRecord[] = qaData?.conversations || [];
 
-  // Apply source filter client-side
-  const conversations = selectedSource === 'all'
-    ? allConversations
-    : allConversations.filter(c => c.source === selectedSource);
+  // Apply filters client-side
+  let conversations = allConversations;
+  
+  // Source filter
+  if (selectedSource !== 'all') {
+    conversations = conversations.filter(c => c.source === selectedSource);
+  }
+  
+  // Disposition filter
+  if (selectedDisposition !== 'all') {
+    conversations = conversations.filter(c => 
+      c.disposition?.toLowerCase().includes(selectedDisposition.toLowerCase())
+    );
+  }
+  
+  // Transcript filter - show only calls with substantial transcripts
+  if (showOnlyWithTranscripts) {
+    conversations = conversations.filter(c => 
+      (c.transcript && c.transcript.length > 100) || 
+      (c.transcriptTurns && c.transcriptTurns.length > 2)
+    );
+  }
 
   const stats = {
     total: conversations.length,
     calls: conversations.filter(c => c.type === 'call' && !c.isTestCall).length,
     emails: conversations.filter(c => c.type === 'email').length,
     testCalls: conversations.filter(c => c.isTestCall).length,
-    withTranscripts: conversations.filter(c => c.transcript || c.transcriptTurns).length,
+    withTranscripts: conversations.filter(c => (c.transcript && c.transcript.length > 100) || (c.transcriptTurns && c.transcriptTurns.length > 2)).length,
   };
 
   return (
@@ -419,6 +470,34 @@ export default function ConversationQualityPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="w-[180px]">
+              <Label htmlFor="disposition">Disposition</Label>
+              <Select value={selectedDisposition} onValueChange={setSelectedDisposition}>
+                <SelectTrigger id="disposition">
+                  <SelectValue placeholder="All Dispositions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Dispositions</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="qualified">Qualified</SelectItem>
+                  <SelectItem value="not_interested">Not Interested</SelectItem>
+                  <SelectItem value="callback">Callback Requested</SelectItem>
+                  <SelectItem value="gatekeeper">Gatekeeper</SelectItem>
+                  <SelectItem value="voicemail">Voicemail</SelectItem>
+                  <SelectItem value="no_answer">No Answer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center space-x-2 pt-6">
+              <Checkbox 
+                id="hasTranscripts" 
+                checked={showOnlyWithTranscripts}
+                onCheckedChange={(checked) => setShowOnlyWithTranscripts(checked === true)}
+              />
+              <Label htmlFor="hasTranscripts" className="text-sm cursor-pointer">
+                Show only with full transcripts
+              </Label>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -430,7 +509,7 @@ export default function ConversationQualityPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Conversations</CardTitle>
             <CardDescription>
-              {conversations.length} conversation{conversations.length !== 1 ? 's' : ''} with transcripts
+              {conversations.length} conversation{conversations.length !== 1 ? 's' : ''} ({stats.withTranscripts} with full transcripts)
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-0">
@@ -511,10 +590,86 @@ export default function ConversationQualityPage() {
                   </div>
 
                   {/* Call Summary */}
-                  {selectedConversation.callSummary && (
+                  {(selectedConversation.callSummary || selectedConversation.analysis?.summary) && (
                     <div className="bg-muted/50 p-3 rounded-lg">
                       <h4 className="text-sm font-medium mb-1">Call Summary</h4>
-                      <p className="text-sm text-muted-foreground">{selectedConversation.callSummary}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {selectedConversation.callSummary || selectedConversation.analysis?.summary}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Analysis Score & Quality Dimensions */}
+                  {selectedConversation.analysis && (
+                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium flex items-center gap-1">
+                          <BarChart3 className="h-4 w-4 text-blue-600" />
+                          Quality Analysis
+                        </h4>
+                        {selectedConversation.analysis.overallScore !== undefined && (
+                          <Badge
+                            variant={selectedConversation.analysis.overallScore >= 70 ? "default" : selectedConversation.analysis.overallScore >= 50 ? "secondary" : "destructive"}
+                            className={selectedConversation.analysis.overallScore >= 70 ? "bg-green-600" : ""}
+                          >
+                            Score: {selectedConversation.analysis.overallScore}/100
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Quality Dimensions Grid */}
+                      {selectedConversation.analysis.qualityDimensions && (
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          {Object.entries(selectedConversation.analysis.qualityDimensions).map(([key, value]) => (
+                            <div key={key} className="bg-white/50 p-2 rounded">
+                              <div className="text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</div>
+                              <div className="font-medium">{String(value)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Performance Metrics */}
+                      {selectedConversation.analysis.performanceMetrics && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedConversation.analysis.performanceMetrics.identityConfirmed && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">Identity Confirmed</Badge>
+                          )}
+                          {selectedConversation.analysis.performanceMetrics.pitchDelivered && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">Pitch Delivered</Badge>
+                          )}
+                          {selectedConversation.analysis.performanceMetrics.objectionHandled && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">Objection Handled</Badge>
+                          )}
+                          {selectedConversation.analysis.performanceMetrics.closingAttempted && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">Closing Attempted</Badge>
+                          )}
+                          {selectedConversation.analysis.performanceMetrics.conversationFlow && (
+                            <Badge variant="outline" className="text-xs">Flow: {selectedConversation.analysis.performanceMetrics.conversationFlow}</Badge>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Recommendations */}
+                  {selectedConversation.analysis?.recommendations && selectedConversation.analysis.recommendations.length > 0 && (
+                    <div className="bg-green-50 border border-green-200 p-3 rounded-lg">
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-1">
+                        <TrendingUp className="h-4 w-4 text-green-600" />
+                        Recommendations ({selectedConversation.analysis.recommendations.length})
+                      </h4>
+                      <div className="space-y-2">
+                        {selectedConversation.analysis.recommendations.slice(0, 3).map((rec: any, idx: number) => (
+                          <div key={idx} className="text-sm bg-white/50 p-2 rounded">
+                            <Badge variant="outline" className="text-xs mb-1">{rec.category}</Badge>
+                            <p className="text-muted-foreground">{rec.suggestedChange}</p>
+                            {rec.expectedImpact && (
+                              <p className="text-green-700 text-xs mt-1">Impact: {rec.expectedImpact}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -548,11 +703,29 @@ export default function ConversationQualityPage() {
                     </div>
                   )}
 
-                  {/* Recording URL */}
-                  {selectedConversation.recordingUrl && (
+                  {/* Recording Playback - uses stream endpoint for reliable playback */}
+                  {(selectedConversation.recordingUrl || selectedConversation.source === 'call_session') && (
                     <div className="bg-muted/50 p-3 rounded-lg">
-                      <h4 className="text-sm font-medium mb-2">Recording</h4>
-                      <audio controls className="w-full" src={selectedConversation.recordingUrl}>
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                        <Phone className="h-4 w-4" />
+                        Call Recording
+                      </h4>
+                      <audio
+                        controls
+                        className="w-full"
+                        src={`/api/recordings/${selectedConversation.id}/stream`}
+                        onError={(e) => {
+                          const target = e.target as HTMLAudioElement;
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent && !parent.querySelector('.audio-error')) {
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'audio-error text-sm text-destructive flex items-center gap-2 p-2 bg-destructive/10 rounded';
+                            errorDiv.innerHTML = '<span>Recording unavailable - may have expired or failed to upload</span>';
+                            parent.appendChild(errorDiv);
+                          }
+                        }}
+                      >
                         Your browser does not support the audio element.
                       </audio>
                     </div>

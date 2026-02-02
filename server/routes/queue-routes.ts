@@ -242,29 +242,67 @@ router.post(
           console.log(`[queues:set] Total resolved: ${campaignContactIds.length} unique contacts from audience refs`);
         }
 
-        // If campaign has no audience defined, return error
+        // If campaign has no audience defined, return error with details
         if (campaignContactIds.length === 0) {
+          const hasSnapshot = snapshot[0]?.contactIds && snapshot[0].contactIds.length > 0;
+          const hasAudienceRefs = !!campaign.audienceRefs;
+          const audienceRefsDetails = campaign.audienceRefs ? {
+            hasFilterGroup: !!(campaign.audienceRefs as any).filterGroup,
+            hasLists: !!((campaign.audienceRefs as any).lists?.length),
+            hasSelectedLists: !!((campaign.audienceRefs as any).selectedLists?.length),
+            hasSegments: !!((campaign.audienceRefs as any).segments?.length),
+          } : null;
+
           console.log('[queues:set] Campaign has no audience defined');
+          console.log('[queues:set] Audience debug info:', {
+            hasSnapshot,
+            hasAudienceRefs,
+            audienceRefsDetails,
+            campaignId,
+            campaignName: campaign.name
+          });
+
           return {
             released,
             assigned: 0,
             skipped_due_to_collision: 0,
             filtered_contacts: [],
-            error: 'Campaign has no audience defined. Please configure campaign audience first.'
+            error: 'Campaign has no audience defined. Please configure campaign audience first.',
+            debug_info: {
+              has_snapshot: hasSnapshot,
+              has_audience_refs: hasAudienceRefs,
+              audience_refs_details: audienceRefsDetails
+            }
           };
         }
 
         // Step 4: Apply agent's filters WITHIN campaign audience
-        console.log('[queues:set] Received filters:', JSON.stringify(filters, null, 2));
-        
+        console.log('[queues:set] ========== FILTER DEBUGGING ==========');
+        console.log('[queues:set] Campaign audience size:', campaignContactIds.length);
+        console.log('[queues:set] Filters received:', filters ? 'yes' : 'no');
+        if (filters) {
+          console.log('[queues:set] Filter logic:', filters.logic);
+          console.log('[queues:set] Filter conditions count:', filters.conditions?.length || 0);
+          filters.conditions?.forEach((condition: any, idx: number) => {
+            console.log(`[queues:set] Condition ${idx + 1}:`, {
+              field: condition.field,
+              operator: condition.operator,
+              values: condition.values,
+              valuesLength: condition.values?.length || 0
+            });
+          });
+        }
+
         // For large campaigns, batch the inArray to avoid PostgreSQL parameter limits
         let eligibleContacts: any[] = [];
         const BATCH_SIZE = 500;
-        
+
         // Build filter SQL once (applies to all batches)
-        const filterPart = filters && filters.conditions && filters.conditions.length > 0 
-          ? buildFilterQuery(filters as FilterGroup, contacts) 
+        const filterPart = filters && filters.conditions && filters.conditions.length > 0
+          ? buildFilterQuery(filters as FilterGroup, contacts)
           : undefined;
+
+        console.log('[queues:set] Filter SQL generated:', filterPart ? 'yes' : 'no (undefined/no conditions)');
         
         // Process campaign contact IDs in batches
         for (let i = 0; i < campaignContactIds.length; i += BATCH_SIZE) {
@@ -1100,9 +1138,24 @@ router.post(
       // Step 2: Apply agent filters within campaign audience
       const BATCH_SIZE = 500;
       let filterMatchCount = 0;
-      
+
+      console.log('[queues:filter-count] ========== FILTER COUNT DEBUGGING ==========');
+      console.log('[queues:filter-count] Campaign audience size:', campaignAudienceCount);
+      console.log('[queues:filter-count] Filter conditions:', filters?.conditions?.length || 0);
+      if (filters?.conditions) {
+        filters.conditions.forEach((condition: any, idx: number) => {
+          console.log(`[queues:filter-count] Condition ${idx + 1}:`, {
+            field: condition.field,
+            operator: condition.operator,
+            values: condition.values,
+            valuesLength: condition.values?.length || 0
+          });
+        });
+      }
+
       const filterPart = buildFilterQuery(filters as FilterGroup, contacts);
-      
+      console.log('[queues:filter-count] Filter SQL generated:', filterPart ? 'yes' : 'no');
+
       for (let i = 0; i < campaignContactIds.length; i += BATCH_SIZE) {
         const batch = campaignContactIds.slice(i, i + BATCH_SIZE);
         const whereConditions: any[] = [inArray(contacts.id, batch)];
@@ -1118,6 +1171,13 @@ router.post(
         
         filterMatchCount += batchResults[0]?.count || 0;
       }
+
+      console.log('[queues:filter-count] Final results:', {
+        campaign_audience_count: campaignAudienceCount,
+        filter_match_count: filterMatchCount,
+        percentage: campaignAudienceCount > 0 ? ((filterMatchCount / campaignAudienceCount) * 100).toFixed(1) + '%' : 'N/A'
+      });
+      console.log('[queues:filter-count] ========================================');
 
       return res.json({
         campaign_audience_count: campaignAudienceCount,
@@ -1369,6 +1429,144 @@ router.get(
     } catch (error) {
       console.error('Error fetching related contacts:', error);
       res.status(500).json({ error: 'Failed to fetch related contacts' });
+    }
+  }
+);
+
+/**
+ * GET /api/campaigns/:campaignId/queues/debug
+ * Debug endpoint to diagnose queue filtering issues
+ *
+ * Returns:
+ * - campaign_info: Campaign configuration
+ * - audience_info: Details about campaign audience (snapshots, refs)
+ * - sample_contacts: First 5 contacts in audience with their field values
+ */
+router.get(
+  '/campaigns/:campaignId/queues/debug',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.campaignId;
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'unauthorized', message: 'User not authenticated' });
+      }
+
+      // Get campaign
+      const [campaign] = await db.select()
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+
+      if (!campaign) {
+        return res.status(404).json({ error: 'not_found', message: 'Campaign not found' });
+      }
+
+      // Check audience snapshot
+      const snapshot = await db.select({
+        id: campaignAudienceSnapshots.id,
+        contactIds: campaignAudienceSnapshots.contactIds,
+        createdAt: campaignAudienceSnapshots.createdAt,
+      })
+      .from(campaignAudienceSnapshots)
+      .where(eq(campaignAudienceSnapshots.campaignId, campaignId))
+      .orderBy(sql`${campaignAudienceSnapshots.createdAt} DESC`)
+      .limit(1);
+
+      const hasSnapshot = snapshot.length > 0 && snapshot[0].contactIds && snapshot[0].contactIds.length > 0;
+      const snapshotSize = hasSnapshot ? snapshot[0].contactIds!.length : 0;
+
+      // Parse audienceRefs
+      const audienceRefs = campaign.audienceRefs as any || {};
+      const audienceRefsInfo = {
+        hasFilterGroup: !!audienceRefs.filterGroup,
+        filterGroupConditions: audienceRefs.filterGroup?.conditions?.length || 0,
+        lists: audienceRefs.lists || [],
+        selectedLists: audienceRefs.selectedLists || [],
+        segments: audienceRefs.segments || [],
+      };
+
+      // Get sample contacts if audience exists
+      let sampleContacts: any[] = [];
+      let campaignContactIds: string[] = [];
+
+      if (hasSnapshot) {
+        campaignContactIds = snapshot[0].contactIds!.slice(0, 100);
+      }
+
+      if (campaignContactIds.length > 0) {
+        sampleContacts = await db.select({
+          id: contacts.id,
+          fullName: contacts.fullName,
+          jobTitle: contacts.jobTitle,
+          seniorityLevel: contacts.seniorityLevel,
+          department: contacts.department,
+          directPhone: contacts.directPhone,
+          mobilePhone: contacts.mobilePhone,
+          accountId: contacts.accountId,
+        })
+        .from(contacts)
+        .where(inArray(contacts.id, campaignContactIds.slice(0, 10)))
+        .limit(10);
+      }
+
+      // Get unique job titles in audience (for debugging filter values)
+      let uniqueJobTitles: string[] = [];
+      let uniqueSeniorityLevels: string[] = [];
+      if (campaignContactIds.length > 0) {
+        const jobTitleResults = await db.selectDistinct({
+          jobTitle: contacts.jobTitle,
+        })
+        .from(contacts)
+        .where(inArray(contacts.id, campaignContactIds))
+        .limit(20);
+        uniqueJobTitles = jobTitleResults.map(r => r.jobTitle).filter(Boolean) as string[];
+
+        const seniorityResults = await db.selectDistinct({
+          seniorityLevel: contacts.seniorityLevel,
+        })
+        .from(contacts)
+        .where(inArray(contacts.id, campaignContactIds))
+        .limit(20);
+        uniqueSeniorityLevels = seniorityResults.map(r => r.seniorityLevel).filter(Boolean) as string[];
+      }
+
+      return res.json({
+        campaign_info: {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+          dialMode: campaign.dialMode,
+        },
+        audience_info: {
+          has_snapshot: hasSnapshot,
+          snapshot_size: snapshotSize,
+          snapshot_created_at: snapshot[0]?.createdAt || null,
+          audience_refs: audienceRefsInfo,
+        },
+        sample_contacts: sampleContacts,
+        available_filter_values: {
+          job_titles_sample: uniqueJobTitles,
+          seniority_levels_sample: uniqueSeniorityLevels,
+          note: 'Use these values for testing filters - they are actual values from contacts in this campaign audience'
+        },
+        tips: {
+          if_zero_results: [
+            '1. Check if campaign_audience_count is 0 - you need to configure campaign audience first',
+            '2. Check if filter values match the available_filter_values samples (case-sensitive for equals, case-insensitive for contains)',
+            '3. Ensure filter conditions have values - empty values array will be skipped',
+            '4. Check server logs for [FILTER_BUILDER] messages for detailed debugging'
+          ]
+        }
+      });
+    } catch (error: any) {
+      console.error('[queues:debug] Error:', error);
+      return res.status(500).json({
+        error: 'debug_failed',
+        message: error.message
+      });
     }
   }
 );

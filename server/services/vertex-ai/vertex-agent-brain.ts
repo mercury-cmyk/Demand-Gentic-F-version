@@ -369,12 +369,24 @@ export async function determineDisposition(
   reasoning: string;
   nextAction?: string;
 }> {
+  // Check for incomplete transcript (missing agent turns)
+  const hasAgentTurns = /\b(Agent|AI|Assistant):/i.test(transcript);
+  const hasProspectTurns = /\b(Prospect|Contact|User|Customer):/i.test(transcript);
+  const transcriptLength = transcript.trim().length;
+  const isIncompleteTranscript = transcriptLength < 200 || (!hasAgentTurns && hasProspectTurns);
+
   const prompt = `Analyze this call transcript and determine the appropriate disposition.
 
 Contact: ${context.contactName} at ${context.companyName}
 
 Transcript:
 ${transcript}
+
+${isIncompleteTranscript ? `
+⚠️ WARNING: This transcript appears to be INCOMPLETE (${!hasAgentTurns ? 'missing agent turns' : 'very short'}). 
+Be conservative in your assessment - if you cannot verify qualification criteria from the transcript,
+do NOT assume "qualified_lead". Use "no_answer" or "not_interested" based on what IS present.
+` : ''}
 
 STRICT QUALIFICATION CRITERIA - A "qualified_lead" MUST meet ALL of these:
 1. The agent successfully delivered a coherent message (not just greetings/confusion)
@@ -383,18 +395,22 @@ STRICT QUALIFICATION CRITERIA - A "qualified_lead" MUST meet ALL of these:
 4. The prospect expressed genuine interest in the topic/offering
 5. There was an agreed next step (meeting, callback, content request, etc.)
 
-If ANY of these are missing, the disposition CANNOT be "qualified_lead".
+If ANY of these are missing OR CANNOT BE VERIFIED from the transcript, the disposition CANNOT be "qualified_lead".
 
 Determine the disposition based on these criteria:
-- qualified_lead: ALL 5 qualification criteria above are met
-- callback_requested: Prospect asked to be called at a specific time
-- not_interested: Prospect politely declined or showed no interest
+- qualified_lead: ALL 5 qualification criteria above are met AND VERIFIED in transcript
+- callback_requested: Prospect explicitly asked to be called at a specific time
+- not_interested: Prospect declined, showed skepticism, or ended call prematurely
 - do_not_call: Prospect explicitly asked not to be called again (DNC request)
 - voicemail: Reached answering machine or voicemail
-- no_answer: Call connected but no meaningful conversation occurred
+- no_answer: Call connected but no meaningful conversation occurred OR transcript incomplete
 - invalid_data: Wrong number, disconnected, or wrong person reached
 
-IMPORTANT: If the agent failed to deliver a coherent message or there was no real conversation, use "no_answer" NOT "qualified_lead".
+IMPORTANT RULES:
+1. If transcript is incomplete or has gaps, lower your confidence and lean toward "not_interested" or "no_answer"
+2. Skeptical questions like "Why are you calling?" or "What do you want?" are NOT interest signals
+3. If prospect hung up or call ended abruptly, that is "not_interested"
+4. Only use "qualified_lead" if you can point to SPECIFIC evidence in the transcript for ALL 5 criteria
 
 Return JSON with:
 {
@@ -425,20 +441,41 @@ Return JSON with:
 
 /**
  * Generate call summary using Vertex AI
+ * CRITICAL: Summary MUST be consistent with the disposition
  */
 export async function summarizeCall(
   transcript: string,
   context: { contactName: string; companyName: string; disposition: string }
 ): Promise<string> {
+  // Map disposition to outcome description for consistency
+  const dispositionOutcomes: Record<string, string> = {
+    'qualified_lead': 'showed interest and agreed to next steps',
+    'not_interested': 'declined or showed no interest',
+    'do_not_call': 'requested removal from contact list',
+    'callback_requested': 'requested a callback at another time',
+    'voicemail': 'reached voicemail, no live conversation',
+    'no_answer': 'no meaningful conversation occurred',
+    'invalid_data': 'wrong number or wrong person reached',
+  };
+  
+  const outcomeDescription = dispositionOutcomes[context.disposition] || 'call outcome unclear';
+
   const prompt = `Summarize this sales call in 2-3 sentences.
 
 Contact: ${context.contactName} at ${context.companyName}
-Disposition: ${context.disposition}
+Final Disposition: ${context.disposition} (${outcomeDescription})
 
 Transcript:
 ${transcript}
 
-Include: who was reached, main outcome, and any follow-up actions needed.`;
+IMPORTANT RULES:
+1. The summary MUST be consistent with the disposition "${context.disposition}"
+2. If disposition is "not_interested", do NOT say the prospect showed interest
+3. If disposition is "qualified_lead", highlight what interest signals were present
+4. If transcript is incomplete or has gaps, acknowledge this in the summary
+5. Include: who was reached, main outcome matching the disposition, and any follow-up actions
+
+Write a factual summary that aligns with the recorded disposition.`;
 
   try {
     return await generateText(prompt, { temperature: 0.3, maxTokens: 200 });

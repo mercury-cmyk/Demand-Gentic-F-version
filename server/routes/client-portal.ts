@@ -97,7 +97,7 @@ function normalizeDomains(input: unknown): string[] {
   const unique = new Set(
     raw
       .map((d) => d.trim().toLowerCase())
-      .filter((d) => d && /^[a-z0-9.-]+\\.[a-z]{2,}$/i.test(d)),
+      .filter((d) => d && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d)),
   );
   return Array.from(unique);
 }
@@ -823,9 +823,11 @@ router.get('/qualified-leads', requireClientAuth, async (req, res) => {
     }
 
     // Build where conditions
+    // Clients only see leads that are published AND submitted to client
     const whereConditions = [
       inArray(leads.campaignId, accessibleCampaignIds),
-      eq(leads.qaStatus, 'approved')
+      eq(leads.qaStatus, 'published'),
+      eq(leads.submittedToClient, true)
     ];
 
     // Filter by specific campaign if provided
@@ -925,17 +927,18 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
       return res.status(404).json({ message: "No campaigns found" });
     }
 
-    // Build where conditions
+    // Build where conditions - only published leads submitted to client
     const whereConditions = [
       inArray(leads.campaignId, accessibleCampaignIds),
-      eq(leads.qaStatus, 'approved')
+      eq(leads.qaStatus, 'published'),
+      eq(leads.submittedToClient, true)
     ];
 
     if (campaignId && typeof campaignId === 'string') {
       whereConditions.push(eq(leads.campaignId, campaignId));
     }
 
-    // Get all approved leads
+    // Get all published leads submitted to client
     const leadsData = await db
       .select({
         id: leads.id,
@@ -1046,7 +1049,7 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
         )
       );
 
-    // Get lead counts per campaign
+    // Get lead counts per campaign - only published leads submitted to client
     const campaignData = await Promise.all(
       accessList.map(async ({ campaign }) => {
         const [count] = await db
@@ -1055,7 +1058,8 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
           .where(
             and(
               eq(leads.campaignId, campaign.id),
-              eq(leads.qaStatus, 'approved')
+              eq(leads.qaStatus, 'published'),
+              eq(leads.submittedToClient, true)
             )
           );
 
@@ -1680,7 +1684,7 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
       .where(eq(clientProjects.clientAccountId, client.id))
       .orderBy(desc(clientProjects.createdAt));
 
-    // Get lead counts for each regular campaign
+    // Get lead counts for each regular campaign (all approved + published leads for admin view)
     const regularCampaignIds = regularAccess.map(a => a.campaign.id);
     let leadCounts: Record<string, number> = {};
     if (regularCampaignIds.length > 0) {
@@ -1693,7 +1697,7 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
         .where(
           and(
             inArray(leads.campaignId, regularCampaignIds),
-            eq(leads.qaStatus, 'approved')
+            inArray(leads.qaStatus, ['approved', 'published'])
           )
         )
         .groupBy(leads.campaignId);

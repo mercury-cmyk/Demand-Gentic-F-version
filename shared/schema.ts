@@ -116,7 +116,8 @@ export const userRoleEnum = pgEnum('user_role', [
   'agent',
   'quality_analyst',
   'content_creator',
-  'campaign_manager'
+  'campaign_manager',
+  'data_ops'
 ]);
 
 // Dialer Run Status Enum
@@ -130,13 +131,14 @@ export const dialerRunStatusEnum = pgEnum('dialer_run_status', [
 
 // Canonical Disposition Code Enum - The ONLY allowed dispositions across platform
 export const canonicalDispositionEnum = pgEnum('canonical_disposition', [
-  'qualified_lead',   // Contact qualified, route to QA
-  'not_interested',   // Contact not interested, suppress from campaign
-  'do_not_call',      // DNC request, global suppression
-  'voicemail',        // Left voicemail, schedule retry
-  'no_answer',        // No answer, schedule retry
-  'invalid_data',     // Wrong number, disconnected, etc.
-  'needs_review'      // Ambiguous call outcome, schedule quick retry and flag for human review
+  'qualified_lead',      // Contact qualified, route to QA
+  'not_interested',      // Contact not interested, suppress from campaign
+  'do_not_call',         // DNC request, global suppression
+  'voicemail',           // Left voicemail, schedule retry
+  'no_answer',           // No answer, schedule retry
+  'invalid_data',        // Wrong number, disconnected, etc.
+  'needs_review',        // Ambiguous call outcome, schedule quick retry and flag for human review
+  'callback_requested'   // Contact requested a callback at a specific time
 ]);
 
 // Campaign Contact State - Audience state machine
@@ -639,7 +641,17 @@ export const activityEventTypeEnum = pgEnum('activity_event_type', [
   'disposition_not_interested',
   'disposition_invalid_data',
   'disposition_voicemail',
-  'disposition_no_answer'
+  'disposition_no_answer',
+  // Admin audit events
+  'lead_deleted',
+  'lead_qa_status_changed',
+  'contact_deleted',
+  'campaign_deleted',
+  'phone_bulk_update',
+  'admin_delete_contacts',
+  'admin_delete_accounts',
+  'admin_delete_leads',
+  'admin_delete_all_data'
 ]);
 
 export const activityEntityTypeEnum = pgEnum('activity_entity_type', [
@@ -851,7 +863,8 @@ export const iamEntityTypeEnum = pgEnum('iam_entity_type', [
   'user',
   'team',
   'role',
-  'policy'
+  'policy',
+  'secret'
 ]);
 
 // IAM Actions - operations that can be performed
@@ -1158,6 +1171,64 @@ export type InsertIamEntityAssignment = z.infer<typeof insertIamEntityAssignment
 export type InsertIamAccessGrant = z.infer<typeof insertIamAccessGrantSchema>;
 export type InsertIamAccessRequest = z.infer<typeof insertIamAccessRequestSchema>;
 export type InsertIamAuditEvent = z.infer<typeof insertIamAuditEventSchema>;
+
+// ==================== SECRET MANAGEMENT ====================
+
+export const secretEnvironmentEnum = pgEnum("secret_environment", [
+  "development", // Non-prod contexts
+  "production"   // Live secrets
+]);
+
+export const secretStore = pgTable("secret_store", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  environment: secretEnvironmentEnum("environment").notNull().default("development"),
+  service: text("service").notNull(),
+  usageContext: text("usage_context").notNull(),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  encryptedValue: text("encrypted_value").notNull(),
+  version: integer("version").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
+  lastRotatedAt: timestamp("last_rotated_at"),
+  rotatedBy: varchar("rotated_by").references(() => users.id, { onDelete: "set null" }),
+  deactivatedAt: timestamp("deactivated_at"),
+  deactivatedBy: varchar("deactivated_by").references(() => users.id, { onDelete: "set null" }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: "set null" }),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  envServiceUsageIdx: uniqueIndex("secret_store_env_service_usage_idx").on(table.environment, table.service, table.usageContext, table.name),
+  environmentIdx: index("secret_store_environment_idx").on(table.environment),
+  serviceIdx: index("secret_store_service_idx").on(table.service),
+  activeIdx: index("secret_store_active_idx").on(table.isActive),
+}));
+
+export const secretStoreRelations = relations(secretStore, ({ one }) => ({
+  createdByUser: one(users, { fields: [secretStore.createdBy], references: [users.id] }),
+  updatedByUser: one(users, { fields: [secretStore.updatedBy], references: [users.id] }),
+  rotatedByUser: one(users, { fields: [secretStore.rotatedBy], references: [users.id] }),
+  deactivatedByUser: one(users, { fields: [secretStore.deactivatedBy], references: [users.id] }),
+  organization: one(campaignOrganizations, { fields: [secretStore.organizationId], references: [campaignOrganizations.id] }),
+}));
+
+export const insertSecretStoreSchema = createInsertSchema(secretStore).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastRotatedAt: true,
+  rotatedBy: true,
+  deactivatedAt: true,
+  deactivatedBy: true,
+  updatedBy: true,
+});
+
+export type SecretStoreRecord = typeof secretStore.$inferSelect;
+export type InsertSecretStore = z.infer<typeof insertSecretStoreSchema>;
+
+export type SecretEnvironment = "production" | "development";
 
 // Custom Field Definitions table
 export const customFieldDefinitions = pgTable("custom_field_definitions", {
@@ -2613,6 +2684,10 @@ export const leads = pgTable("leads", {
   verificationStatus: leadVerificationStatusEnum("verification_status"),
   verificationId: varchar("verification_id"), // Reference to lead_verifications record
   qaDecision: text("qa_decision"), // Clear reason why lead needs review/was rejected
+  
+  // Publishing (QA approved → Published for project management)
+  publishedAt: timestamp("published_at"), // When lead was published
+  publishedBy: varchar("published_by").references(() => users.id), // User who published the lead
   
   // LinkedIn Image Verification
   linkedinImageUrl: text("linkedin_image_url"), // S3 URL of LinkedIn screenshot
@@ -4913,6 +4988,18 @@ export type InsertSoftphoneProfile = typeof softphoneProfiles.$inferInsert;
 export type LeadWithAccount = Lead & {
   accountName?: string | null;
   accountId?: string | null;
+  accountCity?: string | null;
+  accountState?: string | null;
+  accountCountry?: string | null;
+  accountIndustry?: string | null;
+  accountRevenueRange?: string | null;
+  accountEmployeesRange?: string | null;
+  accountLinkedin?: string | null;
+  contactTitle?: string | null;
+  contactCity?: string | null;
+  contactState?: string | null;
+  contactCountry?: string | null;
+  contactLinkedin?: string | null;
   agentFirstName?: string | null;
   agentLastName?: string | null;
   agentEmail?: string | null;
@@ -8967,6 +9054,9 @@ export const dialerCallAttempts = pgTable("dialer_call_attempts", {
   notes: text("notes"),
   recordingUrl: text("recording_url"),
   telnyxCallId: text("telnyx_call_id"), // CRITICAL: Link to Telnyx call control ID for recordings/webhooks
+  // Transcript fields (for Gemini Live calls)
+  fullTranscript: text("full_transcript"), // Full conversation with speaker labels (Agent/Contact)
+  aiTranscript: text("ai_transcript"), // AI agent speech only
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
@@ -9140,7 +9230,7 @@ export type ParticipantCallMemoryNote = typeof participantCallMemoryNotes.$infer
 export type CallFollowupEmail = typeof callFollowupEmails.$inferSelect;
 
 // Canonical disposition type for type safety
-export type CanonicalDisposition = 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data';
+export type CanonicalDisposition = 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' | 'needs_review' | 'callback_requested';
 export type CampaignContactState = 'eligible' | 'locked' | 'waiting_retry' | 'qualified' | 'removed';
 export type DialerRunType = 'manual_dial'; // hybrid and ai_agent share manual_dial mechanics
 export type DialerRunStatus = 'pending' | 'active' | 'paused' | 'completed' | 'cancelled';

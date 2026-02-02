@@ -583,18 +583,36 @@ router.post("/:campaignId/test-calls/:testCallId/analyze", requireAuth, requireR
       });
     }
 
+    // Check transcript quality
+    const transcriptText = testCall.fullTranscript || JSON.stringify(testCall.transcriptTurns, null, 2);
+    const hasAgentTurns = /\b(Agent|AI|Assistant):/i.test(transcriptText);
+    const hasContactTurns = /\b(Contact|Prospect|User|Customer):/i.test(transcriptText);
+    const transcriptQualityWarning = !hasAgentTurns ? `
+⚠️ TRANSCRIPT QUALITY WARNING: The transcript appears to be missing AGENT turns. 
+This is a data capture issue - the agent's responses were not recorded.
+Flag this as "transcript_data_gap" issue with HIGH severity.
+` : '';
+
     const analysisPrompt = `You are an expert B2B sales call analyst. Analyze this B2B cold call transcript and provide actionable feedback for improving the AI agent's performance.
 
 AGENT SYSTEM PROMPT (for context):
 ${agentPrompt}
 
 CALL TRANSCRIPT:
-${testCall.fullTranscript || JSON.stringify(testCall.transcriptTurns, null, 2)}
+${transcriptText}
+${transcriptQualityWarning}
 
 CALL OUTCOME:
 - Duration: ${testCall.durationSeconds || 'Unknown'} seconds
 - Disposition: ${testCall.disposition || 'Unknown'}
 - Summary: ${testCall.callSummary || 'None'}
+
+ANALYSIS RULES:
+1. If the transcript is missing agent turns, flag this as a HIGH severity "transcript_data_gap" issue
+2. If the summary claims "interest" but disposition is "not_interested", flag as "summary_inaccuracy" issue
+3. Skeptical questions ("Why are you calling?", "Who is this?") are NOT interest signals
+4. A call ending with the prospect hanging up or being dismissive is "not_interested", not "qualified"
+5. Be critical - this analysis is used to improve the AI agent
 
 Analyze the call and return a JSON object with:
 {
@@ -611,7 +629,7 @@ Analyze the call and return a JSON object with:
   },
   "detectedIssues": [
     {
-      "type": "<issue_type>",
+      "type": "<issue_type: transcript_data_gap | summary_inaccuracy | objection_handling_failure | purpose_delivery_ineffectiveness | premature_ending | etc>",
       "severity": "low" | "medium" | "high",
       "description": "<what went wrong>",
       "suggestion": "<how to fix it>"
@@ -625,7 +643,7 @@ Analyze the call and return a JSON object with:
       "expectedImprovement": "<what will improve>"
     }
   ],
-  "summary": "<2-3 sentence summary of the analysis>"
+  "summary": "<2-3 sentence summary of the analysis - must be consistent with disposition>"
 }
 
 Return ONLY valid JSON, no other text.`;

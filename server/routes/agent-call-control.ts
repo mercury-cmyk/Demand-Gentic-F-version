@@ -14,6 +14,9 @@
 import { Router, Request, Response as ExpressResponse } from "express";
 import { requireAuth } from "../auth";
 import { z } from "zod";
+import { db } from "../db";
+import { dialerCallAttempts, callSessions } from "@shared/schema";
+import { eq, and, isNull } from "drizzle-orm";
 
 const router = Router();
 const LOG_PREFIX = "[AgentCallControl]";
@@ -202,6 +205,59 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
     };
     activeAgentCalls.set(callControlId, session);
 
+    // CRITICAL: Update dialer_call_attempts with telnyxCallId so recordings can be linked
+    // This enables the recording.completed webhook to find and update the correct record
+    if (contactId) {
+      try {
+        // Find the most recent unprocessed call attempt for this contact/agent
+        const updateResult = await db
+          .update(dialerCallAttempts)
+          .set({
+            telnyxCallId: callControlId,
+            callStartedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(dialerCallAttempts.contactId, contactId),
+              eq(dialerCallAttempts.humanAgentId, agentId),
+              isNull(dialerCallAttempts.telnyxCallId),
+              eq(dialerCallAttempts.dispositionProcessed, false)
+            )
+          );
+        console.log(`${LOG_PREFIX} Linked telnyxCallId ${callControlId} to dialer_call_attempts for contact ${contactId}`);
+      } catch (dbErr) {
+        // Don't fail the call if DB update fails, but log the error
+        console.error(`${LOG_PREFIX} Failed to update dialer_call_attempts with telnyxCallId:`, dbErr);
+      }
+    }
+
+    // CRITICAL: Create call_sessions record so recording appears in Call Recordings dashboard
+    // This enables the recording.completed webhook to update with recording URL
+    try {
+      const [newSession] = await db
+        .insert(callSessions)
+        .values({
+          telnyxCallId: callControlId,
+          fromNumber: fromNumber,
+          toNumberE164: to,
+          startedAt: new Date(),
+          status: 'connecting',
+          agentType: 'human',
+          agentUserId: agentId,
+          campaignId: campaignId || null,
+          contactId: contactId || null,
+          queueItemId: queueItemId || null,
+          recordingStatus: 'pending',
+        })
+        .returning({ id: callSessions.id });
+
+      console.log(`${LOG_PREFIX} Created call_sessions record ${newSession.id} for agent call ${callControlId}`);
+    } catch (sessionErr) {
+      // Don't fail the call if session creation fails, but log the error
+      console.error(`${LOG_PREFIX} Failed to create call_sessions record:`, sessionErr);
+    }
+
     // Return call details to client
     res.json({
       callControlId,
@@ -375,11 +431,27 @@ router.post("/hangup", requireAuth, async (req: Request, res: ExpressResponse) =
       });
     }
 
-    // Update session
+    // Update in-memory session
     const session = activeAgentCalls.get(callControlId);
     if (session) {
       session.status = 'ended';
       session.endedAt = new Date();
+    }
+
+    // Update call_sessions record in database
+    try {
+      const endTime = new Date();
+      await db
+        .update(callSessions)
+        .set({
+          status: 'completed',
+          endedAt: endTime,
+          durationSec: session ? Math.round((endTime.getTime() - session.startedAt.getTime()) / 1000) : null,
+        })
+        .where(eq(callSessions.telnyxCallId, callControlId));
+      console.log(`${LOG_PREFIX} Updated call_sessions record for ${callControlId}`);
+    } catch (dbErr) {
+      console.error(`${LOG_PREFIX} Failed to update call_sessions on hangup:`, dbErr);
     }
 
     console.log(`${LOG_PREFIX} Call hung up successfully:`, callControlId);

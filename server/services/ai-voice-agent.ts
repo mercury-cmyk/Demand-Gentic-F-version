@@ -133,6 +133,7 @@ export interface AiAgentSettings {
     pitch: string;
     objections: string;
     closing: string;
+    systemPrompt?: string;
   };
   handoff: {
     enabled: boolean;
