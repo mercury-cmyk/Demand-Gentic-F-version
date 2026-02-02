@@ -18,7 +18,7 @@
 import { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import * as dgram from 'dgram';
-import { g711ToPcm16k, pcm16kToG711 } from './voice-providers/audio-transcoder';
+import { g711ToPcm16k, pcm16kToG711, detectG711Format, type G711Format } from './voice-providers/audio-transcoder';
 
 const log = (msg: string) => {
   console.log(`[Gemini Live SIP Provider] ${msg}`);
@@ -51,21 +51,24 @@ export class GeminiLiveSIPProvider {
   private config: GeminiLiveSIPProviderConfig;
   private sequenceNumber: number = 0;
   private timestamp: number = Math.floor(Math.random() * 0xffffffff);
+  private g711Format: G711Format = 'ulaw';
 
   constructor(
     callId: string,
     rtpPort: number,
     remoteAddress: string,
     remotePort: number,
-    config: GeminiLiveSIPProviderConfig
+    config: GeminiLiveSIPProviderConfig,
+    toPhoneNumber?: string
   ) {
     this.callId = callId;
     this.rtpPort = rtpPort;
     this.remoteRtpAddress = remoteAddress;
     this.remoteRtpPort = remotePort;
     this.config = config;
+    this.g711Format = detectG711Format(toPhoneNumber);
 
-    log(`Provider created: ${callId} (RTP: ${rtpPort}, Remote: ${remoteAddress}:${remotePort})`);
+    log(`Provider created: ${callId} (RTP: ${rtpPort}, Remote: ${remoteAddress}:${remotePort}, Format: ${this.g711Format})`);
   }
 
   /**
@@ -161,12 +164,12 @@ export class GeminiLiveSIPProvider {
   }
 
   /**
-   * Transcode G.711 (mulaw) audio to PCM
+   * Transcode G.711 audio to PCM
    */
   private transcodeG711ToPcm(g711Buffer: Buffer): Buffer {
     try {
-      // Use existing transcoder (ulaw is standard for telephony)
-      return g711ToPcm16k(g711Buffer, 'ulaw');
+      // Use existing transcoder with detected format
+      return g711ToPcm16k(g711Buffer, this.g711Format);
     } catch (error) {
       logError(`G.711 transcoding error for ${this.callId}`, error);
       return Buffer.alloc(0);
@@ -178,8 +181,8 @@ export class GeminiLiveSIPProvider {
    */
   private transcodePcmToG711(pcmBuffer: Buffer): Buffer {
     try {
-      // Use existing transcoder (ulaw is standard for telephony)
-      return pcm16kToG711(pcmBuffer, 'ulaw');
+      // Use existing transcoder with detected format
+      return pcm16kToG711(pcmBuffer, this.g711Format);
     } catch (error) {
       logError(`PCM transcoding error for ${this.callId}`, error);
       return Buffer.alloc(0);
@@ -401,7 +404,8 @@ export async function createGeminiLiveSIPProvider(
   rtpPort: number,
   remoteAddress: string,
   remotePort: number,
-  config: GeminiLiveSIPProviderConfig
+  config: GeminiLiveSIPProviderConfig,
+  toPhoneNumber?: string
 ): Promise<GeminiLiveSIPProvider | null> {
   try {
     const provider = new GeminiLiveSIPProvider(
@@ -409,7 +413,8 @@ export async function createGeminiLiveSIPProvider(
       rtpPort,
       remoteAddress,
       remotePort,
-      config
+      config,
+      toPhoneNumber
     );
 
     if (await provider.start()) {

@@ -1,0 +1,441 @@
+/**
+ * Number Pool Integration Helper
+ * 
+ * Integrates the number pool router with existing call initiation code.
+ * Provides a drop-in replacement for the legacy TELNYX_FROM_NUMBER approach.
+ * 
+ * Priority order for number selection:
+ * 1. Agent's assigned phone number (if set)
+ * 2. Number pool routing (if enabled)
+ * 3. Legacy TELNYX_FROM_NUMBER fallback
+ * 
+ * Usage:
+ * 1. Replace direct TELNYX_FROM_NUMBER usage with getCallerIdForCall()
+ * 2. After call completes, call handleCallCompleted() to update metrics
+ * 
+ * @see docs/NUMBER_POOL_MANAGEMENT_SYSTEM.md
+ */
+
+import { db } from "../db";
+import { eq } from "drizzle-orm";
+import { virtualAgents } from "@shared/schema";
+import {
+  selectNumber,
+  releaseNumber,
+  recordCallOutcome,
+  isNumberPoolEnabled,
+  type NumberSelectionRequest,
+  type NumberSelectionResult,
+  type CallOutcome,
+} from './number-pool';
+import {
+  updateReputationAfterCall,
+  checkCooldownTriggers,
+  triggerCooldown,
+  getNumberByE164,
+} from './number-pool';
+
+// ==================== TYPES ====================
+
+export interface CallerIdRequest {
+  campaignId: string;
+  virtualAgentId?: string;
+  prospectNumber: string;
+  prospectRegion?: string;
+  prospectTimezone?: string;
+}
+
+export interface CallerIdResult {
+  callerId: string;
+  numberId: string | null;
+  decisionId: string | null;
+  jitterDelayMs: number;
+  selectionReason: string;
+  isPoolNumber: boolean;
+}
+
+export interface CallCompletionData {
+  numberId: string | null;
+  callSessionId?: string;
+  dialerAttemptId?: string;
+  answered: boolean;
+  durationSec: number;
+  disposition: string;
+  failed: boolean;
+  failureReason?: string;
+  prospectNumber: string;
+  campaignId?: string;
+  sipCode?: number;
+  sipReason?: string;
+}
+
+// ==================== MAIN FUNCTIONS ====================
+
+/**
+ * Get caller ID for an outbound call.
+ * 
+ * Priority order:
+ * 1. Agent's assigned phone number (virtualAgents.assignedPhoneNumberId)
+ * 2. Number pool routing (if enabled)
+ * 3. Legacy TELNYX_FROM_NUMBER fallback
+ * 
+ * @example
+ * const { callerId, numberId, jitterDelayMs } = await getCallerIdForCall({
+ *   campaignId: session.campaignId,
+ *   virtualAgentId: session.virtualAgentId,
+ *   prospectNumber: contact.phoneNumber,
+ * });
+ * 
+ * // Apply jitter delay before initiating call
+ * if (jitterDelayMs > 0) {
+ *   await sleep(jitterDelayMs);
+ * }
+ * 
+ * // Use callerId in Telnyx API call
+ * // Store numberId for later metrics update
+ */
+export async function getCallerIdForCall(
+  request: CallerIdRequest
+): Promise<CallerIdResult> {
+  // PRIORITY 1: Check for agent-assigned phone number
+  if (request.virtualAgentId) {
+    const agentNumber = await getAgentAssignedNumber(request.virtualAgentId);
+    if (agentNumber) {
+      console.log(`[NumberPoolIntegration] Using agent-assigned number ${agentNumber.e164} for agent ${request.virtualAgentId}`);
+      return {
+        callerId: agentNumber.e164,
+        numberId: agentNumber.numberId,
+        decisionId: null,
+        jitterDelayMs: calculateAgentJitter(agentNumber.numberId),
+        selectionReason: 'agent_assigned',
+        isPoolNumber: true,
+      };
+    }
+  }
+
+  // PRIORITY 2: Check if number pool is enabled
+  if (!isNumberPoolEnabled()) {
+    return useLegacyCallerId('pool_disabled');
+  }
+
+  try {
+    const selection = await selectNumber({
+      campaignId: request.campaignId,
+      virtualAgentId: request.virtualAgentId,
+      prospectNumber: request.prospectNumber,
+      prospectRegion: request.prospectRegion,
+      prospectTimezone: request.prospectTimezone,
+    });
+
+    // If we got a pool number
+    if (selection.numberId) {
+      console.log(`[NumberPoolIntegration] Selected pool number ${selection.numberE164} for ${request.prospectNumber}`);
+
+      return {
+        callerId: selection.numberE164,
+        numberId: selection.numberId,
+        decisionId: selection.decisionId,
+        jitterDelayMs: selection.jitterDelayMs,
+        selectionReason: selection.selectionReason,
+        isPoolNumber: true,
+      };
+    }
+
+    // Router returned fallback number
+    return {
+      callerId: selection.numberE164,
+      numberId: null,
+      decisionId: null,
+      jitterDelayMs: 0,
+      selectionReason: selection.selectionReason,
+      isPoolNumber: false,
+    };
+  } catch (error) {
+    console.error('[NumberPoolIntegration] Selection error:', error);
+    return useLegacyCallerId('selection_error');
+  }
+}
+
+/**
+ * Handle call completion - update metrics and check cooldown triggers.
+ * 
+ * Call this after a call ends (regardless of outcome) to:
+ * - Update number usage counters
+ * - Record metrics for reputation scoring
+ * - Release the number for reuse
+ * - Check and trigger cooldowns if thresholds exceeded
+ * 
+ * @example
+ * // In call cleanup handler:
+ * await handleCallCompleted({
+ *   numberId: session.callerNumberId, // From getCallerIdForCall
+ *   callSessionId: session.sessionId,
+ *   answered: session.wasAnswered,
+ *   durationSec: session.callDuration,
+ *   disposition: session.disposition,
+ *   failed: session.failed,
+ *   prospectNumber: session.toNumber,
+ *   campaignId: session.campaignId,
+ * });
+ */
+export async function handleCallCompleted(
+  data: CallCompletionData
+): Promise<void> {
+  // Skip if no pool number was used
+  if (!data.numberId) {
+    return;
+  }
+
+  try {
+    // Record the call outcome
+    await recordCallOutcome(data.numberId, {
+      callSessionId: data.callSessionId,
+      dialerAttemptId: data.dialerAttemptId,
+      answered: data.answered,
+      durationSec: data.durationSec,
+      disposition: data.disposition,
+      failed: data.failed,
+      failureReason: data.failureReason,
+      prospectNumber: data.prospectNumber,
+      campaignId: data.campaignId,
+    });
+
+    // Update reputation incrementally
+    await updateReputationAfterCall(data.numberId, {
+      answered: data.answered,
+      durationSec: data.durationSec,
+      isShortCall: data.durationSec > 0 && data.durationSec < 8,
+      isHangup: data.durationSec > 0 && data.durationSec < 3,
+      isVoicemail: data.disposition === 'voicemail',
+      isFailed: data.failed,
+    });
+
+    // Check for carrier blocks
+    if (data.failed && data.sipCode && isCarrierBlockCode(data.sipCode)) {
+      const { handleCarrierBlock } = await import('./number-pool/cooldown-manager');
+      await handleCarrierBlock(data.numberId, data.sipCode, data.sipReason);
+    }
+
+    // Check if cooldown should be triggered
+    const cooldownCheck = await checkCooldownTriggers(data.numberId);
+    if (cooldownCheck.shouldCooldown && cooldownCheck.reason) {
+      console.log(`[NumberPoolIntegration] Cooldown triggered for ${data.numberId}: ${cooldownCheck.reason}`);
+      await triggerCooldown(data.numberId, cooldownCheck.reason, cooldownCheck.cooldownHours);
+    }
+
+  } catch (error) {
+    console.error('[NumberPoolIntegration] Error handling call completion:', error);
+    // Don't throw - this is a non-critical path
+  }
+}
+
+/**
+ * Release a number without recording outcome.
+ * Use this when a call fails before it starts (e.g., API error).
+ */
+export function releaseNumberWithoutOutcome(numberId: string | null): void {
+  if (numberId) {
+    releaseNumber(numberId);
+  }
+}
+
+// ==================== INTERNAL HELPERS ====================
+
+/**
+ * Use legacy TELNYX_FROM_NUMBER fallback
+ */
+function useLegacyCallerId(reason: string): CallerIdResult {
+  const legacyNumber = process.env.TELNYX_FROM_NUMBER;
+
+  if (!legacyNumber) {
+    throw new Error('No caller ID available: Number pool disabled and TELNYX_FROM_NUMBER not configured');
+  }
+
+  console.log(`[NumberPoolIntegration] Using legacy caller ID: ${legacyNumber} (reason: ${reason})`);
+
+  return {
+    callerId: legacyNumber,
+    numberId: null,
+    decisionId: null,
+    jitterDelayMs: 0,
+    selectionReason: `legacy_${reason}`,
+    isPoolNumber: false,
+  };
+}
+
+/**
+ * Check if SIP code indicates a carrier block
+ */
+function isCarrierBlockCode(sipCode: number): boolean {
+  // 603 = Decline
+  // 607 = Unwanted
+  // 608 = Rejected
+  return [603, 607, 608].includes(sipCode);
+}
+
+/**
+ * Get the assigned phone number for an agent
+ */
+async function getAgentAssignedNumber(
+  virtualAgentId: string
+): Promise<{ numberId: string; e164: string } | null> {
+  try {
+    const [agent] = await db
+      .select({
+        assignedPhoneNumberId: virtualAgents.assignedPhoneNumberId,
+      })
+      .from(virtualAgents)
+      .where(eq(virtualAgents.id, virtualAgentId))
+      .limit(1);
+
+    if (!agent?.assignedPhoneNumberId) {
+      return null;
+    }
+
+    // Get the phone number details from telnyx_numbers table
+    const { telnyxNumbers } = await import("@shared/number-pool-schema");
+    const [number] = await db
+      .select({
+        id: telnyxNumbers.id,
+        phoneNumberE164: telnyxNumbers.phoneNumberE164,
+        status: telnyxNumbers.status,
+      })
+      .from(telnyxNumbers)
+      .where(eq(telnyxNumbers.id, agent.assignedPhoneNumberId))
+      .limit(1);
+
+    if (!number || number.status !== 'active') {
+      console.warn(`[NumberPoolIntegration] Agent ${virtualAgentId} has assigned number ${agent.assignedPhoneNumberId} but it's not active`);
+      return null;
+    }
+
+    return {
+      numberId: number.id,
+      e164: number.phoneNumberE164,
+    };
+  } catch (error) {
+    console.error(`[NumberPoolIntegration] Error getting agent assigned number:`, error);
+    return null;
+  }
+}
+
+/**
+ * Calculate jitter for agent-assigned numbers (simpler than pool routing)
+ */
+function calculateAgentJitter(numberId: string): number {
+  // Minimal jitter for agent-assigned numbers (30-60 seconds)
+  // These are dedicated numbers so less aggressive pacing needed
+  return 30000 + Math.random() * 30000;
+}
+
+/**
+ * Assign a phone number to an agent
+ */
+export async function assignNumberToAgent(
+  virtualAgentId: string,
+  phoneNumberId: string
+): Promise<void> {
+  await db
+    .update(virtualAgents)
+    .set({
+      assignedPhoneNumberId: phoneNumberId,
+      updatedAt: new Date(),
+    })
+    .where(eq(virtualAgents.id, virtualAgentId));
+
+  console.log(`[NumberPoolIntegration] Assigned number ${phoneNumberId} to agent ${virtualAgentId}`);
+}
+
+/**
+ * Remove phone number assignment from an agent
+ */
+export async function unassignNumberFromAgent(
+  virtualAgentId: string
+): Promise<void> {
+  await db
+    .update(virtualAgents)
+    .set({
+      assignedPhoneNumberId: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(virtualAgents.id, virtualAgentId));
+
+  console.log(`[NumberPoolIntegration] Unassigned number from agent ${virtualAgentId}`);
+}
+
+/**
+ * Get agents with their assigned phone numbers
+ */
+export async function getAgentsWithNumbers(): Promise<{
+  agentId: string;
+  agentName: string;
+  assignedPhoneNumberId: string | null;
+  phoneNumberE164: string | null;
+}[]> {
+  const { telnyxNumbers } = await import("@shared/number-pool-schema");
+  
+  const results = await db
+    .select({
+      agentId: virtualAgents.id,
+      agentName: virtualAgents.name,
+      assignedPhoneNumberId: virtualAgents.assignedPhoneNumberId,
+      phoneNumberE164: telnyxNumbers.phoneNumberE164,
+    })
+    .from(virtualAgents)
+    .leftJoin(telnyxNumbers, eq(virtualAgents.assignedPhoneNumberId, telnyxNumbers.id))
+    .where(eq(virtualAgents.isActive, true));
+
+  return results;
+}
+
+/**
+ * Sleep utility for jitter delays
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ==================== VOICE DIALER INTEGRATION POINTS ====================
+
+/**
+ * Helper to build voice template values with caller ID from pool.
+ * Use this as a drop-in for the existing buildVoiceTemplateValues pattern.
+ */
+export function buildVoiceTemplateValuesWithPoolNumber(params: {
+  baseValues: Record<string, any>;
+  contactInfo: any;
+  callerId: string;
+  calledNumber?: string | null;
+  orgName?: string;
+}): Record<string, any> {
+  return {
+    ...params.baseValues,
+    // Standard voice variables
+    contactFirstName: params.contactInfo?.firstName || 'there',
+    contactLastName: params.contactInfo?.lastName || '',
+    contactFullName: [params.contactInfo?.firstName, params.contactInfo?.lastName].filter(Boolean).join(' ') || 'there',
+    contactCompany: params.contactInfo?.company || params.contactInfo?.companyName || '',
+    contactTitle: params.contactInfo?.title || params.contactInfo?.jobTitle || '',
+    contactPhone: params.contactInfo?.phoneNumber || params.calledNumber || '',
+    contactEmail: params.contactInfo?.email || '',
+    // Caller info (using pool number instead of env var)
+    callerId: params.callerId,
+    callerNumber: params.callerId,
+    // Organization
+    orgName: params.orgName || '',
+    organizationName: params.orgName || '',
+  };
+}
+
+// ==================== EXPORTS ====================
+
+export default {
+  getCallerIdForCall,
+  handleCallCompleted,
+  releaseNumberWithoutOutcome,
+  assignNumberToAgent,
+  unassignNumberFromAgent,
+  getAgentsWithNumbers,
+  sleep,
+  buildVoiceTemplateValuesWithPoolNumber,
+};

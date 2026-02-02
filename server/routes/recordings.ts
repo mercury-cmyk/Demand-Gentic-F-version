@@ -1772,7 +1772,7 @@ router.post('/:id/retry-sync', async (req: Request, res: Response) => {
 
     console.log(`[Recordings API] Retrying sync for recording: ${id}`);
 
-    // Get the call session
+    // First try to get call session
     const [session] = await db
       .select({
         id: callSessions.id,
@@ -1789,11 +1789,33 @@ router.post('/:id/retry-sync', async (req: Request, res: Response) => {
       .from(callSessions)
       .where(eq(callSessions.id, id));
 
+    // If not found in call_sessions, check dialer_call_attempts
     if (!session) {
-      return res.status(404).json({
-        success: false,
-        error: 'Call session not found',
-      });
+      const [dialerAttempt] = await db
+        .select({
+          id: dialerCallAttempts.id,
+          phoneDialed: dialerCallAttempts.phoneDialed,
+          callStartedAt: dialerCallAttempts.callStartedAt,
+          callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+          telnyxCallId: dialerCallAttempts.telnyxCallId,
+          recordingUrl: dialerCallAttempts.recordingUrl,
+          fullTranscript: dialerCallAttempts.fullTranscript,
+          aiTranscript: dialerCallAttempts.aiTranscript,
+          callSessionId: dialerCallAttempts.callSessionId,
+          campaignId: dialerCallAttempts.campaignId,
+        })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, id));
+
+      if (!dialerAttempt) {
+        return res.status(404).json({
+          success: false,
+          error: 'Recording not found in call_sessions or dialer_call_attempts',
+        });
+      }
+
+      // Handle dialer recording sync
+      return await handleDialerRecordingSync(req, res, dialerAttempt, transcribe);
     }
 
     // If already stored, no need to retry
@@ -1927,5 +1949,177 @@ router.post('/:id/retry-sync', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * Helper function to handle dialer recording sync
+ *
+ * For dialer_call_attempts, we:
+ * 1. Fetch fresh recording URL from Telnyx
+ * 2. If there's a linked callSessionId, store recording there
+ * 3. Update the dialer record's recordingUrl with fresh URL
+ * 4. Optionally trigger transcription
+ */
+async function handleDialerRecordingSync(
+  req: Request,
+  res: Response,
+  dialerAttempt: {
+    id: string;
+    phoneDialed: string | null;
+    callStartedAt: Date | null;
+    callDurationSeconds: number | null;
+    telnyxCallId: string | null;
+    recordingUrl: string | null;
+    fullTranscript: string | null;
+    aiTranscript: string | null;
+    callSessionId: string | null;
+    campaignId: string;
+  },
+  transcribe: boolean
+) {
+  console.log(`[Recordings API] Handling dialer recording sync for: ${dialerAttempt.id}`);
+  console.log(`[Recordings API] Dialer has telnyxCallId: ${dialerAttempt.telnyxCallId || 'NONE'}`);
+  console.log(`[Recordings API] Dialer has linked callSessionId: ${dialerAttempt.callSessionId || 'NONE'}`);
+
+  let freshUrl: string | null = null;
+  let source: string = 'unknown';
+
+  // Strategy 1: Use telnyxCallId to fetch fresh URL
+  if (dialerAttempt.telnyxCallId) {
+    console.log(`[Recordings API] Strategy 1: Fetching via telnyxCallId: ${dialerAttempt.telnyxCallId}`);
+    try {
+      const { fetchTelnyxRecording } = await import('../services/telnyx-recordings');
+      freshUrl = await fetchTelnyxRecording(dialerAttempt.telnyxCallId);
+      if (freshUrl) {
+        source = 'telnyx_call_id';
+        console.log(`[Recordings API] Got fresh URL via telnyxCallId`);
+      }
+    } catch (err: any) {
+      console.warn(`[Recordings API] telnyxCallId lookup failed:`, err.message);
+    }
+  }
+
+  // Strategy 2: Search by phone number and time
+  if (!freshUrl && dialerAttempt.phoneDialed && dialerAttempt.callStartedAt) {
+    console.log(`[Recordings API] Strategy 2: Searching by phone number: ${dialerAttempt.phoneDialed}`);
+    try {
+      const { searchRecordingsByDialedNumber } = await import('../services/telnyx-recordings');
+
+      const searchStart = new Date(dialerAttempt.callStartedAt);
+      searchStart.setMinutes(searchStart.getMinutes() - 30);
+      const searchEnd = new Date(dialerAttempt.callStartedAt);
+      searchEnd.setMinutes(searchEnd.getMinutes() + 30);
+
+      const recordings = await searchRecordingsByDialedNumber(
+        dialerAttempt.phoneDialed,
+        searchStart,
+        searchEnd
+      );
+
+      if (recordings.length > 0) {
+        const recording = recordings.find(r => r.status === 'completed') || recordings[0];
+        freshUrl = recording.download_urls?.mp3 || recording.download_urls?.wav || null;
+
+        if (freshUrl) {
+          source = 'telnyx_phone_search';
+          console.log(`[Recordings API] Found recording via phone search: ${recording.id}`);
+
+          // Update telnyxCallId if missing
+          if (!dialerAttempt.telnyxCallId) {
+            await db.update(dialerCallAttempts)
+              .set({ telnyxCallId: recording.call_control_id })
+              .where(eq(dialerCallAttempts.id, dialerAttempt.id));
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Recordings API] Phone search failed:`, err.message);
+    }
+  }
+
+  if (!freshUrl) {
+    return res.status(404).json({
+      success: false,
+      error: 'Could not find recording in Telnyx',
+      details: 'The recording may have been deleted from Telnyx (retained ~30 days) or was never created.',
+      tried: {
+        telnyxCallId: !!dialerAttempt.telnyxCallId,
+        phoneSearch: !!dialerAttempt.phoneDialed && !!dialerAttempt.callStartedAt,
+      },
+      source: 'dialer_call_attempts',
+    });
+  }
+
+  let s3Key: string | null = null;
+  let storageTarget: string = 'none';
+
+  // If there's a linked call session, store recording there
+  if (dialerAttempt.callSessionId) {
+    console.log(`[Recordings API] Storing recording in linked call session: ${dialerAttempt.callSessionId}`);
+    try {
+      const { storeCallSessionRecording } = await import('../services/recording-storage');
+      s3Key = await storeCallSessionRecording(
+        dialerAttempt.callSessionId,
+        freshUrl,
+        dialerAttempt.callDurationSeconds || undefined
+      );
+      if (s3Key) {
+        storageTarget = 'call_session';
+        console.log(`[Recordings API] Recording stored in call session at: ${s3Key}`);
+      }
+    } catch (err: any) {
+      console.warn(`[Recordings API] Failed to store in call session:`, err.message);
+    }
+  }
+
+  // Always update the dialer record's recordingUrl with fresh URL
+  console.log(`[Recordings API] Updating dialer record with fresh URL...`);
+  await db.update(dialerCallAttempts)
+    .set({ recordingUrl: freshUrl })
+    .where(eq(dialerCallAttempts.id, dialerAttempt.id));
+
+  // Optionally trigger transcription
+  let transcriptStatus: string = 'not_requested';
+  if (transcribe && !dialerAttempt.fullTranscript && !dialerAttempt.aiTranscript) {
+    try {
+      const { submitTranscription } = await import('../services/assemblyai-transcription');
+      const transcript = await submitTranscription(freshUrl);
+      if (transcript) {
+        // Store transcript in dialer record
+        await db.update(dialerCallAttempts)
+          .set({ fullTranscript: transcript })
+          .where(eq(dialerCallAttempts.id, dialerAttempt.id));
+
+        // Also update linked call session if exists
+        if (dialerAttempt.callSessionId) {
+          await db.update(callSessions)
+            .set({ aiTranscript: transcript })
+            .where(eq(callSessions.id, dialerAttempt.callSessionId));
+        }
+
+        transcriptStatus = 'completed';
+        console.log(`[Recordings API] Transcription completed for dialer record`);
+      } else {
+        transcriptStatus = 'failed';
+      }
+    } catch (err: any) {
+      console.warn(`[Recordings API] Transcription failed:`, err.message);
+      transcriptStatus = 'error';
+    }
+  } else if (dialerAttempt.fullTranscript || dialerAttempt.aiTranscript) {
+    transcriptStatus = 'already_exists';
+  }
+
+  res.json({
+    success: true,
+    message: 'Dialer recording successfully synced from Telnyx',
+    data: {
+      s3Key,
+      source,
+      storageTarget,
+      transcriptStatus,
+      recordingUrlUpdated: true,
+    },
+  });
+}
 
 export default router;

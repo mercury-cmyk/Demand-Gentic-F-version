@@ -16,7 +16,7 @@ import { GoogleAuth } from 'google-auth-library';
 import { db } from '../../db';
 import { campaignQueue, type CanonicalDisposition } from '@shared/schema';
 import { eq } from 'drizzle-orm';
-import { g711ToPcm16k, pcm24kToG711, pcm16kToG711 } from '../voice-providers/audio-transcoder';
+import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
 import * as sipClient from './sip-client';
 
@@ -96,6 +96,7 @@ interface BridgeSession {
   voiceName: string;
   systemPrompt: string;
   callContext: CallContext;
+  g711Format: G711Format;
   metrics: AudioMetrics;
   reconnectAttempts: number;
   maxReconnectAttempts: number;
@@ -115,6 +116,7 @@ interface CallContext {
   callAttemptId?: string;
   campaignId?: string;
   contactId?: string;
+  phoneNumber?: string;
   maxCallDurationSeconds?: number;
 }
 
@@ -260,6 +262,7 @@ export async function createBridgeSession(params: {
     voiceName: voiceName || GEMINI_VOICES[0],
     systemPrompt: buildSystemPrompt(context),
     callContext: context,
+    g711Format: detectG711Format((context as any).to || (context as any).phoneNumber),
     metrics: {
       startTime: Date.now(),
       audioChunksSent: 0,
@@ -428,9 +431,9 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
           for (const part of modelTurn.parts) {
             const inlineData = part.inlineData || part.inline_data;
             if (inlineData?.data) {
-              // Transcode from PCM 24kHz to G.711 ulaw
+              // Transcode from PCM 24kHz to G.711
               const pcmBuffer = Buffer.from(inlineData.data, 'base64');
-              const g711Buffer = pcm24kToG711(pcmBuffer, 'ulaw');
+              const g711Buffer = pcm24kToG711(pcmBuffer, session.g711Format);
 
               // Send to SIP via RTP
               sipClient.sendAudio(session.callId, g711Buffer);
@@ -585,8 +588,8 @@ export function handleSipAudio(callId: string, g711Audio: Buffer): void {
     return; // Drop audio until Gemini is ready
   }
 
-  // Transcode G.711 ulaw to PCM 16kHz
-  const pcmBuffer = g711ToPcm16k(g711Audio, 'ulaw');
+  // Transcode G.711 to PCM 16kHz
+  const pcmBuffer = g711ToPcm16k(g711Audio, session.g711Format);
 
   // Send to Gemini
   session.geminiWs.send(JSON.stringify({

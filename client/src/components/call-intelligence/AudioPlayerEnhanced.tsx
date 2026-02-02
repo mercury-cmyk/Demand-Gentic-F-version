@@ -18,6 +18,7 @@ import {
   Download,
   Loader2,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -34,6 +35,8 @@ interface AudioPlayerEnhancedProps {
   onClose?: () => void;
   className?: string;
   onTimeUpdate?: (currentTime: number) => void;
+  onRetrySync?: () => void;
+  isRetrying?: boolean;
 }
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -45,6 +48,8 @@ export function AudioPlayerEnhanced({
   onClose,
   className,
   onTimeUpdate,
+  onRetrySync,
+  isRetrying,
 }: AudioPlayerEnhancedProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -202,14 +207,33 @@ export function AudioPlayerEnhanced({
 
   if (error) {
     return (
-      <div className={cn('flex items-center gap-2 p-4 bg-destructive/10 rounded-lg', className)}>
-        <AlertCircle className="h-5 w-5 text-destructive" />
-        <span className="text-sm text-destructive">{error}</span>
-        {onClose && (
-          <Button variant="ghost" size="sm" onClick={onClose} className="ml-auto">
-            Dismiss
-          </Button>
-        )}
+      <div className={cn('flex flex-col gap-3 p-4 bg-destructive/10 rounded-lg', className)}>
+        <div className="flex items-center gap-2">
+          <AlertCircle className="h-5 w-5 text-destructive" />
+          <span className="text-sm text-destructive">{error}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {onRetrySync && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRetrySync}
+              disabled={isRetrying}
+              className="gap-2"
+            >
+              <RefreshCw className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
+              {isRetrying ? 'Syncing...' : 'Retry Sync from Telnyx'}
+            </Button>
+          )}
+          {onClose && (
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              Dismiss
+            </Button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Recording may have expired. Click "Retry Sync" to fetch a fresh copy from Telnyx.
+        </p>
       </div>
     );
   }

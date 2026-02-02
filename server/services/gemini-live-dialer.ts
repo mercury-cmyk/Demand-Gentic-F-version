@@ -21,7 +21,7 @@ import { db } from "../db";
 import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
 import { audioQualityMonitor } from "./audio-quality-monitor";
-import { g711ToPcm16k, pcm24kToG711, pcm16kToG711 } from "./voice-providers/audio-transcoder";
+import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from "./voice-providers/audio-transcoder";
 import { peekAmdResult, consumeAmdResult } from "./voice-dialer";
 import { processDisposition } from "./disposition-engine";
 import { analyzeConversationQuality } from "./conversation-quality-analyzer";
@@ -157,6 +157,7 @@ interface CallContext {
   callAttemptId?: string;
   campaignId?: string;
   contactId?: string;
+  phoneNumber?: string;
 }
 
 // Call Flow Types (matching client-side definitions)
@@ -647,6 +648,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let systemPrompt: string = 'You are a helpful AI assistant.';
   let aiTranscript: string = "";
   let callContext: CallContext = {};
+  let g711Format: G711Format = 'ulaw'; // Default to ulaw
 
   // TRANSCRIPT ACCUMULATION: Capture both agent and contact speech
   // Uses Gemini's output_audio_transcription and input_audio_transcription features
@@ -855,6 +857,13 @@ CRITICAL RULES:
           callId = msg.start?.call_id;
           callControlId = msg.start?.call_control_id;
 
+          // Detect G.711 format from Telnyx message
+          // This ensures UK (+44) calls correctly use A-law
+          const telnyxTo = msg.start?.metadata?.to || msg.start?.to;
+          const telnyxCodec = msg.start?.media_format?.encoding || msg.start?.media_format?.codec;
+          g711Format = detectG711Format(telnyxTo, telnyxCodec);
+          console.log(`[Gemini Live] 🎙️ Audio format detected: ${g711Format} (To: ${telnyxTo || 'unknown'})`);
+
           // Extract dynamic configuration from client_state
           // Priority: 1) WebSocket message payload, 2) URL query parameter
           const clientStateB64 = msg.start?.custom_parameters?.client_state || urlClientState;
@@ -894,7 +903,14 @@ CRITICAL RULES:
                 callAttemptId: config.call_attempt_id || config.callAttemptId,
                 campaignId: config.campaign_id || config.campaignId,
                 contactId: config.contact_id || config.contactId,
+                phoneNumber: config.to_number || config.toNumber || config.called_number || config.calledNumber || config.phone_number,
               };
+
+              // Re-check format if phoneNumber was in client_state but not in start message
+              if (!telnyxTo && callContext.phoneNumber) {
+                g711Format = detectG711Format(callContext.phoneNumber);
+                console.log(`[Gemini Live] 🎙️ Audio format refined from client_state: ${g711Format}`);
+              }
 
               console.log(`[Gemini Live] 📋 Extracted call context:`, JSON.stringify({
                 ...callContext,
@@ -1174,8 +1190,8 @@ CRITICAL RULES:
               break;
             }
 
-            // CRITICAL FIX: Telnyx sends G.711 PCMU (8kHz, ulaw-encoded).
-            // Gemini expects LINEAR PCM audio, NOT ulaw-encoded.
+            // CRITICAL FIX: Telnyx sends G.711 (8kHz, ulaw or alaw encoded).
+            // Gemini expects LINEAR PCM audio, NOT G.711 encoded.
             // We must decode G.711 to PCM and upsample from 8kHz to 16kHz.
             const g711Buffer = Buffer.from(msg.media.payload, 'base64');
             
@@ -1184,7 +1200,7 @@ CRITICAL RULES:
               recordInboundAudio(callId, g711Buffer);
             }
             
-            const pcm16kBuffer = g711ToPcm16k(g711Buffer, 'ulaw');
+            const pcm16kBuffer = g711ToPcm16k(g711Buffer, g711Format);
             const pcm16kBase64 = pcm16kBuffer.toString('base64');
 
             // Use snake_case for Vertex AI, camelCase for Google AI Studio
@@ -1663,6 +1679,10 @@ CRITICAL RULES:
               }
             }
           },
+          // CRITICAL: Enable transcription of both AI output and user input
+          // This provides full transcript of the conversation for analysis
+          output_audio_transcription: {},
+          input_audio_transcription: {},
           system_instruction: {
             parts: [{ text: systemPrompt }]
           }
@@ -1871,7 +1891,7 @@ CRITICAL RULES:
                 }
 
                 // CRITICAL FIX: Gemini sends PCM audio (typically 24kHz).
-                // Telnyx expects G.711 ulaw (8kHz).
+                // Telnyx expects G.711 (8kHz, ulaw or alaw).
                 // We must downsample and encode to G.711.
                 const pcmBuffer = Buffer.from(part.inlineData.data, 'base64');
 
@@ -1884,13 +1904,13 @@ CRITICAL RULES:
                 // Use the correct transcoding based on detected sample rate
                 let g711Buffer: Buffer;
                 if (geminiSampleRate === 24000) {
-                  g711Buffer = pcm24kToG711(pcmBuffer, 'ulaw');
+                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format);
                 } else if (geminiSampleRate === 16000) {
-                  g711Buffer = pcm16kToG711(pcmBuffer, 'ulaw');
+                  g711Buffer = pcm16kToG711(pcmBuffer, g711Format);
                 } else {
                   // For other rates, assume 24kHz (Gemini Live default)
                   console.warn(`[Gemini Live] ⚠️ Unknown sample rate ${geminiSampleRate}, assuming 24kHz`);
-                  g711Buffer = pcm24kToG711(pcmBuffer, 'ulaw');
+                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format);
                 }
 
                 const g711Base64 = g711Buffer.toString('base64');
@@ -1901,7 +1921,7 @@ CRITICAL RULES:
                 }
 
                 // DEBUG: Log outgoing audio size
-                console.log(`[Gemini Live] 📤 Sending to Telnyx: ${g711Buffer.length} bytes (G.711 ulaw)`);
+                console.log(`[Gemini Live] 📤 Sending to Telnyx: ${g711Buffer.length} bytes (G.711 ${g711Format})`);
 
                 ws.send(JSON.stringify({
                   event: 'media',

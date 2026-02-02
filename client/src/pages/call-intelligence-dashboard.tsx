@@ -152,6 +152,31 @@ export default function CallIntelligenceDashboard() {
     },
   });
 
+  const retrySyncMutation = useMutation({
+    mutationFn: async (callId: string) => {
+      const response = await apiRequest('POST', `/api/recordings/${callId}/retry-sync`, {
+        transcribe: true,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Recording synced!',
+        description: data.data?.transcriptStatus === 'completed'
+          ? 'Recording and transcript are now available.'
+          : 'Recording is now available. Transcript may still be processing.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/call-intelligence/unified'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Sync failed',
+        description: error.message || 'Could not retrieve recording from Telnyx. It may have expired (recordings are kept for ~30 days).',
+        variant: 'destructive',
+      });
+    },
+  });
+
   // Handlers
   const handleFiltersChange = useCallback((newFilters: CallIntelligenceFilters) => {
     setFilters(newFilters);
@@ -179,6 +204,12 @@ export default function CallIntelligenceDashboard() {
       pushToLeadMutation.mutate(selectedCallId);
     }
   }, [selectedCallId, pushToLeadMutation]);
+
+  const handleRetrySync = useCallback(() => {
+    if (selectedCallId) {
+      retrySyncMutation.mutate(selectedCallId);
+    }
+  }, [selectedCallId, retrySyncMutation]);
 
   const calls = callsData?.data?.calls || [];
   const aggregates = callsData?.data?.aggregates;
@@ -419,6 +450,8 @@ export default function CallIntelligenceDashboard() {
                         <AudioPlayerEnhanced
                           recordingId={selectedCall.id}
                           recordingUrl={selectedCall.source === 'dialer' ? undefined : undefined}
+                          onRetrySync={handleRetrySync}
+                          isRetrying={retrySyncMutation.isPending}
                         />
                       </div>
                     )}
@@ -438,7 +471,11 @@ export default function CallIntelligenceDashboard() {
 
                   <TabsContent value="recording" className="flex-1 overflow-auto p-4">
                     {selectedCall.recording.available ? (
-                      <AudioPlayerEnhanced recordingId={selectedCall.id} />
+                      <AudioPlayerEnhanced
+                        recordingId={selectedCall.id}
+                        onRetrySync={handleRetrySync}
+                        isRetrying={retrySyncMutation.isPending}
+                      />
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                         <Mic className="h-12 w-12 mb-4 opacity-50" />

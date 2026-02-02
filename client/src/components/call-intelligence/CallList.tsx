@@ -167,9 +167,13 @@ function CallListItem({ call, isSelected, onSelect }: CallListItemProps) {
             </span>
 
             {/* Date */}
-            <span title={format(new Date(call.startedAt), 'PPpp')}>
-              {formatDistanceToNow(new Date(call.startedAt), { addSuffix: true })}
-            </span>
+            {call.startedAt && !isNaN(new Date(call.startedAt).getTime()) ? (
+              <span title={format(new Date(call.startedAt), 'PPpp')}>
+                {formatDistanceToNow(new Date(call.startedAt), { addSuffix: true })}
+              </span>
+            ) : (
+              <span>--</span>
+            )}
           </div>
 
           {/* Content Indicators */}

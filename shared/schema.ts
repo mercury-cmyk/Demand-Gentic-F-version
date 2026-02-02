@@ -2339,6 +2339,8 @@ export const virtualAgents = pgTable("virtual_agents", {
   // Foundation Agent fields (reusable across campaigns)
   isFoundationAgent: boolean("is_foundation_agent").notNull().default(false), // Marks agent as reusable foundation
   foundationCapabilities: jsonb("foundation_capabilities"), // ["gatekeeper_handling", "right_party_verification", ...]
+  // Assigned phone number - dedicated outbound caller ID for this agent
+  assignedPhoneNumberId: varchar("assigned_phone_number_id"), // FK to telnyx_numbers.id
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -2348,6 +2350,7 @@ export const virtualAgents = pgTable("virtual_agents", {
   activeIdx: index("virtual_agents_active_idx").on(table.isActive),
   demandTypeIdx: index("virtual_agents_demand_type_idx").on(table.demandAgentType),
   skillIdIdx: index("virtual_agents_skill_id_idx").on(table.skillId),
+  assignedPhoneIdx: index("virtual_agents_assigned_phone_idx").on(table.assignedPhoneNumberId),
 }));
 
 // Prompt Perspectives Enum - Different approaches to the same context

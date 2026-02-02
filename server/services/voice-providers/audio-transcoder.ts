@@ -121,6 +121,37 @@ export type G711Format = 'ulaw' | 'alaw';
 export type AudioFormatType = 'g711_ulaw' | 'g711_alaw' | 'pcm_8k' | 'pcm_16k' | 'pcm_24k';
 
 /**
+ * Detect G.711 format from phone number or raw string
+ */
+export function detectG711Format(phoneNumber?: string, rawFormat?: string): G711Format {
+  // 1. Explicit format check
+  if (rawFormat) {
+    const normalized = rawFormat.toLowerCase();
+    if (normalized.includes('alaw') || normalized.includes('pcma') || normalized.includes('g711a')) {
+      return 'alaw';
+    }
+    if (normalized.includes('ulaw') || normalized.includes('pcmu') || normalized.includes('g711u') || normalized.includes('mulaw')) {
+      return 'ulaw';
+    }
+  }
+
+  // 2. Phone number based heuristic
+  // UK (+44), Europe (+3, +4), and most of the world use A-law (PCMA)
+  // North America (+1) and Japan (+81) use mu-law (PCMU)
+  if (phoneNumber) {
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanNumber.startsWith('44')) return 'alaw'; // UK
+    if (cleanNumber.startsWith('1')) return 'ulaw'; // US/Canada
+    
+    // Most international calls outside North America use A-law
+    // This is a safe default for non-+1 numbers
+    return 'alaw';
+  }
+
+  return 'ulaw'; // Default to ulaw
+}
+
+/**
  * Convert G.711 encoded audio to 16-bit PCM at 8kHz
  */
 export function g711ToPcm8k(g711Buffer: Buffer, format: G711Format): Buffer {

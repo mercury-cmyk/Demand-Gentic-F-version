@@ -57,6 +57,7 @@ import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
 import virtualAgentsRouter from './routes/virtual-agents';
+import numberPoolRouter from './routes/number-pool';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
 import dialerRunsRouter from './routes/dialer-runs';
@@ -12907,6 +12908,10 @@ Provide JSON response with:
   // ==================== VIRTUAL AGENTS (AI Personas) ====================
 
   app.use("/api/virtual-agents", virtualAgentsRouter);
+
+  // ==================== NUMBER POOL MANAGEMENT (Multi-DID Routing) ====================
+
+  app.use("/api/number-pool", numberPoolRouter);
 
   // ==================== HYBRID CAMPAIGN AGENTS ====================
 

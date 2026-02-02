@@ -106,6 +106,7 @@ import {
   type AssembledProviderPrompt,
 } from "./provider-prompt-assembly";
 import { normalizeDisposition } from "./disposition-normalizer";
+import { detectG711Format } from "./voice-providers/audio-transcoder";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -453,7 +454,7 @@ function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' |
   return null;
 }
 
-function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' | 'test' } {
+function resolveAudioFormat(message: any, toNumber?: string): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' | 'test' } {
   const envOverride = normalizeG711Format(
     process.env.OPENAI_REALTIME_AUDIO_FORMAT || process.env.TELNYX_AUDIO_FORMAT
   );
@@ -462,6 +463,8 @@ function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; 
     return { format: envOverride, source: 'env' };
   }
 
+  // Use the metadata from start message if available
+  const telnyxTo = toNumber || message?.start?.metadata?.to || message?.start?.to;
   const startFormat = message?.start?.media_format;
   const rawFormat = typeof startFormat === 'string'
     ? startFormat
@@ -471,12 +474,11 @@ function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; 
       || startFormat?.name
       || startFormat?.media_type;
 
-  const telnyxFormat = normalizeG711Format(rawFormat);
-  if (telnyxFormat) {
-    return { format: telnyxFormat, source: 'telnyx' };
-  }
+  // Use the new detection logic which handles phone numbers (UK=alaw, etc.)
+  const detected = detectG711Format(telnyxTo, rawFormat);
+  const source = rawFormat ? 'telnyx' : (telnyxTo ? 'telnyx' : 'default');
 
-  return { format: 'g711_ulaw', source: 'default' };
+  return { format: detected, source };
 }
 
 type RealtimeToolDefinition = {
@@ -852,7 +854,8 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           console.log(`${LOG_PREFIX} 🔍 Raw urlParams:`, JSON.stringify(urlParams));
           console.log(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
 
-          let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
+          const calledNumber = (customParams as any).called_number || (urlParams as any).called_number || null;
+          let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message, calledNumber);
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
           const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
