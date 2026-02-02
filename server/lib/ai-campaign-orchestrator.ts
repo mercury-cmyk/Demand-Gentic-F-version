@@ -29,10 +29,10 @@ import { getOrganizationById } from '../services/problem-intelligence/organizati
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = 20; // Max 20 concurrent calls per campaign unless overridden
-const GLOBAL_MAX_CONCURRENT_CALLS = 50; // System-wide maximum concurrent call channels
+const DEFAULT_MAX_CONCURRENT_CALLS = 25; // Max 25 concurrent calls per campaign unless overridden
+const GLOBAL_MAX_CONCURRENT_CALLS = 50; // System-wide maximum concurrent call channels (Telnyx capacity)
 const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
-const PARALLEL_CALL_BATCH_SIZE = 5; // Batch size of 5 for efficient ramp-up
+const PARALLEL_CALL_BATCH_SIZE = 10; // Batch size of 10 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
 
 // Telnyx error codes that should pause the campaign (account-level issues)

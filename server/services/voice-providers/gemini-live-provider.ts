@@ -877,7 +877,8 @@ CRITICAL RULES:
     const functionCalls = toolCall.function_calls || toolCall.functionCalls;
     if (functionCalls) {
       for (const fc of functionCalls) {
-        const callId = fc.id;
+        // Generate fallback ID if fc.id is undefined (Gemini sometimes omits it)
+        const callId = fc.id || `fc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         this.pendingFunctionCalls.set(callId, { name: fc.name, args: fc.args });
 
         this.emit('function:call', {

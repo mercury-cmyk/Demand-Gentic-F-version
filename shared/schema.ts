@@ -642,6 +642,7 @@ export const activityEventTypeEnum = pgEnum('activity_event_type', [
   'disposition_invalid_data',
   'disposition_voicemail',
   'disposition_no_answer',
+  'disposition_needs_review',
   // Admin audit events
   'lead_deleted',
   'lead_qa_status_changed',

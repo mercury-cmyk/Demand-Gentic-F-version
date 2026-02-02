@@ -20,6 +20,7 @@ import {
   MessageSquare,
   KanbanSquare,
   Settings,
+  Brain,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -79,6 +80,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   MessageSquare,
   KanbanSquare,
   Settings,
+  Brain,
 };
 
 function resolveIcon(iconName: string): LucideIcon {

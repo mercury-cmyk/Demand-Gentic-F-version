@@ -437,7 +437,13 @@ Return JSON only in this strict format:
     recentSignals.push(`Pipeline status: ${signals.pipelineStatus.status}`);
   }
   if (signals.lastTouchAt) {
-    recentSignals.push(`Last touch: ${signals.lastTouchAt.toISOString()}`);
+    // Handle both Date objects and string timestamps from database
+    const lastTouchDate = signals.lastTouchAt instanceof Date 
+      ? signals.lastTouchAt 
+      : new Date(signals.lastTouchAt);
+    if (!isNaN(lastTouchDate.getTime())) {
+      recentSignals.push(`Last touch: ${lastTouchDate.toISOString()}`);
+    }
   }
 
   try {

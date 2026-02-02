@@ -375,6 +375,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Browse, search, and playback all call recordings',
       },
       {
+        id: 'call-intelligence',
+        title: 'Call Intelligence',
+        url: '/call-intelligence',
+        icon: 'Brain',
+        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
+        description: 'Unified view of recordings, transcripts, and quality analysis',
+        badge: { text: 'New', variant: 'new' },
+      },
+      {
         id: 'reports',
         title: 'Reports',
         url: '/reports',

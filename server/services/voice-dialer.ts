@@ -230,6 +230,15 @@ interface OpenAIRealtimeSession {
     ivrMenuRepeatCount: number; // Track repeated IVR menu patterns
     lastIvrMenuHash: string | null; // Hash of last IVR menu heard
   };
+  // Technical audio quality issue tracking (poor connection detection)
+  technicalIssue: {
+    detected: boolean;
+    issueCount: number; // Number of times contact mentioned audio issues
+    firstDetectedAt: Date | null;
+    lastIssueAt: Date | null;
+    offeredCallback: boolean; // Whether we offered to call back
+    phrases: string[]; // Phrases that triggered detection
+  };
   // AMD (Answering Machine Detection) result from Telnyx webhook
   amdResult: {
     detected: boolean;
@@ -1006,6 +1015,15 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 ivrMenuRepeatCount: 0,
                 lastIvrMenuHash: null,
               },
+              // Technical audio quality issue tracking
+              technicalIssue: {
+                detected: false,
+                issueCount: 0,
+                firstDetectedAt: null,
+                lastIssueAt: null,
+                offeredCallback: false,
+                phrases: [],
+              },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
               // Track if wrap-up warning has been sent
@@ -1107,6 +1125,15 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
                 lastTranscriptCheckTime: null,
                 ivrMenuRepeatCount: 0,
                 lastIvrMenuHash: null,
+              },
+              // Technical audio quality issue tracking
+              technicalIssue: {
+                detected: false,
+                issueCount: 0,
+                firstDetectedAt: null,
+                lastIssueAt: null,
+                offeredCallback: false,
+                phrases: [],
               },
               // Campaign-level max call duration (will be fetched from campaign config)
               campaignMaxCallDurationSeconds: null,
@@ -2198,11 +2225,34 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       ensureTelnyxOutboundPacer(session);
     });
 
-    provider.on('transcript:user', (event: any) => {
+    provider.on('transcript:user', async (event: any) => {
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] User: "${event.text}"`);
         session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
         scheduleRealtimeQualityAnalysis(session);
+        
+        // Check for audio quality complaints (Gemini path)
+        const audioIssue = detectAudioQualityComplaint(event.text);
+        if (audioIssue.detected) {
+          session.technicalIssue.issueCount++;
+          session.technicalIssue.lastIssueAt = new Date();
+          session.technicalIssue.phrases.push(audioIssue.phrase);
+          
+          if (!session.technicalIssue.detected) {
+            session.technicalIssue.detected = true;
+            session.technicalIssue.firstDetectedAt = new Date();
+          }
+          
+          console.log(`${LOG_PREFIX} ⚠️ [Gemini] AUDIO QUALITY COMPLAINT DETECTED (${session.technicalIssue.issueCount}x): "${audioIssue.phrase}" - call: ${session.callId}`);
+          
+          // Inject response via Gemini provider
+          if (session.technicalIssue.issueCount >= 2 && !session.technicalIssue.offeredCallback) {
+            session.technicalIssue.offeredCallback = true;
+            await injectGeminiAudioQualityResponse(session, provider, 'callback_offer');
+          } else if (session.technicalIssue.issueCount === 1) {
+            await injectGeminiAudioQualityResponse(session, provider, 'repeat_check');
+          }
+        }
       }
     });
 
@@ -2898,6 +2948,37 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
           });
           scheduleRealtimeQualityAnalysis(session);
 
+          // CRITICAL: Check for audio quality complaints FIRST
+          // Detect phrases like "can't hear you", "bad line", "repeat that"
+          const audioIssue = detectAudioQualityComplaint(message.transcript);
+          if (audioIssue.detected) {
+            session.technicalIssue.issueCount++;
+            session.technicalIssue.lastIssueAt = new Date();
+            session.technicalIssue.phrases.push(audioIssue.phrase);
+            
+            if (!session.technicalIssue.detected) {
+              session.technicalIssue.detected = true;
+              session.technicalIssue.firstDetectedAt = new Date();
+            }
+            
+            console.log(`${LOG_PREFIX} ⚠️ AUDIO QUALITY COMPLAINT DETECTED (${session.technicalIssue.issueCount}x): "${audioIssue.phrase}" - call: ${session.callId}`);
+            
+            // If this is the 2nd+ complaint, offer to call back
+            if (session.technicalIssue.issueCount >= 2 && !session.technicalIssue.offeredCallback) {
+              session.technicalIssue.offeredCallback = true;
+              console.log(`${LOG_PREFIX} 📞 Multiple audio complaints - triggering callback offer for call: ${session.callId}`);
+              
+              // Inject a system message to offer callback
+              await injectAudioQualityResponse(session, 'callback_offer');
+              break; // Don't process further, let the callback offer play out
+            } else if (session.technicalIssue.issueCount === 1) {
+              // First complaint - repeat and check
+              console.log(`${LOG_PREFIX} 🔄 First audio complaint - repeating message for call: ${session.callId}`);
+              await injectAudioQualityResponse(session, 'repeat_check');
+              break;
+            }
+          }
+
           // Mark human as detected for the first time
           if (!session.audioDetection.humanDetected) {
             session.audioDetection.humanDetected = true;
@@ -3412,6 +3493,173 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
   // Couldn't determine with high confidence - treat as potential human to be safe
   console.log(`${LOG_PREFIX} [AudioDetect] UNKNOWN (treating as human): "${normalizedText.substring(0, 50)}..."`);
   return { type: 'human', confidence: 0.5 }; // Changed from 'unknown' to 'human' - be safe and respond
+}
+
+/**
+ * Detect audio quality complaints from the contact
+ * Returns true if the contact is indicating they can't hear properly
+ * 
+ * Common phrases:
+ * - "Can you repeat that?" / "Say that again"
+ * - "I can't hear you" / "Can't hear"
+ * - "Bad line" / "Terrible line"
+ * - "Hello?" (confused, repeated)
+ * - "What?" / "Pardon?"
+ * - "Breaking up" / "Cutting out"
+ */
+function detectAudioQualityComplaint(transcript: string): { detected: boolean; phrase: string; severity: 'low' | 'medium' | 'high' } {
+  const lowerTranscript = transcript.toLowerCase().trim();
+  
+  // High severity - explicit audio quality complaints
+  const highSeverityPatterns = [
+    { pattern: /can(')?t hear (you|anything)/i, phrase: "can't hear you" },
+    { pattern: /cannot hear/i, phrase: "cannot hear" },
+    { pattern: /bad line/i, phrase: "bad line" },
+    { pattern: /terrible line/i, phrase: "terrible line" },
+    { pattern: /really bad (line|connection|audio)/i, phrase: "bad connection" },
+    { pattern: /breaking up/i, phrase: "breaking up" },
+    { pattern: /cutting out/i, phrase: "cutting out" },
+    { pattern: /very (noisy|crackly|distorted)/i, phrase: "noisy/distorted" },
+    { pattern: /lot of (noise|static)/i, phrase: "noise/static" },
+    { pattern: /audio (is )?(terrible|awful|bad)/i, phrase: "bad audio" },
+  ];
+  
+  for (const { pattern, phrase } of highSeverityPatterns) {
+    if (pattern.test(lowerTranscript)) {
+      return { detected: true, phrase, severity: 'high' };
+    }
+  }
+  
+  // Medium severity - requests to repeat
+  const mediumSeverityPatterns = [
+    { pattern: /can you repeat that/i, phrase: "repeat that" },
+    { pattern: /could you repeat/i, phrase: "repeat" },
+    { pattern: /say that again/i, phrase: "say again" },
+    { pattern: /repeat that,? please/i, phrase: "repeat please" },
+    { pattern: /didn(')?t (catch|hear|get) that/i, phrase: "didn't catch that" },
+    { pattern: /sorry,? (what|pardon)/i, phrase: "sorry what" },
+    { pattern: /pardon\??$/i, phrase: "pardon" },
+    { pattern: /^what\??$/i, phrase: "what?" },
+    { pattern: /come again\??/i, phrase: "come again" },
+  ];
+  
+  for (const { pattern, phrase } of mediumSeverityPatterns) {
+    if (pattern.test(lowerTranscript)) {
+      return { detected: true, phrase, severity: 'medium' };
+    }
+  }
+  
+  // Low severity - confused "hello" (often indicates they can't hear)
+  // Only trigger if it's a standalone confused hello
+  if (/^hello\?*$/i.test(lowerTranscript) || /^(hello|hi)\?+ (hello|hi)\?*$/i.test(lowerTranscript)) {
+    return { detected: true, phrase: "confused hello", severity: 'low' };
+  }
+  
+  return { detected: false, phrase: '', severity: 'low' };
+}
+
+/**
+ * Inject a response to handle audio quality issues
+ * Uses conversation.item.create to add a system message that guides the agent's response
+ */
+async function injectAudioQualityResponse(session: OpenAIRealtimeSession, responseType: 'repeat_check' | 'callback_offer'): Promise<void> {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    let instructions: string;
+    
+    if (responseType === 'repeat_check') {
+      instructions = `The contact just indicated they couldn't hear you properly (audio quality issue detected).
+
+RESPOND IMMEDIATELY with this EXACT pattern:
+1. Acknowledge: "I apologize for the connection quality."
+2. Check: "Can you hear me clearly now?"
+3. Wait for their response.
+
+EXAMPLE: "I apologize for the connection quality. Can you hear me clearly now?"
+
+If they confirm they can hear you, continue with your introduction.
+If they still can't hear, you will offer to call them back.
+
+DO NOT:
+- Repeat your entire previous message
+- Ask "who am I speaking with" again
+- Ignore the audio issue
+- Continue without checking`;
+    } else {
+      instructions = `The contact has indicated MULTIPLE TIMES they cannot hear you properly. This is a persistent audio quality issue.
+
+RESPOND IMMEDIATELY with a callback offer:
+"I sincerely apologize - it seems we have a poor connection today. Would it be better if I called you back in a few minutes, or is there another number that might work better?"
+
+THEN:
+- If they give another number: Note it and confirm you'll call them there
+- If they prefer callback later: Confirm a time and end gracefully
+- If they want to continue: Say "Let me speak a bit slower and louder - please stop me if you still can't hear clearly" and proceed
+
+This is CRITICAL - do not ignore the audio issue or continue as if nothing happened.`;
+    }
+
+    // Create a system message to guide the agent
+    const systemMessage = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'system',
+        content: [{
+          type: 'input_text',
+          text: instructions,
+        }],
+      },
+    };
+    
+    session.openaiWs.send(JSON.stringify(systemMessage));
+    
+    // Trigger immediate response
+    const responseCreate = {
+      type: 'response.create',
+      response: {
+        modalities: ['audio', 'text'],
+      },
+    };
+    
+    session.openaiWs.send(JSON.stringify(responseCreate));
+    
+    console.log(`${LOG_PREFIX} 🎤 Injected audio quality response (${responseType}) for call: ${session.callId}`);
+    
+  } catch (err) {
+    console.error(`${LOG_PREFIX} Failed to inject audio quality response:`, err);
+  }
+}
+
+/**
+ * Inject audio quality response for Gemini provider
+ * Sends a text message that Gemini will speak
+ */
+async function injectGeminiAudioQualityResponse(
+  session: OpenAIRealtimeSession,
+  provider: GeminiLiveProvider,
+  responseType: 'repeat_check' | 'callback_offer'
+): Promise<void> {
+  try {
+    let message: string;
+    
+    if (responseType === 'repeat_check') {
+      message = "I apologize for the connection quality. Can you hear me clearly now?";
+    } else {
+      message = "I sincerely apologize - it seems we have a poor connection today. Would it be better if I called you back in a few minutes, or is there another number that might work better?";
+    }
+    
+    // Send as a text message that Gemini will speak
+    provider.sendTextMessage(message);
+    
+    console.log(`${LOG_PREFIX} 🎤 [Gemini] Injected audio quality response (${responseType}) for call: ${session.callId}`);
+    
+  } catch (err) {
+    console.error(`${LOG_PREFIX} Failed to inject Gemini audio quality response:`, err);
+  }
 }
 
 /**
@@ -4239,7 +4487,12 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   if (session.detectedDisposition) {
     console.log(`${LOG_PREFIX} ✅ Disposition from AI submit_disposition: ${disposition}`);
   } else {
-    console.log(`${LOG_PREFIX} ⚠️ AI did NOT call submit_disposition - using fallback mapOutcomeToDisposition: ${disposition} (outcome=${outcome}, transcripts=${session.transcripts.length})`);
+    // AI didn't call submit_disposition - this is NORMAL when:
+    // 1. User hung up before AI could submit
+    // 2. Call ended due to no-human detection
+    // 3. Call ended due to max duration
+    // The fallback mapOutcomeToDisposition analyzes transcripts to determine correct disposition
+    console.log(`${LOG_PREFIX} 📊 Auto-disposition (user hangup/system end): ${disposition} (analyzed from outcome=${outcome}, transcripts=${session.transcripts.length})`);
   }
 
   // Check for voicemail in transcript
@@ -5487,12 +5740,32 @@ async function validateSessionIdentifiers(
       return { valid: false, error: `Queue item ${queueItemId} not found` };
     }
 
-    if (queueItem.status !== 'in_progress') {
-      return { valid: false, error: `Queue item is not locked (status: ${queueItem.status})` };
-    }
-
-    // Verify lock ownership - the queue item must be locked by the same agent as the call attempt AND the run
+    // RACE CONDITION FIX: If queue item is still 'queued' but we have a valid call attempt,
+    // auto-lock it. This handles the race where WebSocket connects before orchestrator PRE-LOCK completes.
     const expectedVirtualAgentId = callAttempt.virtualAgentId;
+    if (queueItem.status === 'queued') {
+      console.log(`${LOG_PREFIX} 🔄 AUTO-LOCK: Queue item ${queueItemId} is 'queued' but call attempt exists. Attempting auto-lock...`);
+      try {
+        await db.update(campaignQueue).set({
+          status: 'in_progress',
+          virtualAgentId: expectedVirtualAgentId,
+          updatedAt: new Date(),
+          lockExpiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minute lock
+        }).where(
+          and(
+            eq(campaignQueue.id, queueItemId),
+            eq(campaignQueue.status, 'queued') // Only update if still queued (optimistic lock)
+          )
+        );
+        console.log(`${LOG_PREFIX} ✅ AUTO-LOCK: Queue item ${queueItemId} locked successfully`);
+      } catch (autoLockError) {
+        console.error(`${LOG_PREFIX} ❌ AUTO-LOCK failed:`, autoLockError);
+        return { valid: false, error: `Queue item is not locked (status: ${queueItem.status}) and auto-lock failed` };
+      }
+    } else if (queueItem.status !== 'in_progress') {
+      // Status is something other than 'queued' or 'in_progress' (e.g., 'completed', 'failed')
+      return { valid: false, error: `Queue item has invalid status for call: ${queueItem.status}` };
+    }
     if (queueItem.virtualAgentId !== expectedVirtualAgentId) {
       return { valid: false, error: `Queue item locked by different agent (expected: ${expectedVirtualAgentId}, actual: ${queueItem.virtualAgentId})` };
     }
@@ -6708,9 +6981,9 @@ function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
 
     // TIME LIMIT ENFORCEMENT with graceful wrap-up
     // - Warn AI 30 seconds before limit to start wrapping up
-    // - Force terminate 30 seconds after limit (absolute max for valuable conversations)
+    // - Force terminate 15 seconds after limit (reduced from 30s for stricter enforcement)
     const WRAP_UP_WARNING_SECONDS = 30; // Warn AI to wrap up 30s before limit
-    const ABSOLUTE_MAX_GRACE_SECONDS = 30; // Absolute max is limit + 30s grace
+    const ABSOLUTE_MAX_GRACE_SECONDS = 15; // Reduced from 30s - stricter enforcement
 
     // Only enforce time limits if effectiveMaxDuration is positive (> 0)
     if (effectiveMaxDuration > 0) {
@@ -6793,6 +7066,30 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       return;
     }
 
+    // ENHANCED VOICEMAIL DETECTION: One-way conversation pattern
+    // If we've been talking for 45+ seconds but got no substantive human responses, it's likely voicemail
+    // A real human would respond back with questions/acknowledgments within this timeframe
+    const MAX_ONE_WAY_CONVERSATION_SECONDS = 45;
+    if (elapsedSeconds > MAX_ONE_WAY_CONVERSATION_SECONDS && !session.detectedDisposition) {
+      // Count meaningful user responses (more than just "hello", "yes", single words)
+      const substantiveUserResponses = session.transcripts.filter(t => 
+        t.role === 'user' && t.text && t.text.split(/\s+/).length >= 3 // At least 3 words
+      ).length;
+      
+      // Count AI messages
+      const aiMessages = session.transcripts.filter(t => t.role === 'assistant').length;
+      
+      // If AI sent 2+ messages but got 0 substantive responses, likely voicemail/IVR
+      if (aiMessages >= 2 && substantiveUserResponses === 0) {
+        console.warn(`${LOG_PREFIX} ONE-WAY CONVERSATION DETECTED - AI sent ${aiMessages} messages, got ${substantiveUserResponses} substantive responses in ${elapsedSeconds}s`);
+        console.log(`${LOG_PREFIX} Transcripts: ${JSON.stringify(session.transcripts.map(t => ({ role: t.role, words: t.text?.split(/\s+/).length || 0, preview: t.text?.substring(0, 30) })))}`);
+        
+        session.detectedDisposition = 'voicemail';
+        endCall(session.callId, 'voicemail');
+        return;
+      }
+    }
+
     // CRITICAL FIX: End call if no human detected after 30 seconds
     // This prevents AI from talking to voicemail/IVR for extended periods
     // Reduced from 60s to 30s based on analysis showing 700+ calls running 60s+ on voicemail
@@ -6814,6 +7111,18 @@ Do NOT start any new topics. Do NOT ask new discovery questions. Focus ONLY on c
       }
 
       endCall(session.callId, session.detectedDisposition === 'voicemail' ? 'voicemail' : 'no_answer');
+      return;
+    }
+    
+    // HARD MAX DURATION FALLBACK: Absolute maximum regardless of conversation state
+    // This catches any edge cases where voicemail wasn't detected
+    const ABSOLUTE_HARD_MAX_SECONDS = 180; // 3 minutes absolute max for any call
+    if (elapsedSeconds > ABSOLUTE_HARD_MAX_SECONDS) {
+      console.warn(`${LOG_PREFIX} ABSOLUTE HARD MAX - Force ending call ${session.callId} after ${elapsedSeconds}s (hard limit: ${ABSOLUTE_HARD_MAX_SECONDS}s)`);
+      if (!session.detectedDisposition) {
+        session.detectedDisposition = 'voicemail';
+      }
+      endCall(session.callId, session.detectedDisposition || 'voicemail');
       return;
     }
 

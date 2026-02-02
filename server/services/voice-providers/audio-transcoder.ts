@@ -156,38 +156,44 @@ export function pcm8kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
  * Soft noise gate to reduce background noise
  * Uses a soft knee to avoid harsh gating artifacts
  * Only affects samples below the threshold, preserving speech
+ * 
+ * UPDATED Feb 2026: Made much more conservative to prevent cutting into speech
+ * which was causing "noisy" distorted audio when speech was partially gated
  *
  * @param pcmBuffer - Input PCM audio buffer (16-bit LE)
- * @param threshold - Noise floor threshold (0-32767, default 150 for telephony)
- * @param ratio - Reduction ratio for samples below threshold (0-1, default 0.3)
+ * @param threshold - Noise floor threshold (0-32767, default 80 - very conservative)
+ * @param ratio - Reduction ratio for samples below threshold (0-1, default 0.5 - gentle)
  * @returns Noise-gated PCM buffer
  */
-function softNoiseGate(pcmBuffer: Buffer, threshold: number = 150, ratio: number = 0.3): Buffer {
+function softNoiseGate(pcmBuffer: Buffer, threshold: number = 80, ratio: number = 0.5): Buffer {
   const samples = pcmBuffer.length / 2;
   if (samples === 0) return pcmBuffer;
 
   // Calculate RMS energy to detect if there's actual speech
   let sumSquared = 0;
+  let peakSample = 0;
   for (let i = 0; i < samples; i++) {
     const sample = pcmBuffer.readInt16LE(i * 2);
     sumSquared += sample * sample;
+    if (Math.abs(sample) > peakSample) peakSample = Math.abs(sample);
   }
   const rms = Math.sqrt(sumSquared / samples);
 
-  // If RMS is above threshold, this chunk has speech - don't gate
-  // Only apply gating to quiet chunks (background noise)
-  if (rms > threshold * 2) {
+  // CRITICAL: If any speech detected (RMS > 50 or peak > 200), don't gate at all
+  // This prevents the gate from cutting into speech transitions
+  if (rms > 50 || peakSample > 200) {
     return pcmBuffer;
   }
 
-  // Apply soft gating to reduce noise in quiet sections
+  // Only apply very gentle gating to truly silent sections
   const output = Buffer.alloc(pcmBuffer.length);
   for (let i = 0; i < samples; i++) {
     let sample = pcmBuffer.readInt16LE(i * 2);
     const absSample = Math.abs(sample);
 
+    // Only gate very quiet samples (noise floor)
     if (absSample < threshold) {
-      // Soft reduction for samples below threshold
+      // Gentle reduction - preserve more of the signal
       sample = Math.round(sample * ratio);
     }
 
@@ -278,7 +284,8 @@ function normalizeAudio(pcmBuffer: Buffer, targetLevel: number = 0.9): Buffer {
 
 /**
  * Generate windowed sinc filter coefficients for anti-aliasing
- * Uses Hamming window for good stopband attenuation with minimal ringing
+ * Uses Blackman window for better stopband attenuation with minimal ringing
+ * (Blackman has less ringing than Hamming, which reduces voice artifacts)
  *
  * @param numTaps - Number of filter taps (must be odd)
  * @param cutoffFreq - Normalized cutoff frequency (0 to 0.5, where 0.5 = Nyquist)
@@ -299,8 +306,9 @@ function generateLowPassFilter(numTaps: number, cutoffFreq: number): number[] {
       sinc = Math.sin(2 * Math.PI * cutoffFreq * n) / (Math.PI * n);
     }
 
-    // Hamming window - provides good stopband attenuation
-    const window = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (numTaps - 1));
+    // Blackman window - provides better stopband attenuation with less ringing than Hamming
+    const window = 0.42 - 0.5 * Math.cos(2 * Math.PI * i / (numTaps - 1)) 
+                       + 0.08 * Math.cos(4 * Math.PI * i / (numTaps - 1));
 
     coeffs[i] = sinc * window;
     sum += coeffs[i];
@@ -316,13 +324,14 @@ function generateLowPassFilter(numTaps: number, cutoffFreq: number): number[] {
 
 // Pre-computed filter for 24kHz → 8kHz (3:1 ratio)
 // Input Nyquist = 12kHz, Output Nyquist = 4kHz
-// Cutoff at 3.4kHz (normalized: 3.4/12 = 0.283)
-const FILTER_24K_TO_8K = generateLowPassFilter(31, 0.28); // 31 taps, cutoff at ~3.4kHz
+// Cutoff at 3.2kHz (normalized: 3.2/12 = 0.267)
+// REDUCED to 15 taps to minimize ringing artifacts that cause "noise" on voice
+const FILTER_24K_TO_8K = generateLowPassFilter(15, 0.26); // 15 taps, cutoff at ~3.2kHz
 
 // Pre-computed filter for 16kHz → 8kHz (2:1 ratio)
 // Input Nyquist = 8kHz, Output Nyquist = 4kHz
 // Cutoff at 3.5kHz (normalized: 3.5/8 = 0.44)
-const FILTER_16K_TO_8K = generateLowPassFilter(21, 0.42); // 21 taps, cutoff at ~3.4kHz
+const FILTER_16K_TO_8K = generateLowPassFilter(11, 0.42); // 11 taps, cutoff at ~3.4kHz
 
 /**
  * Apply low-pass FIR filter for anti-aliasing before downsampling.
@@ -421,65 +430,107 @@ export function resamplePcm(
 }
 
 /**
+ * Apply subtle high-frequency boost to improve speech clarity
+ * Uses a simple first-order high-shelf filter to enhance consonants and sibilance
+ * This makes speech more intelligible over telephony without sounding harsh
+ * 
+ * @param pcmBuffer - Input PCM audio buffer (16-bit LE, 16kHz)
+ * @param boostDb - Amount of high-frequency boost in dB (default 2.0 - subtle)
+ * @returns Enhanced PCM buffer
+ */
+function applyClarityBoost(pcmBuffer: Buffer, boostDb: number = 2.0): Buffer {
+  const samples = pcmBuffer.length / 2;
+  if (samples === 0) return pcmBuffer;
+
+  // Convert dB to linear gain
+  const boostGain = Math.pow(10, boostDb / 20);
+  
+  // Simple first-order high-shelf filter coefficients
+  // Cutoff around 2kHz for speech clarity (alpha controls shelf frequency)
+  const alpha = 0.15; // Controls the transition frequency
+  const output = Buffer.alloc(pcmBuffer.length);
+  
+  let prevInput = 0;
+  let prevOutput = 0;
+
+  for (let i = 0; i < samples; i++) {
+    const input = pcmBuffer.readInt16LE(i * 2);
+    
+    // High-pass component (difference from previous sample = high frequencies)
+    const highPass = input - prevInput;
+    
+    // Mix original with boosted high frequencies
+    // Original signal + (high-frequency component * (boost - 1))
+    const enhanced = input + (highPass * alpha * (boostGain - 1));
+    
+    // Soft clipping to prevent harsh distortion
+    let clipped = enhanced;
+    if (Math.abs(enhanced) > 30000) {
+      const sign = enhanced > 0 ? 1 : -1;
+      clipped = sign * (30000 + (Math.abs(enhanced) - 30000) * 0.1);
+    }
+    
+    output.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(clipped))), i * 2);
+    
+    prevInput = input;
+    prevOutput = clipped;
+  }
+
+  return output;
+}
+
+/**
  * Convert G.711 (8kHz) to PCM 16kHz for Gemini Live API input
  * This is the main function for Telnyx -> Gemini audio path
  *
  * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
  * 1. G.711 decode
- * 2. Soft noise gate to reduce background interference from prospect's phone
- * 3. Upsample to 16kHz (no aliasing risk with upsampling)
+ * 2. Remove DC offset (prevents clicking)
+ * 3. Very gentle noise gate (only on truly silent sections)
+ * 4. Upsample to 16kHz (no aliasing risk with upsampling)
+ * 5. Apply subtle high-frequency boost for clarity
  */
 export function g711ToPcm16k(g711Buffer: Buffer, format: G711Format): Buffer {
   // Step 1: Decode G.711 to PCM 8kHz
   const pcm8k = g711ToPcm8k(g711Buffer, format);
 
-  // Step 2: Apply soft noise gate to reduce background noise from prospect
-  // This helps Gemini focus on speech without interference
-  const gatedPcm = softNoiseGate(pcm8k, 120, 0.25);
+  // Step 2: Remove DC offset first (this prevents clicking/popping)
+  const dcCorrected = removeDcOffset(pcm8k);
 
-  // Step 3: Upsample to 16kHz with linear interpolation
+  // Step 3: Apply VERY gentle noise gate - only on truly silent sections
+  // Using conservative threshold (60) and gentle ratio (0.6) to avoid cutting speech
+  const gatedPcm = softNoiseGate(dcCorrected, 60, 0.6);
+
+  // Step 4: Upsample to 16kHz with linear interpolation
   // No filtering needed for upsampling (no aliasing risk)
   const pcm16k = resamplePcm(gatedPcm, 8000, 16000);
 
-  return pcm16k;
+  // Step 5: Apply subtle clarity boost (high-frequency enhancement)
+  const enhanced = applyClarityBoost(pcm16k);
+
+  return enhanced;
 }
 
 /**
- * Improved 3:1 decimation with weighted averaging (Gaussian-like kernel)
- * Uses a 5-point weighted average centered on each output sample
- * This provides better anti-aliasing than simple 3-point averaging
- * while avoiding the chunk boundary artifacts of full FIR filters
- *
- * Kernel: [0.1, 0.25, 0.3, 0.25, 0.1] (normalized Gaussian-like weights)
+ * Improved 3:1 decimation using simple point-picking after filtering
+ * Since we've already applied a proper anti-aliasing filter,
+ * we can just pick every 3rd sample - no need for additional weighted averaging
+ * which was causing additional noise/distortion artifacts
+ * 
+ * This is cleaner because the FIR filter already removed high frequencies
  */
 function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
   const inputSamples = inputBuffer.length / 2;
   const outputSamples = Math.floor(inputSamples / 3);
   const outputBuffer = Buffer.alloc(outputSamples * 2);
 
-  // Gaussian-like kernel weights (sum = 1.0)
-  const weights = [0.10, 0.25, 0.30, 0.25, 0.10];
-  const halfKernel = 2; // 5-point kernel, 2 samples on each side
-
+  // After anti-aliasing filter, simply pick every 3rd sample (at center of each group)
   for (let i = 0; i < outputSamples; i++) {
-    const centerIdx = i * 3 + 1; // Center of the 3-sample group
-    let sum = 0;
-    let weightSum = 0;
-
-    // Apply weighted average with 5-point kernel
-    for (let k = -halfKernel; k <= halfKernel; k++) {
-      const srcIdx = centerIdx + k;
-      if (srcIdx >= 0 && srcIdx < inputSamples) {
-        const sample = inputBuffer.readInt16LE(srcIdx * 2);
-        const weight = weights[k + halfKernel];
-        sum += sample * weight;
-        weightSum += weight;
-      }
+    const srcIdx = i * 3 + 1; // Center sample of each 3-sample group
+    if (srcIdx < inputSamples) {
+      const sample = inputBuffer.readInt16LE(srcIdx * 2);
+      outputBuffer.writeInt16LE(sample, i * 2);
     }
-
-    // Normalize by actual weight sum (handles edge cases)
-    const avg = weightSum > 0 ? Math.round(sum / weightSum) : 0;
-    outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, avg)), i * 2);
   }
 
   return outputBuffer;
@@ -490,20 +541,29 @@ function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
  * This is the main function for Gemini -> Telnyx audio path
  *
  * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
- * 1. Soft noise gate to reduce background interference
- * 2. Improved weighted decimation (Gaussian kernel) for better anti-aliasing
- * 3. Encode to G.711
+ * 1. Remove DC offset (prevents clicking at chunk boundaries)
+ * 2. Normalize audio to prevent clipping
+ * 3. Apply proper FIR anti-aliasing filter (not just averaging)
+ * 4. Encode to G.711
+ * 
+ * NOTE: Removed noise gate from outbound path - Gemini output is already clean
+ * and gating was causing audio artifacts that made speech sound "noisy"
  */
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
-  // Step 1: Apply soft noise gate to reduce background noise/interference
-  // This helps with intermittent noise issues some calls experience
-  const gatedPcm = softNoiseGate(pcmBuffer, 150, 0.3);
+  // Step 1: Remove DC offset first (prevents clicking/pops at chunk boundaries)
+  const dcCorrected = removeDcOffset(pcmBuffer);
 
-  // Step 2: Improved 3:1 decimation with Gaussian-weighted averaging (24kHz → 8kHz)
-  // Uses 5-point weighted kernel for better anti-aliasing without chunk boundary issues
-  const pcm8k = simpleDecimate3to1(gatedPcm);
+  // Step 2: Normalize to prevent clipping (only if too loud)
+  const normalized = normalizeAudio(dcCorrected, 0.92);
 
-  // Step 3: Encode to G.711
+  // Step 3: Apply proper anti-aliasing FIR filter before downsampling
+  // This prevents the "noise" caused by aliasing artifacts
+  const filtered = applyLowPassFilter(normalized, 0.28); // Cutoff at 3.4kHz
+
+  // Step 4: Decimate 3:1 (24kHz → 8kHz) using improved weighted averaging
+  const pcm8k = simpleDecimate3to1(filtered);
+
+  // Step 5: Encode to G.711
   return pcm8kToG711(pcm8k, format);
 }
 

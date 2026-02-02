@@ -472,6 +472,30 @@ export default function CallRecordingsPage() {
     },
   });
 
+  // Retry sync for failed recordings
+  const retrySyncMutation = useMutation({
+    mutationFn: async ({ recordingId }: { recordingId: string }) => {
+      const response = await apiRequest('POST', `/api/recordings/${recordingId}/retry-sync`, { transcribe: true });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: 'Recording Synced',
+        description: data.data?.transcriptStatus === 'completed'
+          ? 'Recording recovered and transcription completed!'
+          : 'Recording recovered from Telnyx and stored.',
+      });
+      refetchRecordings();
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Sync Failed',
+        description: error.message || 'Could not recover recording from Telnyx. It may have been deleted.',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const recordings = recordingsData?.recordings || [];
   const pagination = recordingsData?.pagination;
 
@@ -955,12 +979,28 @@ export default function CallRecordingsPage() {
                             </>
                           )}
                         </Button>
+                      ) : recording.recordingStatus === 'failed' ? (
+                        // Failed recording - show retry button
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => retrySyncMutation.mutate({ recordingId: recording.id })}
+                          disabled={retrySyncMutation.isPending}
+                          className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                          title="Retry fetching recording from Telnyx"
+                        >
+                          {retrySyncMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                          )}
+                          Retry Sync
+                        </Button>
                       ) : (
                         <Badge variant="secondary" className="text-xs">
                           {recording.recordingStatus === 'pending' && 'Awaiting upload'}
                           {recording.recordingStatus === 'recording' && 'Recording in progress'}
                           {recording.recordingStatus === 'uploading' && 'Uploading...'}
-                          {recording.recordingStatus === 'failed' && 'Upload failed'}
                         </Badge>
                       )}
                     </div>

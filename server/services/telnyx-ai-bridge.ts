@@ -56,6 +56,7 @@ export interface ActiveAiCall {
   disposition?: string;
   isAnswered?: boolean;
   hasEnded?: boolean; // Prevent duplicate hangup processing
+  slotReleased?: boolean; // Prevent double semaphore release
   amdResult?: string;
   amdConfidence?: number;
 }
@@ -231,6 +232,21 @@ export class TelnyxAiBridge extends EventEmitter {
       queuedCalls: this.semaphore.queueLength,
       availableSlots: this.semaphore.available,
     };
+  }
+
+  // Safely release a semaphore slot for a call (prevents double-release)
+  private releaseSlot(callId: string, call: ActiveAiCall | undefined, reason: string): void {
+    if (!call) {
+      console.log(`[TelnyxAiBridge] 🔓 Cannot release slot for ${callId} - call not found`);
+      return;
+    }
+    if (call.slotReleased) {
+      console.log(`[TelnyxAiBridge] 🔓 Slot already released for ${callId}, skipping`);
+      return;
+    }
+    call.slotReleased = true;
+    this.semaphore.release();
+    console.log(`[TelnyxAiBridge] 🔓 Released slot (${reason}) for ${callId} - available: ${this.semaphore.available}`);
   }
 
   // Process queued calls when a slot opens up
@@ -661,6 +677,8 @@ export class TelnyxAiBridge extends EventEmitter {
           timedOutCall.disposition = "no-answer";
           await this.handleCallHangup(callId, timedOutCall);
         }
+        // CRITICAL: Release semaphore slot when call ends
+        this.releaseSlot(callId, timedOutCall, 'timeout');
         this.activeCalls.delete(callId);
         return;
       }
@@ -684,6 +702,8 @@ export class TelnyxAiBridge extends EventEmitter {
               }
               await this.handleCallHangup(callId, endedCall);
             }
+            // CRITICAL: Release semaphore slot when call ends
+            this.releaseSlot(callId, endedCall, '404');
             this.activeCalls.delete(callId);
             return;
           }
@@ -720,6 +740,8 @@ export class TelnyxAiBridge extends EventEmitter {
           if (endedCall) {
             await this.handleCallHangup(callId, endedCall);
           }
+          // CRITICAL: Release semaphore slot when call ends
+          this.releaseSlot(callId, endedCall, 'ended');
           this.activeCalls.delete(callId);
           return;
         }
@@ -1057,6 +1079,8 @@ export class TelnyxAiBridge extends EventEmitter {
       call.mediaWs.close();
     }
 
+    // CRITICAL: Release semaphore slot when call ends normally (before deleting from map)
+    this.releaseSlot(callId, call, 'hangup');
     this.activeCalls.delete(callId);
   }
 

@@ -75,6 +75,7 @@ import recordingsRouter from './routes/recordings';
 import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import researchAnalysisRouter from './routes/research-analysis-routes';
+import callIntelligenceRouter from './routes/call-intelligence-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -12964,8 +12965,20 @@ Provide JSON response with:
   // ==================== CALL CAMPAIGN REPORTING ROUTES ====================
   app.use('/api/reports/calls', reportingRoutes);
 
-  // ==================== CALL RECORDINGS ====================
+  // ==================== CALL RECORDINGS (PUBLIC STREAM ROUTE) ====================
+  // Audio stream endpoint must be public for <audio> elements (can't send auth headers)
+  // Security note: Recording IDs are UUIDs and endpoint only proxies existing recordings
+  app.get('/api/recordings/:id/stream', async (req, res) => {
+    // Delegate to the recordings router's stream handler
+    const recordingsModule = await import('./routes/recordings');
+    return recordingsModule.streamRecording(req, res);
+  });
+
+  // ==================== CALL RECORDINGS (AUTHENTICATED) ====================
   app.use('/api/recordings', requireAuth, recordingsRouter);
+
+  // ==================== CALL INTELLIGENCE ====================
+  app.use('/api/call-intelligence', callIntelligenceRouter);
 
   // ==================== ENGAGEMENT ANALYTICS ENDPOINT ====================
   app.get('/api/analytics/engagement', requireAuth, async (req, res) => {
