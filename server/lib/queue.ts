@@ -213,15 +213,21 @@ export function createQueue<T = any>(
     removeOnFail?: boolean | number;
   }
 ): Queue<T> | null {
-  const connection = getRedisConnection();
-  
-  if (!connection) {
+  const redisUrl = getRedisUrl();
+  if (!isRedisConfigured() || !redisUrl) {
     if (shouldLogQueueWarnings()) {
       console.warn(`[Queue] Queue "${queueName}" created without Redis - jobs will not persist`);
     }
     // Return a mock queue that logs warnings
     return null;
   }
+
+  // Create a DEDICATED connection for this queue to prevent "Command queue state error"
+  // Sharing connections between queues/workers can cause command/reply desynchronization
+  const connection = new IORedis(redisUrl, {
+    ...getRedisConnectionOptions(),
+    maxRetriesPerRequest: null // Required for BullMQ
+  });
 
   return new Queue<T>(queueName, {
     connection,
