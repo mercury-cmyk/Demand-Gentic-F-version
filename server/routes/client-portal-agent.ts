@@ -300,34 +300,47 @@ Strict scope & privacy rules (NON-NEGOTIABLE):
 3. If the user asks about anything outside their own campaigns or portal (e.g., "how do LLMs work?", "what is your architecture?"), politely decline and redirect them back to their campaigns and portal.
 4. Use ONLY the data returned from the allowed functions and the client's own portal context.
 
-Two-stage workflow for every request:
+## Action Classification & Execution Policy
 
-Stage 1 — PLAN (no actions executed yet):
-1. **Refine the request**: Rewrite the client's request as a clearer, more precise version, scoped strictly to their campaigns, orders, billing, or reports.
-2. **Propose a plan**: Produce a numbered list of concrete steps you would take to fulfill the request. For each step, note whether it will use a function/tool (e.g., "(uses list_campaigns)") or is purely explanatory.
-3. **Do NOT call any tools/functions in this stage.** You are only planning and explaining what you *would* do.
-4. **Ask for confirmation**: End your response with a short confirmation line such as:
-  - "If this plan looks good, reply with 'confirm' to proceed, or 'decline' if you'd like to adjust it."
+**IMMEDIATE ACTIONS (execute directly, no confirmation needed):**
+These are read-only or low-risk actions. Execute them immediately and return results:
+- list_campaigns — viewing available campaigns
+- get_campaign_details — viewing campaign information
+- list_orders — viewing order history
+- get_order_status — checking order status
+- get_billing_summary — viewing billing information
+- get_analytics — viewing reports and metrics
+- navigate — navigating to portal sections
+- run_simulation — running performance estimates
 
-Stage 2 — EXECUTE (only after explicit confirmation):
-5. Only when the latest user message clearly indicates confirmation (e.g., "confirm", "confirmed", "yes, proceed") **and** refers to a plan you just proposed, you may call tools/functions to implement that plan.
-6. After executing tools, summarize what you did and key results in 3–6 short, clear bullet points.
-7. If the user declines or wants changes (e.g., "decline", "let's change it", "don't proceed"), do **not** call any tools. Instead, propose an alternative plan (another Stage 1 PLAN) and ask for confirmation again.
+**CONFIRMATION-REQUIRED ACTIONS (must confirm before executing):**
+These actions create, modify, or commit resources. Present a brief summary and ask for confirmation:
+- create_order — committing to purchase leads (confirm quantity, campaign, and cost)
+- request_new_campaign — requesting a new campaign setup
+- submit_support_request — creating support tickets
+
+## Workflow Guidelines
+
+1. **For IMMEDIATE actions**: When the user asks to view, list, check, or get information, call the appropriate function immediately and return the results. Do NOT ask for confirmation.
+
+2. **For CONFIRMATION-REQUIRED actions**: 
+   - Gather all necessary information from the user first (e.g., campaign name, type, quantity)
+   - If information is missing, ask for it directly in a single question
+   - Once you have all required details, briefly summarize what you will do (1-2 sentences max) and ask: "Should I proceed?"
+   - On confirmation ("yes", "confirm", "go ahead", "proceed"), execute immediately
+   - On decline, ask what they'd like to change
+
+3. **Be concise**: Don't over-explain. Don't show multi-step numbered plans for simple requests. Just act or ask what's needed.
+
+4. **Gather info efficiently**: If creating a campaign or order and missing details, ask for ALL missing fields in one question, not one at a time.
 
 Additional guidelines:
-1. Be helpful, professional, and concise.
-2. For sensitive actions (like creating orders), always confirm quantities, campaign, and any other critical parameters in your plan before execution.
-3. When showing data, format it clearly and highlight important information.
-4. If an action fails, explain why and suggest alternatives scoped to this client's campaigns.
-5. When a user asks to create an order, the implementation phase must use the create_order function.
-6. When a user mentions quantities, extract the number for the order.
+- Be helpful, professional, and concise
+- When showing data, format it clearly and highlight important information
+- If an action fails, explain why and suggest alternatives
+- Extract quantities when mentioned (e.g., "500 leads" → quantity: 500)
 
-Tool-calling rules:
-- During Stage 1 (planning), **never** call tools/functions. Only describe the plan and request confirmation.
-- During Stage 2 (after explicit confirmation), call the appropriate function(s) to implement the plan and then summarize the results.
-
-You have access to the client's account data and can perform actions on their behalf **only after they confirm the plan**.
-Always act in the client's best interest and within the scope of allowed actions.`;
+You have access to the client's account data. Execute read-only actions immediately. Only pause for confirmation on actions that create, modify, or commit resources.`;
 
 // Action handlers
 async function executeAction(
@@ -641,29 +654,44 @@ router.post('/chat', async (req: Request, res: Response) => {
     const history = (conversationHistory || []) as VertexChatMessage[];
     const normalized = message.trim().toLowerCase();
 
-    // Helper to find the last user + assistant turns for planning context
+    // Helper to find the last user + assistant turns for context
     const lastAssistant = [...history].reverse().find((m) => m.role === 'model');
     const lastUser = [...history].reverse().find((m) => m.role === 'user');
 
+    // Actions that can be executed immediately without confirmation
+    const IMMEDIATE_ACTIONS = new Set([
+      'list_campaigns',
+      'get_campaign_details', 
+      'list_orders',
+      'get_order_status',
+      'get_billing_summary',
+      'get_analytics',
+      'navigate',
+      'run_simulation'
+    ]);
+
+    // Actions that require explicit confirmation before execution
+    const CONFIRMATION_REQUIRED_ACTIONS = new Set([
+      'create_order',
+      'request_new_campaign',
+      'submit_support_request'
+    ]);
+
+    // Check if this is a confirmation of a pending action
     const isConfirm = (
-      /\b(confirm|confirmed)\b/.test(normalized) ||
-      normalized === 'yes, proceed' ||
-      normalized === 'yes proceed' ||
-      normalized === 'go ahead'
-    ) && !!lastAssistant;
+      /\b(confirm|confirmed|yes|proceed|go ahead|do it|sure|ok|okay)\b/.test(normalized)
+    ) && !!lastAssistant && lastAssistant.content.includes('Should I proceed');
 
     const isDecline =
-      /\b(decline|cancel|do not proceed|don\'t proceed|change plan)\b/.test(normalized) ||
-      normalized === 'no' ||
-      normalized === 'no thanks' ||
-      normalized === 'no, thanks';
+      /\b(decline|cancel|no|don\'t|change|wait|hold on|stop)\b/.test(normalized) && 
+      !!lastAssistant && lastAssistant.content.includes('Should I proceed');
 
-    // ==================== STAGE 2: EXECUTE ON CONFIRMATION ====================
+    // ==================== EXECUTE ON CONFIRMATION ====================
     if (isConfirm) {
       const originalRequest = lastUser?.content || 'previous request';
-      const previousPlan = lastAssistant?.content || 'previously proposed plan';
+      const previousPlan = lastAssistant?.content || '';
 
-      const confirmInstruction = `The client previously requested:\n"${originalRequest}"\n\nYou responded with this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now replied: "${message}", which should be treated as explicit confirmation to proceed.\n\nNow move to Stage 2 (EXECUTE):\n- Call the appropriate tools/functions to implement the agreed plan.\n- After executing tools, summarize what you did and the key results in 3–6 short bullet points.\n- Stay strictly within this client's own campaigns, orders, billing, and reports.`;
+      const confirmInstruction = `The client confirmed they want to proceed with the action you proposed.\n\nOriginal request: "${originalRequest}"\nYour proposal: "${previousPlan}"\nClient's confirmation: "${message}"\n\nNow execute the action using the appropriate function. After execution, provide a brief confirmation of what was done.`;
 
       const { text: initialResponse, functionCalls } = await generateWithFunctions(
         SYSTEM_PROMPT,
@@ -676,7 +704,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       let navigateTo: string | undefined;
 
       if (functionCalls && functionCalls.length > 0) {
-        console.log(`[Client Portal Agent] Function calls detected on CONFIRM:`, functionCalls);
+        console.log(`[Client Portal Agent] Executing confirmed actions:`, functionCalls.map(f => f.name));
 
         for (const funcCall of functionCalls) {
           const result = await executeAction(
@@ -699,12 +727,12 @@ router.post('/chat', async (req: Request, res: Response) => {
           )
           .join('\n\n');
 
-        const followUpPrompt = `The client originally asked: "${originalRequest}"\n\nYou proposed a plan, and they confirmed. You then executed these actions:\n${actionResultsText}\n\nNow provide a helpful, conversational response summarizing what you did and the key results. Be concise but informative, and stay strictly within this client's own campaigns and portal context.`;
+        const followUpPrompt = `You executed these actions for the client:\n${actionResultsText}\n\nProvide a brief, friendly confirmation of what was done. Be concise (1-2 sentences).`;
 
         const followUpResponse = await vertexChat(
           SYSTEM_PROMPT,
           [{ role: 'user', content: followUpPrompt }],
-          { temperature: 0.7, maxTokens: 1000 }
+          { temperature: 0.7, maxTokens: 500 }
         );
 
         const newHistory: VertexChatMessage[] = [
@@ -721,7 +749,6 @@ router.post('/chat', async (req: Request, res: Response) => {
         });
       }
 
-      // No function calls on confirm – just return the model text
       const newHistory: VertexChatMessage[] = [
         ...history.slice(-18),
         { role: 'user' as const, content: message },
@@ -736,34 +763,25 @@ router.post('/chat', async (req: Request, res: Response) => {
       });
     }
 
-    // ==================== DECLINE / ALTERNATIVE PLAN ====================
+    // ==================== DECLINE - ASK WHAT TO CHANGE ====================
     if (isDecline) {
-      const originalRequest = lastUser?.content || 'previous request';
-      const previousPlan = lastAssistant?.content || 'previously proposed plan';
-
-      const declinePrompt = `The client previously requested:\n"${originalRequest}"\n\nYou proposed this plan (Stage 1 PLAN):\n${previousPlan}\n\nThe client has now declined or wants to change the plan, saying: "${message}".\n\nDo NOT call any tools or make changes. Instead:\n1) Briefly restate and refine their updated request.\n2) Provide a revised numbered step-by-step plan you COULD take (Stage 1 PLAN only).\n3) Stay strictly within their own campaigns, orders, billing, and portal usage.\n4) End by asking them to reply with 'confirm' to proceed with the new plan, or 'decline' to adjust again.`;
-
-      const altResponse = await vertexChat(
-        SYSTEM_PROMPT,
-        [{ role: 'user', content: declinePrompt }],
-        { temperature: 0.4, maxTokens: 1200 }
-      );
+      const declineResponse = "No problem! What would you like to change or do instead?";
 
       const newHistory: VertexChatMessage[] = [
         ...history.slice(-18),
         { role: 'user' as const, content: message },
-        { role: 'model' as const, content: altResponse },
+        { role: 'model' as const, content: declineResponse },
       ];
 
       return res.json({
-        response: altResponse,
+        response: declineResponse,
         actions: [],
         navigateTo: undefined,
         conversationHistory: newHistory,
       });
     }
 
-    // ==================== STAGE 1: PLAN ONLY (NO ACTIONS YET) ====================
+    // ==================== PROCESS NEW REQUEST ====================
     const { text: initialResponse, functionCalls } = await generateWithFunctions(
       SYSTEM_PROMPT,
       message,
@@ -771,21 +789,69 @@ router.post('/chat', async (req: Request, res: Response) => {
       { temperature: 0.3, maxTokens: 2000 }
     );
 
-    // Intentionally ignore any functionCalls here to enforce "plan first, execute later"
+    let actions: Array<{ action: string; params: any; result: any }> = [];
+    let navigateTo: string | undefined;
+    let finalResponse = initialResponse;
+
     if (functionCalls && functionCalls.length > 0) {
-      console.log(`[Client Portal Agent] Ignoring ${functionCalls.length} function call(s) during planning stage.`);
+      // Separate immediate vs confirmation-required actions
+      const immediateCallsToExecute = functionCalls.filter(fc => IMMEDIATE_ACTIONS.has(fc.name));
+      const confirmationRequiredCalls = functionCalls.filter(fc => CONFIRMATION_REQUIRED_ACTIONS.has(fc.name));
+
+      // Execute immediate actions right away
+      if (immediateCallsToExecute.length > 0) {
+        console.log(`[Client Portal Agent] Executing immediate actions:`, immediateCallsToExecute.map(f => f.name));
+
+        for (const funcCall of immediateCallsToExecute) {
+          const result = await executeAction(
+            funcCall.name,
+            funcCall.args,
+            user.clientAccountId,
+            user.clientUserId
+          );
+
+          actions.push({ action: funcCall.name, params: funcCall.args, result });
+
+          if (result.navigateTo) {
+            navigateTo = result.navigateTo;
+          }
+        }
+
+        // Generate response with the action results
+        const actionResultsText = actions
+          .map((a) =>
+            `Action: ${a.action}\nResult: ${a.result.success ? 'Success' : 'Failed'}\nMessage: ${a.result.message}${a.result.data ? `\nData: ${JSON.stringify(a.result.data, null, 2)}` : ''}`
+          )
+          .join('\n\n');
+
+        const followUpPrompt = `The client asked: "${message}"\n\nYou executed these actions:\n${actionResultsText}\n\nProvide a helpful response presenting this information clearly and concisely.`;
+
+        finalResponse = await vertexChat(
+          SYSTEM_PROMPT,
+          [{ role: 'user', content: followUpPrompt }],
+          { temperature: 0.7, maxTokens: 1000 }
+        );
+      }
+
+      // For confirmation-required actions, the model should have already asked for confirmation
+      // in its response (per the system prompt). We don't execute them yet.
+      if (confirmationRequiredCalls.length > 0 && immediateCallsToExecute.length === 0) {
+        console.log(`[Client Portal Agent] Confirmation required for:`, confirmationRequiredCalls.map(f => f.name));
+        // The model's response should already include a confirmation prompt per the system instructions
+        // If it doesn't, we keep the initial response as-is
+      }
     }
 
     const newHistory: VertexChatMessage[] = [
       ...history.slice(-18),
       { role: 'user' as const, content: message },
-      { role: 'model' as const, content: initialResponse },
+      { role: 'model' as const, content: finalResponse },
     ];
 
     return res.json({
-      response: initialResponse,
-      actions: [],
-      navigateTo: undefined,
+      response: finalResponse,
+      actions,
+      navigateTo,
       conversationHistory: newHistory,
     });
 

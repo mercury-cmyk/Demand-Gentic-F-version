@@ -1956,6 +1956,7 @@ router.patch('/admin/clients/:clientId/users/:userId', requireAuth, requireRole(
 router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
     const { campaignId, campaignType } = req.body;
+    console.log('[CLIENT PORTAL] Grant access request:', { clientId: req.params.clientId, campaignId, campaignType });
 
     if (!campaignId) {
       return res.status(400).json({ message: "Campaign ID required" });
@@ -1975,19 +1976,25 @@ router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admi
         .limit(1);
 
       if (!campaign) {
+        console.log('[CLIENT PORTAL] Campaign not found:', campaignId);
         return res.status(404).json({ message: "Campaign not found" });
       }
 
+      console.log('[CLIENT PORTAL] Found campaign:', { id: campaign.id, name: campaign.name, clientAccountId: campaign.clientAccountId });
+
+      // Check if campaign is already linked to a different client
       if (campaign.clientAccountId && campaign.clientAccountId !== req.params.clientId) {
+        console.log('[CLIENT PORTAL] Campaign linked to different client:', campaign.clientAccountId);
         return res.status(400).json({ message: "Campaign is linked to a different client account" });
       }
 
-      if (!campaign.projectId) {
-        return res.status(400).json({ message: "Campaign must be linked to a project before granting access" });
-      }
-
-      if (campaign.approvalStatus !== 'published') {
-        return res.status(400).json({ message: "Campaign must be published before granting client access" });
+      // Link the campaign to the client if not already linked
+      if (!campaign.clientAccountId) {
+        console.log('[CLIENT PORTAL] Linking campaign to client:', req.params.clientId);
+        await db
+          .update(campaigns)
+          .set({ clientAccountId: req.params.clientId })
+          .where(eq(campaigns.id, campaignId));
       }
 
       accessData.regularCampaignId = campaignId;
@@ -1995,18 +2002,20 @@ router.post('/admin/clients/:clientId/campaigns', requireAuth, requireRole('admi
       accessData.campaignId = campaignId;
     }
 
+    console.log('[CLIENT PORTAL] Inserting access record:', accessData);
     const [access] = await db
       .insert(clientCampaignAccess)
       .values(accessData)
       .returning();
 
+    console.log('[CLIENT PORTAL] Access granted successfully:', access.id);
     res.status(201).json(access);
   } catch (error: any) {
-    console.error('[CLIENT PORTAL] Grant access error:', error);
+    console.error('[CLIENT PORTAL] Grant access error:', error.message, error.code, error.detail);
     if (error.code === '23505') {
-      return res.status(400).json({ message: "Access already granted" });
+      return res.status(400).json({ message: "Access already granted for this campaign" });
     }
-    res.status(500).json({ message: "Failed to grant access" });
+    res.status(500).json({ message: error.message || "Failed to grant access" });
   }
 });
 
