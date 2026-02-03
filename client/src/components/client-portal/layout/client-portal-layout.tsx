@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { CampaignSimulationPanel } from '../simulation/campaign-simulation-panel';
+import { AgentPanelProvider, AgentSidePanel, useAgentPanelContextOptional } from '@/components/agent-panel';
 
 interface ClientUser {
   id: string;
@@ -88,6 +89,40 @@ const navigation = [
   { name: 'Billing', href: '/client-portal/billing', icon: CreditCard },
   { name: 'Settings', href: '/client-portal/settings', icon: Settings },
 ];
+
+// Toggle button for the header - must be inside AgentPanelProvider
+function ClientPortalAgentToggleButton() {
+  const agentPanel = useAgentPanelContextOptional();
+
+  if (!agentPanel) return null;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="default"
+            size="sm"
+            className={cn(
+              "gap-2 relative group",
+              agentPanel.state.isOpen
+                ? "bg-primary/10 text-primary hover:bg-primary/20"
+                : "bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
+            )}
+            onClick={agentPanel.togglePanel}
+          >
+            <BotMessageSquare className="h-4 w-4" />
+            <span className="hidden sm:inline">AI Assistant</span>
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>AI Assistant - Your command center (Ctrl+/)</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [location, setLocation] = useLocation();
@@ -192,14 +227,15 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+    <AgentPanelProvider userRole="client" isClientPortal={true}>
+      <div className="min-h-screen bg-background">
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
       {/* Sidebar */}
       <aside
@@ -305,26 +341,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
           <div className="flex-1" />
 
-          {/* Agentic Operator Button in Header - Single Entry Point */}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="gap-2 relative group bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-                  onClick={() => handleOpenAssistant()}
-                >
-                  <BotMessageSquare className="h-4 w-4" />
-                  <span className="hidden sm:inline">Agentic Operator</span>
-                  <Sparkles className="h-3 w-3 text-amber-300 absolute -top-1 -right-1 animate-pulse" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>Your AI-powered command center for campaigns, emails, and reports</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {/* Agentic Operator Button in Header - Opens Side Panel */}
+          <ClientPortalAgentToggleButton />
 
           {/* User Menu */}
           <DropdownMenu>
@@ -373,88 +391,46 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         onNavigate={handleVoiceNavigation}
       />
 
-      {/* Floating Agentic Operator FAB with Suggestions */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {/* Suggestions Popup */}
-        {showSuggestions && !voiceOpen && (
-          <div className="bg-card border rounded-lg shadow-lg p-4 w-72 animate-in slide-in-from-bottom-5 fade-in duration-300">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <BotMessageSquare className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">Hi{user?.firstName ? `, ${user.firstName}` : ''}!</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => setShowSuggestions(false)}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              I'm your Agentic Operator. I can help with campaigns, reports, and more:
-            </p>
-            <div className="space-y-2">
-              {getSuggestions().map((suggestion, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleOpenAssistant(suggestion.action)}
-                  className="w-full flex items-center gap-2 p-2 text-left text-xs rounded-md hover:bg-muted transition-colors group"
-                >
-                  <suggestion.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                  <span className="group-hover:text-primary">{suggestion.text}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* FAB Button - Centralized Agentic Operator */}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  if (showSuggestions) {
-                    setShowSuggestions(false);
-                    handleOpenAssistant();
-                  } else if (!hasInteracted) {
-                    setShowSuggestions(true);
-                  } else {
-                    handleOpenAssistant();
-                  }
-                }}
-                className={cn(
-                  "relative h-14 w-14 rounded-full bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-lg",
-                  "flex items-center justify-center transition-all hover:scale-105 hover:shadow-xl",
-                  "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
-                  !hasInteracted && "animate-bounce"
-                )}
-              >
-                <BotMessageSquare className="h-6 w-6" />
-                {!hasInteracted && (
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 items-center justify-center">
-                      <Sparkles className="h-2.5 w-2.5 text-white" />
-                    </span>
-                  </span>
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              <p>Agentic Operator - Your AI command center</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+      {/* Global AI Agent Side Panel */}
+      <AgentSidePanel />
 
       {/* Campaign Simulation Panel */}
       <CampaignSimulationPanel
         open={simulationOpen}
         onOpenChange={setSimulationOpen}
       />
-    </div>
+      </div>
+    </AgentPanelProvider>
+  );
+}
+
+// Client Portal Agent Toggle Button - for use in header
+export function ClientPortalAgentToggle() {
+  const agentPanel = useAgentPanelContextOptional();
+
+  if (!agentPanel) return null;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={agentPanel.togglePanel}
+            className={cn(
+              "relative",
+              agentPanel.state.isOpen && "bg-primary/10 text-primary"
+            )}
+          >
+            <BotMessageSquare className="h-5 w-5" />
+            <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>AI Assistant (Ctrl+/)</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

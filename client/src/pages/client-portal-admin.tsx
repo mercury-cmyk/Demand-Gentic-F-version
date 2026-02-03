@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -114,7 +114,7 @@ export default function ClientPortalAdmin() {
   const [selectedClient, setSelectedClient] = useState<ClientAccount | null>(null);
   const [clientDetail, setClientDetail] = useState<any>(null);
   const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
-  const [grantAccessCampaignType, setGrantAccessCampaignType] = useState<'data' | 'email' | 'phone'>('data');
+  const [grantAccessCampaignType, setGrantAccessCampaignType] = useState<'data' | 'regular'>('data');
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [inviteDomainInput, setInviteDomainInput] = useState('');
   const [inviteEnabled, setInviteEnabled] = useState(true);
@@ -135,26 +135,14 @@ export default function ClientPortalAdmin() {
     queryKey: ['/api/verification-campaigns'],
   });
 
-  // Email campaigns
-  const { data: emailCampaigns } = useQuery<any[]>({
-    queryKey: ['/api/campaigns', { type: 'email' }],
+  // Regular campaigns (all types)
+  const { data: allCampaigns } = useQuery<any[]>({
+    queryKey: ['/api/campaigns'],
     queryFn: async () => {
-      const response = await fetch('/api/campaigns?type=email', {
+      const response = await fetch('/api/campaigns', {
         headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
       });
-      if (!response.ok) throw new Error('Failed to fetch email campaigns');
-      return response.json();
-    },
-  });
-
-  // Phone campaigns
-  const { data: phoneCampaigns } = useQuery<any[]>({
-    queryKey: ['/api/campaigns', { type: 'call' }],
-    queryFn: async () => {
-      const response = await fetch('/api/campaigns?type=call', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('authToken')}` },
-      });
-      if (!response.ok) throw new Error('Failed to fetch phone campaigns');
+      if (!response.ok) throw new Error('Failed to fetch campaigns');
       return response.json();
     },
   });
@@ -1366,21 +1354,17 @@ export default function ClientPortalAdmin() {
           <div className="space-y-4">
             {/* Campaign Type Tabs */}
             <Tabs value={grantAccessCampaignType} onValueChange={(v) => {
-              setGrantAccessCampaignType(v as 'data' | 'email' | 'phone');
+              setGrantAccessCampaignType(v as 'data' | 'regular');
               setSelectedCampaignId('');
             }}>
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="data" className="flex items-center gap-2">
                   <Database className="h-4 w-4" />
-                  Data
+                  Data Verification
                 </TabsTrigger>
-                <TabsTrigger value="email" className="flex items-center gap-2">
-                  <Mail className="h-4 w-4" />
-                  Email
-                </TabsTrigger>
-                <TabsTrigger value="phone" className="flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
-                  Phone
+                <TabsTrigger value="regular" className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Standard Campaigns
                 </TabsTrigger>
               </TabsList>
 
@@ -1411,63 +1395,52 @@ export default function ClientPortalAdmin() {
                 </p>
               </TabsContent>
 
-              {/* Email Campaigns */}
-              <TabsContent value="email" className="mt-4">
+              {/* Regular Campaigns (All types) */}
+              <TabsContent value="regular" className="mt-4">
                 <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select an email campaign" />
+                    <SelectValue placeholder="Select a campaign" />
                   </SelectTrigger>
-                  <SelectContent>
-                    {emailCampaigns?.map((campaign) => (
-                      <SelectItem key={campaign.id} value={String(campaign.id)}>
-                        <div className="flex items-center gap-2">
-                          <Mail className="h-4 w-4 text-blue-600" />
-                          {campaign.name}
-                          <Badge variant="secondary" className="ml-2 text-xs">
-                            {campaign.status}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                    {(!emailCampaigns || emailCampaigns.length === 0) && (
+                  <SelectContent className="max-h-[300px]">
+                    {/* Group campaigns by type */}
+                    {allCampaigns && allCampaigns.length > 0 ? (
+                      Object.entries(
+                        allCampaigns.reduce((acc: any, campaign) => {
+                          const type = campaign.type || 'other';
+                          if (!acc[type]) acc[type] = [];
+                          acc[type].push(campaign);
+                          return acc;
+                        }, {})
+                      ).map(([type, campaigns]: [string, any[]]) => (
+                        <SelectGroup key={type}>
+                          <SelectLabel className="capitalize border-b pb-1 mb-1 mt-2 text-primary/80">
+                            {type.replace(/_/g, ' ')}
+                          </SelectLabel>
+                          {campaigns.map((campaign) => (
+                            <SelectItem key={campaign.id} value={String(campaign.id)}>
+                              <div className="flex items-center gap-2 ml-2">
+                                {type === 'email' ? <Mail className="h-4 w-4 text-blue-600" /> :
+                                 type === 'call' ? <Phone className="h-4 w-4 text-purple-600" /> :
+                                 <Target className="h-4 w-4 text-slate-600" />
+                                }
+                                <span className="truncate max-w-[280px]">{campaign.name}</span>
+                                <Badge variant="secondary" className="ml-auto text-xs py-0 h-5">
+                                  {campaign.status}
+                                </Badge>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))
+                    ) : (
                       <div className="p-4 text-sm text-muted-foreground text-center">
-                        No email campaigns available
+                        No campaigns available
                       </div>
                     )}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Email campaigns provide access to email marketing leads and responses.
-                </p>
-              </TabsContent>
-
-              {/* Phone Campaigns */}
-              <TabsContent value="phone" className="mt-4">
-                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a phone campaign" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {phoneCampaigns?.map((campaign) => (
-                      <SelectItem key={campaign.id} value={String(campaign.id)}>
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-4 w-4 text-purple-600" />
-                          {campaign.name}
-                          <Badge variant="secondary" className="ml-2 text-xs">
-                            {campaign.status}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                    {(!phoneCampaigns || phoneCampaigns.length === 0) && (
-                      <div className="p-4 text-sm text-muted-foreground text-center">
-                        No phone campaigns available
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Phone campaigns provide access to call leads and QA-approved conversations.
+                  Standard campaigns include Email, Call, Webinar, Events, and more.
                 </p>
               </TabsContent>
             </Tabs>

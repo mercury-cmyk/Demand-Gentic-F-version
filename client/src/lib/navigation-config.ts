@@ -135,6 +135,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: MANAGEMENT_ROLES,
             description: 'Chat-based agent operations',
           },
+          {
+            id: 'agent-prompts',
+            title: 'Agent Prompts',
+            url: '/ai-studio/agent-prompts',
+            roles: ['admin'],
+            description: 'Manage agent prompts by role',
+          },
         ],
       },
     ],

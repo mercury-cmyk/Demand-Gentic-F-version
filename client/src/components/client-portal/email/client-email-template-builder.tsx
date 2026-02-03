@@ -43,6 +43,21 @@ interface Campaign {
   status?: string | null;
 }
 
+interface BusinessProfile {
+  legalBusinessName: string;
+  dbaName?: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  customUnsubscribeUrl?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  supportEmail?: string | null;
+}
+
 interface EmailTemplate {
   id?: string;
   name: string;
@@ -287,14 +302,30 @@ const analyzeEmail = (subject: string, body: string): SmartNudge[] => {
   return nudges;
 };
 
-// Generate email-safe HTML - Same structure as EmailBuilderPro
-const generateCleanHtml = (bodyContent: string, organizationName: string = 'Your Company'): string => {
+// Generate email-safe HTML with business profile footer (CAN-SPAM compliance)
+const generateCleanHtml = (
+  bodyContent: string,
+  organizationName: string = 'Your Company',
+  profile?: BusinessProfile | null
+): string => {
+  // Build business address from profile (CAN-SPAM compliance requires physical address)
+  const companyName = profile?.dbaName || profile?.legalBusinessName || organizationName;
+  const addressParts = profile ? [
+    profile.addressLine1,
+    profile.addressLine2,
+    `${profile.city}, ${profile.state} ${profile.postalCode}`,
+    profile.country !== 'United States' ? profile.country : null
+  ].filter(Boolean).join('<br>') : '';
+
+  const unsubscribeUrl = profile?.customUnsubscribeUrl || '{{unsubscribe_url}}';
+
   const footer = `
     <tr>
       <td style="padding: 24px 32px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; text-align: center;">
-        <div style="margin-bottom: 8px; font-weight: 600; color: #374151;">${organizationName}</div>
+        <div style="margin-bottom: 8px; font-weight: 600; color: #374151;">${companyName}</div>
+        ${addressParts ? `<div style="margin-bottom: 12px; font-size: 11px; line-height: 1.5;">${addressParts}</div>` : ''}
         <div>
-          <a href="{{unsubscribe_url}}" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
+          <a href="${unsubscribeUrl}" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
           <span style="margin: 0 8px; color: #d1d5db;">|</span>
           <a href="{{preferences_url}}" style="color: #6b7280; text-decoration: underline;">Manage Preferences</a>
         </div>
@@ -397,6 +428,21 @@ export function ClientEmailTemplateBuilder({
     enabled: open,
   });
 
+  // Fetch business profile for email footer (CAN-SPAM compliance)
+  const { data: businessProfileData } = useQuery<{ profile: BusinessProfile | null; clientName: string }>({
+    queryKey: ['client-portal-business-profile'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/settings/business-profile', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch business profile');
+      return res.json();
+    },
+    enabled: open,
+  });
+
+  const businessProfile = businessProfileData?.profile;
+
   useEffect(() => {
     if (initialCampaignId) {
       setSelectedCampaignId(initialCampaignId);
@@ -417,13 +463,13 @@ export function ClientEmailTemplateBuilder({
   const nudges = useMemo(() => analyzeEmail(subject, bodyContent), [subject, bodyContent]);
   const hasErrors = nudges.some(n => n.type === 'error');
 
-  // Generate full HTML
+  // Generate full HTML with business profile footer
   const fullHtml = useMemo(
-    () => generateCleanHtml(bodyContent, activeCampaignName || 'Your Campaign'),
-    [bodyContent, activeCampaignName]
+    () => generateCleanHtml(bodyContent, activeCampaignName || 'Your Campaign', businessProfile),
+    [bodyContent, activeCampaignName, businessProfile]
   );
 
-  // Plain text version
+  // Plain text version with business profile footer
   const plainTextVersion = useMemo(() => {
     let text = bodyContent
       .replace(/<br\s*\/?>/gi, '\n')
@@ -440,9 +486,18 @@ export function ClientEmailTemplateBuilder({
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    text += `\n\n---\n${activeCampaignName || 'Your Campaign'}\n\nUnsubscribe: {{unsubscribe_url}}`;
+    // Build footer with business profile (CAN-SPAM compliance)
+    const companyName = businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign';
+    const addressLine = businessProfile
+      ? `${businessProfile.addressLine1}${businessProfile.addressLine2 ? ', ' + businessProfile.addressLine2 : ''}\n${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}${businessProfile.country !== 'United States' ? '\n' + businessProfile.country : ''}`
+      : '';
+    const unsubscribeUrl = businessProfile?.customUnsubscribeUrl || '{{unsubscribe_url}}';
+
+    text += `\n\n---\n${companyName}`;
+    if (addressLine) text += `\n${addressLine}`;
+    text += `\n\nUnsubscribe: ${unsubscribeUrl}`;
     return text;
-  }, [bodyContent, activeCampaignName]);
+  }, [bodyContent, activeCampaignName, businessProfile]);
 
   // Insert personalization token
   const insertToken = useCallback((token: string) => {
@@ -746,9 +801,19 @@ Your Name`}
                               </div>
                             )}
 
-                            {/* Auto-injected Footer Preview */}
+                            {/* Auto-injected Footer Preview with Business Profile */}
                             <div className="border-t bg-slate-50 p-4 text-center text-xs text-slate-500">
-                              <div className="font-semibold text-slate-600 mb-1">{activeCampaignName || 'Your Campaign'}</div>
+                              <div className="font-semibold text-slate-600 mb-1">
+                                {businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign'}
+                              </div>
+                              {businessProfile && (
+                                <div className="text-slate-400 mb-2 text-[11px] leading-relaxed">
+                                  {businessProfile.addressLine1}
+                                  {businessProfile.addressLine2 && <><br />{businessProfile.addressLine2}</>}
+                                  <br />{businessProfile.city}, {businessProfile.state} {businessProfile.postalCode}
+                                  {businessProfile.country !== 'United States' && <><br />{businessProfile.country}</>}
+                                </div>
+                              )}
                               <div className="text-slate-400">
                                 <span className="underline cursor-pointer">Unsubscribe</span>
                                 <span className="mx-2">|</span>

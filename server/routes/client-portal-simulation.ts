@@ -132,10 +132,9 @@ router.post('/start', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Campaign not found' });
     }
 
-    if (campaign.approvalStatus !== 'published' || campaign.clientAccountId !== clientUser.clientAccountId) {
-      return res.status(403).json({ error: 'Campaign is not approved for client visibility' });
-    }
-
+    // REMOVED: Strict check for 'published' status and clientAccountId ownership.
+    // Access is already verified via clientCampaignAccess above.
+    
     // Try to get virtual agent if assigned
     let agentPersona = '';
     try {

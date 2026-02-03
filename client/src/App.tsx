@@ -14,6 +14,7 @@ import { CommandPalette } from "@/components/patterns/command-palette";
 import { DeprecatedRedirect } from "@/components/deprecated-redirect";
 import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
 import { canAccessRoute } from "@/lib/route-permissions";
+import { AgentPanelProvider, AgentSidePanel } from "@/components/agent-panel";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import NotFound from "@/pages/not-found";
@@ -103,6 +104,7 @@ import QAReviewCenter from "@/pages/qa-review-center";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
 import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
+import AgentPromptsPage from "@/pages/ai-studio/agent-prompts";
 import IntelligenceStudioDashboard from "@/pages/ai-studio/dashboard";
 import CampaignIntelligencePage from "@/pages/ai-studio/campaign-intelligence";
 import AgentCommandCenter from "@/pages/agent-command-center";
@@ -256,19 +258,21 @@ function AuthenticatedApp() {
     ...rolesFromToken,
   ]));
   const resolvedUserRoles = userRoles.length > 0 ? userRoles : ['agent'];
+  const primaryRole = resolvedUserRoles.includes('admin') ? 'admin' : resolvedUserRoles[0];
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
-      <CommandPalette />
-      <div className="flex h-screen w-full">
-        <AppSidebar userRoles={resolvedUserRoles} />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <TopBar
-            userName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'User'}
-            userRoles={resolvedUserRoles}
-          />
-          <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
-            <RouteGuard userRoles={resolvedUserRoles}>
+      <AgentPanelProvider userRole={primaryRole} isClientPortal={false}>
+        <CommandPalette />
+        <div className="flex h-screen w-full">
+          <AppSidebar userRoles={resolvedUserRoles} />
+          <div className="flex flex-col flex-1 overflow-hidden">
+            <TopBar
+              userName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'User'}
+              userRoles={resolvedUserRoles}
+            />
+            <main className="flex-1 overflow-auto p-3 sm:p-4 md:p-6 bg-background">
+              <RouteGuard userRoles={resolvedUserRoles}>
             <Switch>
               <Route path="/" component={Dashboard} />
               
@@ -455,6 +459,7 @@ function AuthenticatedApp() {
               <Route path="/ai-studio/intelligence" component={OrganizationIntelligencePage} />
               <Route path="/ai-studio/agents" component={AIAgentsPage} />
               <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
+              <Route path="/ai-studio/agent-prompts" component={AgentPromptsPage} />
               <Route path="/ai-studio/campaign-intelligence" component={CampaignIntelligencePage} />
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               
@@ -515,11 +520,14 @@ function AuthenticatedApp() {
 
               {/* 404 */}
               <Route component={NotFound} />
-            </Switch>
-            </RouteGuard>
-          </main>
+              </Switch>
+              </RouteGuard>
+            </main>
+          </div>
+          {/* Global AI Agent Side Panel */}
+          <AgentSidePanel />
         </div>
-      </div>
+      </AgentPanelProvider>
     </SidebarProvider>
   );
 }

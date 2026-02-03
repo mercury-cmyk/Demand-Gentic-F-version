@@ -22,8 +22,10 @@ import {
   leads,
   leadComments,
   campaigns,
+  campaignQueue,
   contacts,
   accounts,
+  lists,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -37,6 +39,8 @@ import clientPortalAdminBillingRouter from './client-portal-admin-billing';
 import clientPortalAgentRouter from './client-portal-agent';
 import clientPortalAgenticRouter from './client-portal-agentic';
 import clientPortalSimulationRouter from './client-portal-simulation';
+import clientPortalSettingsRouter from './client-portal-settings';
+import clientPortalCrmRouter from './client-portal-crm';
 
 const router = Router();
 
@@ -157,6 +161,8 @@ router.use('/voice', requireClientAuth, clientPortalVoiceRouter);
 router.use('/agent', requireClientAuth, clientPortalAgentRouter);
 router.use('/agentic', requireClientAuth, clientPortalAgenticRouter);
 router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
+router.use('/settings', requireClientAuth, clientPortalSettingsRouter);
+router.use('/crm', requireClientAuth, clientPortalCrmRouter);
 
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);
@@ -370,17 +376,24 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
 
 router.get('/campaigns', requireClientAuth, async (req, res) => {
   try {
-    const accessList = await db
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // 1. Fetch Verification Campaigns
+    const verificationAccessList = await db
       .select({
-        campaignId: clientCampaignAccess.campaignId,
         campaign: verificationCampaigns,
       })
       .from(clientCampaignAccess)
       .innerJoin(verificationCampaigns, eq(clientCampaignAccess.campaignId, verificationCampaigns.id))
-      .where(eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId));
+      .where(
+        and(
+           eq(clientCampaignAccess.clientAccountId, clientAccountId),
+           isNotNull(clientCampaignAccess.campaignId)
+        )
+      );
 
-    const campaigns = await Promise.all(
-      accessList.map(async ({ campaign }) => {
+    const enrichedVerificationCampaigns = await Promise.all(
+      verificationAccessList.map(async ({ campaign }) => {
         const eligibleCount = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(verificationContacts)
@@ -394,15 +407,291 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
 
         return {
           ...campaign,
+          type: 'verification',
           eligibleCount: eligibleCount[0]?.count || 0,
         };
       })
     );
 
-    res.json(campaigns);
+    // 2. Fetch Regular Campaigns
+    const regularAccessList = await db
+      .select({
+        campaign: campaigns,
+      })
+      .from(clientCampaignAccess)
+      .innerJoin(campaigns, eq(clientCampaignAccess.regularCampaignId, campaigns.id))
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          isNotNull(clientCampaignAccess.regularCampaignId)
+        )
+      );
+
+    const enrichedRegularCampaigns = regularAccessList.map(({ campaign }) => ({
+      ...campaign,
+      type: 'regular',
+      eligibleCount: 0, // Placeholder as concept differs or needs specific query
+    }));
+
+    res.json([...enrichedVerificationCampaigns, ...enrichedRegularCampaigns]);
   } catch (error) {
     console.error('[CLIENT PORTAL] Get campaigns error:', error);
     res.status(500).json({ message: "Failed to get campaigns" });
+  }
+});
+
+/**
+ * GET /campaigns/:campaignId/preview-audience
+ * Get a sample of accounts and contacts from a campaign's audience for preview purposes
+ * Returns 5-10 sample accounts and 20-30 sample contacts for the client to preview personalization
+ */
+router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (req, res) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const { campaignId } = req.params;
+
+    // Verify client has access to this campaign
+    const [accessCheck] = await db
+      .select()
+      .from(clientCampaignAccess)
+      .where(
+        and(
+          eq(clientCampaignAccess.clientAccountId, clientAccountId),
+          or(
+            eq(clientCampaignAccess.campaignId, campaignId),
+            eq(clientCampaignAccess.regularCampaignId, parseInt(campaignId, 10) || 0)
+          )
+        )
+      )
+      .limit(1);
+
+    if (!accessCheck) {
+      return res.status(403).json({ message: "You don't have access to this campaign" });
+    }
+
+    // Try to get campaign details (verification campaign)
+    let campaignData: any = null;
+    let isVerificationCampaign = false;
+
+    // Check if it's a verification campaign
+    const [verificationCampaign] = await db
+      .select()
+      .from(verificationCampaigns)
+      .where(eq(verificationCampaigns.id, campaignId))
+      .limit(1);
+
+    if (verificationCampaign) {
+      campaignData = verificationCampaign;
+      isVerificationCampaign = true;
+
+      // Get sample contacts from verification campaign (limit 30)
+      const sampleContacts = await db
+        .select({
+          id: verificationContacts.id,
+          firstName: verificationContacts.firstName,
+          lastName: verificationContacts.lastName,
+          email: verificationContacts.email,
+          phone: verificationContacts.phone,
+          title: verificationContacts.title,
+          company: verificationContacts.company,
+        })
+        .from(verificationContacts)
+        .where(eq(verificationContacts.campaignId, campaignId))
+        .limit(30);
+
+      // Group contacts by company to derive accounts
+      const accountsMap = new Map<string, { name: string; contactCount: number; sampleContacts: any[] }>();
+      
+      for (const contact of sampleContacts) {
+        const companyName = contact.company || 'Unknown Company';
+        if (!accountsMap.has(companyName)) {
+          accountsMap.set(companyName, {
+            name: companyName,
+            contactCount: 0,
+            sampleContacts: [],
+          });
+        }
+        const acc = accountsMap.get(companyName)!;
+        acc.contactCount++;
+        if (acc.sampleContacts.length < 5) {
+          acc.sampleContacts.push(contact);
+        }
+      }
+
+      // Convert to array and limit to 10 accounts
+      const sampleAccounts = Array.from(accountsMap.entries())
+        .slice(0, 10)
+        .map(([id, data], index) => ({
+          id: `company_${index}`,
+          name: data.name,
+          contactCount: data.contactCount,
+        }));
+
+      return res.json({
+        campaign: {
+          id: campaignData.id,
+          name: campaignData.name,
+          status: campaignData.status,
+          type: 'verification',
+        },
+        accounts: sampleAccounts,
+        contacts: sampleContacts,
+        totalAccountsAvailable: accountsMap.size,
+        totalContactsAvailable: sampleContacts.length,
+      });
+    }
+
+    // Check if it's a regular campaign (UUID string)
+    const [regularCampaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    if (regularCampaign) {
+      campaignData = regularCampaign;
+      let sampleContactsData: any[] = [];
+
+      // First try: Get contacts from campaignQueue (for activated campaigns)
+      const queueContacts = await db
+        .select({
+          id: contacts.id,
+          firstName: contacts.firstName,
+          lastName: contacts.lastName,
+          email: contacts.email,
+          phone: contacts.directPhone,
+          title: contacts.jobTitle,
+          accountId: contacts.accountId,
+          accountName: accounts.name,
+          accountWebsite: accounts.website,
+          accountIndustry: accounts.industry,
+        })
+        .from(campaignQueue)
+        .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+        .innerJoin(accounts, eq(campaignQueue.accountId, accounts.id))
+        .where(eq(campaignQueue.campaignId, campaignId))
+        .limit(30);
+
+      console.log(`[Preview-Audience] Campaign ${campaignId}: queueContacts=${queueContacts.length}`);
+      
+      if (queueContacts.length > 0) {
+        sampleContactsData = queueContacts;
+      } else {
+        // Fallback: Resolve from audienceRefs (for campaigns not yet activated)
+        const audienceRefs = regularCampaign.audienceRefs as any;
+        console.log(`[Preview-Audience] audienceRefs:`, JSON.stringify(audienceRefs));
+        
+        if (audienceRefs) {
+          let contactIds: string[] = [];
+
+          // Get contacts from lists
+          const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+          console.log(`[Preview-Audience] listIds:`, listIds);
+          
+          if (Array.isArray(listIds) && listIds.length > 0) {
+            const campaignLists = await db
+              .select({ recordIds: lists.recordIds })
+              .from(lists)
+              .where(inArray(lists.id, listIds));
+
+            console.log(`[Preview-Audience] Found ${campaignLists.length} lists`);
+            
+            for (const list of campaignLists) {
+              if (list.recordIds && Array.isArray(list.recordIds)) {
+                console.log(`[Preview-Audience] List has ${list.recordIds.length} record IDs`);
+                contactIds.push(...list.recordIds);
+              }
+            }
+          }
+
+          // Deduplicate and limit
+          contactIds = [...new Set(contactIds)].slice(0, 30);
+
+          if (contactIds.length > 0) {
+            const listContacts = await db
+              .select({
+                id: contacts.id,
+                firstName: contacts.firstName,
+                lastName: contacts.lastName,
+                email: contacts.email,
+                phone: contacts.directPhone,
+                title: contacts.jobTitle,
+                accountId: contacts.accountId,
+              })
+              .from(contacts)
+              .where(inArray(contacts.id, contactIds))
+              .limit(30);
+
+            // Get account details for these contacts
+            const accountIds = [...new Set(listContacts.map(c => c.accountId).filter(Boolean))] as string[];
+            let accountDetails: any[] = [];
+            if (accountIds.length > 0) {
+              accountDetails = await db
+                .select({
+                  id: accounts.id,
+                  name: accounts.name,
+                  website: accounts.website,
+                  industry: accounts.industry,
+                })
+                .from(accounts)
+                .where(inArray(accounts.id, accountIds))
+                .limit(10);
+            }
+            const accountMap = new Map(accountDetails.map(a => [a.id, a]));
+
+            sampleContactsData = listContacts.map(c => ({
+              ...c,
+              accountName: accountMap.get(c.accountId)?.name || 'Unknown Company',
+              accountWebsite: accountMap.get(c.accountId)?.website || null,
+              accountIndustry: accountMap.get(c.accountId)?.industry || null,
+            }));
+          }
+        }
+      }
+
+      // Build unique accounts list (limit 10)
+      const accountsMap = new Map<string, { id: string; name: string; website: string | null; industry: string | null }>();
+      for (const c of sampleContactsData) {
+        if (c.accountId && !accountsMap.has(c.accountId)) {
+          accountsMap.set(c.accountId, {
+            id: c.accountId,
+            name: c.accountName || 'Unknown Company',
+            website: c.accountWebsite,
+            industry: c.accountIndustry,
+          });
+        }
+      }
+      const sampleAccounts = Array.from(accountsMap.values()).slice(0, 10);
+
+      // Enrich contacts with company name
+      const enrichedContacts = sampleContactsData.map(c => ({
+        id: c.id,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        email: c.email,
+        phone: c.phone,
+        title: c.title,
+        company: c.accountName || 'Unknown Company',
+      }));
+
+      return res.json({
+        campaign: {
+          id: campaignData.id,
+          name: campaignData.name,
+          status: campaignData.status,
+          type: 'regular',
+        },
+        accounts: sampleAccounts,
+        contacts: enrichedContacts,
+        totalAccountsAvailable: accountsMap.size,
+        totalContactsAvailable: sampleContactsData.length,
+      });
+    }
+
+    res.status(404).json({ message: "Campaign not found" });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get preview audience error:', error);
+    res.status(500).json({ message: "Failed to get preview audience" });
   }
 });
 
@@ -1043,9 +1332,7 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
       .where(
         and(
           eq(clientCampaignAccess.clientAccountId, req.clientUser!.clientAccountId),
-          isNotNull(clientCampaignAccess.regularCampaignId),
-          eq(campaigns.approvalStatus, 'published'),
-          eq(campaigns.clientAccountId, req.clientUser!.clientAccountId)
+          isNotNull(clientCampaignAccess.regularCampaignId)
         )
       );
 

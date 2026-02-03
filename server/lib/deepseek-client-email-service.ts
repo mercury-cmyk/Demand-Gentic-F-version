@@ -106,13 +106,7 @@ async function getCampaignContext(campaignId: string, clientAccountId: string): 
         )
       )
     )
-    .where(
-      and(
-        eq(campaigns.id, campaignId),
-        eq(campaigns.approvalStatus, 'published'),
-        eq(campaigns.clientAccountId, clientAccountId)
-      )
-    )
+    .where(eq(campaigns.id, campaignId))
     .limit(1);
 
   if (!record) return null;

@@ -7,7 +7,7 @@
 
 export { AudioPlayerEnhanced } from './AudioPlayerEnhanced';
 export { TranscriptDisplay } from './TranscriptDisplay';
-export { QualityMetricsPanel } from './QualityMetricsPanel';
+export { QualityMetricsPanel, type QualityFeedback } from './QualityMetricsPanel';
 export { CallFilters } from './CallFilters';
 export { CallList } from './CallList';
 

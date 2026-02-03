@@ -1,8 +1,11 @@
-import { Bell, HelpCircle, LogOut, Settings, Mail, Phone, Zap, UserCog, ShieldCheck, Database } from "lucide-react";
+import { Bell, HelpCircle, LogOut, Settings, Mail, Phone, Zap, UserCog, ShieldCheck, Database, Bot } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useAgentPanelContextOptional } from "@/components/agent-panel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,8 +25,9 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
   const { logout } = useAuth();
   const [, setLocation] = useLocation();
   const initials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
-  
+
   const isAdmin = userRoles.includes('admin');
+  const agentPanel = useAgentPanelContextOptional();
 
   const handleLogout = () => {
     logout();
@@ -48,6 +52,30 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
 
       <div className="flex items-center gap-2 sm:gap-3">
         <ThemeToggle />
+
+        {/* AI Assistant Toggle */}
+        {agentPanel && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={agentPanel.togglePanel}
+                className={cn(
+                  "relative hover:bg-accent/70 transition-all duration-200",
+                  agentPanel.state.isOpen && "bg-primary/10 text-primary"
+                )}
+                data-testid="button-agent-panel"
+              >
+                <Bot className="h-5 w-5" />
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>AI Assistant (Ctrl+/)</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         <Button variant="ghost" size="icon" className="hidden sm:flex hover:bg-accent/70 transition-all duration-200" data-testid="button-help">
           <HelpCircle className="h-5 w-5" />

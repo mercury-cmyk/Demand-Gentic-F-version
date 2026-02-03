@@ -72,6 +72,21 @@ interface Campaign {
   status?: string | null;
 }
 
+interface BusinessProfile {
+  legalBusinessName: string;
+  dbaName?: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  customUnsubscribeUrl?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  supportEmail?: string | null;
+}
+
 interface EmailTemplateGeneratorPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -152,6 +167,21 @@ export function EmailTemplateGeneratorPanel({
     },
     enabled: open,
   });
+
+  // Fetch business profile for email footer
+  const { data: businessProfileData } = useQuery<{ profile: BusinessProfile | null; clientName: string }>({
+    queryKey: ['client-portal-business-profile'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/settings/business-profile', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch business profile');
+      return res.json();
+    },
+    enabled: open,
+  });
+
+  const businessProfile = businessProfileData?.profile;
 
   useEffect(() => {
     if (!selectedCampaignId && campaigns.length === 1) {
@@ -321,17 +351,28 @@ export function EmailTemplateGeneratorPanel({
     },
   });
 
-  // Build simple, professional email HTML with campaign context
+  // Build simple, professional email HTML with campaign context and business profile footer
   const buildSimpleEmailHtml = (email: GeneratedEmail, campaign?: string): string => {
-    const preheaderHtml = email.preheader 
+    const preheaderHtml = email.preheader
       ? `<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">${email.preheader}</div>`
       : '';
-    
+
     // Convert newlines to <br> tags and paragraphs
     const formattedBody = email.body
       .split('\n\n')
       .map(para => `<p style="margin: 0 0 16px 0; line-height: 1.6;">${para.replace(/\n/g, '<br>')}</p>`)
       .join('');
+
+    // Build business address from profile (CAN-SPAM compliance)
+    const companyName = businessProfile?.dbaName || businessProfile?.legalBusinessName || campaign || 'DemandEarn';
+    const addressParts = businessProfile ? [
+      businessProfile.addressLine1,
+      businessProfile.addressLine2,
+      `${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}`,
+      businessProfile.country !== 'United States' ? businessProfile.country : null
+    ].filter(Boolean).join('<br>') : '';
+
+    const unsubscribeUrl = businessProfile?.customUnsubscribeUrl || '{{unsubscribe_url}}';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -356,7 +397,7 @@ export function EmailTemplateGeneratorPanel({
           <tr>
             <td style="padding: 32px 32px 24px 32px; border-bottom: 1px solid #e5e7eb;">
               <h1 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">
-                ${campaign || 'DemandEarn'}
+                ${companyName}
               </h1>
             </td>
           </tr>
@@ -366,12 +407,20 @@ export function EmailTemplateGeneratorPanel({
               ${formattedBody}
             </td>
           </tr>
-          <!-- Footer -->
+          <!-- Footer with Business Profile (CAN-SPAM Compliance) -->
           <tr>
             <td style="padding: 24px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; border-radius: 0 0 8px 8px;">
-              <p style="margin: 0; font-size: 12px; color: #6b7280; text-align: center;">
-                This is a test email from ${campaign || 'your campaign'}.
-              </p>
+              <div style="text-align: center;">
+                <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 600; color: #374151;">
+                  ${companyName}
+                </p>
+                ${addressParts ? `<p style="margin: 0 0 12px 0; font-size: 11px; color: #6b7280; line-height: 1.5;">${addressParts}</p>` : ''}
+                <p style="margin: 0; font-size: 11px; color: #6b7280;">
+                  <a href="${unsubscribeUrl}" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
+                  <span style="margin: 0 8px; color: #d1d5db;">|</span>
+                  <a href="{{preferences_url}}" style="color: #6b7280; text-decoration: underline;">Manage Preferences</a>
+                </p>
+              </div>
             </td>
           </tr>
         </table>

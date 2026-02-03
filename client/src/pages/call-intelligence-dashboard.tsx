@@ -20,7 +20,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
+  AlertTriangle,
   Brain,
+  CloudOff,
+  Database,
   Phone,
   Mic,
   FileText,
@@ -51,6 +54,29 @@ interface Campaign {
   name: string;
 }
 
+interface IntelligenceStats {
+  sessions: {
+    total: number;
+    withRecording: number;
+    storedInGcs: number;
+    withTranscript: number;
+  };
+  quality: {
+    totalAnalyzed: number;
+    avgScore: number;
+    sentiment: {
+      positive: number;
+      neutral: number;
+      negative: number;
+    };
+  };
+  pending: {
+    recordingsNotInGcs: number;
+    needsTranscript: number;
+    needsAnalysis: number;
+  };
+}
+
 export default function CallIntelligenceDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -71,6 +97,18 @@ export default function CallIntelligenceDashboard() {
       return response.json();
     },
   });
+
+  // Fetch intelligence stats
+  const { data: statsData } = useQuery<{ success: boolean; data: IntelligenceStats }>({
+    queryKey: ['/api/call-intelligence/stats'],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/call-intelligence/stats');
+      return response.json();
+    },
+    refetchInterval: autoRefresh ? 30000 : false, // Refresh stats every 30s if auto-refresh is on
+  });
+
+  const stats = statsData?.data;
 
   // Fetch unified calls data
   const {
@@ -248,40 +286,74 @@ export default function CallIntelligenceDashboard() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      {aggregates && (
+      {/* Stats Cards - Use real database counts from stats API */}
+      {(stats || aggregates) && (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
           <StatCard
             icon={<Phone className="h-4 w-4" />}
             label="Total Calls"
-            value={aggregates.totalCalls}
+            value={stats?.sessions?.total ?? aggregates?.totalCalls ?? 0}
           />
           <StatCard
             icon={<BarChart3 className="h-4 w-4" />}
             label="Avg Score"
-            value={aggregates.avgQualityScore || '--'}
+            value={stats?.quality?.avgScore || aggregates?.avgQualityScore || '--'}
             suffix="/100"
           />
           <StatCard
             icon={<Clock className="h-4 w-4" />}
             label="Avg Duration"
-            value={formatDuration(aggregates.avgDuration)}
+            value={formatDuration(aggregates?.avgDuration || 0)}
           />
           <StatCard
             icon={<Mic className="h-4 w-4" />}
             label="Recordings"
-            value={aggregates.withRecordings}
+            value={stats?.sessions?.withRecording ?? aggregates?.withRecordings ?? 0}
           />
           <StatCard
             icon={<FileText className="h-4 w-4" />}
             label="Transcripts"
-            value={aggregates.withTranscripts}
+            value={stats?.sessions?.withTranscript ?? aggregates?.withTranscripts ?? 0}
           />
           <StatCard
             icon={<Sparkles className="h-4 w-4" />}
             label="Analyzed"
-            value={aggregates.withAnalysis}
+            value={stats?.quality?.totalAnalyzed ?? aggregates?.withAnalysis ?? 0}
           />
+        </div>
+      )}
+
+      {/* Pending Items Alert */}
+      {stats && (stats.pending.recordingsNotInGcs > 0 || stats.pending.needsTranscript > 0 || stats.pending.needsAnalysis > 0) && (
+        <div className="flex items-center gap-4 p-3 mb-4 rounded-lg bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800">
+          <AlertTriangle className="h-5 w-5 text-yellow-600" />
+          <div className="flex-1 text-sm">
+            <span className="font-medium text-yellow-800 dark:text-yellow-200">Action needed:</span>
+            <span className="ml-2 text-yellow-700 dark:text-yellow-300">
+              {stats.pending.recordingsNotInGcs > 0 && (
+                <span className="inline-flex items-center gap-1 mr-3">
+                  <CloudOff className="h-4 w-4" />
+                  {stats.pending.recordingsNotInGcs} recordings not in cloud
+                </span>
+              )}
+              {stats.pending.needsTranscript > 0 && (
+                <span className="inline-flex items-center gap-1 mr-3">
+                  <FileText className="h-4 w-4" />
+                  {stats.pending.needsTranscript} need transcription
+                </span>
+              )}
+              {stats.pending.needsAnalysis > 0 && (
+                <span className="inline-flex items-center gap-1">
+                  <Sparkles className="h-4 w-4" />
+                  {stats.pending.needsAnalysis} need analysis
+                </span>
+              )}
+            </span>
+          </div>
+          <Badge variant="outline" className="flex-shrink-0">
+            <Database className="h-3 w-3 mr-1" />
+            {stats.sessions.storedInGcs} in GCS
+          </Badge>
         </div>
       )}
 
@@ -357,6 +429,19 @@ export default function CallIntelligenceDashboard() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {/* Recording Storage Status */}
+                      {selectedCall.recording.available && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            selectedCall.recording.s3Key
+                              ? 'border-green-500 text-green-600'
+                              : 'border-yellow-500 text-yellow-600'
+                          }
+                        >
+                          {selectedCall.recording.s3Key ? '☁️ GCS' : '⚠️ URL Only'}
+                        </Badge>
+                      )}
                       {selectedCall.quality.analyzed && selectedCall.quality.overallScore !== undefined && (
                         <Badge
                           className={
@@ -374,7 +459,20 @@ export default function CallIntelligenceDashboard() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Sync Recording to GCS */}
+                    {selectedCall.recording.available && !selectedCall.recording.s3Key && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleRetrySync}
+                        disabled={retrySyncMutation.isPending}
+                        className="text-yellow-600 border-yellow-500 hover:bg-yellow-50"
+                      >
+                        <RefreshCw className={`h-4 w-4 mr-2 ${retrySyncMutation.isPending ? 'animate-spin' : ''}`} />
+                        {retrySyncMutation.isPending ? 'Syncing...' : 'Save to Cloud'}
+                      </Button>
+                    )}
                     {selectedCall.recording.available && !selectedCall.transcript.available && (
                       <Button
                         size="sm"
@@ -530,6 +628,13 @@ export default function CallIntelligenceDashboard() {
                 nextBestActions={selectedCall.quality.nextBestActions}
                 onAnalyze={handleAnalyze}
                 isAnalyzing={analyzeMutation.isPending}
+                callSessionId={selectedCall.id}
+                onFeedbackSubmit={(feedback) => {
+                  // Submit feedback via API
+                  apiRequest('POST', `/api/call-intelligence/feedback`, feedback)
+                    .then(() => toast({ title: 'Feedback submitted', description: 'Thank you for your feedback!' }))
+                    .catch(() => toast({ title: 'Feedback failed', variant: 'destructive' }));
+                }}
                 className="flex-1"
               />
             ) : (

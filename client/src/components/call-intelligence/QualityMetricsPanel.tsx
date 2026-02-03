@@ -63,6 +63,16 @@ interface QualityMetricsPanelProps {
   className?: string;
   onAnalyze?: () => void;
   isAnalyzing?: boolean;
+  callSessionId?: string;
+  onFeedbackSubmit?: (feedback: QualityFeedback) => void;
+}
+
+export interface QualityFeedback {
+  callSessionId: string;
+  rating: 'helpful' | 'not_helpful' | null;
+  comment: string;
+  analysisAccurate: boolean;
+  dispositionCorrect: boolean;
 }
 
 export function QualityMetricsPanel({
@@ -82,7 +92,28 @@ export function QualityMetricsPanel({
   className,
   onAnalyze,
   isAnalyzing,
+  callSessionId,
+  onFeedbackSubmit,
 }: QualityMetricsPanelProps) {
+  // Feedback state
+  const [feedbackRating, setFeedbackRating] = useState<'helpful' | 'not_helpful' | null>(null);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [analysisAccurate, setAnalysisAccurate] = useState(true);
+  const [dispositionCorrect, setDispositionCorrect] = useState(true);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+
+  const handleSubmitFeedback = () => {
+    if (onFeedbackSubmit && callSessionId) {
+      onFeedbackSubmit({
+        callSessionId,
+        rating: feedbackRating,
+        comment: feedbackComment,
+        analysisAccurate,
+        dispositionCorrect,
+      });
+      setFeedbackSubmitted(true);
+    }
+  };
   if (!analyzed) {
     return (
       <div className={cn('flex flex-col items-center justify-center py-12 px-4', className)}>
@@ -383,6 +414,96 @@ export function QualityMetricsPanel({
               </CollapsibleContent>
             </Card>
           </Collapsible>
+        )}
+
+        {/* Feedback Section */}
+        {analyzed && callSessionId && (
+          <Card className="border-blue-500/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-blue-500" />
+                Provide Feedback
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {feedbackSubmitted ? (
+                <div className="flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="h-5 w-5" />
+                  <span className="text-sm">Thank you for your feedback!</span>
+                </div>
+              ) : (
+                <>
+                  {/* Rating buttons */}
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Was this analysis helpful?</p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant={feedbackRating === 'helpful' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setFeedbackRating('helpful')}
+                        className="gap-1"
+                      >
+                        <ThumbsUp className="h-4 w-4" />
+                        Helpful
+                      </Button>
+                      <Button
+                        variant={feedbackRating === 'not_helpful' ? 'destructive' : 'outline'}
+                        size="sm"
+                        onClick={() => setFeedbackRating('not_helpful')}
+                        className="gap-1"
+                      >
+                        <ThumbsDown className="h-4 w-4" />
+                        Not Helpful
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Accuracy checks */}
+                  <div className="flex gap-4 text-xs">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={analysisAccurate}
+                        onChange={(e) => setAnalysisAccurate(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Analysis accurate</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dispositionCorrect}
+                        onChange={(e) => setDispositionCorrect(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Disposition correct</span>
+                    </label>
+                  </div>
+
+                  {/* Comment */}
+                  <div className="space-y-2">
+                    <Textarea
+                      placeholder="Share additional feedback or suggestions..."
+                      value={feedbackComment}
+                      onChange={(e) => setFeedbackComment(e.target.value)}
+                      className="text-sm min-h-[60px]"
+                    />
+                  </div>
+
+                  {/* Submit button */}
+                  <Button
+                    size="sm"
+                    onClick={handleSubmitFeedback}
+                    disabled={!feedbackRating && !feedbackComment.trim()}
+                    className="w-full gap-2"
+                  >
+                    <Send className="h-4 w-4" />
+                    Submit Feedback
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
         )}
       </div>
     </ScrollArea>

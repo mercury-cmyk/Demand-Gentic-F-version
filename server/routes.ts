@@ -75,6 +75,8 @@ import voiceProviderRoutes from './routes/voice-provider-routes';
 import recordingsRouter from './routes/recordings';
 import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
+import agentPromptsRouter from './routes/agent-prompts';
+import agentPanelRouter from './routes/agent-panel';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import { z } from "zod";
@@ -12954,6 +12956,11 @@ Provide JSON response with:
 
   app.use("/api/iam", iamRouter);
   app.use("/api/secrets", secretsRouter);
+
+  // ==================== AGENTIC OPERATOR ====================
+
+  app.use("/api/agent-prompts", agentPromptsRouter);
+  app.use("/api/agent-panel", agentPanelRouter);
 
   // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================
 

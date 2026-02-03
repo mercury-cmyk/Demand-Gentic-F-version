@@ -7224,6 +7224,154 @@ export const clientOrganizationLinks = pgTable("client_organization_links", {
   primaryIdx: index("client_organization_links_primary_idx").on(table.clientAccountId),
 }));
 
+// ==================== WORK ORDERS / CAMPAIGN REQUESTS ====================
+
+/**
+ * Work Order Status Enum
+ * Tracks the lifecycle of a work order / campaign request
+ */
+export const workOrderStatusEnum = pgEnum('work_order_status', [
+  'draft',           // Client creating the request
+  'submitted',       // Submitted, awaiting review
+  'under_review',    // Being reviewed by admin
+  'approved',        // Approved, ready for project creation
+  'in_progress',     // Campaign is being built/executed
+  'qa_review',       // In QA review stage
+  'completed',       // Work completed, leads delivered
+  'on_hold',         // Temporarily paused
+  'rejected',        // Request rejected
+  'cancelled'        // Request cancelled
+]);
+
+/**
+ * Work Order Type Enum
+ * Type of campaign/work being requested
+ */
+export const workOrderTypeEnum = pgEnum('work_order_type', [
+  'call_campaign',      // AI calling campaign
+  'email_campaign',     // Email outreach campaign
+  'combo_campaign',     // Combined call + email
+  'data_enrichment',    // Data enrichment/verification
+  'lead_generation',    // New lead generation
+  'appointment_setting', // Appointment setting focused
+  'market_research',    // Market research calls
+  'custom'              // Custom request
+]);
+
+/**
+ * Work Order Priority Enum
+ */
+export const workOrderPriorityEnum = pgEnum('work_order_priority', [
+  'low',
+  'normal',
+  'high',
+  'urgent'
+]);
+
+/**
+ * Work Orders (Client View) / Campaign Requests (Admin View)
+ *
+ * Submitted by clients as "Work Orders"
+ * Viewed by admins as "Campaign Requests"
+ * Links to Projects, Campaigns, QA, and Leads
+ */
+export const workOrders = pgTable("work_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderNumber: text("order_number").notNull().unique(),
+
+  // Client info
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+
+  // Request details
+  title: text("title").notNull(),
+  description: text("description"),
+  orderType: workOrderTypeEnum("order_type").notNull().default('lead_generation'),
+  priority: workOrderPriorityEnum("priority").notNull().default('normal'),
+  status: workOrderStatusEnum("status").notNull().default('draft'),
+
+  // Target specifications
+  targetIndustries: text("target_industries").array(),
+  targetTitles: text("target_titles").array(),
+  targetCompanySize: text("target_company_size"),
+  targetRegions: text("target_regions").array(),
+  targetAccountCount: integer("target_account_count"),
+  targetLeadCount: integer("target_lead_count"),
+
+  // Timeline
+  requestedStartDate: date("requested_start_date"),
+  requestedEndDate: date("requested_end_date"),
+  actualStartDate: date("actual_start_date"),
+  actualEndDate: date("actual_end_date"),
+
+  // Budget
+  estimatedBudget: numeric("estimated_budget", { precision: 12, scale: 2 }),
+  approvedBudget: numeric("approved_budget", { precision: 12, scale: 2 }),
+  actualSpend: numeric("actual_spend", { precision: 12, scale: 2 }).default('0'),
+
+  // Client notes & requirements
+  clientNotes: text("client_notes"),
+  specialRequirements: text("special_requirements"),
+
+  // Campaign configuration (from AI Studio or manual)
+  campaignConfig: jsonb("campaign_config").$type<{
+    voiceId?: string;
+    emailTemplateId?: string;
+    callScript?: string;
+    qualificationQuestions?: Array<{ question: string; required: boolean }>;
+    bookingEnabled?: boolean;
+    bookingUrl?: string;
+  }>(),
+
+  // Links to other entities (populated after approval)
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+
+  // Admin workflow
+  assignedTo: varchar("assigned_to").references(() => users.id, { onDelete: 'set null' }),
+  adminNotes: text("admin_notes"),
+  internalPriority: integer("internal_priority"),
+
+  // Review tracking
+  reviewedBy: varchar("reviewed_by").references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp("reviewed_at"),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+  rejectedBy: varchar("rejected_by").references(() => users.id, { onDelete: 'set null' }),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+
+  // Progress tracking
+  progressPercent: integer("progress_percent").default(0),
+  leadsGenerated: integer("leads_generated").default(0),
+  leadsDelivered: integer("leads_delivered").default(0),
+
+  // QA tracking
+  qaStatus: text("qa_status"), // pending, in_review, approved, rejected
+  qaReviewedBy: varchar("qa_reviewed_by").references(() => users.id, { onDelete: 'set null' }),
+  qaReviewedAt: timestamp("qa_reviewed_at"),
+  qaNotes: text("qa_notes"),
+
+  // Timestamps
+  submittedAt: timestamp("submitted_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("work_orders_client_idx").on(table.clientAccountId),
+  statusIdx: index("work_orders_status_idx").on(table.status),
+  typeIdx: index("work_orders_type_idx").on(table.orderType),
+  projectIdx: index("work_orders_project_idx").on(table.projectId),
+  campaignIdx: index("work_orders_campaign_idx").on(table.campaignId),
+  assignedIdx: index("work_orders_assigned_idx").on(table.assignedTo),
+  orderNumberIdx: uniqueIndex("work_orders_order_number_idx").on(table.orderNumber),
+}));
+
+// Schema for inserting work orders
+export const insertWorkOrderSchema = createInsertSchema(workOrders);
+export type InsertWorkOrder = z.infer<typeof insertWorkOrderSchema>;
+export type WorkOrder = typeof workOrders.$inferSelect;
+
 /**
  * QA Gated Content
  * Universal QA gating registry for all client-facing content
@@ -11604,4 +11752,766 @@ export type InsertNextBestActionRecord = z.infer<typeof insertNextBestActionReco
 
 export type EngagementAnalysisRecord = typeof engagementAnalysisRecords.$inferSelect;
 export type InsertEngagementAnalysisRecord = z.infer<typeof insertEngagementAnalysisRecordSchema>;
+
+// ==================== AGENTIC OPERATOR SYSTEM ====================
+
+// Agent Prompt Type Enum
+export const agentPromptTypeEnum = pgEnum('agent_prompt_type', [
+  'system',           // System-level instructions
+  'capability',       // Defines what agent can do
+  'restriction',      // Defines what agent cannot do
+  'persona',          // Agent personality/behavior
+  'context'           // Context injection rules
+]);
+
+// Agent Execution Plan Status Enum
+export const agentPlanStatusEnum = pgEnum('agent_plan_status', [
+  'pending',          // Plan created, awaiting approval
+  'approved',         // User approved the plan
+  'executing',        // Plan is being executed
+  'completed',        // Plan executed successfully
+  'rejected',         // User rejected the plan
+  'cancelled',        // Execution was cancelled
+  'failed'            // Execution failed
+]);
+
+// Agent Prompts - Store role-specific prompts and capabilities
+export const agentPrompts = pgTable("agent_prompts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+
+  // Role associations (supports both legacy and modern IAM)
+  userRole: userRoleEnum("user_role"),           // Legacy role enum
+  iamRoleId: varchar("iam_role_id").references(() => iamRoles.id, { onDelete: 'set null' }),
+  isClientPortal: boolean("is_client_portal").notNull().default(false), // For client portal users
+
+  // Prompt configuration
+  promptType: agentPromptTypeEnum("prompt_type").notNull().default('system'),
+  promptContent: text("prompt_content").notNull(),
+
+  // Capabilities and restrictions (JSON arrays of tool names)
+  capabilities: jsonb("capabilities").$type<string[]>(),       // Allowed tools/actions
+  restrictions: jsonb("restrictions").$type<string[]>(),       // Blocked tools/actions
+  contextRules: jsonb("context_rules").$type<Record<string, any>>(),  // Rules for context injection
+
+  // Metadata
+  isActive: boolean("is_active").notNull().default(true),
+  priority: integer("priority").notNull().default(0), // Higher priority evaluated first
+  version: integer("version").notNull().default(1),
+
+  // Audit fields
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  roleIdx: index("agent_prompts_role_idx").on(table.userRole),
+  iamRoleIdx: index("agent_prompts_iam_role_idx").on(table.iamRoleId),
+  activeIdx: index("agent_prompts_active_idx").on(table.isActive),
+  priorityIdx: index("agent_prompts_priority_idx").on(table.priority),
+  typeIdx: index("agent_prompts_type_idx").on(table.promptType),
+}));
+
+// Agent Prompt History - Version tracking and audit trail
+export const agentPromptHistory = pgTable("agent_prompt_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentPromptId: varchar("agent_prompt_id").notNull().references(() => agentPrompts.id, { onDelete: 'cascade' }),
+
+  // Previous state
+  previousContent: text("previous_content").notNull(),
+  previousCapabilities: jsonb("previous_capabilities").$type<string[]>(),
+  previousRestrictions: jsonb("previous_restrictions").$type<string[]>(),
+
+  // Change details
+  changeReason: text("change_reason"),
+  version: integer("version").notNull(),
+
+  // Audit
+  changedBy: varchar("changed_by").references(() => users.id, { onDelete: 'set null' }),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+}, (table) => ({
+  promptIdx: index("agent_prompt_history_prompt_idx").on(table.agentPromptId),
+  versionIdx: index("agent_prompt_history_version_idx").on(table.version),
+  changedAtIdx: index("agent_prompt_history_changed_at_idx").on(table.changedAt),
+}));
+
+// Agent Conversations - Persist chat sessions across navigation
+export const agentConversations = pgTable("agent_conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // User associations (one of these will be set)
+  userId: varchar("user_id").references(() => users.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id"), // For client portal users
+
+  // Session management
+  sessionId: varchar("session_id").notNull(), // Browser session identifier
+  title: text("title"), // Auto-generated or user-set title
+
+  // Conversation state
+  messages: jsonb("messages").$type<Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: string;
+    thoughtProcess?: string[];
+    toolsExecuted?: Array<{ tool: string; args: any; result: any }>;
+    planId?: string;
+  }>>().notNull().default(sql`'[]'::jsonb`),
+
+  context: jsonb("context").$type<Record<string, any>>(), // Additional context data
+
+  // Status
+  isActive: boolean("is_active").notNull().default(true),
+  isPinned: boolean("is_pinned").notNull().default(false), // Pin important conversations
+
+  // Timestamps
+  lastMessageAt: timestamp("last_message_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  userIdx: index("agent_conversations_user_idx").on(table.userId),
+  clientUserIdx: index("agent_conversations_client_user_idx").on(table.clientUserId),
+  sessionIdx: index("agent_conversations_session_idx").on(table.sessionId),
+  activeIdx: index("agent_conversations_active_idx").on(table.isActive),
+  lastMessageIdx: index("agent_conversations_last_message_idx").on(table.lastMessageAt),
+}));
+
+// Agent Execution Plans - Plan-before-execute tracking
+export const agentExecutionPlans = pgTable("agent_execution_plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+
+  // Associations
+  conversationId: varchar("conversation_id").references(() => agentConversations.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id"), // For client portal users
+
+  // Request
+  requestMessage: text("request_message").notNull(),
+
+  // Plan details
+  plannedSteps: jsonb("planned_steps").$type<Array<{
+    id: string;
+    stepNumber: number;
+    tool: string;
+    description: string;
+    args: Record<string, any>;
+    isDestructive: boolean;
+    estimatedImpact?: string;
+  }>>().notNull(),
+
+  // Risk assessment
+  riskLevel: text("risk_level").notNull().default('low'), // 'low', 'medium', 'high'
+  affectedEntities: jsonb("affected_entities").$type<string[]>(),
+
+  // Execution state
+  status: agentPlanStatusEnum("status").notNull().default('pending'),
+  executedSteps: jsonb("executed_steps").$type<Array<{
+    stepId: string;
+    executedAt: string;
+    result: any;
+    success: boolean;
+    error?: string;
+  }>>().default(sql`'[]'::jsonb`),
+
+  // User modifications
+  userModifications: jsonb("user_modifications").$type<{
+    modifiedSteps?: Array<{ stepId: string; originalArgs: any; newArgs: any }>;
+    removedSteps?: string[];
+    addedSteps?: Array<{ tool: string; args: any; insertAfter?: string }>;
+  }>(),
+
+  // Approval
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+
+  // Execution timing
+  executionStartedAt: timestamp("execution_started_at"),
+  executionCompletedAt: timestamp("execution_completed_at"),
+
+  // Timestamps
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  conversationIdx: index("agent_plans_conversation_idx").on(table.conversationId),
+  userIdx: index("agent_plans_user_idx").on(table.userId),
+  clientUserIdx: index("agent_plans_client_user_idx").on(table.clientUserId),
+  statusIdx: index("agent_plans_status_idx").on(table.status),
+  createdAtIdx: index("agent_plans_created_at_idx").on(table.createdAt),
+}));
+
+// ==================== AGENTIC OPERATOR INSERT SCHEMAS ====================
+
+export const insertAgentPromptSchema = createInsertSchema(agentPrompts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAgentPromptHistorySchema = createInsertSchema(agentPromptHistory).omit({
+  id: true,
+  changedAt: true,
+});
+
+export const insertAgentConversationSchema = createInsertSchema(agentConversations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertAgentExecutionPlanSchema = createInsertSchema(agentExecutionPlans).omit({
+  id: true,
+  createdAt: true,
+});
+
+// ==================== AGENTIC OPERATOR TYPES ====================
+
+export type AgentPrompt = typeof agentPrompts.$inferSelect;
+export type InsertAgentPrompt = z.infer<typeof insertAgentPromptSchema>;
+
+export type AgentPromptHistory = typeof agentPromptHistory.$inferSelect;
+export type InsertAgentPromptHistory = z.infer<typeof insertAgentPromptHistorySchema>;
+
+export type AgentConversation = typeof agentConversations.$inferSelect;
+export type InsertAgentConversation = z.infer<typeof insertAgentConversationSchema>;
+
+export type AgentExecutionPlan = typeof agentExecutionPlans.$inferSelect;
+export type InsertAgentExecutionPlan = z.infer<typeof insertAgentExecutionPlanSchema>;
+
+// ==================== CLIENT SELF-SERVICE PORTAL SYSTEM ====================
+
+/**
+ * Client Feature Flags Enum
+ * Controls which features are enabled for each client
+ */
+export const clientFeatureFlagEnum = pgEnum('client_feature_flag', [
+  'accounts_contacts',       // Can manage accounts and contacts
+  'bulk_upload',            // Can bulk upload contacts/accounts
+  'campaign_creation',      // Can create campaigns
+  'email_templates',        // Can create/manage email templates
+  'call_flows',             // Can define call flows
+  'voice_selection',        // Can select AI voices
+  'calendar_booking',       // Can configure calendar booking
+  'analytics_dashboard',    // Can access analytics
+  'reports_export',         // Can export reports
+  'api_access',             // Has API access
+]);
+
+/**
+ * Client Business Profile
+ * Stores legal business information for compliance (email footers, etc.)
+ */
+export const clientBusinessProfiles = pgTable("client_business_profiles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().unique().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Legal Business Information (Required for compliance)
+  legalBusinessName: text("legal_business_name").notNull(),
+  dbaName: text("dba_name"), // DBA / Trade Name (optional)
+  
+  // Physical Address (Required for CAN-SPAM, GDPR compliance)
+  addressLine1: text("address_line1").notNull(),
+  addressLine2: text("address_line2"),
+  city: text("city").notNull(),
+  state: text("state").notNull(),
+  postalCode: text("postal_code").notNull(),
+  country: text("country").notNull().default('United States'),
+
+  // Custom Unsubscribe URL (for client's own unsubscribe mechanism)
+  customUnsubscribeUrl: text("custom_unsubscribe_url"),
+
+  // Optional Business Details
+  website: text("website"),
+  phone: text("phone"),
+  supportEmail: text("support_email"),
+
+  // Logo and Branding
+  logoUrl: text("logo_url"),
+  brandColor: varchar("brand_color", { length: 7 }), // Hex color e.g. #3B82F6
+
+  // Audit
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+}, (table) => ({
+  clientAccountIdx: uniqueIndex("client_business_profiles_client_idx").on(table.clientAccountId),
+}));
+
+/**
+ * Client Feature Access
+ * Stores which features are enabled for each client (admin-controlled)
+ */
+export const clientFeatureAccess = pgTable("client_feature_access", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  
+  // Feature flag
+  feature: clientFeatureFlagEnum("feature").notNull(),
+  
+  // Is this feature enabled?
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  
+  // Feature-specific configuration (optional)
+  config: jsonb("config").$type<Record<string, any>>(),
+
+  // Audit
+  enabledBy: varchar("enabled_by").references(() => users.id, { onDelete: 'set null' }),
+  enabledAt: timestamp("enabled_at").notNull().defaultNow(),
+  disabledBy: varchar("disabled_by").references(() => users.id, { onDelete: 'set null' }),
+  disabledAt: timestamp("disabled_at"),
+}, (table) => ({
+  clientFeatureIdx: uniqueIndex("client_feature_access_unique_idx").on(table.clientAccountId, table.feature),
+  clientAccountIdx: index("client_feature_access_client_idx").on(table.clientAccountId),
+}));
+
+/**
+ * Client Accounts (CRM) - Client's own account records
+ * Separate from our internal accounts table
+ */
+export const clientCrmAccounts = pgTable("client_crm_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Account Information
+  name: text("name").notNull(),
+  domain: text("domain"),
+  industry: text("industry"),
+  employees: text("employees"),
+  annualRevenue: text("annual_revenue"),
+  
+  // Location
+  city: text("city"),
+  state: text("state"),
+  country: text("country"),
+  
+  // Contact Info
+  phone: text("phone"),
+  website: text("website"),
+
+  // Classification
+  accountType: text("account_type"), // prospect, customer, partner
+  status: text("status").default('active'),
+  
+  // Custom Fields
+  customFields: jsonb("custom_fields").$type<Record<string, any>>(),
+
+  // Source tracking
+  source: text("source"),
+  sourceId: varchar("source_id"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_crm_accounts_client_idx").on(table.clientAccountId),
+  nameIdx: index("client_crm_accounts_name_idx").on(table.name),
+  domainIdx: index("client_crm_accounts_domain_idx").on(table.domain),
+}));
+
+/**
+ * Client Contacts (CRM) - Client's own contact records
+ */
+export const clientCrmContacts = pgTable("client_crm_contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  crmAccountId: varchar("crm_account_id").references(() => clientCrmAccounts.id, { onDelete: 'set null' }),
+
+  // Contact Information
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  email: text("email"),
+  phone: text("phone"),
+  mobile: text("mobile"),
+  
+  // Professional Info
+  title: text("title"),
+  department: text("department"),
+  linkedinUrl: text("linkedin_url"),
+  
+  // Company (denormalized for display)
+  company: text("company"),
+  
+  // Status
+  status: text("status").default('active'),
+  
+  // Opt-out tracking
+  emailOptOut: boolean("email_opt_out").default(false),
+  phoneOptOut: boolean("phone_opt_out").default(false),
+  optOutDate: timestamp("opt_out_date"),
+  
+  // Custom Fields
+  customFields: jsonb("custom_fields").$type<Record<string, any>>(),
+
+  // Source tracking
+  source: text("source"),
+  sourceId: varchar("source_id"),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_crm_contacts_client_idx").on(table.clientAccountId),
+  crmAccountIdx: index("client_crm_contacts_crm_account_idx").on(table.crmAccountId),
+  emailIdx: index("client_crm_contacts_email_idx").on(table.email),
+  nameIdx: index("client_crm_contacts_name_idx").on(table.firstName, table.lastName),
+}));
+
+/**
+ * Client Campaigns - Client-created campaigns
+ */
+export const clientCampaigns = pgTable("client_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Campaign Details
+  name: text("name").notNull(),
+  description: text("description"),
+  campaignType: text("campaign_type").notNull(), // 'call', 'email', 'mixed'
+  status: text("status").notNull().default('draft'), // draft, active, paused, completed
+  
+  // Objectives and Content
+  objectives: text("objectives"),
+  keyTalkingPoints: jsonb("key_talking_points").$type<string[]>(),
+  targetAudience: text("target_audience"),
+  
+  // Call Configuration
+  callFlowId: varchar("call_flow_id").references(() => clientCallFlows.id, { onDelete: 'set null' }),
+  voiceId: text("voice_id"), // Gemini voice ID
+  voiceName: text("voice_name"),
+  
+  // Email Configuration
+  defaultEmailTemplateId: varchar("default_email_template_id").references(() => clientEmailTemplates.id, { onDelete: 'set null' }),
+  senderName: text("sender_name"),
+  senderEmail: text("sender_email"),
+  
+  // Booking Configuration (for appointment campaigns)
+  bookingEnabled: boolean("booking_enabled").default(false),
+  bookingUrl: text("booking_url"),
+  calendarIntegration: text("calendar_integration"), // 'calendly', 'google', 'outlook'
+  
+  // Timing
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  
+  // Statistics (denormalized for performance)
+  totalContacts: integer("total_contacts").default(0),
+  contactsReached: integer("contacts_reached").default(0),
+  appointmentsBooked: integer("appointments_booked").default(0),
+  
+  // Audit
+  createdBy: varchar("created_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_campaigns_client_idx").on(table.clientAccountId),
+  statusIdx: index("client_campaigns_status_idx").on(table.status),
+  typeIdx: index("client_campaigns_type_idx").on(table.campaignType),
+}));
+
+/**
+ * Client Campaign Contacts - Links contacts to campaigns
+ */
+export const clientCampaignContacts = pgTable("client_campaign_contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull().references(() => clientCampaigns.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id").notNull().references(() => clientCrmContacts.id, { onDelete: 'cascade' }),
+  
+  // Status within campaign
+  status: text("status").default('pending'), // pending, scheduled, contacted, responded, converted
+  
+  // Activity tracking
+  lastContactedAt: timestamp("last_contacted_at"),
+  responseAt: timestamp("response_at"),
+  conversionAt: timestamp("conversion_at"),
+  
+  // Notes
+  notes: text("notes"),
+
+  addedAt: timestamp("added_at").notNull().defaultNow(),
+  addedBy: varchar("added_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+}, (table) => ({
+  campaignContactIdx: uniqueIndex("client_campaign_contacts_unique_idx").on(table.campaignId, table.contactId),
+  campaignIdx: index("client_campaign_contacts_campaign_idx").on(table.campaignId),
+  contactIdx: index("client_campaign_contacts_contact_idx").on(table.contactId),
+  statusIdx: index("client_campaign_contacts_status_idx").on(table.status),
+}));
+
+/**
+ * Client Email Templates - Client-created email templates
+ */
+export const clientEmailTemplates = pgTable("client_email_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Template Details
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"), // 'outreach', 'follow-up', 'nurture', etc.
+  
+  // Email Content
+  subject: text("subject").notNull(),
+  bodyHtml: text("body_html").notNull(),
+  bodyText: text("body_text"),
+  
+  // Personalization
+  mergeFields: jsonb("merge_fields").$type<string[]>(), // Available merge fields
+  
+  // Status
+  isActive: boolean("is_active").default(true),
+  isDefault: boolean("is_default").default(false),
+  
+  // Statistics
+  timesUsed: integer("times_used").default(0),
+  
+  // Audit
+  createdBy: varchar("created_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_email_templates_client_idx").on(table.clientAccountId),
+  categoryIdx: index("client_email_templates_category_idx").on(table.category),
+  activeIdx: index("client_email_templates_active_idx").on(table.isActive),
+}));
+
+/**
+ * Client Call Flows - Client-defined AI call scripts/flows
+ */
+export const clientCallFlows = pgTable("client_call_flows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Flow Details
+  name: text("name").notNull(),
+  description: text("description"),
+  
+  // Call Script/Flow Definition
+  greeting: text("greeting"),
+  qualificationQuestions: jsonb("qualification_questions").$type<Array<{
+    id: string;
+    question: string;
+    expectedResponses?: string[];
+    followUp?: string;
+    required?: boolean;
+  }>>(),
+  objectionHandling: jsonb("objection_handling").$type<Array<{
+    objection: string;
+    response: string;
+  }>>(),
+  closingScript: text("closing_script"),
+  
+  // Appointment Booking Script
+  appointmentScript: text("appointment_script"),
+  
+  // Voice Configuration
+  voiceId: text("voice_id"),
+  voiceName: text("voice_name"),
+  speakingRate: numeric("speaking_rate", { precision: 3, scale: 2 }).default('1.0'),
+  
+  // Status
+  isActive: boolean("is_active").default(true),
+  isDefault: boolean("is_default").default(false),
+
+  // Audit
+  createdBy: varchar("created_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_call_flows_client_idx").on(table.clientAccountId),
+  activeIdx: index("client_call_flows_active_idx").on(table.isActive),
+}));
+
+/**
+ * Client Bulk Import Jobs - Tracks bulk upload operations
+ */
+export const clientBulkImports = pgTable("client_bulk_imports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Import Details
+  importType: text("import_type").notNull(), // 'contacts', 'accounts'
+  fileName: text("file_name"),
+  fileUrl: text("file_url"),
+  
+  // Status
+  status: text("status").notNull().default('pending'), // pending, processing, completed, failed
+  
+  // Counts
+  totalRows: integer("total_rows").default(0),
+  processedRows: integer("processed_rows").default(0),
+  successCount: integer("success_count").default(0),
+  errorCount: integer("error_count").default(0),
+  duplicateCount: integer("duplicate_count").default(0),
+  
+  // Mapping Configuration
+  columnMapping: jsonb("column_mapping").$type<Record<string, string>>(),
+  
+  // Errors
+  errors: jsonb("errors").$type<Array<{
+    row: number;
+    field?: string;
+    message: string;
+  }>>(),
+
+  // Campaign assignment (optional)
+  campaignId: varchar("campaign_id").references(() => clientCampaigns.id, { onDelete: 'set null' }),
+
+  // Audit
+  uploadedBy: varchar("uploaded_by").references(() => clientUsers.id, { onDelete: 'set null' }),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("client_bulk_imports_client_idx").on(table.clientAccountId),
+  statusIdx: index("client_bulk_imports_status_idx").on(table.status),
+}));
+
+// ==================== CLIENT SELF-SERVICE RELATIONS ====================
+
+export const clientBusinessProfilesRelations = relations(clientBusinessProfiles, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientBusinessProfiles.clientAccountId], references: [clientAccounts.id] }),
+  updatedByUser: one(clientUsers, { fields: [clientBusinessProfiles.updatedBy], references: [clientUsers.id] }),
+}));
+
+export const clientFeatureAccessRelations = relations(clientFeatureAccess, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientFeatureAccess.clientAccountId], references: [clientAccounts.id] }),
+  enabledByUser: one(users, { fields: [clientFeatureAccess.enabledBy], references: [users.id] }),
+}));
+
+export const clientCrmAccountsRelations = relations(clientCrmAccounts, ({ one, many }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientCrmAccounts.clientAccountId], references: [clientAccounts.id] }),
+  contacts: many(clientCrmContacts),
+  createdByUser: one(clientUsers, { fields: [clientCrmAccounts.createdBy], references: [clientUsers.id] }),
+}));
+
+export const clientCrmContactsRelations = relations(clientCrmContacts, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientCrmContacts.clientAccountId], references: [clientAccounts.id] }),
+  crmAccount: one(clientCrmAccounts, { fields: [clientCrmContacts.crmAccountId], references: [clientCrmAccounts.id] }),
+  createdByUser: one(clientUsers, { fields: [clientCrmContacts.createdBy], references: [clientUsers.id] }),
+}));
+
+export const clientCampaignsRelations = relations(clientCampaigns, ({ one, many }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientCampaigns.clientAccountId], references: [clientAccounts.id] }),
+  callFlow: one(clientCallFlows, { fields: [clientCampaigns.callFlowId], references: [clientCallFlows.id] }),
+  emailTemplate: one(clientEmailTemplates, { fields: [clientCampaigns.defaultEmailTemplateId], references: [clientEmailTemplates.id] }),
+  contacts: many(clientCampaignContacts),
+  createdByUser: one(clientUsers, { fields: [clientCampaigns.createdBy], references: [clientUsers.id] }),
+}));
+
+export const clientCampaignContactsRelations = relations(clientCampaignContacts, ({ one }) => ({
+  campaign: one(clientCampaigns, { fields: [clientCampaignContacts.campaignId], references: [clientCampaigns.id] }),
+  contact: one(clientCrmContacts, { fields: [clientCampaignContacts.contactId], references: [clientCrmContacts.id] }),
+  addedByUser: one(clientUsers, { fields: [clientCampaignContacts.addedBy], references: [clientUsers.id] }),
+}));
+
+export const clientEmailTemplatesRelations = relations(clientEmailTemplates, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientEmailTemplates.clientAccountId], references: [clientAccounts.id] }),
+  createdByUser: one(clientUsers, { fields: [clientEmailTemplates.createdBy], references: [clientUsers.id] }),
+}));
+
+export const clientCallFlowsRelations = relations(clientCallFlows, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientCallFlows.clientAccountId], references: [clientAccounts.id] }),
+  createdByUser: one(clientUsers, { fields: [clientCallFlows.createdBy], references: [clientUsers.id] }),
+}));
+
+export const clientBulkImportsRelations = relations(clientBulkImports, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientBulkImports.clientAccountId], references: [clientAccounts.id] }),
+  campaign: one(clientCampaigns, { fields: [clientBulkImports.campaignId], references: [clientCampaigns.id] }),
+  uploadedByUser: one(clientUsers, { fields: [clientBulkImports.uploadedBy], references: [clientUsers.id] }),
+}));
+
+// ==================== CLIENT SELF-SERVICE INSERT SCHEMAS ====================
+
+export const insertClientBusinessProfileSchema = createInsertSchema(clientBusinessProfiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientFeatureAccessSchema = createInsertSchema(clientFeatureAccess).omit({
+  id: true,
+});
+
+export const insertClientCrmAccountSchema = createInsertSchema(clientCrmAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientCrmContactSchema = createInsertSchema(clientCrmContacts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientCampaignSchema = createInsertSchema(clientCampaigns).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientCampaignContactSchema = createInsertSchema(clientCampaignContacts).omit({
+  id: true,
+  addedAt: true,
+});
+
+export const insertClientEmailTemplateSchema = createInsertSchema(clientEmailTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientCallFlowSchema = createInsertSchema(clientCallFlows).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertClientBulkImportSchema = createInsertSchema(clientBulkImports).omit({
+  id: true,
+  createdAt: true,
+});
+
+// ==================== CLIENT SELF-SERVICE TYPES ====================
+
+export type ClientBusinessProfile = typeof clientBusinessProfiles.$inferSelect;
+export type InsertClientBusinessProfile = z.infer<typeof insertClientBusinessProfileSchema>;
+
+export type ClientFeatureAccess = typeof clientFeatureAccess.$inferSelect;
+export type InsertClientFeatureAccess = z.infer<typeof insertClientFeatureAccessSchema>;
+
+export type ClientCrmAccount = typeof clientCrmAccounts.$inferSelect;
+export type InsertClientCrmAccount = z.infer<typeof insertClientCrmAccountSchema>;
+
+export type ClientCrmContact = typeof clientCrmContacts.$inferSelect;
+export type InsertClientCrmContact = z.infer<typeof insertClientCrmContactSchema>;
+
+export type ClientCampaign = typeof clientCampaigns.$inferSelect;
+export type InsertClientCampaign = z.infer<typeof insertClientCampaignSchema>;
+
+export type ClientCampaignContact = typeof clientCampaignContacts.$inferSelect;
+export type InsertClientCampaignContact = z.infer<typeof insertClientCampaignContactSchema>;
+
+export type ClientEmailTemplate = typeof clientEmailTemplates.$inferSelect;
+export type InsertClientEmailTemplate = z.infer<typeof insertClientEmailTemplateSchema>;
+
+export type ClientCallFlow = typeof clientCallFlows.$inferSelect;
+export type InsertClientCallFlow = z.infer<typeof insertClientCallFlowSchema>;
+
+export type ClientBulkImport = typeof clientBulkImports.$inferSelect;
+export type InsertClientBulkImport = z.infer<typeof insertClientBulkImportSchema>;
+
+// Feature flag type for type-safe feature checks
+export type ClientFeatureFlag = 
+  | 'accounts_contacts'
+  | 'bulk_upload'
+  | 'campaign_creation'
+  | 'email_templates'
+  | 'call_flows'
+  | 'voice_selection'
+  | 'calendar_booking'
+  | 'analytics_dashboard'
+  | 'reports_export'
+  | 'api_access';
 

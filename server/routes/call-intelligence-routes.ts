@@ -1234,4 +1234,149 @@ router.post("/unified/:id/analyze", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/call-intelligence/feedback
+ * Submit feedback on call quality analysis
+ * This feedback is used to improve AI analysis accuracy over time
+ */
+router.post("/feedback", requireAuth, async (req, res) => {
+  try {
+    const { callSessionId, rating, comment, analysisAccurate, dispositionCorrect } = req.body;
+
+    if (!callSessionId) {
+      return res.status(400).json({ error: "callSessionId is required" });
+    }
+
+    // Store feedback in the call_quality_records table as JSON
+    const [existingRecord] = await db
+      .select()
+      .from(callQualityRecords)
+      .where(eq(callQualityRecords.callSessionId, callSessionId))
+      .limit(1);
+
+    if (!existingRecord) {
+      return res.status(404).json({ error: "No quality record found for this call" });
+    }
+
+    // Update the quality record with feedback
+    const feedback = {
+      rating,
+      comment,
+      analysisAccurate,
+      dispositionCorrect,
+      submittedAt: new Date().toISOString(),
+    };
+
+    // Get existing prompt updates or initialize as array
+    const existingFeedback = (existingRecord.promptUpdates as any[]) || [];
+    
+    await db
+      .update(callQualityRecords)
+      .set({
+        // Store feedback in promptUpdates for now (can add dedicated column later)
+        promptUpdates: [...existingFeedback, { type: 'user_feedback', ...feedback }],
+        updatedAt: new Date(),
+      })
+      .where(eq(callQualityRecords.id, existingRecord.id));
+
+    console.log(
+      `[CallIntelligence] ✅ Feedback logged for call ${callSessionId}`,
+      `| Rating: ${rating}`,
+      `| Accurate: ${analysisAccurate}`,
+      `| Disposition Correct: ${dispositionCorrect}`
+    );
+
+    res.json({
+      success: true,
+      message: "Feedback submitted successfully",
+    });
+  } catch (error) {
+    console.error("[CallIntelligence] Error submitting feedback:", error);
+    res.status(500).json({ error: "Failed to submit feedback" });
+  }
+});
+
+/**
+ * GET /api/call-intelligence/stats
+ * Get overall call intelligence statistics
+ */
+router.get("/stats", requireAuth, async (req, res) => {
+  try {
+    // Get overall stats
+    const stats = await db.execute(sql`
+      SELECT 
+        count(*) as total_calls,
+        count(case when recording_url is not null or recording_s3_key is not null then 1 end) as with_recording,
+        count(case when recording_s3_key is not null then 1 end) as stored_in_gcs,
+        count(case when ai_transcript is not null then 1 end) as with_transcript
+      FROM call_sessions
+    `);
+
+    const qualityStats = await db.execute(sql`
+      SELECT 
+        count(*) as total_analyzed,
+        round(avg(overall_quality_score)::numeric, 1) as avg_score,
+        count(case when sentiment = 'positive' then 1 end) as positive_sentiment,
+        count(case when sentiment = 'neutral' then 1 end) as neutral_sentiment,
+        count(case when sentiment = 'negative' then 1 end) as negative_sentiment
+      FROM call_quality_records
+      WHERE overall_quality_score IS NOT NULL
+    `);
+
+    // Get pending items counts
+    const pendingRecordings = await db.execute(sql`
+      SELECT count(*) as count
+      FROM call_sessions
+      WHERE recording_url IS NOT NULL 
+      AND recording_s3_key IS NULL
+    `);
+
+    const pendingTranscripts = await db.execute(sql`
+      SELECT count(*) as count
+      FROM call_sessions
+      WHERE (recording_url IS NOT NULL OR recording_s3_key IS NOT NULL)
+      AND ai_transcript IS NULL
+    `);
+
+    const pendingAnalysis = await db.execute(sql`
+      SELECT count(*) as count
+      FROM call_sessions cs
+      WHERE cs.ai_transcript IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM call_quality_records cqr 
+        WHERE cqr.call_session_id = cs.id
+      )
+    `);
+
+    res.json({
+      success: true,
+      data: {
+        sessions: {
+          total: parseInt(stats.rows[0].total_calls as string),
+          withRecording: parseInt(stats.rows[0].with_recording as string),
+          storedInGcs: parseInt(stats.rows[0].stored_in_gcs as string),
+          withTranscript: parseInt(stats.rows[0].with_transcript as string),
+        },
+        quality: {
+          totalAnalyzed: parseInt(qualityStats.rows[0].total_analyzed as string),
+          avgScore: parseFloat(qualityStats.rows[0].avg_score as string) || 0,
+          sentiment: {
+            positive: parseInt(qualityStats.rows[0].positive_sentiment as string),
+            neutral: parseInt(qualityStats.rows[0].neutral_sentiment as string),
+            negative: parseInt(qualityStats.rows[0].negative_sentiment as string),
+          },
+        },
+        pending: {
+          recordingsNotInGcs: parseInt(pendingRecordings.rows[0].count as string),
+          needsTranscript: parseInt(pendingTranscripts.rows[0].count as string),
+          needsAnalysis: parseInt(pendingAnalysis.rows[0].count as string),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[CallIntelligence] Error fetching stats:", error);
+    res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+
 export default router;
