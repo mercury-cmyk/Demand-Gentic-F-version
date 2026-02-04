@@ -351,35 +351,70 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Campaigns"
-          value={campaigns.length}
-          icon={Zap}
-          description="All time"
-        />
-        <StatCard
-          title="Active Email"
-          value={campaigns.filter((c: any) => c.type === "email" && c.status === "active").length}
-          icon={Mail}
-          trend={{ value: 5, isPositive: true }}
-        />
-        <StatCard
-          title="Active Phone"
-          value={campaigns.filter((c: any) =>
-            (c.type === "call" || c.type === "telemarketing" || c.type === "sql") &&
-            c.status === "active"
-          ).length}
-          icon={Phone}
-          trend={{ value: 2, isPositive: true }}
-        />
-        <StatCard
-          title="Avg Performance"
-          value="28%"
-          icon={BarChart}
-          description="Open/Connect rate"
-        />
+      {/* Stats Overview - Refreshed */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 pb-6">
+        <Card className="shadow-sm border-slate-200 bg-white">
+            <CardContent className="p-5 flex flex-col justify-between h-full">
+                <div className="flex justify-between items-start">
+                    <p className="text-sm font-medium text-slate-500">Total Campaigns</p>
+                    <div className="h-8 w-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-500">
+                        <Zap className="h-4 w-4" />
+                    </div>
+                </div>
+                <div>
+                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.length}</h3>
+                     <p className="text-xs text-slate-400 mt-1">All time</p>
+                </div>
+            </CardContent>
+        </Card>
+        <Card className="shadow-sm border-slate-200 bg-white">
+            <CardContent className="p-5 flex flex-col justify-between h-full">
+                <div className="flex justify-between items-start">
+                    <p className="text-sm font-medium text-slate-500">Active Email</p>
+                    <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-500">
+                        <Mail className="h-4 w-4" />
+                    </div>
+                </div>
+                <div>
+                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.filter((c: any) => c.type === "email" && c.status === "active").length}</h3>
+                     <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
+                        <ArrowUpRight className="h-3 w-3 mr-1" />
+                        <span>+5 this week</span>
+                     </div>
+                </div>
+            </CardContent>
+        </Card>
+        <Card className="shadow-sm border-slate-200 bg-white">
+            <CardContent className="p-5 flex flex-col justify-between h-full">
+                <div className="flex justify-between items-start">
+                    <p className="text-sm font-medium text-slate-500">Active Phone</p>
+                    <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-500">
+                        <Phone className="h-4 w-4" />
+                    </div>
+                </div>
+                <div>
+                     <h3 className="text-2xl font-semibold text-slate-900">{campaigns.filter((c: any) => (c.type === "call" || c.type === "telemarketing" || c.type === "sql") && c.status === "active").length}</h3>
+                     <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
+                        <ArrowUpRight className="h-3 w-3 mr-1" />
+                        <span>+2 this week</span>
+                     </div>
+                </div>
+            </CardContent>
+        </Card>
+        <Card className="shadow-sm border-slate-200 bg-white">
+            <CardContent className="p-5 flex flex-col justify-between h-full">
+                <div className="flex justify-between items-start">
+                    <p className="text-sm font-medium text-slate-500">Avg Performance</p>
+                    <div className="h-8 w-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
+                        <BarChart className="h-4 w-4" />
+                    </div>
+                </div>
+                <div>
+                     <h3 className="text-2xl font-semibold text-slate-900">28%</h3>
+                     <p className="text-xs text-slate-400 mt-1">Open/Connect rate</p>
+                </div>
+            </CardContent>
+        </Card>
       </div>
 
       {/* Main Content */}

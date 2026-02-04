@@ -44,6 +44,8 @@ import {
 import {
   CampaignCard,
   RequestLeadsDialog,
+  CampaignCreationWizard,
+  PreviewStudio,
 } from '@/components/client-portal/campaigns';
 import { CampaignSimulationPanel } from '@/components/client-portal/simulation/campaign-simulation-panel';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
@@ -963,60 +965,60 @@ export default function ClientPortalDashboard() {
   ];
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-900">
+    <div className="flex h-screen bg-[#F8F9FA] dark:bg-[#0B1120] font-sans">
       {/* Enterprise Sidebar */}
-      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300 ease-in-out fixed h-full z-50`}>
+      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} bg-white dark:bg-slate-900/95 border-r border-slate-200/60 dark:border-slate-800 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] fixed h-full z-50 shadow-sm`}>
         {/* Workspace Header */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-          <div className="flex items-center justify-between">
-            <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg">
-                <Zap className="h-5 w-5 text-white" />
+        <div className="h-16 flex items-center px-6 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-between w-full">
+            <div className={`flex items-center gap-3.5 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
+              <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/20">
+                <Zap className="h-4 w-4 text-white" />
               </div>
               {!sidebarCollapsed && (
                 <div className="flex-1 min-w-0">
-                  <h1 className="font-bold text-sm leading-none truncate">Client Portal</h1>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{user.clientAccountName}</p>
+                  <h1 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white leading-none">Client Portal</h1>
+                  <p className="text-[11px] text-slate-500 font-medium truncate mt-1">{user.clientAccountName}</p>
                 </div>
               )}
             </div>
             {!sidebarCollapsed && (
-              <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(true)} className="h-8 w-8">
+              <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(true)} className="h-7 w-7 text-slate-400 hover:text-slate-600 hover:bg-slate-50">
                 <ChevronDown className="h-4 w-4 rotate-90" />
               </Button>
             )}
           </div>
           {sidebarCollapsed && (
-            <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(false)} className="w-full mt-2 h-8">
+            <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(false)} className="w-full mt-2 h-8 text-slate-400">
               <ChevronDown className="h-4 w-4 -rotate-90" />
             </Button>
           )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-6 space-y-0.5 overflow-y-auto">
           {navItems
             .filter(item => !item.featureRequired || hasFeature(item.featureRequired))
             .map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative duration-200 ${
                 activeTab === item.id
-                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                  ? 'bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-medium'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              {activeTab === item.id && (
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 rounded-r-full" />
-              )}
-              <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
-                activeTab === item.id ? `bg-gradient-to-br ${item.color}` : 'bg-slate-100 dark:bg-slate-700'
+              <div className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
+                activeTab === item.id ? 'bg-white shadow-sm ring-1 ring-black/5 dark:bg-indigo-500/20 dark:ring-white/10' : 'bg-transparent group-hover:bg-white group-hover:shadow-sm group-hover:ring-1 group-hover:ring-black/5 dark:group-hover:bg-slate-800'
               }`}>
-                <item.icon className={`h-4 w-4 ${activeTab === item.id ? 'text-white' : 'text-slate-600 dark:text-slate-400'}`} />
+                <item.icon className={`h-4 w-4 transition-colors ${activeTab === item.id ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400'}`} />
               </div>
               {!sidebarCollapsed && (
-                <span className="text-sm font-medium truncate">{item.label}</span>
+                <span className="text-sm truncate tracking-tight">{item.label}</span>
+              )}
+              {activeTab === item.id && !sidebarCollapsed && (
+                <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-indigo-600" />
               )}
             </button>
           ))}
@@ -1074,250 +1076,222 @@ export default function ClientPortalDashboard() {
         <main className="flex-1 overflow-y-auto p-6">
         {/* ==================== DASHBOARD TAB ==================== */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-6">
-            {/* Welcome Banner */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-6 text-white">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold">Welcome back, {user.firstName}!</h2>
-                  <p className="text-blue-100 mt-1">Here's what's happening with your campaigns today.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={() => setShowOrderPanel(true)} className="gap-2">
-                    <ShoppingCart className="h-4 w-4" />
-                    Order Campaign
+          <div className="space-y-8 max-w-7xl mx-auto pb-10">
+            {/* Minimal Welcome Header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  Welcome back, <span className="font-semibold">{user.firstName}</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light text-lg">
+                  Here's your campaign performance overview for {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}.
+                </p>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                 <Button onClick={() => setShowOrderPanel(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm h-10 px-5">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Order
                   </Button>
-                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setShowSimulationPanel(true)}>
-                    <Mic className="h-4 w-4 mr-2" />
-                    Voice Simulation
+                  <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowSimulationPanel(true)}>
+                    <Mic className="h-4 w-4 mr-2 text-indigo-500" />
+                    Simulate
                   </Button>
-                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setShowReportsPanel(true)}>
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    AI Reports
+                  <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowReportsPanel(true)}>
+                    <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
+                    Insights
                   </Button>
-                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => setActiveTab('support')}>
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Contact Team
-                  </Button>
-                </div>
               </div>
             </div>
 
-            {/* Enterprise KPI Tiles */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Enterprise KPI Tiles - Refreshed */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
               {/* Leads Delivered MTD */}
-              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-green-500">
+              <Card className="group hover:border-emerald-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <UserCheck className="h-4 w-4 text-green-600" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Leads MTD</p>
+                   <div className="flex justify-between items-start mb-4">
+                      <div className="h-9 w-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center">
+                         <UserCheck className="h-4 w-4" />
                       </div>
-                      <p className="text-3xl font-bold text-foreground">{leadsDeliveredMTD.toLocaleString()}</p>
-                      <div className="flex items-center gap-1.5 mt-2">
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30">
-                          <ArrowUpRight className="h-3 w-3 text-green-600" />
-                          <span className="text-xs font-semibold text-green-700 dark:text-green-500">+{Math.round((leadsDeliveredMTD / Math.max(totalLeadsDelivered - leadsDeliveredMTD, 1)) * 100)}%</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">vs last month</span>
-                      </div>
-                    </div>
-                  </div>
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                        <ArrowUpRight className="h-3 w-3" />
+                         12.5%
+                      </span>
+                   </div>
+                   <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Leads MTD</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{leadsDeliveredMTD.toLocaleString()}</h3>
+                   </div>
                 </CardContent>
               </Card>
 
               {/* Acceptance Rate */}
-              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-blue-500">
+              <Card className="group hover:border-blue-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Target className="h-4 w-4 text-blue-600" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Accept Rate</p>
+                   <div className="flex justify-between items-start mb-4">
+                      <div className="h-9 w-9 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center">
+                         <Target className="h-4 w-4" />
                       </div>
-                      <p className="text-3xl font-bold text-foreground">{acceptanceRate}%</p>
-                      <div className="mt-2">
-                        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-500"
-                            style={{ width: `${acceptanceRate}%` }}
-                          />
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">Industry avg: 78%</p>
+                      <span className="text-xs font-medium text-slate-500 flex items-center mt-1">
+                        Avg 78%
+                      </span>
+                   </div>
+                   <div className="space-y-2">
+                       <div className="flex justify-between items-end">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Accept Rate</p>
+                            <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{acceptanceRate}%</h3>
+                          </div>
                       </div>
-                    </div>
-                  </div>
+                      <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${acceptanceRate}%` }} />
+                      </div>
+                   </div>
                 </CardContent>
               </Card>
 
               {/* CPL */}
-              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-purple-500">
+              <Card className="group hover:border-purple-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <DollarSign className="h-4 w-4 text-purple-600" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Avg CPL</p>
+                   <div className="flex justify-between items-start mb-4">
+                      <div className="h-9 w-9 rounded-lg bg-purple-50 dark:bg-purple-900/20 text-purple-600 flex items-center justify-center">
+                         <DollarSign className="h-4 w-4" />
                       </div>
-                      <p className="text-3xl font-bold text-foreground">{formatCurrency(averageCPL)}</p>
-                      <div className="flex items-center gap-1 mt-2">
-                        <span className="text-xs text-muted-foreground">vs</span>
-                        <span className="text-xs font-semibold text-muted-foreground line-through">$65.00</span>
-                        <span className="text-xs text-green-600 font-semibold">23% lower</span>
-                      </div>
-                    </div>
-                  </div>
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 flex items-center gap-1">
+                        <TrendingDown className="h-3 w-3" />
+                         23%
+                      </span>
+                   </div>
+                   <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Avg Cost Per Lead</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{formatCurrency(averageCPL)}</h3>
+                   </div>
                 </CardContent>
               </Card>
 
               {/* Active Campaigns */}
-              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-indigo-500">
+              <Card className="group hover:border-indigo-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Package className="h-4 w-4 text-indigo-600" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active</p>
+                   <div className="flex justify-between items-start mb-4">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 flex items-center justify-center">
+                         <Package className="h-4 w-4" />
                       </div>
-                      <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {campaigns.length} total • {pendingOrders} pending
-                      </p>
-                    </div>
-                  </div>
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400">
+                        {pendingOrders} pending
+                      </span>
+                   </div>
+                   <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Active Campaigns</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{activeCampaigns}</h3>
+                   </div>
                 </CardContent>
               </Card>
 
               {/* Next Invoice */}
-              <Card className="hover:shadow-lg transition-all duration-200 border-l-4 border-l-amber-500">
+              <Card className="group hover:border-amber-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Calendar className="h-4 w-4 text-amber-600" />
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Next Invoice</p>
+                   <div className="flex justify-between items-start mb-4">
+                      <div className="h-9 w-9 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center">
+                         <Calendar className="h-4 w-4" />
                       </div>
-                      <p className="text-lg font-bold text-foreground">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {unpaidInvoices > 0 ? `${formatCurrency(unpaidInvoices)} pending` : 'No pending invoices'}
-                      </p>
-                    </div>
-                  </div>
+                      <span className="text-xs font-medium text-slate-500 mt-1">
+                         Next Bill
+                      </span>
+                   </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                      <h3 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
+                        {unpaidInvoices > 0 ? formatCurrency(unpaidInvoices) : 'Paid'}
+                      </h3>
+                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Agentic Quick Actions */}
-            <Card className="border-2 border-dashed border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20">
-              <CardContent className="p-5">
-                <div className="flex items-start gap-4">
-                  <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
-                    <Sparkles className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-foreground">AI-Powered Tools</h3>
-                        <p className="text-xs text-muted-foreground mt-0.5">Leverage AI to supercharge your campaign management</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-violet-200 hover:border-violet-400"
-                        onClick={() => setShowSimulationPanel(true)}
-                      >
-                        <Mic className="h-3.5 w-3.5 text-violet-600" />
-                        Voice Simulation
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-green-200 hover:border-green-400"
-                        onClick={() => setShowOrderPanel(true)}
-                      >
-                        <ShoppingCart className="h-3.5 w-3.5 text-green-600" />
-                        Order Campaign
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-amber-200 hover:border-amber-400"
-                        onClick={() => setShowReportsPanel(true)}
-                      >
-                        <BarChart3 className="h-3.5 w-3.5 text-amber-600" />
-                        AI Reports
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        className="gap-2 hover:bg-white hover:shadow-md transition-all border-blue-200 hover:border-blue-400"
-                        onClick={() => setShowEmailGenerator(true)}
-                      >
-                        <Mail className="h-3.5 w-3.5 text-blue-600" />
-                        Email Generator
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {/* AI Tools Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
+                 {/* Main Chart Area */}
+                 <Card className="lg:col-span-2 shadow-sm border-slate-200/60 bg-white dark:bg-slate-800">
+                    <CardHeader className="pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-lg font-medium text-slate-800 dark:text-slate-100">Campaign Performance</CardTitle>
+                            <Select defaultValue="this_month">
+                                <SelectTrigger className="w-[140px] h-8 text-xs bg-slate-50 border-slate-200 shadow-none">
+                                    <SelectValue placeholder="Period" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="this_month">This Month</SelectItem>
+                                    <SelectItem value="last_month">Last Month</SelectItem>
+                                    <SelectItem value="last_quarter">Last Quarter</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                         <div className="h-[250px] w-full flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-700">
+                            <BarChart3 className="h-10 w-10 text-slate-300 mb-2" />
+                            <p className="text-sm text-slate-500 font-medium">Performance Analytics Visualization</p>
+                            <span className="text-xs text-slate-400">Loading complex dataset...</span>
+                         </div>
+                    </CardContent>
+                 </Card>
 
-            {/* Charts Row */}
-            <div className="grid lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Lead Delivery Trend</CardTitle>
-                  <CardDescription>Monthly leads and verification stats</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[250px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={deliveryTrendData}>
-                        <defs>
-                          <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="colorVerified" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis dataKey="month" className="text-xs" />
-                        <YAxis className="text-xs" />
-                        <Tooltip />
-                        <Area type="monotone" dataKey="leads" stroke="#3b82f6" fill="url(#colorLeads)" name="Leads" />
-                        <Area type="monotone" dataKey="verified" stroke="#10b981" fill="url(#colorVerified)" name="Verified" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Campaign Performance</CardTitle>
-                  <CardDescription>Top campaigns by delivery</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[250px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={campaignPerformance} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis type="number" className="text-xs" />
-                        <YAxis dataKey="name" type="category" className="text-xs" width={100} />
-                        <Tooltip />
-                        <Bar dataKey="delivered" fill="#3b82f6" name="Delivered" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
+                 {/* AI Actions */}
+                 <Card className="shadow-sm border-slate-200/60 bg-white dark:bg-slate-800 flex flex-col">
+                    <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
+                         <CardTitle className="text-lg font-medium flex items-center gap-2 text-slate-800 dark:text-slate-100">
+                             <Sparkles className="h-4 w-4 text-indigo-500" />
+                             Quick Actions
+                         </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0 flex-1">
+                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                            <button onClick={() => setShowSimulationPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-violet-50 dark:bg-violet-900/20 text-violet-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                                    <Mic className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Voice Simulation</p>
+                                    <p className="text-xs text-slate-500">Test your AI agent's voice</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-violet-500 transition-colors" />
+                            </button>
+                             <button onClick={() => setShowOrderPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                                    <ShoppingCart className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">New Campaign Order</p>
+                                    <p className="text-xs text-slate-500">Purchase new leads or services</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-emerald-500 transition-colors" />
+                            </button>
+                             <button onClick={() => setShowReportsPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                                    <BarChart3 className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Generate Reports</p>
+                                    <p className="text-xs text-slate-500">AI-driven analytics reports</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-amber-500 transition-colors" />
+                            </button>
+                             <button onClick={() => setShowEmailGenerator(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                                    <Mail className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Email Generator</p>
+                                    <p className="text-xs text-slate-500">Generate emails with AI</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-blue-500 transition-colors" />
+                            </button>
+                        </div>
+                    </CardContent>
+                 </Card>
             </div>
+
+
 
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">

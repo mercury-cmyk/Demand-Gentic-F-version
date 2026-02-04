@@ -364,23 +364,30 @@ const FILTER_24K_TO_8K = generateLowPassFilter(15, 0.26); // 15 taps, cutoff at 
 // Cutoff at 3.5kHz (normalized: 3.5/8 = 0.44)
 const FILTER_16K_TO_8K = generateLowPassFilter(11, 0.42); // 11 taps, cutoff at ~3.4kHz
 
+// Gentler filter for A-law regions (UK, Europe) - fewer taps = less ringing
+// A-law has different quantization characteristics that make filter ringing more audible
+const FILTER_24K_TO_8K_ALAW = generateLowPassFilter(9, 0.30); // 9 taps, slightly higher cutoff
+const FILTER_16K_TO_8K_ALAW = generateLowPassFilter(7, 0.45); // 7 taps, gentler filtering
+
 /**
  * Apply low-pass FIR filter for anti-aliasing before downsampling.
  * Prevents aliasing artifacts (the irritating noise) by removing
  * frequencies above the Nyquist frequency of the target sample rate.
+ * 
+ * @param useAlawFilter - Use gentler A-law optimized filter (for UK/Europe)
  */
-function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number): Buffer {
+function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number, useAlawFilter: boolean = false): Buffer {
   const inputSamples = inputBuffer.length / 2;
   const outputBuffer = Buffer.alloc(inputBuffer.length);
 
-  // Select appropriate pre-computed filter based on downsample ratio
+  // Select appropriate pre-computed filter based on downsample ratio and codec
   let coeffs: number[];
   if (cutoffRatio <= 0.35) {
     // 3:1 downsampling (24kHz → 8kHz)
-    coeffs = FILTER_24K_TO_8K;
+    coeffs = useAlawFilter ? FILTER_24K_TO_8K_ALAW : FILTER_24K_TO_8K;
   } else if (cutoffRatio <= 0.55) {
     // 2:1 downsampling (16kHz → 8kHz)
-    coeffs = FILTER_16K_TO_8K;
+    coeffs = useAlawFilter ? FILTER_16K_TO_8K_ALAW : FILTER_16K_TO_8K;
   } else {
     // Minor downsampling - use simple averaging
     return inputBuffer;
@@ -453,6 +460,51 @@ export function resamplePcm(
       : sample1;
 
     // Linear interpolation (safe after filtering for downsampling)
+    const interpolated = Math.round(sample1 + (sample2 - sample1) * fraction);
+    outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, interpolated)), i * 2);
+  }
+
+  return outputBuffer;
+}
+
+/**
+ * Resample PCM audio with format-aware anti-aliasing
+ * Uses gentler filtering for A-law (UK/Europe) to reduce noise artifacts
+ */
+function resamplePcmWithFormat(
+  inputBuffer: Buffer,
+  inputSampleRate: number,
+  outputSampleRate: number,
+  useAlawFilter: boolean = false
+): Buffer {
+  if (inputSampleRate === outputSampleRate) {
+    return inputBuffer;
+  }
+
+  const ratio = outputSampleRate / inputSampleRate;
+  let processedInput = inputBuffer;
+
+  // When downsampling, apply anti-aliasing filter first
+  if (ratio < 1) {
+    processedInput = applyLowPassFilter(inputBuffer, ratio, useAlawFilter);
+  }
+
+  const inputSamples = processedInput.length / 2;
+  const outputSamples = Math.floor(inputSamples * ratio);
+  const outputBuffer = Buffer.alloc(outputSamples * 2);
+
+  for (let i = 0; i < outputSamples; i++) {
+    const srcPos = i / ratio;
+    const srcIndex = Math.floor(srcPos);
+    const fraction = srcPos - srcIndex;
+
+    const sample1 = srcIndex < inputSamples
+      ? processedInput.readInt16LE(srcIndex * 2)
+      : 0;
+    const sample2 = srcIndex + 1 < inputSamples
+      ? processedInput.readInt16LE((srcIndex + 1) * 2)
+      : sample1;
+
     const interpolated = Math.round(sample1 + (sample2 - sample1) * fraction);
     outputBuffer.writeInt16LE(Math.max(-32768, Math.min(32767, interpolated)), i * 2);
   }
@@ -577,21 +629,26 @@ function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
  * 3. Apply proper FIR anti-aliasing filter (not just averaging)
  * 4. Encode to G.711
  * 
- * NOTE: Removed noise gate from outbound path - Gemini output is already clean
- * and gating was causing audio artifacts that made speech sound "noisy"
+ * UK/A-LAW FIX (Feb 2026):
+ * - Use gentler FIR filter for A-law to reduce ringing artifacts
+ * - A-law quantization makes filter artifacts more audible than µ-law
+ * - Skip normalization for A-law (Gemini output is already well-leveled)
  */
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
+  const isAlaw = format === 'alaw';
+  
   // Step 1: Remove DC offset first (prevents clicking/pops at chunk boundaries)
   const dcCorrected = removeDcOffset(pcmBuffer);
 
-  // Step 2: Normalize to prevent clipping (only if too loud)
-  const normalized = normalizeAudio(dcCorrected, 0.92);
+  // Step 2: For A-law (UK), skip normalization - it can amplify quantization noise
+  // For µ-law (US), normalize to prevent clipping
+  const normalized = isAlaw ? dcCorrected : normalizeAudio(dcCorrected, 0.92);
 
-  // Step 3: Apply proper anti-aliasing FIR filter before downsampling
-  // This prevents the "noise" caused by aliasing artifacts
-  const filtered = applyLowPassFilter(normalized, 0.28); // Cutoff at 3.4kHz
+  // Step 3: Apply anti-aliasing FIR filter before downsampling
+  // Use gentler A-law filter for UK calls to reduce ringing/noise artifacts
+  const filtered = applyLowPassFilter(normalized, 0.28, isAlaw);
 
-  // Step 4: Decimate 3:1 (24kHz → 8kHz) using improved weighted averaging
+  // Step 4: Decimate 3:1 (24kHz → 8kHz)
   const pcm8k = simpleDecimate3to1(filtered);
 
   // Step 5: Encode to G.711
@@ -604,19 +661,21 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
  *
  * AUDIO QUALITY FIXES:
  * 1. Remove DC offset (prevents clicking at chunk boundaries)
- * 2. Normalize only if needed to prevent clipping
- * 3. Downsample with anti-aliasing filter
+ * 2. Normalize only if needed to prevent clipping (skip for A-law)
+ * 3. Downsample with anti-aliasing filter (gentler for A-law)
  * 4. Encode to G.711
  */
 export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
+  const isAlaw = format === 'alaw';
+  
   // Step 1: Remove DC offset
   const dcCorrected = removeDcOffset(pcmBuffer);
 
-  // Step 2: Normalize only if peaks would clip
-  const normalizedInput = normalizeAudio(dcCorrected, 0.9);
+  // Step 2: Skip normalization for A-law (UK) to avoid amplifying quantization noise
+  const normalizedInput = isAlaw ? dcCorrected : normalizeAudio(dcCorrected, 0.9);
 
-  // Step 3: Downsample 16kHz to 8kHz with anti-aliasing
-  const pcm8k = resamplePcm(normalizedInput, 16000, 8000);
+  // Step 3: Downsample 16kHz to 8kHz with anti-aliasing (gentler filter for A-law)
+  const pcm8k = resamplePcmWithFormat(normalizedInput, 16000, 8000, isAlaw);
 
   // Step 4: Encode to G.711
   return pcm8kToG711(pcm8k, format);

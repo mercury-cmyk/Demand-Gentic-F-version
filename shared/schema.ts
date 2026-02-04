@@ -93,7 +93,9 @@ export const campaignTypeEnum = pgEnum('campaign_type', [
 export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
 export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
 export const campaignStatusEnum = pgEnum('campaign_status', ['draft', 'scheduled', 'active', 'paused', 'completed', 'cancelled']);
-export const qaStatusEnum = pgEnum('qa_status', ['new', 'under_review', 'approved', 'rejected', 'returned', 'published']);
+// Lead QA Status Flow: new → under_review → approved → pending_pm_review → published
+// PM (Project Management) review is required before leads can be published to client portal
+export const qaStatusEnum = pgEnum('qa_status', ['new', 'under_review', 'approved', 'rejected', 'returned', 'pending_pm_review', 'published']);
 export const leadDeliverySourceEnum = pgEnum('lead_delivery_source', ['auto_webhook', 'manual']);
 
 // Queue Target Agent Type - For routing queue items to specific agent types
@@ -2689,9 +2691,16 @@ export const leads = pgTable("leads", {
   verificationId: varchar("verification_id"), // Reference to lead_verifications record
   qaDecision: text("qa_decision"), // Clear reason why lead needs review/was rejected
   
-  // Publishing (QA approved → Published for project management)
+  // Publishing (QA approved → PM Review → Published for client portal)
   publishedAt: timestamp("published_at"), // When lead was published
   publishedBy: varchar("published_by").references(() => users.id), // User who published the lead
+  
+  // Project Management Review (PM approval required after QA approval)
+  pmApprovedAt: timestamp("pm_approved_at"), // When PM approved the lead
+  pmApprovedBy: varchar("pm_approved_by").references(() => users.id), // PM who approved
+  pmRejectedAt: timestamp("pm_rejected_at"), // When PM rejected the lead
+  pmRejectedBy: varchar("pm_rejected_by").references(() => users.id), // PM who rejected
+  pmRejectionReason: text("pm_rejection_reason"), // Reason for PM rejection
   
   // LinkedIn Image Verification
   linkedinImageUrl: text("linkedin_image_url"), // S3 URL of LinkedIn screenshot

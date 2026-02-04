@@ -427,6 +427,14 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: [USER_ROLES.ADMIN],
         description: 'Manage clients, client users, and portal access',
       },
+      {
+        id: 'campaign-requests',
+        title: 'Campaign Requests',
+        url: '/campaign-requests',
+        icon: 'ClipboardList',
+        roles: MANAGEMENT_ROLES,
+        description: 'Review and manage client work orders and campaign requests',
+      },
     ],
   },
 

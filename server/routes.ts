@@ -8416,6 +8416,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // QA Approve - moves lead to pending_pm_review for Project Management final review
   app.post("/api/leads/:id/approve", requireAuth, requireRole('admin', 'quality_analyst'), async (req, res) => {
     try {
       const { approvedById } = req.body;
@@ -8428,21 +8429,9 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      // Trigger lead delivery in background (fire-and-forget)
-      setImmediate(async () => {
-        try {
-          const { triggerLeadDelivery } = await import('./services/lead-delivery');
-          const deliveryResult = await triggerLeadDelivery(req.params.id);
-          
-          if (deliveryResult.success) {
-            console.log(`[LEAD-APPROVE] Lead ${req.params.id} delivered to ${deliveryResult.destination}`);
-          } else if (deliveryResult.error !== 'Lead not approved' && deliveryResult.error !== 'No campaign order linked to this campaign') {
-            console.warn(`[LEAD-APPROVE] Lead delivery warning for ${req.params.id}: ${deliveryResult.error}`);
-          }
-        } catch (error) {
-          console.error(`[LEAD-APPROVE] Lead delivery failed for ${req.params.id}:`, error);
-        }
-      });
+      // After QA approval, lead moves to pending_pm_review for Project Management
+      // No delivery happens until PM approves
+      console.log(`[LEAD-APPROVE] Lead ${req.params.id} QA approved, now pending PM review`);
 
       res.json(lead);
     } catch (error) {
@@ -8470,7 +8459,155 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  // Publish lead - move from approved to published (makes visible in project management)
+  // PM Approve - Final approval by Project Management to publish lead to client portal
+  // Only leads with pending_pm_review status can be approved by PM
+  app.post("/api/leads/:id/pm-approve", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const leadId = req.params.id;
+      const approvedById = req.user!.userId;
+
+      // Get current lead
+      const [existingLead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+      if (!existingLead) {
+        return res.status(404).json({ message: "Lead not found" });
+      }
+
+      // Only leads pending PM review can be approved by PM
+      if (existingLead.qaStatus !== 'approved' && existingLead.qaStatus !== 'pending_pm_review') {
+        return res.status(400).json({ message: "Only leads pending PM review can be approved" });
+      }
+
+      // Update lead status to published
+      const [updatedLead] = await db.update(leads)
+        .set({
+          qaStatus: 'published',
+          publishedAt: new Date(),
+          publishedBy: approvedById,
+          pmApprovedAt: new Date(),
+          pmApprovedBy: approvedById,
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, leadId))
+        .returning();
+
+      // Trigger lead delivery in background after PM approval
+      setImmediate(async () => {
+        try {
+          const { triggerLeadDelivery } = await import('./services/lead-delivery');
+          const deliveryResult = await triggerLeadDelivery(leadId);
+          
+          if (deliveryResult.success) {
+            console.log(`[PM-APPROVE] Lead ${leadId} delivered to ${deliveryResult.destination}`);
+          } else if (deliveryResult.error !== 'Lead not approved' && deliveryResult.error !== 'No campaign order linked to this campaign') {
+            console.warn(`[PM-APPROVE] Lead delivery warning for ${leadId}: ${deliveryResult.error}`);
+          }
+        } catch (error) {
+          console.error(`[PM-APPROVE] Lead delivery failed for ${leadId}:`, error);
+        }
+      });
+
+      console.log(`[PM-APPROVE] Lead ${leadId} approved by PM ${approvedById} and published to client portal`);
+      res.json(updatedLead);
+    } catch (error) {
+      console.error('[PM-APPROVE] Error:', error);
+      res.status(500).json({ message: "Failed to approve lead", error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // PM Reject - Project Management rejects lead back to QA for review
+  app.post("/api/leads/:id/pm-reject", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const leadId = req.params.id;
+      const rejectedById = req.user!.userId;
+      const { reason } = req.body;
+
+      if (!reason) {
+        return res.status(400).json({ message: "Rejection reason is required" });
+      }
+
+      // Get current lead
+      const [existingLead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+      if (!existingLead) {
+        return res.status(404).json({ message: "Lead not found" });
+      }
+
+      // Only leads pending PM review can be rejected by PM
+      if (existingLead.qaStatus !== 'approved' && existingLead.qaStatus !== 'pending_pm_review') {
+        return res.status(400).json({ message: "Only leads pending PM review can be rejected by PM" });
+      }
+
+      // Return lead to QA with 'returned' status for re-review
+      const [updatedLead] = await db.update(leads)
+        .set({
+          qaStatus: 'returned',
+          pmRejectedAt: new Date(),
+          pmRejectedBy: rejectedById,
+          pmRejectionReason: reason,
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, leadId))
+        .returning();
+
+      console.log(`[PM-REJECT] Lead ${leadId} rejected by PM ${rejectedById}: ${reason}`);
+      res.json(updatedLead);
+    } catch (error) {
+      console.error('[PM-REJECT] Error:', error);
+      res.status(500).json({ message: "Failed to reject lead", error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Bulk PM Approve - PM approves multiple leads at once
+  app.post("/api/leads/pm-approve-bulk", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
+    try {
+      const { leadIds } = req.body as { leadIds: string[] };
+      const approvedById = req.user!.userId;
+
+      if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+        return res.status(400).json({ message: "leadIds array is required" });
+      }
+
+      // Update all pending PM review leads to published
+      const updatedLeads = await db.update(leads)
+        .set({
+          qaStatus: 'published',
+          publishedAt: new Date(),
+          publishedBy: approvedById,
+          pmApprovedAt: new Date(),
+          pmApprovedBy: approvedById,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          inArray(leads.id, leadIds),
+          or(eq(leads.qaStatus, 'approved'), eq(leads.qaStatus, 'pending_pm_review'))
+        ))
+        .returning();
+
+      // Trigger lead delivery for all approved leads
+      for (const lead of updatedLeads) {
+        setImmediate(async () => {
+          try {
+            const { triggerLeadDelivery } = await import('./services/lead-delivery');
+            await triggerLeadDelivery(lead.id);
+          } catch (error) {
+            console.error(`[PM-APPROVE-BULK] Lead delivery failed for ${lead.id}:`, error);
+          }
+        });
+      }
+
+      console.log(`[PM-APPROVE-BULK] ${updatedLeads.length} leads approved by PM ${approvedById}`);
+      res.json({
+        message: `${updatedLeads.length} leads approved and published successfully`,
+        approvedCount: updatedLeads.length,
+        leads: updatedLeads
+      });
+    } catch (error) {
+      console.error('[PM-APPROVE-BULK] Error:', error);
+      res.status(500).json({ message: "Failed to bulk approve leads", error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Publish lead - legacy endpoint, now redirects to PM approval workflow
+  // Kept for backward compatibility - move from approved to published (makes visible in project management)
   app.post("/api/leads/:id/publish", requireAuth, requireRole('admin', 'quality_analyst', 'campaign_manager'), async (req, res) => {
     try {
       const leadId = req.params.id;
@@ -8482,8 +8619,8 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      // Only approved leads can be published
-      if (existingLead.qaStatus !== 'approved') {
+      // Only approved or pending_pm_review leads can be published
+      if (existingLead.qaStatus !== 'approved' && existingLead.qaStatus !== 'pending_pm_review') {
         return res.status(400).json({ message: "Only approved leads can be published" });
       }
 

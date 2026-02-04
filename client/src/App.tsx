@@ -101,6 +101,7 @@ import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
+import CampaignRequestsPage from "@/pages/campaign-requests";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
 import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
@@ -468,6 +469,7 @@ function AuthenticatedApp() {
               <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />
+              <Route path="/campaign-requests" component={CampaignRequestsPage} />
               
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />

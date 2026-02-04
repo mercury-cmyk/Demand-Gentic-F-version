@@ -4,7 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe } from "lucide-react";
+import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe, Briefcase } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FilterBuilder } from "@/components/filter-builder";
 import type { FilterGroup } from "@shared/filter-types";
@@ -62,6 +62,9 @@ export default function LeadsPage() {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [rejectingLeadId, setRejectingLeadId] = useState<string | null>(null);
+  const [pmRejectDialogOpen, setPmRejectDialogOpen] = useState(false);
+  const [pmRejectReason, setPmRejectReason] = useState("");
+  const [pmRejectingLeadId, setPmRejectingLeadId] = useState<string | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<LeadWithAccount | null>(null);
   const [filterGroup, setFilterGroup] = useState<FilterGroup | undefined>(undefined);
@@ -376,6 +379,86 @@ export default function LeadsPage() {
       toast({
         title: "Error",
         description: error.message || "Failed to reject lead",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // PM Approval mutation - for Project Management final approval
+  const pmApproveMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated");
+      }
+      return await apiRequest('POST', `/api/leads/${id}/pm-approve`, { pmApprovedById: user.id });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      toast({
+        title: "Success",
+        description: "Lead approved by PM and submitted to client portal",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve lead",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // PM Rejection mutation - returns lead to QA for more work
+  const pmRejectMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated");
+      }
+      return await apiRequest('POST', `/api/leads/${id}/pm-reject`, { 
+        pmRejectedById: user.id, 
+        reason 
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setPmRejectDialogOpen(false);
+      setPmRejectReason("");
+      setPmRejectingLeadId(null);
+      toast({
+        title: "Returned to QA",
+        description: "Lead returned to QA team for review",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to return lead to QA",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Bulk PM Approval mutation
+  const bulkPmApproveMutation = useMutation({
+    mutationFn: async (leadIds: string[]) => {
+      if (!user?.id) {
+        throw new Error("User not authenticated");
+      }
+      return await apiRequest('POST', '/api/leads/pm-approve-bulk', { leadIds, pmApprovedById: user.id });
+    },
+    onSuccess: async (response) => {
+      const data = await response.json();
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setSelectedLeads([]);
+      toast({
+        title: "Success",
+        description: data.message || "Leads approved by PM and submitted to client portal",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve leads",
         variant: "destructive",
       });
     },
@@ -861,6 +944,7 @@ export default function LeadsPage() {
 
   const pendingLeads = filteredLeads.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review');
   const approvedLeads = filteredLeads.filter(l => l.qaStatus === 'approved' || l.qaStatus === 'published');
+  const pmReviewLeads = filteredLeads.filter(l => l.qaStatus === 'approved' || l.qaStatus === 'pending_pm_review');
   const rejectedLeads = filteredLeads.filter(l => l.qaStatus === 'rejected');
 
   const handleBulkExport = async () => {
@@ -1825,6 +1909,12 @@ export default function LeadsPage() {
             <CheckCircle className="mr-2 h-4 w-4" />
             Approved ({approvedLeads.length})
           </TabsTrigger>
+          {(userRoles.includes('admin') || userRoles.includes('campaign_manager')) && (
+            <TabsTrigger value="pm-review" data-testid="tab-pm-review">
+              <Briefcase className="mr-2 h-4 w-4" />
+              PM Review ({pmReviewLeads.length})
+            </TabsTrigger>
+          )}
           <TabsTrigger value="rejected" data-testid="tab-rejected">
             <XCircle className="mr-2 h-4 w-4" />
             Rejected ({rejectedLeads.length})
@@ -2133,6 +2223,190 @@ export default function LeadsPage() {
           )}
           {renderLeadsTable(approvedLeads, !isAgentOnly, false)}
         </TabsContent>
+
+        {/* PM Review Tab - Project Management final approval before client portal */}
+        {(userRoles.includes('admin') || userRoles.includes('campaign_manager')) && (
+          <TabsContent value="pm-review" className="mt-6 space-y-4">
+            <Card className="mb-4">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Briefcase className="h-5 w-5" />
+                  Project Management Review
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  These leads have been approved by QA and are awaiting final PM review before publishing to the client portal.
+                  Approve to submit to client or reject to return to QA team.
+                </p>
+              </CardContent>
+            </Card>
+            
+            {selectedLeads.length > 0 && (
+              <div className="flex justify-end gap-2 flex-wrap">
+                <Button
+                  onClick={() => bulkPmApproveMutation.mutate(selectedLeads)}
+                  disabled={bulkPmApproveMutation.isPending}
+                  variant="default"
+                  data-testid="button-bulk-pm-approve"
+                >
+                  {bulkPmApproveMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  )}
+                  PM Approve & Publish ({selectedLeads.length})
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => bulkExportMutation.mutate(selectedLeads)}
+                  disabled={bulkExportMutation.isPending}
+                  data-testid="button-bulk-export-pm-review"
+                >
+                  {bulkExportMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Export ({selectedLeads.length})
+                </Button>
+              </div>
+            )}
+            
+            {/* PM Review Table */}
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={pmReviewLeads.length > 0 && selectedLeads.length === pmReviewLeads.length}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedLeads(pmReviewLeads.map(l => l.id));
+                          } else {
+                            setSelectedLeads([]);
+                          }
+                        }}
+                        aria-label="Select all PM review leads"
+                      />
+                    </TableHead>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Campaign</TableHead>
+                    <TableHead>QA Status</TableHead>
+                    <TableHead>QA Approved By</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pmReviewLeads.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                        No leads pending PM review
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    pmReviewLeads.map((lead) => (
+                      <TableRow key={lead.id}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedLeads.includes(lead.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedLeads([...selectedLeads, lead.id]);
+                              } else {
+                                setSelectedLeads(selectedLeads.filter(id => id !== lead.id));
+                              }
+                            }}
+                            aria-label={`Select ${lead.firstName} ${lead.lastName}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <button
+                            className="flex items-center gap-2 hover:underline cursor-pointer"
+                            onClick={() => navigate(`/leads/${lead.id}`)}
+                          >
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                {(lead.firstName?.[0] || '') + (lead.lastName?.[0] || '')}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="text-left">
+                              <div className="font-medium">{lead.firstName} {lead.lastName}</div>
+                              <div className="text-xs text-muted-foreground">{lead.title}</div>
+                            </div>
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                            {lead.accountName || '-'}
+                          </div>
+                        </TableCell>
+                        <TableCell>{lead.campaignName || '-'}</TableCell>
+                        <TableCell>
+                          <Badge variant={lead.qaStatus === 'approved' ? 'default' : 'secondary'}>
+                            {lead.qaStatus === 'approved' ? 'QA Approved' : 'Pending PM'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            {lead.approvedAt ? (
+                              <>
+                                <div>{new Date(lead.approvedAt).toLocaleDateString()}</div>
+                                <div className="text-xs text-muted-foreground">by QA Team</div>
+                              </>
+                            ) : '-'}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => pmApproveMutation.mutate(lead.id)}
+                              disabled={pmApproveMutation.isPending}
+                              data-testid={`button-pm-approve-${lead.id}`}
+                            >
+                              {pmApproveMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <CheckCircle className="mr-1 h-4 w-4" />
+                                  Approve
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPmRejectingLeadId(lead.id);
+                                setPmRejectDialogOpen(true);
+                              }}
+                              data-testid={`button-pm-reject-${lead.id}`}
+                            >
+                              <RotateCcw className="mr-1 h-4 w-4" />
+                              Return to QA
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => navigate(`/leads/${lead.id}`)}
+                              data-testid={`button-view-${lead.id}`}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        )}
 
         <TabsContent value="rejected" className="mt-6 space-y-4">
           {!isAgentOnly && selectedLeads.length > 0 && (
@@ -2707,6 +2981,56 @@ export default function LeadsPage() {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Reject Lead
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PM Reject Dialog - Return lead to QA */}
+      <Dialog open={pmRejectDialogOpen} onOpenChange={setPmRejectDialogOpen}>
+        <DialogContent data-testid="dialog-pm-reject-lead">
+          <DialogHeader>
+            <DialogTitle>Return Lead to QA</DialogTitle>
+            <DialogDescription>
+              This lead will be returned to the QA team for additional review.
+              Provide feedback on what needs to be addressed.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder="Enter reason for returning to QA..."
+            value={pmRejectReason}
+            onChange={(e) => setPmRejectReason(e.target.value)}
+            rows={4}
+            data-testid="textarea-pm-reject-reason"
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setPmRejectDialogOpen(false);
+                setPmRejectReason("");
+                setPmRejectingLeadId(null);
+              }}
+              data-testid="button-cancel-pm-reject"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (pmRejectingLeadId && pmRejectReason.trim()) {
+                  pmRejectMutation.mutate({ id: pmRejectingLeadId, reason: pmRejectReason });
+                }
+              }}
+              disabled={!pmRejectReason.trim() || pmRejectMutation.isPending}
+              variant="outline"
+              data-testid="button-confirm-pm-reject"
+            >
+              {pmRejectMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Return to QA
             </Button>
           </DialogFooter>
         </DialogContent>
