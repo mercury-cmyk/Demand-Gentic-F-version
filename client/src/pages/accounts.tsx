@@ -5,7 +5,7 @@ import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Filter, Download, Upload, Building2, Trash2, LayoutGrid, List } from "lucide-react";
+import { Plus, Search, Filter, Download, Upload, Building2, Trash2, LayoutGrid, List, Zap, TrendingUp, Users, Globe, BarChart3, ArrowUpRight } from "lucide-react";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import { BulkActionsToolbar } from "@/components/bulk-actions-toolbar";
 import { BulkUpdateDialog } from "@/components/bulk-update-dialog";
@@ -322,44 +322,20 @@ export default function AccountsPage() {
       />
       <div className="flex-1 overflow-auto">
         <div className="space-y-6 p-6">
-          <Card className="relative overflow-hidden border border-border/60 bg-gradient-to-br from-card via-card to-primary/10 shadow-smooth-lg">
-            <div className="absolute -top-16 right-6 h-40 w-40 rounded-full bg-primary/20 blur-3xl" />
-            <div className="absolute bottom-0 left-0 h-32 w-32 rounded-full bg-teal-accent/20 blur-3xl" />
-            <CardContent className="relative p-6 lg:p-8">
-              <div className="flex flex-col gap-6">
-                <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
-                  <div className="space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      <Building2 className="h-3.5 w-3.5" />
-                      Accounts Workspace
-                    </div>
-                    <h1 className="text-3xl lg:text-4xl font-semibold text-gradient">Accounts</h1>
-                    <p className="text-muted-foreground max-w-xl">
-                      Manage your B2B account database with smart filtering and fast actions.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge className="bg-background/80 text-foreground border border-border/60">
-                        Total {totalAccounts}
-                      </Badge>
-                      <Badge className="bg-primary/10 text-primary border border-primary/20">
-                        Filtered {filteredCount}
-                      </Badge>
-                      {activeFilterCount > 0 && (
-                        <Badge className="bg-teal-500/10 text-teal-700 dark:text-teal-200 border border-teal-500/30">
-                          {activeFilterCount} Filters
-                        </Badge>
-                      )}
-                      {selectedCount > 0 && (
-                        <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-200 border border-amber-500/30">
-                          {selectedCount} Selected
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
+          {/* Header Section */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+             <div>
+                <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight">
+                  Client Management
+                </h1>
+                <p className="text-slate-500 mt-1">
+                  Manage your accounts, track revenue, and monitor growth.
+                </p>
+             </div>
+             <div className="flex items-center gap-3">
+                  <Button
                       variant="outline"
-                      className="bg-background/70 border-border/60 hover:bg-background"
+                      className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm transition-all"
                       onClick={() => {
                         const csv = exportAccountsToCSV(filteredAccounts);
                         downloadCSV(csv, `accounts_export_${new Date().toISOString().split('T')[0]}.csv`);
@@ -368,27 +344,100 @@ export default function AccountsPage() {
                           description: `Exported ${filteredAccounts.length} accounts to CSV`,
                         });
                       }}
-                      data-testid="button-export-accounts"
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Export
                     </Button>
                     <Button
                       variant="outline"
-                      className="bg-background/70 border-border/60 hover:bg-background"
+                      className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm transition-all"
                       onClick={() => setImportDialogOpen(true)}
-                      data-testid="button-import-accounts"
                     >
                       <Upload className="mr-2 h-4 w-4" />
                       Import
                     </Button>
-                    <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-                      <DialogTrigger asChild>
-                        <Button className="bg-gradient-primary text-white shadow-md hover:opacity-90" data-testid="button-create-account">
-                          <Plus className="mr-2 h-4 w-4" />
-                          Create Account
-                        </Button>
-                      </DialogTrigger>
+                    <Button 
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
+                      onClick={() => setCreateDialogOpen(true)}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Account
+                    </Button>
+             </div>
+          </div>
+
+          {/* Stats Overview */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+             <Card className="shadow-sm border-slate-200 bg-white">
+                <CardContent className="p-5 flex flex-col justify-between h-full">
+                    <div className="flex justify-between items-start">
+                        <p className="text-sm font-medium text-slate-500">Total Accounts</p>
+                        <div className="h-8 w-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-500">
+                            <Building2 className="h-4 w-4" />
+                        </div>
+                    </div>
+                    <div>
+                         <h3 className="text-2xl font-semibold text-slate-900">{totalAccounts}</h3>
+                         <p className="text-xs text-slate-400 mt-1">Active clients</p>
+                    </div>
+                </CardContent>
+            </Card>
+            <Card className="shadow-sm border-slate-200 bg-white">
+                <CardContent className="p-5 flex flex-col justify-between h-full">
+                    <div className="flex justify-between items-start">
+                        <p className="text-sm font-medium text-slate-500">New This Month</p>
+                        <div className="h-8 w-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500">
+                            <TrendingUp className="h-4 w-4" />
+                        </div>
+                    </div>
+                    <div>
+                         <h3 className="text-2xl font-semibold text-slate-900">{accounts?.filter(a => new Date(a.createdAt).getMonth() === new Date().getMonth()).length || 0}</h3>
+                         <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
+                            <ArrowUpRight className="h-3 w-3 mr-1" />
+                            <span>Growing</span>
+                         </div>
+                    </div>
+                </CardContent>
+            </Card>
+            <Card className="shadow-sm border-slate-200 bg-white">
+                <CardContent className="p-5 flex flex-col justify-between h-full">
+                    <div className="flex justify-between items-start">
+                        <p className="text-sm font-medium text-slate-500">Top Industry</p>
+                        <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-500">
+                            <Globe className="h-4 w-4" />
+                        </div>
+                    </div>
+                    <div>
+                         <h3 className="text-2xl font-semibold text-slate-900 truncate">Technology</h3>
+                         <p className="text-xs text-slate-400 mt-1">Most common sector</p>
+                    </div>
+                </CardContent>
+            </Card>
+            <Card className="shadow-sm border-slate-200 bg-white">
+                <CardContent className="p-5 flex flex-col justify-between h-full">
+                    <div className="flex justify-between items-start">
+                        <p className="text-sm font-medium text-slate-500">Avg Revenue</p>
+                        <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-500">
+                            <BarChart3 className="h-4 w-4" />
+                        </div>
+                    </div>
+                    <div>
+                         <h3 className="text-2xl font-semibold text-slate-900">$2.4M</h3>
+                         <p className="text-xs text-slate-400 mt-1">Est. annual revenue</p>
+                    </div>
+                </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-none shadow-sm bg-white/50 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <div className="flex flex-col gap-6">
+                <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-semibold text-slate-900">All Accounts</h2>
+                    <p className="text-sm text-slate-500">View and manage your client list.</p>
+                  </div>
+                  <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
                       <DialogContent className="sm:max-w-[500px]">
                         <DialogHeader>
                           <DialogTitle>Create Account</DialogTitle>
@@ -496,7 +545,6 @@ export default function AccountsPage() {
                         </Form>
                       </DialogContent>
                     </Dialog>
-                  </div>
                 </div>
 
                 <div className="flex flex-col gap-4">

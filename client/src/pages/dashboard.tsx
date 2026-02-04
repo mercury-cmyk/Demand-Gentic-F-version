@@ -4,7 +4,7 @@ import { StatCard } from "@/components/shared/stat-card";
 import { 
   Users, Building2, Mail, CheckCircle, Phone, Clock, TrendingUp, 
   Award, FileText, ArrowUp, ArrowDown, Activity, Sparkles, 
-  Zap, MessageSquare, ShieldCheck, Search, Brain, Target, AlertCircle
+  Zap, MessageSquare, ShieldCheck, Search, Brain, Target, AlertCircle, Plus
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -166,38 +166,24 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="relative min-h-screen p-6 space-y-10 max-w-7xl mx-auto">
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-24 right-0 h-80 w-80 rounded-full bg-emerald-400/20 blur-3xl" />
-        <div className="absolute top-1/3 -left-20 h-72 w-72 rounded-full bg-sky-400/20 blur-3xl" />
-        <div className="absolute bottom-10 right-16 h-64 w-64 rounded-full bg-amber-300/20 blur-3xl" />
-        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-sky-500/10 via-transparent to-transparent" />
-      </div>
+    <div className="min-h-screen bg-slate-50/50 p-6 lg:p-10 space-y-8 max-w-[1600px] mx-auto">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <div className="flex items-center gap-3">
-            <Badge variant="success" className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30">
-              Live
-            </Badge>
-            <Badge className="bg-sky-500/15 text-sky-600 border-sky-500/30">
-              AI Guided
-            </Badge>
-          </div>
-          <h1 className="text-3xl md:text-4xl font-display font-bold tracking-tight bg-gradient-to-r from-emerald-500 via-sky-500 to-amber-500 text-transparent bg-clip-text">
-            Mission Control
+          <h1 className="text-3xl font-display font-bold text-slate-900 tracking-tight">
+            Dashboard
           </h1>
-          <p className="text-foreground/70 mt-2">
-            {isAgent ? "Agent Performance & Tasks" : "System Overview & AI Insights"}
+          <p className="text-slate-500 mt-1">
+            {isAgent ? "Agent Performance & Tasks" : "System Overview & Insights"}
           </p>
         </div>
         <div className="flex items-center gap-3">
            <AgentState status="idle" />
            <Button
              onClick={() => setLocation('/campaigns/new')}
-             className="gap-2 bg-gradient-to-r from-emerald-500 via-sky-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:via-sky-400 hover:to-cyan-400"
+             className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
            >
-             <Zap className="w-4 h-4" />
+             <Plus className="w-4 h-4 mr-2" />
              New Campaign
            </Button>
         </div>
@@ -213,135 +199,151 @@ export default function Dashboard() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {!isAgent ? (
               <>
-                <StatCard
-                  title="Total Contacts"
-                  value={stats?.totalContacts || 0}
-                  icon={Users}
-                  trend={{ value: 12, isPositive: true }}
-                  gradient={statThemes[0].gradient}
-                  accentClassName={statThemes[0].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(16,185,129,0.45)]"
-                />
-                <StatCard
-                  title="Active Campaigns"
-                  value={stats?.activeCampaigns || 0}
-                  icon={Target}
-                  description={`${stats?.activeCampaignsBreakdown?.email || 0} Email, ${stats?.activeCampaignsBreakdown?.telemarketing || 0} Voice`}
-                  gradient={statThemes[1].gradient}
-                  accentClassName={statThemes[1].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(14,165,233,0.45)]"
-                />
-                <StatCard
-                  title="Leads Generated"
-                  value={stats?.leadsThisMonth || 0}
-                  icon={Sparkles}
-                  trend={{ value: 8, isPositive: true }}
-                  gradient={statThemes[2].gradient}
-                  accentClassName={statThemes[2].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(251,146,60,0.45)]"
-                />
+                <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5 flex flex-col justify-between h-full">
+                        <div className="flex justify-between items-start">
+                            <p className="text-sm font-medium text-slate-500">Total Contacts</p>
+                            <div className="h-8 w-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-500">
+                                <Users className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <div>
+                             <h3 className="text-2xl font-semibold text-slate-900">{stats?.totalContacts || 0}</h3>
+                            <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
+                                <ArrowUp className="h-3 w-3 mr-1" />
+                                <span>+12%</span>
+                             </div>
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5 flex flex-col justify-between h-full">
+                        <div className="flex justify-between items-start">
+                            <p className="text-sm font-medium text-slate-500">Active Campaigns</p>
+                            <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-500">
+                                <Target className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <div>
+                             <h3 className="text-2xl font-semibold text-slate-900">{stats?.activeCampaigns || 0}</h3>
+                             <p className="text-xs text-slate-400 mt-1">
+                                {stats?.activeCampaignsBreakdown?.email || 0} Email, {stats?.activeCampaignsBreakdown?.telemarketing || 0} Voice
+                             </p>
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5 flex flex-col justify-between h-full">
+                        <div className="flex justify-between items-start">
+                            <p className="text-sm font-medium text-slate-500">Leads Generated</p>
+                            <div className="h-8 w-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-500">
+                                <Sparkles className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <div>
+                             <h3 className="text-2xl font-semibold text-slate-900">{stats?.leadsThisMonth || 0}</h3>
+                             <div className="flex items-center mt-1 text-xs text-emerald-600 font-medium">
+                                <ArrowUp className="h-3 w-3 mr-1" />
+                                <span>+8%</span>
+                             </div>
+                        </div>
+                    </CardContent>
+                </Card>
               </>
             ) : (
-              <>
-                <StatCard
-                  title="Calls Today"
-                  value={agentStats?.callsToday || 0}
-                  icon={Phone}
-                  gradient={agentThemes[0].gradient}
-                  accentClassName={agentThemes[0].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(244,63,94,0.45)]"
-                />
-                <StatCard
-                  title="Qualified Leads"
-                  value={agentStats?.qualified || 0}
-                  icon={CheckCircle}
-                  gradient={agentThemes[1].gradient}
-                  accentClassName={agentThemes[1].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(16,185,129,0.45)]"
-                />
-                <StatCard
-                  title="Avg Duration"
-                  value={`${Math.floor((agentStats?.avgDuration || 0) / 60)}m ${(agentStats?.avgDuration || 0) % 60}s`}
-                  icon={Clock}
-                  gradient={agentThemes[2].gradient}
-                  accentClassName={agentThemes[2].accent}
-                  className="shadow-[0_20px_40px_-34px_rgba(56,189,248,0.45)]"
-                />
-              </>
+                <>
+                 {/* Agent Stats Placeholders - matching style */}
+                 <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5">
+                         <h3 className="text-2xl font-semibold text-slate-900">{agentStats?.callsToday || 0}</h3>
+                         <p className="text-sm text-slate-500">Calls Today</p>
+                    </CardContent>
+                 </Card>
+                 <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5">
+                         <h3 className="text-2xl font-semibold text-slate-900">{agentStats?.qualified || 0}</h3>
+                         <p className="text-sm text-slate-500">Qualified Leads</p>
+                    </CardContent>
+                 </Card>
+                 <Card className="shadow-sm border-slate-200 bg-white">
+                    <CardContent className="p-5">
+                         <h3 className="text-2xl font-semibold text-slate-900">{Math.floor((agentStats?.avgDuration || 0) / 60)}m {(agentStats?.avgDuration || 0) % 60}s</h3>
+                         <p className="text-sm text-slate-500">Avg Duration</p>
+                    </CardContent>
+                 </Card>
+                </>
             )}
           </div>
 
           {/* Performance Trend Chart */}
-          <Card className="relative overflow-hidden border border-border/60 shadow-lg shadow-slate-900/10 bg-card/80 backdrop-blur-sm">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_60%),radial-gradient(circle_at_70%_80%,_rgba(16,185,129,0.14),_transparent_55%)]" />
-            <CardHeader className="relative z-10">
-              <CardTitle className="flex items-center gap-2 text-foreground">
-                <Activity className="w-5 h-5 text-sky-500" />
+          <Card className="border-none shadow-sm bg-white">
+            <CardHeader className="pb-4 border-b border-slate-100">
+              <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <Activity className="w-5 h-5 text-indigo-500" />
                 Performance Trends
               </CardTitle>
-              <CardDescription className="text-foreground/65">Weekly engagement and activity metrics</CardDescription>
             </CardHeader>
-            <CardContent className="relative z-10">
+            <CardContent className="pt-6">
               <TrendChart 
                 title="Weekly Activity"
                 data={trendData}
                 type="area"
                 height={300}
-                className="mt-4"
+                className="mt-0"
               />
             </CardContent>
           </Card>
 
         </div>
 
-        {/* Right Column: AI Insights & Actions (1/3 width) */}
+        {/* Right Column: AI Insights & Actions */}
         <div className="space-y-6">
-          <Card className="relative h-full overflow-hidden border border-border/60 shadow-lg shadow-slate-900/10 bg-card/85">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(251,146,60,0.18),_transparent_65%),radial-gradient(circle_at_20%_80%,_rgba(14,165,233,0.18),_transparent_55%)]" />
-            <CardHeader className="relative z-10">
-              <CardTitle className="flex items-center gap-2 text-xl text-foreground">
-                <Brain className="w-6 h-6 text-amber-500" />
-                AI Insights
-              </CardTitle>
-              <CardDescription className="text-foreground/65">
-                Real-time intelligence and recommendations
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 relative z-10">
-              {aiInsights.map((insight) => {
-                const theme = insightThemes[insight.type] || insightThemes.optimization;
-                return (
-                <Card key={insight.id} className={cn("border border-border/60 shadow-sm", theme.card)}>
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        {insight.type === 'opportunity' && <Sparkles className={cn("w-4 h-4", theme.icon)} />}
-                        {insight.type === 'anomaly' && <AlertCircle className={cn("w-4 h-4", theme.icon)} />}
-                        {insight.type === 'optimization' && <TrendingUp className={cn("w-4 h-4", theme.icon)} />}
-                        <span className="font-semibold text-sm text-foreground">{insight.summary}</span>
-                      </div>
-                      <ConfidenceIndicator score={insight.confidence} />
+          <Card className="border-none shadow-sm bg-white h-full">
+             <CardHeader className="pb-4 border-b border-slate-100">
+                <CardTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                    <Brain className="w-5 h-5 text-purple-500" />
+                    AI Insights
+                </CardTitle>
+             </CardHeader>
+             <CardContent className="p-0">
+                <div className="divide-y divide-slate-100">
+                  {aiInsights.map((insight) => (
+                    <div key={insight.id} className="p-5 hover:bg-slate-50/50 transition-colors">
+                        <div className="flex items-start gap-4">
+                            <div className={cn("mt-1 p-2 rounded-lg", 
+                                insight.type === 'opportunity' ? "bg-emerald-50 text-emerald-600" : 
+                                insight.type === 'anomaly' ? "bg-amber-50 text-amber-600" : 
+                                "bg-blue-50 text-blue-600"
+                            )}>
+                                {insight.type === 'opportunity' ? <TrendingUp className="h-4 w-4" /> : 
+                                 insight.type === 'anomaly' ? <AlertCircle className="h-4 w-4" /> : 
+                                 <Zap className="h-4 w-4" />}
+                            </div>
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className={cn("text-xs font-semibold uppercase tracking-wider",
+                                        insight.type === 'opportunity' ? "text-emerald-600" : 
+                                        insight.type === 'anomaly' ? "text-amber-600" : 
+                                        "text-blue-600"
+                                    )}>{insight.type}</span>
+                                    <span className="text-xs text-slate-400">{insight.confidence}% confidence</span>
+                                </div>
+                                <h4 className="font-semibold text-slate-900 text-sm">{insight.summary}</h4>
+                                <p className="text-xs text-slate-500 leading-relaxed">{insight.details}</p>
+                                <Button variant="outline" size="sm" className="mt-3 h-8 text-xs w-full justify-between group">
+                                    {insight.action}
+                                    <ArrowUp className="h-3 w-3 rotate-45 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                                </Button>
+                            </div>
+                        </div>
                     </div>
-                    
-                    <div className="text-sm text-foreground/70">
-                      {insight.details}
-                      <AIReasoning 
-                        summary="View reasoning" 
-                        details={insight.details} 
-                        className="mt-2"
-                      />
-                    </div>
-
-                    <Button variant="outline" size="sm" className={cn("w-full text-xs h-8", theme.button)}>
-                      {insight.action}
-                    </Button>
-                  </CardContent>
-                </Card>
-              )})}
-            </CardContent>
+                  ))}
+                </div>
+             </CardContent>
           </Card>
         </div>
       </div>
     </div>
   );
+
 }

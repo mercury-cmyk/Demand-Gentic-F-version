@@ -248,6 +248,11 @@ export default function ClientPortalDashboard() {
   // Sidebar state
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // Campaign Creation Wizard State (new wizard)
+  const [showCampaignWizard, setShowCampaignWizard] = useState(false);
+  const [showPreviewStudio, setShowPreviewStudio] = useState(false);
+  const [previewCampaignId, setPreviewCampaignId] = useState<string | undefined>(undefined);
+
   // Qualified Leads state
   const [selectedQualifiedLeadId, setSelectedQualifiedLeadId] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -1310,7 +1315,7 @@ export default function ClientPortalDashboard() {
                     <div className="text-center py-8 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                       <p>No orders yet</p>
-                      <Button variant="link" onClick={() => setShowCreateDialog(true)}>
+                      <Button variant="link" onClick={() => setShowCampaignWizard(true)}>
                         Create your first campaign
                       </Button>
                     </div>
@@ -1430,10 +1435,26 @@ export default function ClientPortalDashboard() {
                 <h2 className="text-2xl font-bold">Campaigns</h2>
                 <p className="text-muted-foreground">Create and manage your self-service campaigns</p>
               </div>
-              <Button onClick={() => { setShowCampaignCreator(true); setCampaignCreatorStep(1); }} className="gap-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
-                <Plus className="h-4 w-4" />
-                Create Campaign
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setPreviewCampaignId(undefined);
+                    setShowPreviewStudio(true);
+                  }}
+                  className="gap-2"
+                >
+                  <Play className="h-4 w-4" />
+                  Preview Studio
+                </Button>
+                <Button
+                  onClick={() => setShowCampaignWizard(true)}
+                  className="gap-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                >
+                  <Wand2 className="h-4 w-4" />
+                  Create Campaign
+                </Button>
+              </div>
             </div>
 
             {/* Info Banner */}
@@ -1587,8 +1608,8 @@ export default function ClientPortalDashboard() {
                          {campaigns.length === 0 ? 'Create your first campaign to start reaching your audience with AI-powered outreach.' : 'No campaigns match your current filters.'}
                        </p>
                        {campaigns.length === 0 && (
-                         <Button onClick={() => { setShowCampaignCreator(true); setCampaignCreatorStep(1); }} className="bg-gradient-to-r from-purple-600 to-pink-600">
-                           <Plus className="h-4 w-4 mr-2" />
+                         <Button onClick={() => setShowCampaignWizard(true)} className="bg-gradient-to-r from-purple-600 to-pink-600">
+                           <Wand2 className="h-4 w-4 mr-2" />
                            Create Your First Campaign
                          </Button>
                        )}
@@ -1610,7 +1631,7 @@ export default function ClientPortalDashboard() {
             {/* Quick Actions for Empty State */}
             {campaigns.length === 0 && (
               <div className="grid md:grid-cols-3 gap-4 mt-8">
-                <Card className="border-dashed hover:border-purple-300 hover:bg-purple-50/50 dark:hover:bg-purple-950/10 transition-all cursor-pointer group" onClick={() => { setShowCampaignCreator(true); setCampaignCreatorStep(1); }}>
+                <Card className="border-dashed hover:border-purple-300 hover:bg-purple-50/50 dark:hover:bg-purple-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
                   <CardContent className="p-6 flex flex-col items-center text-center">
                     <div className="h-12 w-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
                       <Phone className="h-6 w-6 text-purple-600" />
@@ -1619,7 +1640,7 @@ export default function ClientPortalDashboard() {
                     <p className="text-sm text-muted-foreground mt-1">AI-powered calling with natural conversations</p>
                   </CardContent>
                 </Card>
-                <Card className="border-dashed hover:border-blue-300 hover:bg-blue-50/50 dark:hover:bg-blue-950/10 transition-all cursor-pointer group" onClick={() => { setShowCampaignCreator(true); setCampaignCreatorStep(1); }}>
+                <Card className="border-dashed hover:border-blue-300 hover:bg-blue-50/50 dark:hover:bg-blue-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
                   <CardContent className="p-6 flex flex-col items-center text-center">
                     <div className="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
                       <Mail className="h-6 w-6 text-blue-600" />
@@ -1628,7 +1649,7 @@ export default function ClientPortalDashboard() {
                     <p className="text-sm text-muted-foreground mt-1">Personalized email outreach at scale</p>
                   </CardContent>
                 </Card>
-                <Card className="border-dashed hover:border-green-300 hover:bg-green-50/50 dark:hover:bg-green-950/10 transition-all cursor-pointer group" onClick={() => { setShowCampaignCreator(true); setCampaignCreatorStep(1); }}>
+                <Card className="border-dashed hover:border-green-300 hover:bg-green-50/50 dark:hover:bg-green-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
                   <CardContent className="p-6 flex flex-col items-center text-center">
                     <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
                       <Zap className="h-6 w-6 text-green-600" />
@@ -4421,6 +4442,23 @@ export default function ClientPortalDashboard() {
 
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
+
+      {/* Campaign Creation Wizard - Enhanced multi-step wizard */}
+      <CampaignCreationWizard
+        open={showCampaignWizard}
+        onOpenChange={setShowCampaignWizard}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
+          queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+        }}
+      />
+
+      {/* Preview Studio - AI Agent voice preview and testing */}
+      <PreviewStudio
+        open={showPreviewStudio}
+        onOpenChange={setShowPreviewStudio}
+        preselectedCampaignId={previewCampaignId}
+      />
     </div>
   );
 }
