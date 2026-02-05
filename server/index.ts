@@ -61,7 +61,7 @@ app.use(compression({
 
 // Payload size limits (防止 DOS attacks)
 // Capture raw body for webhook signature verification
-app.use(express.json({ 
+app.use(express.json({
   limit: PAYLOAD_LIMITS.json,
   verify: (req: any, res, buf) => {
     // Store raw body for signature verification (used by media/webhook providers)
@@ -69,6 +69,21 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: false, limit: PAYLOAD_LIMITS.urlencoded }));
+
+// JSON parsing error handler - catches malformed JSON before it reaches routes
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    console.error('[JSON Parse Error] Path:', req.path);
+    console.error('[JSON Parse Error] Method:', req.method);
+    console.error('[JSON Parse Error] Content-Type:', req.headers['content-type']);
+    console.error('[JSON Parse Error] Error:', err.message);
+    return res.status(400).json({
+      message: 'Invalid JSON in request body',
+      error: err.message
+    });
+  }
+  next(err);
+});
 
 // Sanitize all incoming request bodies (BEFORE validation)
 app.use(sanitizeBody); // Remove HTML/SQL injection patterns

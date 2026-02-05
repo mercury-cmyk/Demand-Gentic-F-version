@@ -47,7 +47,7 @@ import {
   CampaignCreationWizard,
   PreviewStudio,
 } from '@/components/client-portal/campaigns';
-import { CampaignSimulationPanel } from '@/components/client-portal/simulation/campaign-simulation-panel';
+import { SimulationStudioPanel as CampaignSimulationPanel } from '@/components/client-portal/simulation-studio/simulation-studio-panel';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';

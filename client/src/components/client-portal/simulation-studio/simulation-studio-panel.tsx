@@ -425,3 +425,24 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
       </Card>
     </div>
   );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4 border-b">
+          <DialogTitle className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-primary" />
+            AI Simulation Studio
+          </DialogTitle>
+          <DialogDescription>
+            Test your AI agents in a realistic, interactive environment.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-grow overflow-hidden bg-muted/20">
+          {view === 'setup' ? <SetupView /> : <SimulationView />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
