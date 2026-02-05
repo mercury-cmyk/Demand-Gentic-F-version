@@ -6580,9 +6580,10 @@ export const clientPortalOrders = pgTable("client_portal_orders", {
   orderNumber: text("order_number").notNull().unique(),
   clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }).notNull(),
   clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
-  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }),  // Nullable - order can be created before campaign association
   
-  // Order details
+  // Flexible metadata for work order details
+  metadata: jsonb("metadata"),
   requestedQuantity: integer("requested_quantity").notNull(),
   approvedQuantity: integer("approved_quantity"),
   deliveredQuantity: integer("delivered_quantity").default(0).notNull(),

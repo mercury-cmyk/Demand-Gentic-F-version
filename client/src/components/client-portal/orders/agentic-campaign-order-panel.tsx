@@ -111,6 +111,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   const [step, setStep] = useState<'goal' | 'configure' | 'review'>('goal');
   const [goalDescription, setGoalDescription] = useState('');
   const [recommendation, setRecommendation] = useState<any>(null);
+  const [showAiReview, setShowAiReview] = useState(false);
 
   // Context management
   const [contextUrls, setContextUrls] = useState<string[]>([]);
@@ -253,10 +254,10 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           goal,
-          contextUrls, // Add context URLs
-          contextFiles: uploadedFiles // Add uploaded files
+          contextUrls,
+          contextFiles: uploadedFiles
         }),
       });
       if (!res.ok) throw new Error('Failed to get recommendations');
@@ -265,10 +266,14 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     onSuccess: (data) => {
       if (data.success && data.data?.recommendation) {
         const rec = data.data.recommendation;
-        setRecommendation(data.data);
-        
-        // Pre-fill form with recommendations
-        setCampaignType(rec.campaignType || 'lead_generation');
+        // Store the full recommendation data including rationale
+        setRecommendation({
+          ...data.data,
+          rationale: data.data.rationale || rec.rationale || 'AI analysis complete. Please review the recommended strategy below.'
+        });
+
+        // Pre-fill form with recommendations (but DO NOT advance - wait for user confirmation)
+        setCampaignType(rec.campaignType || 'high_quality_leads');
         setVolume(rec.suggestedVolume || 100);
         if (rec.targetAudience?.industries) {
           setIndustries(rec.targetAudience.industries);
@@ -280,8 +285,29 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           setChannels(rec.channels);
         }
         setEstimatedCost(rec.estimatedCost);
-        setStep('configure');
+
+        // CRITICAL: Show AI strategy review screen - user MUST review and approve before proceeding
+        // This blocks any campaign/order creation until explicit user approval
+        setShowAiReview(true);
+
+        toast({
+          title: 'Strategy Generated',
+          description: 'Please review the AI-recommended strategy before proceeding.',
+        });
+      } else {
+        toast({
+          title: 'Strategy Generation Failed',
+          description: 'Unable to generate strategy. Please try again with more details.',
+          variant: 'destructive',
+        });
       }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Strategy Generation Failed',
+        description: error.message || 'Failed to generate campaign strategy.',
+        variant: 'destructive',
+      });
     },
   });
 
@@ -493,8 +519,9 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                 {/* Step 2 */}
                 <button
                   type="button"
-                  onClick={() => setStep('configure')}
-                  className="flex items-center gap-3 group cursor-pointer"
+                  onClick={() => recommendation && setStep('configure')}
+                  className={cn("flex items-center gap-3 group", recommendation ? "cursor-pointer" : "cursor-not-allowed opacity-50")}
+                  disabled={!recommendation}
                 >
                   <div className={cn(
                     "h-12 w-12 rounded-xl flex items-center justify-center text-base font-bold transition-all duration-300 shadow-md group-hover:scale-105",
@@ -523,8 +550,9 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                 {/* Step 3 */}
                 <button
                   type="button"
-                  onClick={() => setStep('review')}
-                  className="flex items-center gap-3 group cursor-pointer"
+                  onClick={() => recommendation && setStep('review')}
+                  className={cn("flex items-center gap-3 group", recommendation ? "cursor-pointer" : "cursor-not-allowed opacity-50")}
+                  disabled={!recommendation}
                 >
                   <div className={cn(
                     "h-12 w-12 rounded-xl flex items-center justify-center text-base font-bold transition-all duration-300 shadow-md group-hover:scale-105",
@@ -547,6 +575,89 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           {/* Step 1: Describe Goal */}
           {step === 'goal' && (
             <div className="space-y-8 max-w-4xl mx-auto">
+              {showAiReview ? (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                  {/* Important Notice Banner */}
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-amber-800">Strategy Review Required</p>
+                      <p className="text-sm text-amber-700">No campaign or order will be created until you explicitly approve this strategy and complete the configuration.</p>
+                    </div>
+                  </div>
+
+                  <div className="text-center mb-6">
+                    <div className="inline-flex p-4 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-2xl mb-5 shadow-lg shadow-purple-100/50">
+                      <Sparkles className="h-10 w-10 text-purple-600" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-slate-800 mb-2">AI Strategy Analysis Complete</h3>
+                    <p className="text-slate-500">Review the AI-generated strategy below. You must approve before proceeding.</p>
+                  </div>
+
+                  <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 shadow-lg">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-indigo-900">
+                        <Bot className="h-5 w-5" />
+                        Strategic Rationale
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-base text-indigo-800 leading-relaxed">
+                        {recommendation?.rationale}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-2 border-slate-200">
+                     <CardHeader className="bg-slate-50 border-b border-slate-100 py-3">
+                        <CardTitle className="text-base text-slate-700 flex items-center gap-2">
+                          <Target className="h-4 w-4 text-emerald-600" />
+                          Proposed Configuration
+                        </CardTitle>
+                     </CardHeader>
+                     <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Campaign Type</p>
+                            <p className="font-semibold text-slate-800">{CAMPAIGN_TYPES.find(t => t.value === campaignType)?.label}</p>
+                            <p className="text-xs text-slate-500 mt-1">{CAMPAIGN_TYPES.find(t => t.value === campaignType)?.description}</p>
+                        </div>
+                        <div>
+                            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Target Volume</p>
+                            <p className="font-semibold text-slate-800">{volume} Leads</p>
+                        </div>
+                         <div>
+                            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Est. Timeline</p>
+                            <p className="font-semibold text-slate-800 capitalize">{deliveryTimeline?.replace('_', ' ')}</p>
+                        </div>
+                         <div>
+                            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Channels</p>
+                            <p className="font-semibold text-slate-800 capitalize">{channels.join(' & ')}</p>
+                        </div>
+                     </CardContent>
+                  </Card>
+                  
+                  <div className="flex gap-4 pt-6">
+                    <Button 
+                        variant="outline" 
+                        size="lg" 
+                        onClick={() => setShowAiReview(false)} 
+                        className="h-14 px-8 border-2"
+                    >
+                        Refine Request
+                    </Button>
+                    <Button 
+                        className="flex-1 h-14 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-lg font-semibold shadow-lg shadow-emerald-200/50" 
+                        onClick={() => {
+                            setStep('configure');
+                            setShowAiReview(false);
+                        }}
+                    >
+                        Accept Strategy & Configure <ArrowRight className="ml-2 h-5 w-5" />
+                    </Button>
+                </div>
+               </div>
+              ) : (
+                <>
               {/* Hero Section */}
               <div className="text-center mb-8">
                 <div className="inline-flex p-4 bg-gradient-to-br from-emerald-100 to-green-100 rounded-2xl mb-5 shadow-lg shadow-emerald-100/50">
@@ -989,36 +1100,26 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
 
               {/* Navigation Buttons */}
               <div className="flex gap-4 pt-4">
-                {/* Optional: Get AI Recommendations */}
                 <Button
-                  variant="outline"
-                  size="lg"
-                  className="h-14 px-6 text-base border-2 rounded-xl hover:bg-emerald-50 hover:border-emerald-300 transition-all"
+                  className="w-full h-14 text-lg font-semibold rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-200/60"
                   onClick={handleGoalSubmit}
                   disabled={!goalDescription.trim() || recommendMutation.isPending}
                 >
                   {recommendMutation.isPending ? (
                     <>
-                      <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                      Analyzing...
+                      <Loader2 className="h-5 w-5 mr-3 animate-spin" />
+                      Analyzing Goal & Generating Strategy...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="h-5 w-5 mr-2 text-emerald-600" />
-                      Get AI Suggestions
+                      <Sparkles className="h-5 w-5 mr-3" />
+                      Generate AI Campaign Strategy
                     </>
                   )}
                 </Button>
-
-                {/* Next Button */}
-                <Button
-                  className="flex-1 h-14 text-lg font-semibold rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-200/50 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-200/60"
-                  onClick={() => setStep('configure')}
-                >
-                  Next: Configure Campaign
-                  <ArrowRight className="h-5 w-5 ml-3" />
-                </Button>
               </div>
+              </>
+            )}
             </div>
           )}
 

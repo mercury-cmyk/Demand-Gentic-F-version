@@ -567,7 +567,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
+    enabled: open && formData.audienceSource === 'lists' && mode === 'client',
   });
 
   // Fetch client's contacts for audience selection
@@ -580,7 +580,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
+    enabled: open && formData.audienceSource === 'lists' && mode === 'client',
   });
 
   // Create/Update campaign mutation
@@ -701,14 +701,20 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       campaignType: 'content_syndication',
       objective: '',
       talkingPoints: [],
+      emailSubject: '',
+      emailBody: '',
       successCriteria: '',
       targetAudience: '',
       objections: [{ objection: '', response: '' }],
       selectedVoice: 'Fenrir',
+      selectedPhoneNumber: '',
+      senderProfileId: '',
       agentPersona: '',
       agentTone: 'professional',
       openingScript: '',
       audienceSource: 'request_handling',
+      selectedLists: [],
+      selectedSegments: [],
       selectedAccounts: [],
       selectedContacts: [],
       targetIndustries: [],
@@ -716,6 +722,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       targetRegions: [],
       targetCompanySize: '',
       targetLeadCount: undefined,
+      useProjectDocuments: true,
       priority: 'normal',
       startDate: '',
       endDate: '',
@@ -799,6 +806,38 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     }
   };
 
+  // Get missing required fields for current step
+  const getMissingFields = (stepNum: number): string[] => {
+    const missing: string[] = [];
+    switch (stepNum) {
+      case 1:
+        if (!formData.name.trim()) missing.push('Campaign Name');
+        break;
+      case 2:
+        if (!formData.channel) missing.push('Promotion Channel');
+        break;
+      case 3:
+        if (!formData.campaignType) missing.push('Campaign Type');
+        break;
+      case 4:
+        if (!formData.objective.trim()) missing.push('Campaign Objective');
+        if (!formData.successCriteria.trim()) missing.push('Success Criteria');
+        break;
+      case 5:
+        if (formData.channel !== 'email' && !formData.selectedVoice) missing.push('AI Voice');
+        break;
+      case 6:
+        if (formData.audienceSource !== 'request_handling' &&
+            formData.selectedAccounts.length === 0 &&
+            formData.selectedContacts.length === 0 &&
+            formData.targetIndustries.length === 0) {
+          missing.push('Target Audience');
+        }
+        break;
+    }
+    return missing;
+  };
+
   // Progress calculation
   const progressPercentage = ((step - 1) / (STEPS.length - 1)) * 100;
 
@@ -852,7 +891,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="w-[95vw] max-w-6xl h-[90vh] overflow-hidden flex flex-col p-0">
         {/* Header with progress */}
         <div className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-primary/5 to-primary/10">
           <DialogHeader>
@@ -908,8 +947,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         </div>
 
         {/* Content area */}
-        <ScrollArea className="flex-1 px-6">
-          <div className="py-6">
+        <ScrollArea className="flex-1 min-h-0 px-6">
+          <div className="py-6 min-h-full">
             <AnimatePresence mode="wait">
               {/* Step 1: Campaign Basics */}
               {step === 1 && (
@@ -921,20 +960,48 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Let's start with the basics</h3>
+                    <h3 className="text-xl font-semibold mb-2">Let's start with the basics</h3>
                     <p className="text-muted-foreground">Give your campaign a name and description</p>
                   </div>
 
-                  <div className="space-y-4 max-w-xl mx-auto">
+                  <div className="space-y-6 max-w-2xl mx-auto">
                     <div className="space-y-2">
                       <Label htmlFor="name" className="text-base">Campaign Name *</Label>
-                      <Input
-                        id="name"
-                        placeholder="e.g., Q1 Lead Generation - Tech Sector"
-                        value={formData.name}
-                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                        className="h-12 text-lg"
-                      />
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Format: ClientID-MMDDYY-CustomName
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center h-12 px-3 bg-muted rounded-l-md border border-r-0 text-sm font-mono text-muted-foreground whitespace-nowrap">
+                          {clientAccountId ? clientAccountId.slice(0, 8) : 'CLIENTID'}-{(() => {
+                            const now = new Date();
+                            const mm = String(now.getMonth() + 1).padStart(2, '0');
+                            const dd = String(now.getDate()).padStart(2, '0');
+                            const yy = String(now.getFullYear()).slice(-2);
+                            return `${mm}${dd}${yy}`;
+                          })()}-
+                        </div>
+                        <Input
+                          id="name"
+                          placeholder="Enter custom name"
+                          value={formData.name.includes('-') ? formData.name.split('-').slice(2).join('-') : formData.name}
+                          onChange={(e) => {
+                            const customName = e.target.value;
+                            const now = new Date();
+                            const mm = String(now.getMonth() + 1).padStart(2, '0');
+                            const dd = String(now.getDate()).padStart(2, '0');
+                            const yy = String(now.getFullYear()).slice(-2);
+                            const prefix = `${clientAccountId ? clientAccountId.slice(0, 8) : 'CLIENTID'}-${mm}${dd}${yy}`;
+                            const fullName = customName ? `${prefix}-${customName}` : '';
+                            setFormData(prev => ({ ...prev, name: fullName }));
+                          }}
+                          className="h-12 text-lg flex-1 rounded-l-none"
+                        />
+                      </div>
+                      {formData.name && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Full name: <span className="font-mono">{formData.name}</span>
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -961,7 +1028,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Choose your promotion channel</h3>
+                    <h3 className="text-xl font-semibold mb-2">Choose your promotion channel</h3>
                     <p className="text-muted-foreground">How would you like to reach your audience?</p>
                   </div>
 
@@ -1009,7 +1076,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-6">
-                    <h3 className="text-lg font-semibold mb-2">What type of campaign is this?</h3>
+                    <h3 className="text-xl font-semibold mb-2">What type of campaign is this?</h3>
                     <p className="text-muted-foreground">
                       Choose your campaign objective for {formData.channel === 'voice' ? 'AI Voice Calls' : formData.channel === 'email' ? 'Email Campaigns' : 'Multi-Channel'}
                     </p>
@@ -1021,8 +1088,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                     )}
                   </div>
 
-                  <ScrollArea className="h-[450px] pr-4">
-                    <div className="space-y-6 max-w-4xl mx-auto">
+                  <ScrollArea className="h-[500px] pr-4">
+                    <div className="space-y-6 max-w-5xl mx-auto">
                       {CAMPAIGN_TYPE_CATEGORIES.map((category) => {
                         // Filter types that are available for the selected channel
                         const categoryTypes = availableCampaignTypes.filter(
@@ -1105,11 +1172,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Define your campaign content</h3>
+                    <h3 className="text-xl font-semibold mb-2">Define your campaign content</h3>
                     <p className="text-muted-foreground">Tell us what makes your campaign special</p>
                   </div>
 
-                  <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="max-w-3xl mx-auto space-y-6">
                     {/* Prompt Hierarchy Info */}
                     <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 mb-6">
                       <div className="flex items-start gap-3">
@@ -1363,7 +1430,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">
+                    <h3 className="text-xl font-semibold mb-2">
                       Sender Configuration
                     </h3>
                     <p className="text-muted-foreground">
@@ -1380,7 +1447,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       </div>
 
                       {/* Phone Number Selection */}
-                      <div className="max-w-xl mx-auto mb-8">
+                      <div className="max-w-3xl mx-auto mb-8">
                          <Label className="mb-2 block">Outbound Phone Number</Label>
                          <Select
                             value={formData.selectedPhoneNumber}
@@ -1526,7 +1593,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
                   {/* Email Configuration */}
                   {(formData.channel === 'email' || formData.channel === 'combo') && (
-                    <div className="space-y-6 max-w-2xl mx-auto border-b pb-8">
+                    <div className="space-y-6 max-w-3xl mx-auto border-b pb-8">
                       <div className="flex items-center gap-2 mb-4">
                         <Mail className="h-5 w-5 text-primary" />
                         <h4 className="text-lg font-semibold">Email Sender Configuration</h4>
@@ -1556,7 +1623,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   )}
 
                   {/* Agent Personality Configuration */}
-                  <div className="max-w-2xl mx-auto space-y-6 pt-4">
+                  <div className="max-w-3xl mx-auto space-y-6 pt-4">
                     <div className="space-y-2">
                       <Label className="text-base">Agent Tone</Label>
                       <RadioGroup
@@ -1630,7 +1697,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Define your target audience</h3>
+                    <h3 className="text-xl font-semibold mb-2">Define your target audience</h3>
                     <p className="text-muted-foreground">Select from lists, use advanced filters, or let us handle targeting</p>
                   </div>
 
@@ -1969,7 +2036,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Review your campaign</h3>
+                    <h3 className="text-xl font-semibold mb-2">Review your campaign</h3>
                     <p className="text-muted-foreground">Make sure everything looks good before submitting</p>
                   </div>
 
@@ -2291,18 +2358,38 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
             </Button>
           )}
 
-          <div className="flex-1 text-center text-sm text-muted-foreground">
-            Step {step} of {STEPS.length}
+          <div className="flex-1 text-center">
+            <span className="text-sm text-muted-foreground">Step {step} of {STEPS.length}</span>
+            {/* Show missing fields message */}
+            {!isStepValid(step) && getMissingFields(step).length > 0 && (
+              <p className="text-xs text-amber-600 mt-1 flex items-center justify-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Required: {getMissingFields(step).join(', ')}
+              </p>
+            )}
           </div>
 
           {step < STEPS.length ? (
-            <Button
-              onClick={() => setStep(step + 1)}
-              disabled={!isStepValid(step)}
-            >
-              Continue
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      onClick={() => setStep(step + 1)}
+                      disabled={!isStepValid(step)}
+                    >
+                      Continue
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!isStepValid(step) && getMissingFields(step).length > 0 && (
+                  <TooltipContent>
+                    <p>Please fill in: {getMissingFields(step).join(', ')}</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <Button
               onClick={() => createMutation.mutate()}

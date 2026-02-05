@@ -20,18 +20,19 @@ import { Bot, Send, Loader2, User, Sparkles, Phone, MessageSquare, Mic, MicOff, 
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Complete list of Gemini voices mapped to high-quality Google Cloud TTS
 const AI_VOICES = [
-  // ============ GEMINI VOICES (Google) ============
   {
     id: 'Puck',
     name: 'Puck',
     gender: 'male',
     accent: 'American',
     tone: 'Natural, Soft, Storytelling',
-    description: 'A youthful, enthusiastic voice with high energy.',
+    description: 'Light and expressive voice - great for creative content.',
     bestFor: ['Product Launches', 'Cold Calling'],
     color: 'from-orange-500 to-amber-500',
-    provider: 'gemini'
+    provider: 'gemini',
+    googleVoice: 'en-US-Journey-D',
   },
   {
     id: 'Charon',
@@ -39,21 +40,23 @@ const AI_VOICES = [
     gender: 'male',
     accent: 'American',
     tone: 'Deep, Resonant, Authoritative',
-    description: 'A rich, bass-heavy voice that conveys wisdom and experience.',
+    description: 'Deep and authoritative voice that commands attention.',
     bestFor: ['Enterprise Sales', 'Executive Outreach'],
     color: 'from-slate-600 to-slate-800',
-    provider: 'gemini'
+    provider: 'gemini',
+    googleVoice: 'en-US-Studio-M',
   },
   {
     id: 'Fenrir',
     name: 'Fenrir',
     gender: 'male',
     accent: 'American',
-    tone: 'Deep, Intense, Cinematic',
-    description: 'A strong, assertive voice that commands attention.',
-    bestFor: ['Sales Calls', 'Lead Qualification'],
+    tone: 'Calm, Measured, Thoughtful',
+    description: 'Calm and measured voice for thoughtful conversations.',
+    bestFor: ['Sales Calls', 'Lead Qualification', 'B2B'],
     color: 'from-blue-500 to-indigo-600',
-    provider: 'gemini'
+    provider: 'gemini',
+    googleVoice: 'en-US-Studio-Q',
   },
   {
     id: 'Kore',
@@ -61,10 +64,11 @@ const AI_VOICES = [
     gender: 'female',
     accent: 'American',
     tone: 'Balanced, Clear, Professional',
-    description: 'A gentle, reassuring voice that puts people at ease.',
-    bestFor: ['Healthcare', 'Insurance'],
+    description: 'Soft and friendly voice - great default for most use cases.',
+    bestFor: ['Healthcare', 'Insurance', 'Customer Service'],
     color: 'from-green-400 to-emerald-500',
-    provider: 'gemini'
+    provider: 'gemini',
+    googleVoice: 'en-US-Journey-F',
   },
   {
     id: 'Aoede',
@@ -72,22 +76,97 @@ const AI_VOICES = [
     gender: 'female',
     accent: 'American',
     tone: 'Bright, Expressive, Engaging',
-    description: 'A cheerful, welcoming voice that creates instant rapport.',
+    description: 'Bright and warm voice with natural enthusiasm.',
     bestFor: ['Appointment Setting', 'Customer Outreach'],
     color: 'from-rose-400 to-pink-500',
-    provider: 'gemini'
+    provider: 'gemini',
+    googleVoice: 'en-US-Journey-F',
   },
   {
     id: 'Leda',
     name: 'Leda',
     gender: 'female',
     accent: 'American',
-    tone: 'Professional & Articulate',
-    description: 'A clear, polished voice with executive presence.',
-    bestFor: ['Executive Outreach', 'Consulting'],
+    tone: 'Professional, Articulate, Steady',
+    description: 'Steady and clear voice with executive presence.',
+    bestFor: ['Executive Outreach', 'Consulting', 'Financial Services'],
     color: 'from-violet-500 to-purple-600',
-    provider: 'gemini'
-  }
+    provider: 'gemini',
+    googleVoice: 'en-US-Studio-O',
+  },
+  {
+    id: 'Orus',
+    name: 'Orus',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Confident, Direct, Professional',
+    description: 'Confident and direct voice for assertive conversations.',
+    bestFor: ['Sales Calls', 'Lead Qualification', 'Negotiations'],
+    color: 'from-amber-500 to-orange-600',
+    provider: 'gemini',
+    googleVoice: 'en-US-Journey-D',
+  },
+  {
+    id: 'Zephyr',
+    name: 'Zephyr',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Gentle, Reliable, Soothing',
+    description: 'Gentle and reliable voice for sensitive conversations.',
+    bestFor: ['Healthcare', 'Support Calls', 'Sensitive Topics'],
+    color: 'from-teal-400 to-cyan-500',
+    provider: 'gemini',
+    googleVoice: 'en-US-Journey-O',
+  },
+];
+
+// Prospect Personas - Different types of prospects the AI agent will simulate calling
+const PROSPECT_PERSONAS = [
+  {
+    id: 'friendly_dm',
+    name: 'Friendly Decision Maker',
+    role: 'VP of Marketing',
+    disposition: 'friendly',
+    description: 'Open to conversation, interested in learning more',
+    icon: 'Smile',
+    color: 'from-green-500 to-emerald-500',
+  },
+  {
+    id: 'neutral_dm',
+    name: 'Neutral Decision Maker',
+    role: 'Director of Technology',
+    disposition: 'neutral',
+    description: 'Professional, needs convincing with value',
+    icon: 'User',
+    color: 'from-blue-500 to-indigo-500',
+  },
+  {
+    id: 'skeptical_dm',
+    name: 'Skeptical Decision Maker',
+    role: 'IT Director',
+    disposition: 'skeptical',
+    description: 'Has objections, tests your pitch',
+    icon: 'Shield',
+    color: 'from-amber-500 to-orange-500',
+  },
+  {
+    id: 'busy_executive',
+    name: 'Busy Executive',
+    role: 'CEO',
+    disposition: 'busy',
+    description: 'Limited time, needs quick value proposition',
+    icon: 'Clock',
+    color: 'from-purple-500 to-violet-500',
+  },
+  {
+    id: 'gatekeeper',
+    name: 'Gatekeeper',
+    role: 'Executive Assistant',
+    disposition: 'gatekeeper',
+    description: 'Protects the decision maker',
+    icon: 'Users',
+    color: 'from-slate-500 to-gray-600',
+  },
 ];
 
 // --- Type Definitions ---
@@ -124,7 +203,8 @@ interface SimulationStudioPanelProps {
 export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialCampaignId }: SimulationStudioPanelProps) {
   const [view, setView] = useState<'setup' | 'simulation'>('setup');
   const [mode, setMode] = useState<'text' | 'voice' | 'email'>('voice');
-  const [selectedVoice, setSelectedVoice] = useState<string>('Puck');
+  const [selectedVoice, setSelectedVoice] = useState<string>('Fenrir');
+  const [selectedPersona, setSelectedPersona] = useState<string>('neutral_dm');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -166,10 +246,11 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
       const res = await fetch('/api/client-portal/simulation/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ 
-          campaignId: selectedCampaignId, 
+        body: JSON.stringify({
+          campaignId: selectedCampaignId,
           mode,
-          voiceId: mode === 'voice' ? selectedVoice : undefined
+          voiceId: mode === 'voice' ? selectedVoice : undefined,
+          personaPreset: selectedPersona, // Send selected prospect persona
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to start simulation');
@@ -221,19 +302,85 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
     },
   });
 
-  // --- Speech Synthesis & Recognition ---
-  const speak = (text: string) => {
-    if (!window.speechSynthesis) return;
+  // --- Audio ref for TTS playback ---
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // --- Speech Synthesis using Google Cloud TTS API ---
+  const speak = async (text: string) => {
+    if (!voiceOutputEnabled) return;
     stopListening();
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
+    
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    window.speechSynthesis?.cancel();
+
+    try {
+      setIsSpeaking(true);
+      
+      // Generate TTS audio using the client portal voice API
+      const response = await fetch('/api/client-portal/voice/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          text,
+          voiceId: selectedVoice,
+          provider: 'gemini',
+        }),
+      });
+
+      if (!response.ok) {
+        // Fallback to browser speech synthesis if API fails
+        console.warn('[SimStudio] TTS API failed, using browser fallback');
+        if (window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            if (view === 'simulation') startListening();
+          };
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        }
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        if (view === 'simulation') startListening();
+      };
+
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        console.error('[SimStudio] Audio playback error');
+      };
+
+      audioRef.current = audio;
+      await audio.play();
+    } catch (error) {
+      console.error('[SimStudio] TTS error:', error);
       setIsSpeaking(false);
-      if (view === 'simulation') startListening();
-    };
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+      // Fallback to browser speech synthesis
+      if (window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          if (view === 'simulation') startListening();
+        };
+        utterance.onerror = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+      }
+    }
   };
 
   const startListening = () => {
@@ -324,7 +471,13 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
   };
 
   const handleReset = () => {
-    window.speechSynthesis.cancel();
+    // Stop API TTS audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    // Stop browser TTS
+    window.speechSynthesis?.cancel();
     stopListening();
     setIsSpeaking(false);
     setMessages([]);
@@ -438,48 +591,89 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
           </div>
 
           {mode === 'voice' && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }} 
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
-              className="space-y-3"
+              className="space-y-6"
             >
-              <Label className="font-medium">Select Agent Voice</Label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {AI_VOICES.map((voice) => (
-                  <div
-                    key={voice.id}
-                    onClick={() => setSelectedVoice(voice.id)}
-                    className={cn(
-                      "cursor-pointer rounded-xl border p-4 transition-all hover:shadow-md relative overflow-hidden group",
-                      selectedVoice === voice.id 
-                        ? "border-primary bg-primary/5 ring-1 ring-primary" 
-                        : "border-border hover:border-primary/50"
-                    )}
-                  >
-                    <div className={`absolute inset-0 bg-gradient-to-br ${voice.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
-                    <div className="relative flex items-start gap-4">
-                      <div className={cn(
-                        "flex items-center justify-center w-10 h-10 rounded-full text-white shadow-sm bg-gradient-to-br",
-                        voice.color
-                      )}>
-                        {voice.gender === 'male' ? <User className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <h4 className="font-semibold text-sm truncate">{voice.name}</h4>
-                          {selectedVoice === voice.id && (
-                            <Zap className="h-3 w-3 text-primary fill-primary animate-pulse" />
-                          )}
+              {/* Agent Voice Selection */}
+              <div className="space-y-3">
+                <Label className="font-medium flex items-center gap-2">
+                  <Volume2 className="h-4 w-4 text-violet-600" />
+                  Agent Voice
+                </Label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {AI_VOICES.map((voice) => (
+                    <div
+                      key={voice.id}
+                      onClick={() => setSelectedVoice(voice.id)}
+                      className={cn(
+                        "cursor-pointer rounded-xl border p-3 transition-all hover:shadow-md relative overflow-hidden group",
+                        selectedVoice === voice.id
+                          ? "border-primary bg-primary/5 ring-1 ring-primary"
+                          : "border-border hover:border-primary/50"
+                      )}
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${voice.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
+                      <div className="relative flex items-start gap-3">
+                        <div className={cn(
+                          "flex items-center justify-center w-9 h-9 rounded-full text-white shadow-sm bg-gradient-to-br flex-shrink-0",
+                          voice.color
+                        )}>
+                          {voice.gender === 'male' ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-4">{voice.accent}</Badge>
-                          <Badge variant="outline" className="px-1.5 py-0 text-[10px] h-4">{voice.gender}</Badge>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <h4 className="font-semibold text-sm truncate">{voice.name}</h4>
+                            {selectedVoice === voice.id && (
+                              <Zap className="h-3 w-3 text-primary fill-primary animate-pulse" />
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                            <Badge variant="secondary" className="px-1 py-0 text-[9px] h-3.5">{voice.gender}</Badge>
+                            <Badge variant="outline" className="px-1 py-0 text-[9px] h-3.5">{voice.tone.split(',')[0]}</Badge>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2">{voice.description}</p>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Prospect Persona Selection */}
+              <div className="space-y-3">
+                <Label className="font-medium flex items-center gap-2">
+                  <UserCircle className="h-4 w-4 text-amber-600" />
+                  Prospect Type (Who the AI simulates calling)
+                </Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {PROSPECT_PERSONAS.map((persona) => (
+                    <div
+                      key={persona.id}
+                      onClick={() => setSelectedPersona(persona.id)}
+                      className={cn(
+                        "cursor-pointer rounded-xl border p-3 transition-all hover:shadow-md relative overflow-hidden group",
+                        selectedPersona === persona.id
+                          ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-500"
+                          : "border-border hover:border-amber-400"
+                      )}
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${persona.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
+                      <div className="relative">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-semibold text-sm">{persona.name}</h4>
+                          {selectedPersona === persona.id && (
+                            <Zap className="h-3 w-3 text-amber-500 fill-amber-500 animate-pulse" />
+                          )}
+                        </div>
+                        <Badge variant="secondary" className="text-[10px] mb-2">{persona.role}</Badge>
+                        <p className="text-xs text-muted-foreground">{persona.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </motion.div>
           )}

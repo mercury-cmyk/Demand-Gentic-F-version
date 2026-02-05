@@ -706,4 +706,37 @@ router.post('/transcribe', async (req: Request, res: Response) => {
   }
 });
 
+// TTS endpoint for voice simulation - generates audio using Google Cloud TTS
+// Supports all Gemini voices mapped to high-quality Google Cloud TTS voices
+router.post('/tts', async (req: Request, res: Response) => {
+  try {
+    const { text, voiceId, provider } = req.body;
+
+    if (!text || typeof text !== 'string' || text.length === 0) {
+      return res.status(400).json({ message: 'Text is required' });
+    }
+
+    if (!voiceId || typeof voiceId !== 'string') {
+      return res.status(400).json({ message: 'Voice ID is required' });
+    }
+
+    // Import the TTS generator from voice-discovery-service
+    const { generateTTSAudio } = await import('../services/voice-discovery-service');
+    
+    const validProvider = provider === 'openai' ? 'openai' : 'gemini';
+    const audioBuffer = await generateTTSAudio(text, voiceId, validProvider);
+
+    // Set appropriate headers for audio response
+    res.set('Content-Type', 'audio/mpeg');
+    res.set('Content-Length', audioBuffer.length.toString());
+    res.set('Content-Disposition', 'inline; filename="tts-audio.mp3"');
+    res.set('Cache-Control', 'private, max-age=60');
+
+    res.send(audioBuffer);
+  } catch (error) {
+    console.error('[VOICE] TTS error:', error);
+    res.status(500).json({ message: 'Failed to generate TTS audio' });
+  }
+});
+
 export default router;

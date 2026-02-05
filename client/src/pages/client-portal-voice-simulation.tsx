@@ -22,6 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 
+// Complete list of Gemini voices mapped to high-quality Google Cloud TTS
 const AI_VOICES = [
   {
     id: 'Puck',
@@ -29,9 +30,10 @@ const AI_VOICES = [
     gender: 'male',
     accent: 'American',
     tone: 'Natural, Soft, Storytelling',
-    description: 'A youthful, enthusiastic voice with high energy.',
+    description: 'Light and expressive voice - great for creative content.',
     bestFor: ['Product Launches', 'Cold Calling'],
     color: 'from-orange-500 to-amber-500',
+    googleVoice: 'en-US-Journey-D',
   },
   {
     id: 'Charon',
@@ -39,9 +41,10 @@ const AI_VOICES = [
     gender: 'male',
     accent: 'American',
     tone: 'Deep, Resonant, Authoritative',
-    description: 'A rich, bass-heavy voice that conveys wisdom.',
+    description: 'Deep and authoritative voice that commands attention.',
     bestFor: ['Enterprise Sales', 'Executive Outreach'],
     color: 'from-slate-600 to-slate-800',
+    googleVoice: 'en-US-Studio-M',
   },
   {
     id: 'Kore',
@@ -49,9 +52,21 @@ const AI_VOICES = [
     gender: 'female',
     accent: 'American',
     tone: 'Balanced, Clear, Professional',
-    description: 'A gentle, reassuring voice.',
-    bestFor: ['Healthcare', 'Insurance'],
+    description: 'Soft and friendly voice - great default for most use cases.',
+    bestFor: ['Healthcare', 'Insurance', 'Customer Service'],
     color: 'from-green-400 to-emerald-500',
+    googleVoice: 'en-US-Journey-F',
+  },
+  {
+    id: 'Fenrir',
+    name: 'Fenrir',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Calm, Measured, Thoughtful',
+    description: 'Calm and measured voice for thoughtful conversations.',
+    bestFor: ['Consulting', 'Technical Discussions', 'B2B Sales'],
+    color: 'from-blue-500 to-indigo-600',
+    googleVoice: 'en-US-Studio-Q',
   },
   {
     id: 'Aoede',
@@ -59,9 +74,43 @@ const AI_VOICES = [
     gender: 'female',
     accent: 'American',
     tone: 'Bright, Expressive, Engaging',
-    description: 'A cheerful, welcoming voice.',
+    description: 'Bright and warm voice with natural enthusiasm.',
     bestFor: ['Appointment Setting', 'Customer Outreach'],
     color: 'from-rose-400 to-pink-500',
+    googleVoice: 'en-US-Journey-F',
+  },
+  {
+    id: 'Leda',
+    name: 'Leda',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Professional, Articulate, Steady',
+    description: 'Steady and clear voice with executive presence.',
+    bestFor: ['Executive Outreach', 'Consulting', 'Financial Services'],
+    color: 'from-violet-500 to-purple-600',
+    googleVoice: 'en-US-Studio-O',
+  },
+  {
+    id: 'Orus',
+    name: 'Orus',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Confident, Direct, Professional',
+    description: 'Confident and direct voice for assertive conversations.',
+    bestFor: ['Sales Calls', 'Lead Qualification', 'Negotiations'],
+    color: 'from-amber-500 to-orange-600',
+    googleVoice: 'en-US-Journey-D',
+  },
+  {
+    id: 'Zephyr',
+    name: 'Zephyr',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Gentle, Reliable, Soothing',
+    description: 'Gentle and reliable voice for sensitive conversations.',
+    bestFor: ['Healthcare', 'Support Calls', 'Sensitive Topics'],
+    color: 'from-teal-400 to-cyan-500',
+    googleVoice: 'en-US-Journey-O',
   },
 ];
 
@@ -101,7 +150,7 @@ export default function ClientPortalVoiceSimulationPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Get client portal token
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('clientPortalToken');
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
@@ -201,19 +250,84 @@ export default function ClientPortalVoiceSimulationPage() {
     },
   });
 
-  // Speech Synthesis
-  const speak = (text: string) => {
-    if (!window.speechSynthesis) return;
+  // Audio player ref for TTS playback
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Speech Synthesis using Google Cloud TTS API (mapped to selected Gemini voice)
+  const speak = async (text: string) => {
+    if (!voiceOutputEnabled) return;
     stopListening();
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
+    
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    try {
+      setIsSpeaking(true);
+      
+      // Generate TTS audio using the client portal voice API
+      const response = await fetch('/api/client-portal/voice/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          text,
+          voiceId: selectedVoice,
+          provider: 'gemini',
+        }),
+      });
+
+      if (!response.ok) {
+        // Fallback to browser speech synthesis if API fails
+        console.warn('[VoiceSim] TTS API failed, using browser fallback');
+        if (window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            if (view === 'simulation') startListening();
+          };
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        }
+        return;
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        if (view === 'simulation') startListening();
+      };
+
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        console.error('[VoiceSim] Audio playback error');
+      };
+
+      audioRef.current = audio;
+      await audio.play();
+    } catch (error) {
+      console.error('[VoiceSim] TTS error:', error);
       setIsSpeaking(false);
-      if (view === 'simulation') startListening();
-    };
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+      // Fallback to browser speech synthesis
+      if (window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          if (view === 'simulation') startListening();
+        };
+        utterance.onerror = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+      }
+    }
   };
 
   const startListening = () => {
@@ -288,7 +402,13 @@ export default function ClientPortalVoiceSimulationPage() {
   };
 
   const handleReset = () => {
-    window.speechSynthesis.cancel();
+    // Stop API TTS audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    // Stop browser TTS
+    window.speechSynthesis?.cancel();
     stopListening();
     setIsSpeaking(false);
     setMessages([]);

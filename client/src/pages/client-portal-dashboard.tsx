@@ -52,9 +52,6 @@ import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
-import { AIReasoning } from '@/components/ui/ai-reasoning';
-import { AgentState } from '@/components/ui/agent-state';
-import { ConfidenceIndicator } from '@/components/ui/confidence-indicator';
 
 interface ClientUser {
   id: string;
@@ -192,20 +189,19 @@ export default function ClientPortalDashboard() {
   const { toast } = useToast();
   const [user, setUser] = useState<ClientUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
-
-  // Handle URL query parameters for tab selection
-  useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const tab = searchParams.get('tab');
-    if (tab) {
-      setActiveTab(tab);
-    }
-  }, []);
-
   const [showSupportDialog, setShowSupportDialog] = useState(false);
   
-  // Agentic Campaign Order Panel State (AI-powered ordering)
-  const [showOrderPanel, setShowOrderPanel] = useState(false);
+  // Work Order Request State (managed campaigns by Pivotal team)
+  const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
+  const [newWorkOrder, setNewWorkOrder] = useState({
+    campaignType: '' as 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom',
+    campaignGoals: '',
+    requiredLeads: '',
+    desiredTimeline: '',
+    deadline: '',
+    additionalInstructions: '',
+    priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
+  });
 
   // Self-Service Campaign Creation State
   const [showCampaignCreator, setShowCampaignCreator] = useState(false);
@@ -271,6 +267,7 @@ export default function ClientPortalDashboard() {
   // New agentic panels state
   const [showSimulationPanel, setShowSimulationPanel] = useState(false);
   const [showReportsPanel, setShowReportsPanel] = useState(false);
+  const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [showEmailGenerator, setShowEmailGenerator] = useState(false);
   const [selectedCampaignForSimulation, setSelectedCampaignForSimulation] = useState<string | undefined>(undefined);
   const [showAgentChat, setShowAgentChat] = useState(false);
@@ -396,7 +393,7 @@ export default function ClientPortalDashboard() {
   const { data: costSummary } = useQuery<CostSummary>({
     queryKey: ['client-portal-costs'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/billing/costs/summary', authHeaders);
+      const res = await fetch('/api/client-portal/billing/summary', authHeaders);
       if (!res.ok) return { totalCost: 0, monthlyTrend: [], byType: [] };
       return res.json();
     },
@@ -968,9 +965,9 @@ export default function ClientPortalDashboard() {
   // Note: Accounts & Contacts removed - now accessed via Campaign Context in Preview Studio
   const navItems: { id: string; label: string; icon: any; color: string; action?: () => void; featureRequired?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
+    { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'work-orders', label: 'Agentic Orders', icon: ClipboardList, color: 'from-amber-500 to-orange-500' },
-    { id: 'studio', label: 'Preview Studio', icon: Eye, color: 'from-cyan-500 to-blue-500' },
+    { id: 'studio', label: 'Simulations', icon: Eye, color: 'from-cyan-500 to-blue-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
     { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
@@ -984,13 +981,13 @@ export default function ClientPortalDashboard() {
         {/* Workspace Header */}
         <div className="h-16 flex items-center px-6 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between w-full">
-            <div className={`flex items-center gap-3 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className="flex items-center justify-center h-10 w-10 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-                 <Sparkles className="h-6 w-6" />
+            <div className={`flex items-center gap-3.5 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
+              <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/20">
+                <Zap className="h-4 w-4 text-white" />
               </div>
               {!sidebarCollapsed && (
                 <div className="flex-1 min-w-0">
-                  <h1 className="font-medium text-base tracking-tight text-slate-900 dark:text-white leading-none font-display">Pivotal AI</h1>
+                  <h1 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white leading-none">Client Portal</h1>
                   <p className="text-[11px] text-slate-500 font-medium truncate mt-1">{user.clientAccountName}</p>
                 </div>
               )}
@@ -1008,8 +1005,8 @@ export default function ClientPortalDashboard() {
           )}
         </div>
 
-        {/* Navigation - Google AI Style */}
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-6 space-y-0.5 overflow-y-auto">
           {navItems
             .filter(item => !item.featureRequired || hasFeature(item.featureRequired))
             .map((item) => (
@@ -1022,15 +1019,22 @@ export default function ClientPortalDashboard() {
                   setActiveTab(item.id);
                 }
               }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-full transition-all group relative duration-200 ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative duration-200 ${
                 activeTab === item.id && !item.action
-                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-100 font-medium'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-200'
+                  ? 'bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-medium'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              <item.icon className={`h-5 w-5 transition-colors ${activeTab === item.id && !item.action ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 group-hover:text-slate-700 dark:text-slate-400'}`} />
+              <div className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
+                activeTab === item.id && !item.action ? 'bg-white shadow-sm ring-1 ring-black/5 dark:bg-indigo-500/20 dark:ring-white/10' : 'bg-transparent group-hover:bg-white group-hover:shadow-sm group-hover:ring-1 group-hover:ring-black/5 dark:group-hover:bg-slate-800'
+              }`}>
+                <item.icon className={`h-4 w-4 transition-colors ${activeTab === item.id && !item.action ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400'}`} />
+              </div>
               {!sidebarCollapsed && (
-                <span className="text-sm tracking-wide">{item.label}</span>
+                <span className="text-sm truncate tracking-tight">{item.label}</span>
+              )}
+              {activeTab === item.id && !item.action && !sidebarCollapsed && (
+                <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-indigo-600" />
               )}
             </button>
           ))}
@@ -1057,44 +1061,28 @@ export default function ClientPortalDashboard() {
 
       {/* Main Content Area */}
       <div className={`flex-1 flex flex-col ${sidebarCollapsed ? 'ml-20' : 'ml-64'} transition-all duration-300`}>
-        {/* Top Header Bar - Google AI Style */}
-        <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-border h-16 flex items-center px-8 sticky top-0 z-40 transition-all">
+        {/* Top Header Bar */}
+        <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 h-16 flex items-center px-6 sticky top-0 z-40">
           <div className="flex-1 flex items-center gap-4">
-            <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-slate-100">{navItems.find(i => i.id === activeTab)?.label}</h2>
-             {activeTab === 'dashboard' && (
-                <Badge variant="outline" className="font-normal text-xs bg-blue-50 text-blue-700 border-blue-100 hidden sm:flex items-center gap-1 rounded-full px-2.5">
-                    <Sparkles className="h-3 w-3" />
-                    AI-Enhanced
-                </Badge>
-             )}
+            <h2 className="text-lg font-semibold">{navItems.find(i => i.id === activeTab)?.label}</h2>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="relative hidden md:block w-64">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <Input 
-                    placeholder="Ask Pivotal AI..." 
-                    className="pl-9 h-9 bg-slate-50 border-input shadow-none focus-visible:ring-1 focus-visible:ring-blue-500 rounded-full transition-all" 
-                />
-             </div>
-             
-             <Button variant="ghost" size="icon" className="relative rounded-full text-slate-500 hover:text-slate-700">
-               <Bell className="h-5 w-5" />
-               <span className="absolute top-2.5 right-2.5 h-2 w-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-900" />
-             </Button>
-
-            <Separator orientation="vertical" className="h-6 mx-1" />
-            
-            <div className="flex items-center gap-3 pl-2">
-              <Avatar className="h-8 w-8 ring-2 ring-white dark:ring-slate-900 shadow-sm">
-                <AvatarFallback className="bg-blue-600 text-white text-xs font-medium">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="relative">
+              <Bell className="h-5 w-5" />
+              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full" />
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-primary/10 text-primary text-sm">
                   {user.firstName?.[0]}{user.lastName?.[0]}
                 </AvatarFallback>
               </Avatar>
-              <div className="hidden md:block">
-                <p className="text-sm font-medium leading-none text-slate-900 dark:text-slate-100">{user.firstName} {user.lastName}</p>
-                <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{user.clientAccountName}</p>
+              <div>
+                <p className="text-sm font-medium leading-none">{user.firstName} {user.lastName}</p>
+                <p className="text-xs text-muted-foreground">{user.email}</p>
               </div>
-              <Button variant="ghost" size="icon" onClick={handleLogout} className="text-slate-400 hover:text-red-500 rounded-full">
+              <Button variant="ghost" size="icon" onClick={handleLogout}>
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>
@@ -1117,6 +1105,10 @@ export default function ClientPortalDashboard() {
               </div>
               
               <div className="flex items-center gap-3">
+                 <Button onClick={() => setShowOrderPanel(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm h-10 px-5">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Order
+                  </Button>
                   <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowSimulationPanel(true)}>
                     <Mic className="h-4 w-4 mr-2 text-indigo-500" />
                     Simulate
@@ -1128,103 +1120,103 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            {/* Enterprise KPI Tiles - Google AI Style */}
+            {/* Enterprise KPI Tiles - Refreshed */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
               {/* Leads Delivered MTD */}
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-all duration-200">
+              <Card className="group hover:border-emerald-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 flex items-center justify-center">
-                         <UserCheck className="h-5 w-5" />
+                      <div className="h-9 w-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center">
+                         <UserCheck className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/10 text-emerald-700 dark:text-emerald-400 flex items-center gap-1 border border-emerald-100 dark:border-emerald-800">
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
                         <ArrowUpRight className="h-3 w-3" />
                          12.5%
                       </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Leads MTD</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-foreground">{leadsDeliveredMTD.toLocaleString()}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Leads MTD</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{leadsDeliveredMTD.toLocaleString()}</h3>
                    </div>
                 </CardContent>
               </Card>
 
               {/* Acceptance Rate */}
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-all duration-200">
+              <Card className="group hover:border-blue-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center">
-                         <Target className="h-5 w-5" />
+                      <div className="h-9 w-9 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center">
+                         <Target className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium text-muted-foreground flex items-center mt-1">
+                      <span className="text-xs font-medium text-slate-500 flex items-center mt-1">
                         Avg 78%
                       </span>
                    </div>
                    <div className="space-y-2">
                        <div className="flex justify-between items-end">
                           <div className="space-y-1">
-                            <p className="text-sm font-medium text-muted-foreground">Accept Rate</p>
-                            <h3 className="text-2xl font-semibold tracking-tight text-foreground">{acceptanceRate}%</h3>
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Accept Rate</p>
+                            <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{acceptanceRate}%</h3>
                           </div>
                       </div>
-                      <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full transition-all duration-500" style={{ width: `${acceptanceRate}%` }} />
+                      <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${acceptanceRate}%` }} />
                       </div>
                    </div>
                 </CardContent>
               </Card>
 
               {/* CPL */}
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-all duration-200">
+              <Card className="group hover:border-purple-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center">
-                         <DollarSign className="h-5 w-5" />
+                      <div className="h-9 w-9 rounded-lg bg-purple-50 dark:bg-purple-900/20 text-purple-600 flex items-center justify-center">
+                         <DollarSign className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/10 text-emerald-700 dark:text-emerald-400 flex items-center gap-1 border border-emerald-100 dark:border-emerald-800">
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 flex items-center gap-1">
                         <TrendingDown className="h-3 w-3" />
                          23%
                       </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Avg Cost Per Lead</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-foreground">{formatCurrency(averageCPL)}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Avg Cost Per Lead</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{formatCurrency(averageCPL)}</h3>
                    </div>
                 </CardContent>
               </Card>
 
               {/* Active Campaigns */}
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-all duration-200">
+              <Card className="group hover:border-indigo-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 flex items-center justify-center">
-                         <Package className="h-5 w-5" />
+                      <div className="h-9 w-9 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 flex items-center justify-center">
+                         <Package className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800">
+                      <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400">
                         {pendingOrders} pending
                       </span>
                    </div>
                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">Active Campaigns</p>
-                      <h3 className="text-2xl font-semibold tracking-tight text-foreground">{activeCampaigns}</h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Active Campaigns</p>
+                      <h3 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{activeCampaigns}</h3>
                    </div>
                 </CardContent>
               </Card>
 
               {/* Next Invoice */}
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-all duration-200">
+              <Card className="group hover:border-amber-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center">
-                         <Calendar className="h-5 w-5" />
+                      <div className="h-9 w-9 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center">
+                         <Calendar className="h-4 w-4" />
                       </div>
-                      <span className="text-xs font-medium text-muted-foreground mt-1">
+                      <span className="text-xs font-medium text-slate-500 mt-1">
                          Next Bill
                       </span>
                    </div>
                     <div className="space-y-1">
-                      <p className="text-sm font-medium text-muted-foreground">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                      <h3 className="text-lg font-semibold tracking-tight text-foreground">
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{nextInvoiceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                      <h3 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
                         {unpaidInvoices > 0 ? formatCurrency(unpaidInvoices) : 'Paid'}
                       </h3>
                    </div>
@@ -1235,12 +1227,12 @@ export default function ClientPortalDashboard() {
             {/* AI Tools Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
                  {/* Main Chart Area */}
-                 <Card className="lg:col-span-2 shadow-sm border-border bg-card">
-                    <CardHeader className="pb-2 border-b border-border/50">
+                 <Card className="lg:col-span-2 shadow-sm border-slate-200/60 bg-white dark:bg-slate-800">
+                    <CardHeader className="pb-2 border-b border-slate-100 dark:border-slate-800">
                         <div className="flex items-center justify-between">
-                            <CardTitle className="text-lg font-medium text-foreground">Campaign Performance</CardTitle>
+                            <CardTitle className="text-lg font-medium text-slate-800 dark:text-slate-100">Campaign Performance</CardTitle>
                             <Select defaultValue="this_month">
-                                <SelectTrigger className="w-[140px] h-8 text-xs bg-muted/50 border-input shadow-none">
+                                <SelectTrigger className="w-[140px] h-8 text-xs bg-slate-50 border-slate-200 shadow-none">
                                     <SelectValue placeholder="Period" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1252,53 +1244,63 @@ export default function ClientPortalDashboard() {
                         </div>
                     </CardHeader>
                     <CardContent className="p-6">
-                         <div className="h-[250px] w-full flex flex-col items-center justify-center bg-muted/30 rounded-lg border border-dashed border-border">
-                            <BarChart3 className="h-10 w-10 text-muted-foreground/30 mb-2" />
-                            <p className="text-sm text-muted-foreground font-medium">Performance Analytics Visualization</p>
-                            <span className="text-xs text-muted-foreground/60">Loading complex dataset...</span>
+                         <div className="h-[250px] w-full flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-700">
+                            <BarChart3 className="h-10 w-10 text-slate-300 mb-2" />
+                            <p className="text-sm text-slate-500 font-medium">Performance Analytics Visualization</p>
+                            <span className="text-xs text-slate-400">Loading complex dataset...</span>
                          </div>
                     </CardContent>
                  </Card>
 
                  {/* AI Actions */}
-                 <Card className="shadow-sm border-border bg-card flex flex-col">
-                    <CardHeader className="pb-3 border-b border-border/50">
-                         <CardTitle className="text-lg font-medium flex items-center gap-2 text-foreground">
-                             <Sparkles className="h-4 w-4 text-primary" />
+                 <Card className="shadow-sm border-slate-200/60 bg-white dark:bg-slate-800 flex flex-col">
+                    <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
+                         <CardTitle className="text-lg font-medium flex items-center gap-2 text-slate-800 dark:text-slate-100">
+                             <Sparkles className="h-4 w-4 text-indigo-500" />
                              Quick Actions
                          </CardTitle>
                     </CardHeader>
                     <CardContent className="p-0 flex-1">
-                        <div className="divide-y divide-border/50">
-                            <button onClick={() => setShowSimulationPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors text-left group">
-                                <div className="h-10 w-10 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                            <button onClick={() => setShowSimulationPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-violet-50 dark:bg-violet-900/20 text-violet-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
                                     <Mic className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <p className="font-medium text-sm text-foreground">Voice Simulation</p>
-                                    <p className="text-xs text-muted-foreground">Test your AI agent's voice</p>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Voice Simulation</p>
+                                    <p className="text-xs text-slate-500">Test your AI agent's voice</p>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto group-hover:text-violet-500 transition-colors" />
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-violet-500 transition-colors" />
                             </button>
-                             <button onClick={() => setShowReportsPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors text-left group">
-                                <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                             <button onClick={() => setShowOrderPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                                    <ShoppingCart className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">New Campaign Order</p>
+                                    <p className="text-xs text-slate-500">Purchase new leads or services</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-emerald-500 transition-colors" />
+                            </button>
+                             <button onClick={() => setShowReportsPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
                                     <BarChart3 className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <p className="font-medium text-sm text-foreground">Generate Reports</p>
-                                    <p className="text-xs text-muted-foreground">AI-driven analytics reports</p>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Generate Reports</p>
+                                    <p className="text-xs text-slate-500">AI-driven analytics reports</p>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto group-hover:text-amber-500 transition-colors" />
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-amber-500 transition-colors" />
                             </button>
-                             <button onClick={() => setShowEmailGenerator(true)} className="w-full flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors text-left group">
-                                <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
+                             <button onClick={() => setShowEmailGenerator(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
+                                <div className="h-10 w-10 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
                                     <Mail className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <p className="font-medium text-sm text-foreground">Email Generator</p>
-                                    <p className="text-xs text-muted-foreground">Generate emails with AI</p>
+                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Email Generator</p>
+                                    <p className="text-xs text-slate-500">Generate emails with AI</p>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto group-hover:text-blue-500 transition-colors" />
+                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-blue-500 transition-colors" />
                             </button>
                         </div>
                     </CardContent>
@@ -1309,13 +1311,13 @@ export default function ClientPortalDashboard() {
 
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">
-              <Card className="border-border shadow-sm bg-card">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle className="text-lg font-medium text-foreground">Recent Orders</CardTitle>
+                    <CardTitle className="text-lg">Recent Orders</CardTitle>
                     <CardDescription>Your latest contact orders</CardDescription>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('leads')} className="text-muted-foreground hover:text-foreground">
+                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('leads')}>
                     View All <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </CardHeader>
@@ -1324,17 +1326,20 @@ export default function ClientPortalDashboard() {
                     <div className="text-center py-8 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                       <p>No orders yet</p>
+                      <Button variant="link" onClick={() => setShowOrderPanel(true)}>
+                        Submit your first campaign request
+                      </Button>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {orders.slice(0, 5).map((order) => (
-                        <div key={order.id} className="flex items-center justify-between p-3 rounded-lg border border-border/60 hover:bg-muted/50 transition-colors">
+                        <div key={order.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/50 transition-colors">
                           <div className="flex items-center gap-3">
                             <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
                               <Package className="h-4 w-4 text-primary" />
                             </div>
                             <div>
-                              <p className="font-medium text-sm text-foreground">{order.orderNumber}</p>
+                              <p className="font-medium text-sm">{order.orderNumber}</p>
                               <p className="text-xs text-muted-foreground">{order.campaignName}</p>
                             </div>
                           </div>
@@ -1351,13 +1356,13 @@ export default function ClientPortalDashboard() {
                 </CardContent>
               </Card>
 
-              <Card className="border-border shadow-sm bg-card">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle className="text-lg font-medium text-foreground">Your Campaigns</CardTitle>
+                    <CardTitle className="text-lg">Your Campaigns</CardTitle>
                     <CardDescription>Quick access to campaigns</CardDescription>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('campaigns')} className="text-muted-foreground hover:text-foreground">
+                  <Button variant="ghost" size="sm" onClick={() => setActiveTab('campaigns')}>
                     View All <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </CardHeader>
@@ -1373,7 +1378,7 @@ export default function ClientPortalDashboard() {
                       {campaigns.slice(0, 5).map((campaign) => (
                         <div
                           key={campaign.id}
-                          className="flex items-center justify-between p-3 rounded-lg border border-border/60 hover:bg-muted/50 transition-colors cursor-pointer"
+                          className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/50 transition-colors cursor-pointer"
                           onClick={() => {
                             openRequestLeadsDialog(campaign.id);
                           }}
@@ -1383,7 +1388,7 @@ export default function ClientPortalDashboard() {
                               <Target className="h-4 w-4 text-blue-600" />
                             </div>
                             <div>
-                              <p className="font-medium text-sm text-foreground">{campaign.name}</p>
+                              <p className="font-medium text-sm">{campaign.name}</p>
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 <span>{campaign.eligibleCount?.toLocaleString() || 0} eligible</span>
                                 <span>•</span>
@@ -1403,21 +1408,21 @@ export default function ClientPortalDashboard() {
               </Card>
             </div>
 
-            <Separator className="bg-border/60" />
+            <Separator />
 
             {/* Activity & Requests */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground">
-                <Clock className="h-5 w-5 text-indigo-500" />
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Clock className="h-5 w-5 text-indigo-600" />
                 Activity & Requests
                 {(activityData?.activities?.length || 0) > 0 && (
-                  <Badge variant="secondary" className="ml-2 bg-secondary text-secondary-foreground">{activityData?.activities?.length}</Badge>
+                  <Badge variant="secondary" className="ml-2">{activityData?.activities?.length}</Badge>
                 )}
               </h3>
-              <Card className="border-border shadow-sm bg-card">
+              <Card className="border-indigo-200 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/20">
                 <CardContent className="p-6">
                   {activityLoading ? (
-                    <div className="flex justify-center p-8"><Loader2 className="animate-spin text-muted-foreground" /></div>
+                    <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
                   ) : (
                     <ScrollArea className="h-[320px] pr-3">
                       <ActivityTimeline
@@ -1438,121 +1443,155 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6 md:space-y-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Campaigns</h2>
+                <h2 className="text-2xl font-bold">Campaigns</h2>
                 <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setSelectedCampaignForSimulation(undefined);
-                    setShowSimulationPanel(true);
+                    setPreviewCampaignId('');
+                    setShowPreviewStudio(true);
                   }}
                   className="gap-2 w-full sm:w-auto"
                 >
                   <Play className="h-4 w-4" />
-                  Simulation Studio
+                  Preview Studio
+                </Button>
+                <Button
+                  onClick={() => setShowOrderPanel(true)}
+                  className="gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 w-full sm:w-auto"
+                >
+                  <Bot className="h-4 w-4" />
+                  New Campaign Request
                 </Button>
               </div>
             </div>
 
-            {/* Campaign Stats - Google AI Style */}
+            {/* Agentic Campaign Order Banner */}
+            <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/20 dark:to-purple-950/20 dark:border-violet-800">
+              <CardContent className="p-4 md:p-6">
+                <div className="flex flex-col sm:flex-row items-start gap-4">
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg">
+                    <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+                  </div>
+                  <div className="flex-1 space-y-3 w-full">
+                    <div>
+                      <h4 className="font-semibold text-lg text-violet-800 dark:text-violet-300">Submit a Campaign Request</h4>
+                      <p className="text-sm text-violet-700 dark:text-violet-400 mt-1 leading-relaxed">
+                        Describe your campaign goals, target audience, budget, and timeline - our AI agent will capture all the details. The DemandGentic team will configure and launch your campaign with our best-in-class AI voice agents.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-md hover:shadow-lg transition-all"
+                      onClick={() => setShowOrderPanel(true)}
+                    >
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Submit Campaign Request
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Campaign Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {/* Active Campaigns */}
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card className="border-green-200 dark:border-green-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Active Campaigns</p>
-                      <p className="text-3xl font-semibold tracking-tight mt-1 text-foreground">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
+                      <p className="text-sm text-muted-foreground">Active Campaigns</p>
+                      <p className="text-3xl font-bold text-green-600">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
                       <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
                           {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'email' || c.campaignType === 'email')).length}
                         </span>
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
                           {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'phone' || c.type === 'call' || c.campaignType === 'phone' || c.campaignType === 'call')).length}
                         </span>
                       </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <Zap className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
+                      <Zap className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Impressions - Email & Phone */}
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card className="border-blue-200 dark:border-blue-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Impressions</p>
-                      <p className="text-3xl font-semibold tracking-tight mt-1 text-foreground">{totalLeadsDelivered.toLocaleString()}</p>
+                      <p className="text-sm text-muted-foreground">Impressions</p>
+                      <p className="text-3xl font-bold text-blue-600">{totalLeadsDelivered.toLocaleString()}</p>
                       <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
                           {Math.floor(totalLeadsDelivered * 0.6).toLocaleString()}
                         </span>
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
                           {Math.floor(totalLeadsDelivered * 0.4).toLocaleString()}
                         </span>
                       </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <BarChart3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
+                      <BarChart3 className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Qualified Leads */}
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card className="border-purple-200 dark:border-purple-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Qualified Leads</p>
-                      <p className="text-3xl font-semibold tracking-tight mt-1 text-foreground">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
+                      <p className="text-sm text-muted-foreground">Qualified Leads</p>
+                      <p className="text-3xl font-bold text-purple-600">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
                       <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
                           {Math.floor(totalLeadsDelivered * 0.042 * 0.55).toLocaleString()}
                         </span>
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
                           {Math.floor(totalLeadsDelivered * 0.042 * 0.45).toLocaleString()}
                         </span>
                       </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                      <UserCheck className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-lg">
+                      <UserCheck className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Conversion Rate */}
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card className="border-amber-200 dark:border-amber-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Conversion Rate</p>
-                      <p className="text-3xl font-semibold tracking-tight mt-1 text-foreground">4.2%</p>
+                      <p className="text-sm text-muted-foreground">Conversion Rate</p>
+                      <p className="text-3xl font-bold text-amber-600">4.2%</p>
                       <div className="flex gap-3 mt-2 text-xs">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
                           3.8%
                         </span>
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
                           4.7%
                         </span>
                       </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <TrendingUp className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg">
+                      <TrendingUp className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
@@ -1560,20 +1599,20 @@ export default function ClientPortalDashboard() {
             </div>
 
             {/* Campaign Filters */}
-            <Card className="border-border bg-muted/20 shadow-none">
+            <Card className="border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20">
               <CardContent className="p-4">
                 <div className="flex flex-col md:flex-row gap-3">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input 
                       placeholder="Search campaigns..." 
-                      className="pl-9 bg-background border-input"
+                      className="pl-9 bg-white dark:bg-gray-950"
                       value={campaignSearchQuery}
                       onChange={(e) => setCampaignSearchQuery(e.target.value)}
                     />
                   </div>
                   <Select value={campaignStatusFilter} onValueChange={(val) => setCampaignStatusFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[180px] bg-background border-input">
+                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
                       <div className="flex items-center gap-2">
                         <Filter className="h-4 w-4" />
                         <SelectValue placeholder="Status" />
@@ -1588,7 +1627,7 @@ export default function ClientPortalDashboard() {
                     </SelectContent>
                   </Select>
                   <Select value={campaignTypeFilter} onValueChange={(val) => setCampaignTypeFilter(val)}>
-                    <SelectTrigger className="w-full md:w-[180px] bg-background border-input">
+                    <SelectTrigger className="w-full md:w-[180px] bg-white dark:bg-gray-950">
                       <SelectValue placeholder="Type" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1618,29 +1657,35 @@ export default function ClientPortalDashboard() {
 
             {/* Your Campaigns */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground">
-                <Target className="h-5 w-5 text-indigo-500" />
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Target className="h-5 w-5 text-purple-600" />
                 Your Campaigns
                 {filteredCampaigns.length > 0 && (
-                  <Badge variant="secondary" className="ml-2 bg-secondary text-secondary-foreground">{filteredCampaigns.length}</Badge>
+                  <Badge variant="secondary" className="ml-2">{filteredCampaigns.length}</Badge>
                 )}
               </h3>
               {campaignsLoading ? (
-                 <div className="flex justify-center p-8"><Loader2 className="animate-spin text-muted-foreground" /></div>
+                 <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
               ) : filteredCampaigns.length === 0 ? (
-                 <Card className="bg-muted/10 border-dashed border-border">
+                 <Card className="bg-slate-50 dark:bg-slate-900 border-dashed">
                     <CardContent className="flex flex-col items-center justify-center py-12">
-                      <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
-                        <Target className="h-8 w-8 text-muted-foreground" />
+                      <div className="h-16 w-16 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-4">
+                        <Target className="h-8 w-8 text-purple-600" />
                       </div>
-                      <h4 className="font-semibold text-lg mb-2 text-foreground">No campaigns yet</h4>
+                      <h4 className="font-semibold text-lg mb-2">No campaigns yet</h4>
                        <p className="text-muted-foreground text-center mb-4 max-w-md">
-                         {campaigns.length === 0 ? 'Contact our team to get started with your AI-powered outreach.' : 'No campaigns match your current filters.'}
+                         {campaigns.length === 0 ? 'Submit a campaign request and our team will configure and launch your AI-powered outreach.' : 'No campaigns match your current filters.'}
                        </p>
+                       {campaigns.length === 0 && (
+                         <Button onClick={() => setShowOrderPanel(true)} className="bg-gradient-to-r from-violet-600 to-purple-600">
+                           <Bot className="h-4 w-4 mr-2" />
+                           Submit Your First Request
+                         </Button>
+                       )}
                     </CardContent>
                  </Card>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredCampaigns.map((campaign) => (
                   <CampaignCard
                     key={campaign.id}
@@ -1661,7 +1706,7 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Qualified Leads</h2>
+                <h2 className="text-2xl font-bold">Qualified Leads</h2>
                 <p className="text-muted-foreground">QA-approved leads from your campaigns with recordings and transcripts</p>
               </div>
             </div>
@@ -1679,12 +1724,12 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Reports & Analytics</h2>
+                <h2 className="text-2xl font-bold">Reports & Analytics</h2>
                 <p className="text-muted-foreground">Track your campaign performance and ROI</p>
               </div>
               <div className="flex gap-2">
                 <Select defaultValue="30d">
-                  <SelectTrigger className="w-32 bg-background border-input">
+                  <SelectTrigger className="w-32">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1694,8 +1739,8 @@ export default function ClientPortalDashboard() {
                     <SelectItem value="1y">Last year</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button variant="outline" className="gap-2">
-                  <FileDown className="h-4 w-4" />
+                <Button variant="outline">
+                  <FileDown className="h-4 w-4 mr-2" />
                   Export Report
                 </Button>
               </div>
@@ -1703,53 +1748,53 @@ export default function ClientPortalDashboard() {
 
             {/* Report Cards */}
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="border-border shadow-sm bg-card hover:border-emerald-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Total Leads</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1 text-foreground">{totalLeadsDelivered.toLocaleString()}</p>
+                      <p className="text-sm text-muted-foreground">Total Leads</p>
+                      <p className="text-2xl font-bold">{totalLeadsDelivered.toLocaleString()}</p>
                     </div>
-                    <div className="flex items-center text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-full text-xs font-medium">
-                      <ArrowUpRight className="h-3 w-3 mr-1" />
+                    <div className="flex items-center text-green-600 text-sm">
+                      <ArrowUpRight className="h-4 w-4" />
                       +12%
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Verified Rate</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1 text-foreground">87.5%</p>
+                      <p className="text-sm text-muted-foreground">Verified Rate</p>
+                      <p className="text-2xl font-bold">87.5%</p>
                     </div>
-                    <div className="flex items-center text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-full text-xs font-medium">
-                      <ArrowUpRight className="h-3 w-3 mr-1" />
+                    <div className="flex items-center text-green-600 text-sm">
+                      <ArrowUpRight className="h-4 w-4" />
                       +3%
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Cost per Lead</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1 text-foreground">{averageCPL > 0 ? `$${averageCPL.toLocaleString()}` : '-'}</p>
+                      <p className="text-sm text-muted-foreground">Cost per Lead</p>
+                      <p className="text-2xl font-bold">{averageCPL > 0 ? `$${averageCPL.toLocaleString()}` : '-'}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Avg. Delivery Time</p>
-                      <p className="text-2xl font-bold tracking-tight mt-1 text-foreground">2.3 days</p>
+                      <p className="text-sm text-muted-foreground">Avg. Delivery Time</p>
+                      <p className="text-2xl font-bold">2.3 days</p>
                     </div>
-                    <div className="flex items-center text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-full text-xs font-medium">
-                      <ArrowDownRight className="h-3 w-3 mr-1" />
+                    <div className="flex items-center text-green-600 text-sm">
+                      <ArrowDownRight className="h-4 w-4" />
                       -18%
                     </div>
                   </div>
@@ -1759,9 +1804,9 @@ export default function ClientPortalDashboard() {
 
             {/* Charts */}
             <div className="grid lg:grid-cols-2 gap-6">
-              <Card className="border-border shadow-sm bg-card">
+              <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg font-medium text-foreground">Monthly Lead Delivery</CardTitle>
+                  <CardTitle>Monthly Lead Delivery</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[300px]">
@@ -1769,26 +1814,24 @@ export default function ClientPortalDashboard() {
                       <AreaChart data={deliveryTrendData}>
                         <defs>
                           <linearGradient id="colorLeads2" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
-                        <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} dy={10} />
-                        <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: 'var(--muted-foreground)' }} />
-                        <Tooltip 
-                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Area type="monotone" dataKey="leads" stroke="#6366f1" strokeWidth={2} fill="url(#colorLeads2)" />
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="leads" stroke="#3b82f6" fill="url(#colorLeads2)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-border shadow-sm bg-card">
+              <Card>
                 <CardHeader>
-                  <CardTitle className="text-lg font-medium text-foreground">Cost Breakdown</CardTitle>
+                  <CardTitle>Cost Breakdown</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="h-[300px]">
@@ -1808,11 +1851,11 @@ export default function ClientPortalDashboard() {
                           dataKey="value"
                         >
                           {(costSummary?.byType || [{ name: 'Leads' }, { name: 'Verification' }, { name: 'AI Calls' }]).map((_, i) => (
-                            <Cell key={i} fill={COLORS[i % COLORS.length]} strokeWidth={0} />
+                            <Cell key={i} fill={COLORS[i % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value) => formatCurrency(value as number)} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                        <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                        <Tooltip formatter={(value) => formatCurrency(value as number)} />
+                        <Legend />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
@@ -1827,63 +1870,55 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Billing & Invoices</h2>
+                <h2 className="text-2xl font-bold">Billing & Invoices</h2>
                 <p className="text-muted-foreground">View your invoices and payment history</p>
               </div>
             </div>
 
             {/* Billing Summary */}
             <div className="grid md:grid-cols-3 gap-4">
-              <Card className="md:col-span-2 border-border shadow-sm bg-card">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg font-medium text-foreground">Billing Summary</CardTitle>
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle>Billing Summary</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="grid sm:grid-cols-3 gap-6">
-                    <div className="text-center p-4 rounded-xl bg-muted/30 border border-border/50">
-                      <div className="h-10 w-10 mx-auto mb-3 rounded-full bg-background flex items-center justify-center border border-border">
-                        <DollarSign className="h-5 w-5 text-green-600" />
-                      </div>
-                      <p className="text-2xl font-bold text-foreground">{formatCurrency(totalSpent)}</p>
-                      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mt-1">Total Spent</p>
+                    <div className="text-center p-4 rounded-lg bg-muted/50">
+                      <DollarSign className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-2xl font-bold">{formatCurrency(totalSpent)}</p>
+                      <p className="text-sm text-muted-foreground">Total Spent</p>
                     </div>
-                    <div className="text-center p-4 rounded-xl bg-muted/30 border border-border/50">
-                       <div className="h-10 w-10 mx-auto mb-3 rounded-full bg-background flex items-center justify-center border border-border">
-                        <Receipt className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <p className="text-2xl font-bold text-foreground">{invoices.length}</p>
-                      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mt-1">Total Invoices</p>
+                    <div className="text-center p-4 rounded-lg bg-muted/50">
+                      <Receipt className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-2xl font-bold">{invoices.length}</p>
+                      <p className="text-sm text-muted-foreground">Total Invoices</p>
                     </div>
-                    <div className="text-center p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30">
-                       <div className="h-10 w-10 mx-auto mb-3 rounded-full bg-background flex items-center justify-center border border-amber-100">
-                        <AlertCircle className="h-5 w-5 text-amber-600" />
-                      </div>
+                    <div className="text-center p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20">
+                      <AlertCircle className="h-8 w-8 mx-auto mb-2 text-amber-600" />
                       <p className="text-2xl font-bold text-amber-600">{formatCurrency(unpaidInvoices)}</p>
-                      <p className="text-xs text-amber-600/80 font-medium uppercase tracking-wider mt-1">Outstanding</p>
+                      <p className="text-sm text-muted-foreground">Outstanding Balance</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="border-border shadow-sm bg-card">
-                <CardHeader pb-2>
-                  <CardTitle className="text-lg font-medium text-foreground">Payment Methods</CardTitle>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Payment Methods</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg border">
                     <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-md bg-white flex items-center justify-center border border-border">
-                         <CreditCard className="h-4 w-4 text-muted-foreground" />
-                      </div>
+                      <CreditCard className="h-5 w-5 text-muted-foreground" />
                       <div>
-                        <p className="font-medium text-sm text-foreground">Wire Transfer</p>
+                        <p className="font-medium text-sm">Wire Transfer</p>
                         <p className="text-xs text-muted-foreground">NET 30</p>
                       </div>
                     </div>
-                    <Badge variant="secondary" className="text-xs">Default</Badge>
+                    <Badge variant="outline">Default</Badge>
                   </div>
-                  <Button variant="outline" className="w-full text-sm" size="sm">
-                    <Plus className="h-3.5 w-3.5 mr-2" />
+                  <Button variant="outline" className="w-full" size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
                     Add Payment Method
                   </Button>
                 </CardContent>
@@ -1891,51 +1926,51 @@ export default function ClientPortalDashboard() {
             </div>
 
             {/* Invoices Table */}
-            <Card className="border-border shadow-sm bg-card">
+            <Card>
               <CardHeader>
-                <CardTitle className="text-lg font-medium text-foreground">Invoices</CardTitle>
+                <CardTitle>Invoices</CardTitle>
               </CardHeader>
               <CardContent>
                 {invoices.length === 0 ? (
                   <div className="text-center py-12">
-                    <Receipt className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                    <h3 className="font-semibold mb-2 text-foreground">No Invoices Yet</h3>
+                    <Receipt className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <h3 className="font-semibold mb-2">No Invoices Yet</h3>
                     <p className="text-muted-foreground">Your invoices will appear here once generated</p>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-border overflow-hidden">
+                  <div className="rounded-lg border overflow-hidden">
                     <Table>
-                      <TableHeader className="bg-muted/30">
-                        <TableRow className="hover:bg-transparent border-border">
-                          <TableHead className="font-medium">Invoice #</TableHead>
-                          <TableHead className="font-medium">Period</TableHead>
-                          <TableHead className="text-right font-medium">Amount</TableHead>
-                          <TableHead className="text-right font-medium">Paid</TableHead>
-                          <TableHead className="font-medium">Due Date</TableHead>
-                          <TableHead className="font-medium">Status</TableHead>
-                          <TableHead className="text-right font-medium">Actions</TableHead>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Invoice #</TableHead>
+                          <TableHead>Period</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                          <TableHead className="text-right">Paid</TableHead>
+                          <TableHead>Due Date</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {invoices.map((invoice) => (
-                          <TableRow key={invoice.id} className="hover:bg-muted/30 border-border">
-                            <TableCell className="font-mono text-sm text-foreground">{invoice.invoiceNumber}</TableCell>
-                            <TableCell className="text-foreground">
+                          <TableRow key={invoice.id}>
+                            <TableCell className="font-mono text-sm">{invoice.invoiceNumber}</TableCell>
+                            <TableCell>
                               {new Date(invoice.billingPeriodStart).toLocaleDateString()} - {new Date(invoice.billingPeriodEnd).toLocaleDateString()}
                             </TableCell>
-                            <TableCell className="text-right font-medium text-foreground">{formatCurrency(invoice.totalAmount)}</TableCell>
-                            <TableCell className="text-right text-muted-foreground">{formatCurrency(invoice.amountPaid)}</TableCell>
-                            <TableCell className="text-foreground">
+                            <TableCell className="text-right font-medium">{formatCurrency(invoice.totalAmount)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(invoice.amountPaid)}</TableCell>
+                            <TableCell>
                               {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : '-'}
                             </TableCell>
                             <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-1">
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground">
+                                <Button variant="ghost" size="sm">
                                   <Eye className="h-4 w-4" />
                                 </Button>
                                 {invoice.pdfUrl && (
-                                  <Button variant="ghost" size="sm" asChild className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground">
+                                  <Button variant="ghost" size="sm" asChild>
                                     <a href={invoice.pdfUrl} target="_blank" rel="noopener">
                                       <Download className="h-4 w-4" />
                                     </a>
@@ -2103,26 +2138,26 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Agentic Order Requests</h2>
-                <p className="text-muted-foreground">AI-powered campaign ordering with intelligent recommendations</p>
+                <h2 className="text-2xl font-bold">Direct Agentic Orders</h2>
+                <p className="text-muted-foreground">Request campaigns to be managed and executed by our team</p>
               </div>
-              <Button onClick={() => setShowOrderPanel(true)} className="bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-600 hover:to-green-600 text-white shadow-md">
+              <Button onClick={() => setShowWorkOrderDialog(true)} className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600">
                 <Plus className="h-4 w-4 mr-2" />
-                New Agentic Order Request
+                Submit New Direct Agentic Order
               </Button>
             </div>
 
             {/* Info Banner */}
-            <Card className="border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/10 dark:border-emerald-900/50">
+            <Card className="border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/20 dark:to-amber-950/20 dark:border-orange-800">
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
-                  <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
-                    <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="h-10 w-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+                    <ClipboardList className="h-5 w-5 text-orange-600" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-emerald-900 dark:text-emerald-200">AI-Powered Agentic Order Requests</h4>
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300/80 mt-1 leading-relaxed">
-                      Describe your campaign goal in natural language and our AI will recommend the best approach. Upload target lists, suppression files, and templates. Our team will configure and execute your campaign with AI-powered voice and email outreach.
+                    <h4 className="font-semibold text-orange-800 dark:text-orange-300">What are Direct Agentic Orders?</h4>
+                    <p className="text-sm text-orange-700 dark:text-orange-400 mt-1">
+                      Direct Agentic Orders allow you to request that our team runs campaigns on your behalf. You specify the campaign type, goals, lead requirements, and timeline — and our team handles execution from start to finish.
                     </p>
                   </div>
                 </div>
@@ -2130,54 +2165,54 @@ export default function ClientPortalDashboard() {
             </Card>
 
             <div className="grid md:grid-cols-4 gap-4">
-              <Card className="border-border shadow-sm bg-card hover:border-blue-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Pending Review</p>
-                      <p className="text-2xl font-bold mt-1 text-foreground">1</p>
+                      <p className="text-sm text-muted-foreground">Pending Review</p>
+                      <p className="text-2xl font-bold">1</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                      <Clock className="h-5 w-5 text-blue-600" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card hover:border-amber-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">In Progress</p>
-                      <p className="text-2xl font-bold mt-1 text-foreground">2</p>
+                      <p className="text-sm text-muted-foreground">In Progress</p>
+                      <p className="text-2xl font-bold">2</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <Target className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                      <Target className="h-5 w-5 text-amber-600" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card hover:border-emerald-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Completed</p>
-                      <p className="text-2xl font-bold mt-1 text-foreground">12</p>
+                      <p className="text-sm text-muted-foreground">Completed</p>
+                      <p className="text-2xl font-bold">12</p>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                      <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="border-border shadow-sm bg-card hover:border-purple-200 transition-colors">
+              <Card>
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-muted-foreground">Total Value</p>
-                      <p className="text-2xl font-bold mt-1 text-foreground">$24,500</p>
+                      <p className="text-sm text-muted-foreground">Total Value</p>
+                      <p className="text-2xl font-bold">$24,500</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <DollarSign className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                      <DollarSign className="h-5 w-5 text-purple-600" />
                     </div>
                   </div>
                 </CardContent>
@@ -2185,17 +2220,14 @@ export default function ClientPortalDashboard() {
             </div>
 
             {/* Work Orders Table */}
-            <Card className="border-border shadow-sm bg-card">
+            <Card>
               <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <CardTitle className="text-lg font-medium text-foreground">Your Direct Agentic Orders</CardTitle>
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <div className="relative flex-1 sm:w-[200px]">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="Search orders..." className="pl-9 h-9" />
-                    </div>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Your Direct Agentic Orders</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Input placeholder="Search orders..." className="w-[200px]" />
                     <Select defaultValue="all">
-                      <SelectTrigger className="w-[150px] h-9">
+                      <SelectTrigger className="w-[150px]">
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
@@ -2210,55 +2242,55 @@ export default function ClientPortalDashboard() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="rounded-lg border border-border overflow-hidden">
+                <div className="rounded-lg border overflow-hidden">
                   <Table>
-                    <TableHeader className="bg-muted/30">
-                      <TableRow className="hover:bg-transparent border-border">
-                        <TableHead className="font-medium">Order #</TableHead>
-                        <TableHead className="font-medium">Campaign Type</TableHead>
-                        <TableHead className="font-medium">Goals</TableHead>
-                        <TableHead className="font-medium">Leads Requested</TableHead>
-                        <TableHead className="font-medium">Deadline</TableHead>
-                        <TableHead className="font-medium">Status</TableHead>
-                        <TableHead className="font-medium">Created</TableHead>
-                        <TableHead className="text-right font-medium">Actions</TableHead>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Order #</TableHead>
+                        <TableHead>Campaign Type</TableHead>
+                        <TableHead>Goals</TableHead>
+                        <TableHead>Leads Requested</TableHead>
+                        <TableHead>Deadline</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow className="hover:bg-muted/30 border-border">
-                        <TableCell className="font-mono font-medium text-foreground">WO-2026-003</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-violet-50/50 text-violet-700 border-violet-200">Call Campaign</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate text-muted-foreground">Q1 Enterprise Outreach - IT Decision Makers</TableCell>
-                        <TableCell className="text-foreground">500</TableCell>
-                        <TableCell className="text-foreground">Feb 28, 2026</TableCell>
-                        <TableCell><Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none">Pending Review</Badge></TableCell>
-                        <TableCell className="text-muted-foreground">Feb 1, 2026</TableCell>
+                      <TableRow>
+                        <TableCell className="font-mono font-medium">WO-2026-003</TableCell>
+                        <TableCell><Badge variant="outline" className="bg-violet-50">Call Campaign</Badge></TableCell>
+                        <TableCell className="max-w-[200px] truncate">Q1 Enterprise Outreach - IT Decision Makers</TableCell>
+                        <TableCell>500</TableCell>
+                        <TableCell>Feb 28, 2026</TableCell>
+                        <TableCell><Badge className="bg-blue-100 text-blue-700">Pending Review</Badge></TableCell>
+                        <TableCell>Feb 1, 2026</TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"><Eye className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
                         </TableCell>
                       </TableRow>
-                      <TableRow className="hover:bg-muted/30 border-border">
-                        <TableCell className="font-mono font-medium text-foreground">WO-2026-002</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-blue-50/50 text-blue-700 border-blue-200">Email Campaign</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate text-muted-foreground">Product Launch Announcement</TableCell>
-                        <TableCell className="text-foreground">1,000</TableCell>
-                        <TableCell className="text-foreground">Feb 15, 2026</TableCell>
-                        <TableCell><Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none">In Progress</Badge></TableCell>
-                        <TableCell className="text-muted-foreground">Jan 25, 2026</TableCell>
+                      <TableRow>
+                        <TableCell className="font-mono font-medium">WO-2026-002</TableCell>
+                        <TableCell><Badge variant="outline" className="bg-blue-50">Email Campaign</Badge></TableCell>
+                        <TableCell className="max-w-[200px] truncate">Product Launch Announcement</TableCell>
+                        <TableCell>1,000</TableCell>
+                        <TableCell>Feb 15, 2026</TableCell>
+                        <TableCell><Badge className="bg-amber-100 text-amber-700">In Progress</Badge></TableCell>
+                        <TableCell>Jan 25, 2026</TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"><Eye className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
                         </TableCell>
                       </TableRow>
-                      <TableRow className="hover:bg-muted/30 border-border">
-                        <TableCell className="font-mono font-medium text-foreground">WO-2026-001</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-emerald-50/50 text-emerald-700 border-emerald-200">Combined</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate text-muted-foreground">Multi-channel ABM Campaign</TableCell>
-                        <TableCell className="text-foreground">250</TableCell>
-                        <TableCell className="text-foreground">Jan 31, 2026</TableCell>
-                        <TableCell><Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-none">Completed</Badge></TableCell>
-                        <TableCell className="text-muted-foreground">Jan 10, 2026</TableCell>
+                      <TableRow>
+                        <TableCell className="font-mono font-medium">WO-2026-001</TableCell>
+                        <TableCell><Badge variant="outline" className="bg-green-50">Combined</Badge></TableCell>
+                        <TableCell className="max-w-[200px] truncate">Multi-channel ABM Campaign</TableCell>
+                        <TableCell>250</TableCell>
+                        <TableCell>Jan 31, 2026</TableCell>
+                        <TableCell><Badge className="bg-green-100 text-green-700">Completed</Badge></TableCell>
+                        <TableCell>Jan 10, 2026</TableCell>
                         <TableCell className="text-right">
-                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"><Eye className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
                         </TableCell>
                       </TableRow>
                     </TableBody>
@@ -2275,26 +2307,26 @@ export default function ClientPortalDashboard() {
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Preview Studio</h2>
-                <p className="text-muted-foreground">Experience your AI agent in action</p>
+                <h2 className="text-2xl font-bold">Simulation Studio</h2>
+                <p className="text-muted-foreground">Test and experience your AI agents in action</p>
               </div>
             </div>
 
-            {/* Main Layout */}
+            {/* Main Layout - Clean Single Entry Point */}
             <div className="grid lg:grid-cols-12 gap-6">
-              {/* Left Sidebar: Campaign & Scenario Selection */}
+              {/* Left: Campaign Selection */}
               <div className="lg:col-span-4 space-y-4">
-                {/* Campaign Selection */}
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="pb-3 border-b border-border/50">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2 text-foreground">
-                      <Target className="h-4 w-4 text-primary" />
+                <Card className="border-2 border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Target className="h-4 w-4 text-violet-600" />
                       Select Campaign
                     </CardTitle>
+                    <CardDescription>Choose the campaign to simulate</CardDescription>
                   </CardHeader>
-                  <CardContent className="pt-4">
+                  <CardContent>
                     <Select value={previewCampaignId} onValueChange={setPreviewCampaignId}>
-                      <SelectTrigger className="w-full bg-background">
+                      <SelectTrigger className="w-full h-12">
                         <SelectValue placeholder="Choose a campaign..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -2303,9 +2335,9 @@ export default function ClientPortalDashboard() {
                             <div className="flex items-center justify-between w-full gap-3">
                               <span className="truncate">{c.name}</span>
                               <Badge variant="outline" className={`text-xs shrink-0 ${
-                                c.status === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                c.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
                                 c.status === 'paused' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                'bg-muted text-muted-foreground border-border'
+                                'bg-gray-50 text-gray-600 border-gray-200'
                               }`}>
                                 {c.status}
                               </Badge>
@@ -2317,169 +2349,45 @@ export default function ClientPortalDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Test Scenarios */}
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="pb-3 border-b border-border/50">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2 text-foreground">
-                      <TestTube className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-                      Test Scenario
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 pt-4">
-                    {[
-                      { id: 'cold', label: 'Cold Introduction', desc: 'First-time outreach to a prospect', icon: Phone },
-                      { id: 'gatekeeper', label: 'Gatekeeper Navigation', desc: 'Getting past the receptionist', icon: Shield },
-                      { id: 'budget', label: 'Budget Objection', desc: 'Prospect says they have no budget', icon: DollarSign },
-                      { id: 'timing', label: 'Timing Objection', desc: 'Prospect says now is not a good time', icon: Clock },
-                      { id: 'competitor', label: 'Competitor Objection', desc: 'Prospect uses a competitor', icon: Users },
-                      { id: 'decision', label: 'Decision Maker', desc: 'Speaking with a decision maker', icon: Crown },
-                    ].map((scenario) => (
-                      <div
-                        key={scenario.id}
-                        onClick={() => setSelectedScenario(scenario.id)}
-                        className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                          selectedScenario === scenario.id
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800'
-                            : 'border-transparent hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center transition-colors ${
-                            selectedScenario === scenario.id
-                              ? 'bg-violet-100 dark:bg-violet-800'
-                              : 'bg-muted/50'
-                          }`}>
-                            <scenario.icon className={`h-4 w-4 ${
-                              selectedScenario === scenario.id ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground'
-                            }`} />
-                          </div>
-                          <div>
-                            <p className={`font-medium text-sm ${selectedScenario === scenario.id ? 'text-violet-700 dark:text-violet-300' : 'text-foreground'}`}>{scenario.label}</p>
-                            <p className="text-xs text-muted-foreground">{scenario.desc}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-              </div>
-
-              {/* Right Area: Simulation Mode & Launch */}
-              <div className="lg:col-span-8 space-y-4">
-                {/* Simulation Mode */}
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="pb-3 border-b border-border/50">
-                    <CardTitle className="text-sm font-medium text-foreground">Simulation Mode</CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div
-                        onClick={() => setSimulationMode('text')}
-                        className={`p-6 rounded-xl cursor-pointer transition-all border ${
-                          simulationMode === 'text'
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800 shadow-sm'
-                            : 'border-border hover:border-violet-200 hover:bg-muted/30'
-                        }`}
-                      >
-                        <div className="flex flex-col items-center text-center">
-                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 transition-colors ${
-                            simulationMode === 'text'
-                              ? 'bg-gradient-to-br from-violet-500 to-purple-600 shadow-md'
-                              : 'bg-muted'
-                          }`}>
-                            <MessageSquare className={`h-7 w-7 ${simulationMode === 'text' ? 'text-white' : 'text-muted-foreground'}`} />
-                          </div>
-                          <h4 className={`font-semibold ${simulationMode === 'text' ? 'text-violet-700 dark:text-violet-300' : 'text-foreground'}`}>Text Chat</h4>
-                          <p className="text-xs text-muted-foreground mt-1">Chat with your AI agent</p>
-                        </div>
-                      </div>
-                      <div
-                        onClick={() => setSimulationMode('voice')}
-                        className={`p-6 rounded-xl cursor-pointer transition-all border ${
-                          simulationMode === 'voice'
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800 shadow-sm'
-                            : 'border-border hover:border-violet-200 hover:bg-muted/30'
-                        }`}
-                      >
-                        <div className="flex flex-col items-center text-center">
-                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 transition-colors ${
-                            simulationMode === 'voice'
-                              ? 'bg-gradient-to-br from-violet-500 to-purple-600 shadow-md'
-                              : 'bg-muted'
-                          }`}>
-                            <Phone className={`h-7 w-7 ${simulationMode === 'voice' ? 'text-white' : 'text-muted-foreground'}`} />
-                          </div>
-                          <h4 className={`font-semibold ${simulationMode === 'voice' ? 'text-violet-700 dark:text-violet-300' : 'text-foreground'}`}>Voice Call</h4>
-                          <p className="text-xs text-muted-foreground mt-1">Speak with your AI agent</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
                 {/* Email Template Generation */}
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="pb-3 border-b border-border/50">
-                    <CardTitle className="text-sm font-medium flex items-center justify-between text-foreground">
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-                        Email Template Generation
-                      </div>
-                      <Badge variant="secondary" className="text-xs font-normal">Content</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                     <div 
-                        onClick={() => setShowEmailGenerator(true)}
-                        className="p-4 rounded-xl cursor-pointer transition-all border border-dashed border-border hover:border-indigo-300 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10 flex items-center justify-between group"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center group-hover:scale-105 transition-transform">
-                            <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                          </div>
-                          <div>
-                            <h4 className="font-semibold text-sm text-foreground">Generate AI Email Sequences</h4>
-                            <p className="text-xs text-muted-foreground">Create personalized outreach templates</p>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-indigo-500" />
-                      </div>
-                  </CardContent>
-                </Card>
-
-                {/* What You'll Experience */}
-                <Card className="bg-gradient-to-br from-violet-50/50 to-purple-50/50 dark:from-violet-950/20 dark:to-purple-950/20 border border-violet-100 dark:border-violet-900/50">
+                <Card className="border-2 border-indigo-200 dark:border-indigo-800">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2 text-violet-800 dark:text-violet-300">
-                      <Sparkles className="h-4 w-4" />
-                      What you'll experience:
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-4 w-4 text-indigo-600" />
+                        Email Templates
+                      </div>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        { icon: Brain, text: "AI agent with your campaign's intelligence" },
-                        { icon: Building, text: "Account-aware conversations" },
-                        { icon: Zap, text: "Real-time objection handling" },
-                        { icon: UserCheck, text: "Personalized engagement" }
-                      ].map((item, i) => (
-                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-white/60 dark:bg-slate-900/60 border border-white/50 dark:border-slate-800 shadow-sm">
-                          <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center shrink-0">
-                            <item.icon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                     <div
+                        onClick={() => setShowEmailGenerator(true)}
+                        className="p-4 rounded-xl cursor-pointer transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                            <Sparkles className="h-5 w-5 text-indigo-600" />
                           </div>
-                          <span className="text-sm text-foreground">{item.text}</span>
+                          <div>
+                            <h4 className="font-semibold text-sm">Generate AI Email Sequences</h4>
+                            <p className="text-xs text-muted-foreground">Create personalized outreach</p>
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
                   </CardContent>
                 </Card>
+              </div>
 
-                {/* Launch Button */}
-                <Button
-                  size="lg"
-                  className="w-full h-14 text-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all"
-                  disabled={!previewCampaignId}
+              {/* Right: Simulation Options */}
+              <div className="lg:col-span-8 space-y-4">
+                {/* Voice Simulation Card */}
+                <Card
+                  className={`border-2 cursor-pointer transition-all hover:shadow-lg ${
+                    previewCampaignId
+                      ? 'border-violet-300 hover:border-violet-400'
+                      : 'border-slate-200 opacity-60'
+                  }`}
                   onClick={() => {
                     if (previewCampaignId) {
                       setSelectedCampaignForSimulation(previewCampaignId);
@@ -2487,9 +2395,84 @@ export default function ClientPortalDashboard() {
                     }
                   }}
                 >
-                  <Play className="h-5 w-5 mr-2" />
-                  {previewCampaignId ? 'Start Simulation & Preview' : 'Select a Campaign to Start'}
-                </Button>
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-6">
+                      <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-200">
+                        <Phone className="h-8 w-8 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-semibold mb-2">Voice & Text Simulation</h3>
+                        <p className="text-muted-foreground mb-4">
+                          Experience your AI agent with realistic voice conversations or text chat.
+                          Select from multiple voice personas and test different scenarios.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Voice Call</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Text Chat</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Email Preview</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Multiple Voices</Badge>
+                        </div>
+                      </div>
+                      <Button
+                        size="lg"
+                        className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+                        disabled={!previewCampaignId}
+                      >
+                        <Play className="h-5 w-5 mr-2" />
+                        Launch
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* What You'll Experience */}
+                <Card className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-600" />
+                      What you'll experience:
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Brain className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">AI agent with campaign intelligence</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Volume2 className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Multiple voice personas (male/female)</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Building className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Account & contact context aware</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Zap className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Real-time objection handling</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Help Text */}
+                {!previewCampaignId && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-amber-800 dark:text-amber-200">Select a Campaign</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-300">Choose a campaign from the dropdown to start simulating your AI agent.</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2500,17 +2483,17 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold tracking-tight text-foreground">Accounts & Contacts</h2>
+                <h2 className="text-2xl font-bold">Accounts & Contacts</h2>
                 <p className="text-muted-foreground">Manage your CRM data for campaigns</p>
               </div>
               <div className="flex gap-2">
                 {hasFeature('bulk_upload') && (
-                  <Button variant="outline" className="border-border">
+                  <Button variant="outline">
                     <Upload className="h-4 w-4 mr-2" />
                     Bulk Import
                   </Button>
                 )}
-                <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                <Button>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Contact
                 </Button>
@@ -2518,34 +2501,29 @@ export default function ClientPortalDashboard() {
             </div>
 
             <Tabs defaultValue="contacts" className="w-full">
-              <TabsList className="bg-muted/50 border border-border">
-                <TabsTrigger value="contacts" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Contacts</TabsTrigger>
-                <TabsTrigger value="accounts" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Accounts</TabsTrigger>
+              <TabsList>
+                <TabsTrigger value="contacts">Contacts</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
               </TabsList>
 
               <TabsContent value="contacts" className="mt-4">
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="border-b border-border/50 pb-4">
+                <Card>
+                  <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg font-medium">Contacts</CardTitle>
+                      <CardTitle>Contacts</CardTitle>
                       <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input placeholder="Search contacts..." className="pl-9 w-[250px] bg-background" />
-                        </div>
+                        <Input placeholder="Search contacts..." className="w-[250px]" />
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="p-0">
+                  <CardContent>
                     {(crmContacts || []).length === 0 ? (
-                      <div className="text-center py-16">
-                        <div className="h-16 w-16 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Users className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
-                        <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import them from a CSV file to start running campaigns.</p>
-                        <div className="flex justify-center gap-3">
-                          <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <div className="text-center py-12">
+                        <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                        <h3 className="font-semibold mb-2">No Contacts Yet</h3>
+                        <p className="text-muted-foreground mb-4">Add contacts manually or import from a file</p>
+                        <div className="flex justify-center gap-2">
+                          <Button>
                             <Plus className="h-4 w-4 mr-2" />
                             Add Contact
                           </Button>
@@ -2558,11 +2536,11 @@ export default function ClientPortalDashboard() {
                         </div>
                       </div>
                     ) : (
-                      <div className="border-0">
+                      <div className="rounded-lg border overflow-hidden">
                         <Table>
-                          <TableHeader className="bg-muted/30">
-                            <TableRow className="hover:bg-transparent border-b border-border">
-                              <TableHead className="w-[200px]">Name</TableHead>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Name</TableHead>
                               <TableHead>Email</TableHead>
                               <TableHead>Phone</TableHead>
                               <TableHead>Company</TableHead>
@@ -2572,26 +2550,17 @@ export default function ClientPortalDashboard() {
                           </TableHeader>
                           <TableBody>
                             {(crmContacts || []).map((contact: any) => (
-                              <TableRow key={contact.id} className="hover:bg-muted/30 border-b border-border">
+                              <TableRow key={contact.id}>
                                 <TableCell className="font-medium">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 dark:text-blue-300 font-bold text-xs">
-                                      {contact.firstName?.[0]}{contact.lastName?.[0]}
-                                    </div>
-                                    <div>
-                                        {contact.firstName} {contact.lastName}
-                                    </div>
-                                  </div>
+                                  {contact.firstName} {contact.lastName}
                                 </TableCell>
                                 <TableCell>{contact.email}</TableCell>
                                 <TableCell>{contact.phone}</TableCell>
                                 <TableCell>{contact.company}</TableCell>
                                 <TableCell>{contact.title}</TableCell>
                                 <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-blue-600"><Eye className="h-4 w-4" /></Button>
-                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-blue-600"><Pencil className="h-4 w-4" /></Button>
-                                  </div>
+                                  <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="sm"><Pencil className="h-4 w-4" /></Button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -2604,41 +2573,36 @@ export default function ClientPortalDashboard() {
               </TabsContent>
 
               <TabsContent value="accounts" className="mt-4">
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="border-b border-border/50 pb-4">
+                <Card>
+                  <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg font-medium">Accounts</CardTitle>
+                      <CardTitle>Accounts</CardTitle>
                       <div className="flex items-center gap-2">
-                         <div className="relative">
-                          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                          <Input placeholder="Search accounts..." className="pl-9 w-[250px] bg-background" />
-                        </div>
-                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                        <Input placeholder="Search accounts..." className="w-[250px]" />
+                        <Button>
                           <Plus className="h-4 w-4 mr-2" />
                           Add Account
                         </Button>
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="p-0">
+                  <CardContent>
                     {(crmAccounts || []).length === 0 ? (
-                      <div className="text-center py-16">
-                        <div className="h-16 w-16 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                             <Building2 className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
-                        <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and track engagement at the company level.</p>
-                        <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <div className="text-center py-12">
+                        <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                        <h3 className="font-semibold mb-2">No Accounts Yet</h3>
+                        <p className="text-muted-foreground mb-4">Create accounts to organize your contacts</p>
+                        <Button>
                           <Plus className="h-4 w-4 mr-2" />
                           Add Account
                         </Button>
                       </div>
                     ) : (
-                      <div className="border-0">
+                      <div className="rounded-lg border overflow-hidden">
                         <Table>
-                          <TableHeader className="bg-muted/30">
-                            <TableRow className="hover:bg-transparent border-b border-border">
-                              <TableHead className="w-[250px]">Company Name</TableHead>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Company Name</TableHead>
                               <TableHead>Industry</TableHead>
                               <TableHead>Website</TableHead>
                               <TableHead>Contacts</TableHead>
@@ -2647,32 +2611,16 @@ export default function ClientPortalDashboard() {
                           </TableHeader>
                           <TableBody>
                             {(crmAccounts || []).map((account: any) => (
-                              <TableRow key={account.id} className="hover:bg-muted/30 border-b border-border">
-                                <TableCell className="font-medium">
-                                  <div className="flex items-center gap-2">
-                                     <div className="h-8 w-8 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 dark:text-blue-300">
-                                         <Building2 className="h-4 w-4" />
-                                     </div>
-                                     {account.companyName}
-                                  </div>
-                                </TableCell>
+                              <TableRow key={account.id}>
+                                <TableCell className="font-medium">{account.companyName}</TableCell>
                                 <TableCell>{account.industry}</TableCell>
+                                <TableCell>{account.website}</TableCell>
                                 <TableCell>
-                                    {account.website && (
-                                        <a href={account.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-1 text-xs">
-                                            {account.website.replace(/^https?:\/\//, '')}
-                                            <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                    )}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-0">{account.contactCount || 0} Contacts</Badge>
+                                  <Badge variant="secondary">{account.contactCount || 0}</Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-blue-600"><Eye className="h-4 w-4" /></Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-blue-600"><Pencil className="h-4 w-4" /></Button>
-                                  </div>
+                                  <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="sm"><Pencil className="h-4 w-4" /></Button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -2691,35 +2639,34 @@ export default function ClientPortalDashboard() {
         {activeTab === 'settings' && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground">Settings</h2>
+              <h2 className="text-2xl font-bold">Settings</h2>
               <p className="text-muted-foreground">Manage your business profile and preferences</p>
             </div>
 
             <Tabs defaultValue="business-profile" className="w-full">
-              <TabsList className="bg-muted/50 border border-border">
-                <TabsTrigger value="business-profile" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Business Profile</TabsTrigger>
-                <TabsTrigger value="organization-intelligence" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Organization Intelligence</TabsTrigger>
-                <TabsTrigger value="compliance" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Compliance</TabsTrigger>
-                <TabsTrigger value="integrations" className="data-[state=active]:bg-background data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">Integrations</TabsTrigger>
+              <TabsList>
+                <TabsTrigger value="business-profile">Business Profile</TabsTrigger>
+                <TabsTrigger value="organization-intelligence">Organization Intelligence</TabsTrigger>
+                <TabsTrigger value="compliance">Compliance</TabsTrigger>
+                <TabsTrigger value="integrations">Integrations</TabsTrigger>
               </TabsList>
 
               <TabsContent value="business-profile" className="mt-4">
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="border-b border-border/50 pb-4">
-                    <CardTitle className="flex items-center gap-2 text-lg font-medium">
-                      <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Building2 className="h-5 w-5" />
                       Business Information
                     </CardTitle>
                     <CardDescription>
                       This information is used for compliance and appears in email footers
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4 pt-6">
+                  <CardContent className="space-y-4">
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Legal Business Name *</Label>
                         <Input
-                          className="bg-background"
                           placeholder="Your Company, LLC"
                           value={businessProfile?.legalBusinessName || ''}
                           onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, legalBusinessName: e.target.value }))}
@@ -2728,7 +2675,6 @@ export default function ClientPortalDashboard() {
                       <div className="space-y-2">
                         <Label>DBA / Trade Name</Label>
                         <Input
-                          className="bg-background"
                           placeholder="Your Brand Name"
                           value={businessProfile?.dbaName || ''}
                           onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, dbaName: e.target.value }))}
@@ -2739,7 +2685,6 @@ export default function ClientPortalDashboard() {
                     <div className="space-y-2">
                       <Label>Street Address *</Label>
                       <Input
-                        className="bg-background"
                         placeholder="123 Business St, Suite 100"
                         value={businessProfile?.streetAddress || ''}
                         onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, streetAddress: e.target.value }))}
@@ -2750,7 +2695,6 @@ export default function ClientPortalDashboard() {
                       <div className="space-y-2">
                         <Label>City *</Label>
                         <Input
-                          className="bg-background"
                           placeholder="New York"
                           value={businessProfile?.city || ''}
                           onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, city: e.target.value }))}
@@ -2759,7 +2703,6 @@ export default function ClientPortalDashboard() {
                       <div className="space-y-2">
                         <Label>State / Province *</Label>
                         <Input
-                          className="bg-background"
                           placeholder="NY"
                           value={businessProfile?.state || ''}
                           onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, state: e.target.value }))}
@@ -2768,7 +2711,6 @@ export default function ClientPortalDashboard() {
                       <div className="space-y-2">
                         <Label>Postal Code *</Label>
                         <Input
-                          className="bg-background"
                           placeholder="10001"
                           value={businessProfile?.postalCode || ''}
                           onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, postalCode: e.target.value }))}
@@ -2782,7 +2724,7 @@ export default function ClientPortalDashboard() {
                         value={businessProfile?.country || 'US'}
                         onValueChange={(value) => setBusinessProfile((prev: any) => ({ ...prev, country: value }))}
                       >
-                        <SelectTrigger className="bg-background">
+                        <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -2795,7 +2737,7 @@ export default function ClientPortalDashboard() {
                     </div>
 
                     <Button 
-                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white" 
+                      className="mt-4" 
                       onClick={handleSaveBusinessProfile}
                       disabled={saveBusinessProfileMutation.isPending || !businessProfile?.legalBusinessName || !businessProfile?.streetAddress || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode}
                     >
@@ -2810,17 +2752,17 @@ export default function ClientPortalDashboard() {
               <TabsContent value="organization-intelligence" className="mt-4">
                 <div className="space-y-4">
                   {/* Header with organization info */}
-                  <Card className="border-border shadow-sm bg-card">
-                    <CardHeader className="border-b border-border/50 pb-4">
-                      <CardTitle className="flex items-center gap-2 text-lg font-medium">
-                        <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Brain className="h-5 w-5" />
                         Organization Intelligence
                       </CardTitle>
                       <CardDescription>
                         Define your organization's context to power AI agents in campaigns. This information helps AI understand your business.
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="pt-6">
+                    <CardContent>
                       {orgIntelLoading ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -2832,27 +2774,20 @@ export default function ClientPortalDashboard() {
                           <p className="text-sm mt-1">Contact your account manager to set up organization intelligence.</p>
                         </div>
                       ) : (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-4 p-4 bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-900/50 rounded-xl">
-                            <div className="h-12 w-12 rounded-full bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center">
-                                <Building2 className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-                            </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
+                            <Building2 className="h-8 w-8 text-primary" />
                             <div>
-                              <h3 className="font-semibold text-lg">{orgIntelligence.name}</h3>
-                              <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                                {orgIntelligence.domain && (
-                                    <div className="flex items-center gap-1">
-                                        <Globe className="h-3.5 w-3.5" />
-                                        <span>{orgIntelligence.domain}</span>
-                                    </div>
-                                )}
-                                {orgIntelligence.industry && <Badge variant="outline" className="text-xs border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300">{orgIntelligence.industry}</Badge>}
-                              </div>
+                              <h3 className="font-semibold">{orgIntelligence.name}</h3>
+                              <p className="text-sm text-muted-foreground">
+                                {orgIntelligence.domain && <span className="mr-2">{orgIntelligence.domain}</span>}
+                                {orgIntelligence.industry && <Badge variant="outline" className="text-xs">{orgIntelligence.industry}</Badge>}
+                              </p>
                             </div>
                           </div>
                           {orgIntelligenceData?.campaigns && orgIntelligenceData.campaigns.length > 0 && (
-                            <div className="text-sm text-muted-foreground px-1">
-                              <span className="font-medium text-foreground">{orgIntelligenceData.campaigns.length}</span> campaign{orgIntelligenceData.campaigns.length !== 1 ? 's' : ''} using this organization intelligence
+                            <div className="text-sm text-muted-foreground">
+                              <span className="font-medium">{orgIntelligenceData.campaigns.length}</span> campaign{orgIntelligenceData.campaigns.length !== 1 ? 's' : ''} using this organization
                             </div>
                           )}
                         </div>
@@ -2863,29 +2798,26 @@ export default function ClientPortalDashboard() {
                   {orgIntelligence && (
                     <>
                       {/* Identity Section */}
-                      <Card className="border-border shadow-sm bg-card overflow-hidden">
+                      <Card>
                         <CardHeader 
-                          className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 py-4"
+                          className="cursor-pointer hover:bg-muted/30 transition-colors"
                           onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'identity' ? null : 'identity')}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                                <Building className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                              </div>
-                              <CardTitle className="text-base font-medium">Company Identity</CardTitle>
+                            <div className="flex items-center gap-2">
+                              <Building className="h-5 w-5 text-blue-500" />
+                              <CardTitle className="text-base">Company Identity</CardTitle>
                             </div>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${orgIntelligenceExpanded === 'identity' ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'identity' ? 'rotate-180' : ''}`} />
                           </div>
-                          <CardDescription className="ml-11">Legal name, description, industry, and company size</CardDescription>
+                          <CardDescription>Legal name, description, industry, and company size</CardDescription>
                         </CardHeader>
                         {orgIntelligenceExpanded === 'identity' && (
-                          <CardContent className="space-y-4 pt-6 bg-muted/5 dark:bg-muted/10">
+                          <CardContent className="space-y-4">
                             <div className="grid sm:grid-cols-2 gap-4">
                               <div className="space-y-2">
                                 <Label>Legal Name</Label>
                                 <Input
-                                  className="bg-background"
                                   value={orgIntelligence.identity?.legalName || ''}
                                   onChange={(e) => setOrgIntelligence((prev: any) => ({
                                     ...prev,
@@ -2896,7 +2828,6 @@ export default function ClientPortalDashboard() {
                               <div className="space-y-2">
                                 <Label>Industry</Label>
                                 <Input
-                                  className="bg-background"
                                   value={orgIntelligence.identity?.industry || ''}
                                   onChange={(e) => setOrgIntelligence((prev: any) => ({
                                     ...prev,
@@ -2908,7 +2839,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Description</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={orgIntelligence.identity?.description || ''}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -2922,7 +2852,6 @@ export default function ClientPortalDashboard() {
                               <div className="space-y-2">
                                 <Label>Number of Employees</Label>
                                 <Input
-                                  className="bg-background"
                                   value={orgIntelligence.identity?.employees || ''}
                                   onChange={(e) => setOrgIntelligence((prev: any) => ({
                                     ...prev,
@@ -2934,7 +2863,6 @@ export default function ClientPortalDashboard() {
                               <div className="space-y-2">
                                 <Label>Founded Year</Label>
                                 <Input
-                                  className="bg-background"
                                   type="number"
                                   value={orgIntelligence.identity?.foundedYear || ''}
                                   onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -2949,28 +2877,25 @@ export default function ClientPortalDashboard() {
                       </Card>
 
                       {/* Offerings Section */}
-                      <Card className="border-border shadow-sm bg-card overflow-hidden">
+                      <Card>
                         <CardHeader 
-                          className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 py-4"
+                          className="cursor-pointer hover:bg-muted/30 transition-colors"
                           onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'offerings' ? null : 'offerings')}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                                <Package className="h-4 w-4 text-green-600 dark:text-green-400" />
-                              </div>
-                              <CardTitle className="text-base font-medium">Products & Services</CardTitle>
+                            <div className="flex items-center gap-2">
+                              <Package className="h-5 w-5 text-green-500" />
+                              <CardTitle className="text-base">Products & Services</CardTitle>
                             </div>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${orgIntelligenceExpanded === 'offerings' ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'offerings' ? 'rotate-180' : ''}`} />
                           </div>
-                          <CardDescription className="ml-11">Core products, use cases, problems solved, and differentiators</CardDescription>
+                          <CardDescription>Core products, use cases, problems solved, and differentiators</CardDescription>
                         </CardHeader>
                         {orgIntelligenceExpanded === 'offerings' && (
-                          <CardContent className="space-y-4 pt-6 bg-muted/5 dark:bg-muted/10">
+                          <CardContent className="space-y-4">
                             <div className="space-y-2">
                               <Label>Core Products/Services (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.offerings?.coreProducts || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -2983,7 +2908,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Problems We Solve (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.offerings?.problemsSolved || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -2996,7 +2920,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Key Differentiators (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.offerings?.differentiators || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3011,28 +2934,25 @@ export default function ClientPortalDashboard() {
                       </Card>
 
                       {/* ICP Section */}
-                      <Card className="border-border shadow-sm bg-card overflow-hidden">
+                      <Card>
                         <CardHeader 
-                          className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 py-4"
+                          className="cursor-pointer hover:bg-muted/30 transition-colors"
                           onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'icp' ? null : 'icp')}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                                <Target className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                              </div>
-                              <CardTitle className="text-base font-medium">Ideal Customer Profile (ICP)</CardTitle>
+                            <div className="flex items-center gap-2">
+                              <Target className="h-5 w-5 text-purple-500" />
+                              <CardTitle className="text-base">Ideal Customer Profile (ICP)</CardTitle>
                             </div>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${orgIntelligenceExpanded === 'icp' ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'icp' ? 'rotate-180' : ''}`} />
                           </div>
-                          <CardDescription className="ml-11">Target industries, company size, and buyer personas</CardDescription>
+                          <CardDescription>Target industries, company size, and buyer personas</CardDescription>
                         </CardHeader>
                         {orgIntelligenceExpanded === 'icp' && (
-                          <CardContent className="space-y-4 pt-6 bg-muted/5 dark:bg-muted/10">
+                          <CardContent className="space-y-4">
                             <div className="space-y-2">
                               <Label>Target Industries (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.icp?.industries || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3045,7 +2965,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Target Company Size</Label>
                               <Input
-                                className="bg-background"
                                 value={orgIntelligence.icp?.companySize || ''}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
                                   ...prev,
@@ -3057,7 +2976,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Common Objections We Hear (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.icp?.objections || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3072,28 +2990,25 @@ export default function ClientPortalDashboard() {
                       </Card>
 
                       {/* Positioning Section */}
-                      <Card className="border-border shadow-sm bg-card overflow-hidden">
+                      <Card>
                         <CardHeader 
-                          className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 py-4"
+                          className="cursor-pointer hover:bg-muted/30 transition-colors"
                           onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'positioning' ? null : 'positioning')}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center">
-                                <Megaphone className="h-4 w-4 text-pink-600 dark:text-pink-400" />
-                              </div>
-                              <CardTitle className="text-base font-medium">Positioning & Messaging</CardTitle>
+                            <div className="flex items-center gap-2">
+                              <Megaphone className="h-5 w-5 text-orange-500" />
+                              <CardTitle className="text-base">Positioning & Messaging</CardTitle>
                             </div>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${orgIntelligenceExpanded === 'positioning' ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'positioning' ? 'rotate-180' : ''}`} />
                           </div>
-                          <CardDescription className="ml-11">Value proposition, one-liner, and competitive positioning</CardDescription>
+                          <CardDescription>Value proposition, one-liner, and competitive positioning</CardDescription>
                         </CardHeader>
                         {orgIntelligenceExpanded === 'positioning' && (
-                          <CardContent className="space-y-4 pt-6 bg-muted/5 dark:bg-muted/10">
+                          <CardContent className="space-y-4">
                             <div className="space-y-2">
                               <Label>One-Liner / Elevator Pitch</Label>
                               <Input
-                                className="bg-background"
                                 value={orgIntelligence.positioning?.oneLiner || ''}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
                                   ...prev,
@@ -3105,7 +3020,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Value Proposition</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={orgIntelligence.positioning?.valueProposition || ''}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3118,7 +3032,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Competitors (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={2}
                                 value={(orgIntelligence.positioning?.competitors || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3131,7 +3044,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Why Choose Us (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.positioning?.whyUs || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3146,28 +3058,25 @@ export default function ClientPortalDashboard() {
                       </Card>
 
                       {/* Outreach Section */}
-                      <Card className="border-border shadow-sm bg-card overflow-hidden">
+                      <Card>
                         <CardHeader 
-                          className="cursor-pointer hover:bg-muted/50 transition-colors border-b border-border/50 py-4"
+                          className="cursor-pointer hover:bg-muted/30 transition-colors"
                           onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'outreach' ? null : 'outreach')}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-8 w-8 rounded-lg bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center">
-                                <PhoneCall className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
-                              </div>
-                              <CardTitle className="text-base font-medium">Outreach Guidance</CardTitle>
+                            <div className="flex items-center gap-2">
+                              <PhoneCall className="h-5 w-5 text-cyan-500" />
+                              <CardTitle className="text-base">Outreach Guidance</CardTitle>
                             </div>
-                            <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform ${orgIntelligenceExpanded === 'outreach' ? 'rotate-180' : ''}`} />
+                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'outreach' ? 'rotate-180' : ''}`} />
                           </div>
-                          <CardDescription className="ml-11">Email angles, call openers, and objection handling</CardDescription>
+                          <CardDescription>Email angles, call openers, and objection handling</CardDescription>
                         </CardHeader>
                         {orgIntelligenceExpanded === 'outreach' && (
-                          <CardContent className="space-y-4 pt-6 bg-muted/5 dark:bg-muted/10">
+                          <CardContent className="space-y-4">
                             <div className="space-y-2">
                               <Label>Email Angles / Hooks (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.outreach?.emailAngles || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3180,7 +3089,6 @@ export default function ClientPortalDashboard() {
                             <div className="space-y-2">
                               <Label>Call Openers (one per line)</Label>
                               <Textarea
-                                className="bg-background"
                                 rows={3}
                                 value={(orgIntelligence.outreach?.callOpeners || []).join('\n')}
                                 onChange={(e) => setOrgIntelligence((prev: any) => ({
@@ -3195,12 +3103,11 @@ export default function ClientPortalDashboard() {
                       </Card>
 
                       {/* Save Button */}
-                      <div className="flex justify-end pt-4">
+                      <div className="flex justify-end">
                         <Button 
                           onClick={handleSaveOrgIntelligence}
                           disabled={saveOrgIntelMutation.isPending}
                           size="lg"
-                          className="bg-purple-600 hover:bg-purple-700 text-white shadow-md"
                         >
                           {saveOrgIntelMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                           Save Organization Intelligence
@@ -3212,21 +3119,20 @@ export default function ClientPortalDashboard() {
               </TabsContent>
 
               <TabsContent value="compliance" className="mt-4">
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="border-b border-border/50 pb-4">
-                    <CardTitle className="flex items-center gap-2 text-lg font-medium">
-                      <Shield className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Shield className="h-5 w-5" />
                       Compliance Settings
                     </CardTitle>
                     <CardDescription>
                       Configure email unsubscribe and compliance settings
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4 pt-6">
+                  <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <Label>Custom Unsubscribe URL</Label>
                       <Input
-                        className="bg-background"
                         placeholder="https://yourdomain.com/unsubscribe"
                         value={businessProfile?.customUnsubscribeUrl || ''}
                         onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, customUnsubscribeUrl: e.target.value }))}
@@ -3236,25 +3142,22 @@ export default function ClientPortalDashboard() {
                       </p>
                     </div>
 
-                    <div className="p-6 rounded-lg border border-border bg-muted/20">
-                      <h4 className="font-medium mb-3 flex items-center gap-2">
-                         <Mail className="h-4 w-4 text-muted-foreground" />
-                         Email Footer Preview
-                      </h4>
-                      <div className="text-sm text-muted-foreground space-y-1 pl-6 border-l-2 border-border">
-                        <p className="font-medium text-foreground">{businessProfile?.legalBusinessName || 'Your Company Name'}</p>
+                    <div className="p-4 rounded-lg border bg-muted/30">
+                      <h4 className="font-medium mb-2">Email Footer Preview</h4>
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>{businessProfile?.legalBusinessName || 'Your Company Name'}</p>
                         <p>{businessProfile?.streetAddress || '123 Business St'}</p>
                         <p>
                           {businessProfile?.city || 'City'}, {businessProfile?.state || 'ST'} {businessProfile?.postalCode || '00000'}
                         </p>
-                        <p className="text-blue-600 underline cursor-pointer mt-2">
+                        <p className="text-blue-600 underline cursor-pointer">
                           {businessProfile?.customUnsubscribeUrl ? 'Unsubscribe' : 'Unsubscribe from this list'}
                         </p>
                       </div>
                     </div>
 
                     <Button 
-                      className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white" 
+                      className="mt-4" 
                       onClick={handleSaveBusinessProfile}
                       disabled={saveBusinessProfileMutation.isPending}
                     >
@@ -3266,10 +3169,10 @@ export default function ClientPortalDashboard() {
               </TabsContent>
 
               <TabsContent value="integrations" className="mt-4">
-                <Card className="border-border shadow-sm bg-card">
-                  <CardHeader className="border-b border-border/50 pb-4">
-                    <CardTitle className="flex items-center gap-2 text-lg font-medium">
-                      <Puzzle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Puzzle className="h-5 w-5" />
                       Integrations
                     </CardTitle>
                     <CardDescription>
@@ -3277,12 +3180,10 @@ export default function ClientPortalDashboard() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-center py-16 text-muted-foreground">
-                      <div className="h-16 w-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <Puzzle className="h-8 w-8 text-amber-600 dark:text-amber-400" />
-                      </div>
-                      <h3 className="font-semibold text-lg text-foreground mb-1">No Integrations Yet</h3>
-                      <p className="text-sm max-w-sm mx-auto">We are working on adding more integrations. Contact your account manager to request custom integrations.</p>
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Puzzle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No integrations available yet.</p>
+                      <p className="text-sm">Contact your account manager for custom integrations.</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -3428,6 +3329,182 @@ export default function ClientPortalDashboard() {
             <Button onClick={handleCreateProject} disabled={createProjectMutation.isPending || isUploading}>
               {createProjectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Work Order Request Dialog */}
+      <Dialog open={showWorkOrderDialog} onOpenChange={setShowWorkOrderDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center">
+                <ClipboardList className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <DialogTitle>Submit Work Order Request</DialogTitle>
+                <DialogDescription>
+                  Request our team to run a campaign on your behalf
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="space-y-5 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="wo-campaignType">Campaign Type *</Label>
+              <Select
+                value={newWorkOrder.campaignType}
+                onValueChange={(val: 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom') =>
+                  setNewWorkOrder(prev => ({ ...prev, campaignType: val }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select campaign type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="call_campaign">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-violet-500" />
+                      Call Campaign
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="email_campaign">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-blue-500" />
+                      Email Campaign
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="combined">
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-green-500" />
+                      Combined (Multi-channel)
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="data_enrichment">
+                    <div className="flex items-center gap-2">
+                      <Database className="h-4 w-4 text-amber-500" />
+                      Data Enrichment
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="custom">
+                    <div className="flex items-center gap-2">
+                      <Settings className="h-4 w-4 text-gray-500" />
+                      Custom Request
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="wo-goals">Campaign Goals *</Label>
+              <Textarea
+                id="wo-goals"
+                placeholder="Describe what you want to achieve with this campaign (e.g., schedule demos with IT decision makers, generate qualified leads for enterprise software...)"
+                value={newWorkOrder.campaignGoals}
+                onChange={(e) => setNewWorkOrder(prev => ({ ...prev, campaignGoals: e.target.value }))}
+                rows={3}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="wo-leads">Required Number of Leads</Label>
+                <div className="relative">
+                  <Users className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="wo-leads"
+                    type="text"
+                    className="pl-9"
+                    placeholder="e.g. 500"
+                    value={newWorkOrder.requiredLeads}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, requiredLeads: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wo-priority">Priority</Label>
+                <Select
+                  value={newWorkOrder.priority}
+                  onValueChange={(val: 'low' | 'normal' | 'high' | 'urgent') =>
+                    setNewWorkOrder(prev => ({ ...prev, priority: val }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="wo-timeline">Desired Timeline</Label>
+                <div className="relative">
+                  <Clock className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="wo-timeline"
+                    className="pl-9"
+                    placeholder="e.g. 2 weeks, 1 month"
+                    value={newWorkOrder.desiredTimeline}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, desiredTimeline: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wo-deadline">Deadline</Label>
+                <div className="relative">
+                  <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="wo-deadline"
+                    type="date"
+                    className="pl-9"
+                    value={newWorkOrder.deadline}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, deadline: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="wo-instructions">Additional Instructions</Label>
+              <Textarea
+                id="wo-instructions"
+                placeholder="Any specific requirements, target industries, geographic focus, exclusions, or other details our team should know..."
+                value={newWorkOrder.additionalInstructions}
+                onChange={(e) => setNewWorkOrder(prev => ({ ...prev, additionalInstructions: e.target.value }))}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowWorkOrderDialog(false)}>Cancel</Button>
+            <Button 
+              onClick={() => {
+                toast({ title: 'Work Order Submitted', description: 'Your request has been submitted. Our team will review it shortly.' });
+                setShowWorkOrderDialog(false);
+                setNewWorkOrder({
+                  campaignType: '' as 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom',
+                  campaignGoals: '',
+                  requiredLeads: '',
+                  desiredTimeline: '',
+                  deadline: '',
+                  additionalInstructions: '',
+                  priority: 'normal',
+                });
+              }}
+              disabled={!newWorkOrder.campaignType || !newWorkOrder.campaignGoals}
+              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Submit Work Order
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3926,7 +4003,10 @@ export default function ClientPortalDashboard() {
         onClose={() => setShowExportDialog(false)}
       />
 
-      {/* Voice Simulation Panel */}
+      {/* Unified Simulation Studio Panel
+          Single entry point for all simulation: Voice, Text, Email
+          Supports multiple voice personas (male/female) with proper context awareness
+      */}
       <CampaignSimulationPanel
         open={showSimulationPanel}
         onOpenChange={setShowSimulationPanel}
@@ -3937,6 +4017,16 @@ export default function ClientPortalDashboard() {
       <AgenticReportsPanel
         open={showReportsPanel}
         onOpenChange={setShowReportsPanel}
+      />
+
+      {/* Campaign Order Panel */}
+      <AgenticCampaignOrderPanel
+        open={showOrderPanel}
+        onOpenChange={setShowOrderPanel}
+        onOrderCreated={() => {
+          // Optionally refresh data after order creation
+          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
+        }}
       />
 
       {/* Email Template Builder - Same structure as main email campaigns */}
@@ -3954,30 +4044,6 @@ export default function ClientPortalDashboard() {
 
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
-
-      {/* AI-Powered Agentic Campaign Order Panel */}
-      <AgenticCampaignOrderPanel
-        open={showOrderPanel}
-        onOpenChange={setShowOrderPanel}
-        onOrderCreated={() => {
-          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
-          queryClient.invalidateQueries({ queryKey: ['work-orders'] });
-        }}
-      />
-
-      {/* Campaign Creation Wizard - Disabled for order-only mode
-          Clients now submit campaign requests via the AI agent order panel.
-          Campaign configuration is handled by the DemandGentic team.
-      <CampaignCreationWizard
-        open={showCampaignWizard}
-        onOpenChange={setShowCampaignWizard}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
-          queryClient.invalidateQueries({ queryKey: ['work-orders'] });
-        }}
-      />
-      */}
-
     </div>
   );
 }

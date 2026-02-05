@@ -31,7 +31,7 @@ import { RichTextEditor } from '@/components/rich-text-editor';
 import {
   Mail, Send, Eye, Code2, Sparkles, Copy, Check,
   AlertTriangle, CheckCircle2, Info, ChevronDown,
-  Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle, Maximize2, Minimize2,
+  Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle,
   User, Building2, AtSign, MousePointer, LayoutTemplate, Loader2,
   Plus
 } from 'lucide-react';
@@ -464,7 +464,6 @@ export function ClientEmailTemplateBuilder({
   const [bodyContent, setBodyContent] = useState('');
   const [editorMode, setEditorMode] = useState<'preview' | 'html'>('preview');
   const [templateName, setTemplateName] = useState('');
-  const [isCanvasExpanded, setIsCanvasExpanded] = useState(true);
 
   // AI Generation state
   const [emailType, setEmailType] = useState('cold_outreach');
@@ -862,7 +861,7 @@ export function ClientEmailTemplateBuilder({
                             className="text-xs"
                           >
                             <Eye className="w-3.5 h-3.5 mr-1" />
-                            Preview
+                            Visual Editor
                           </Button>
                           <Button
                             variant={editorMode === 'html' ? 'secondary' : 'ghost'}
@@ -871,135 +870,119 @@ export function ClientEmailTemplateBuilder({
                             className="text-xs"
                           >
                             <Code2 className="w-3.5 h-3.5 mr-1" />
-                            HTML
+                            HTML Source
                           </Button>
                         </div>
 
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setIsCanvasExpanded(prev => !prev)}
-                          className="text-xs"
-                        >
-                          {isCanvasExpanded ? (
-                            <Minimize2 className="w-3.5 h-3.5 mr-1" />
-                          ) : (
-                            <Maximize2 className="w-3.5 h-3.5 mr-1" />
-                          )}
-                          {isCanvasExpanded ? 'Compact' : 'Full width'}
-                        </Button>
+                        <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                          <Info className="w-3.5 h-3.5" />
+                          Editor on left, live preview on right
+                        </div>
                       </div>
 
                       {/* Email Canvas */}
-                      <div className="flex-1 flex justify-center overflow-auto pb-4">
-                        <div
-                          className={cn(
-                            'w-full transition-all duration-200',
-                            isCanvasExpanded ? 'max-w-[1600px]' : 'max-w-[1200px]'
-                          )}
-                        >
-                            <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
-                             <div className="grid grid-cols-1 lg:grid-cols-2">
-                               <div className="p-3 border-b lg:border-b-0 lg:border-r">
-                                 {editorMode === 'preview' ? (
-                                   bodyIsFullHtmlDocument ? (
-                                     <div className="p-6 bg-slate-50 border-b">
-                                   <div className="flex items-start justify-between gap-4">
-                                     <div className="min-w-0">
-                                       <div className="text-sm font-medium text-slate-700">Branded HTML template detected</div>
-                                       <p className="text-sm text-slate-500 mt-1">
-                                         This template is full HTML. Use the HTML tab to edit safely without breaking layout.
-                                       </p>
-                                     </div>
-                                     <Button
-                                       type="button"
-                                       size="sm"
-                                       variant="outline"
-                                       onClick={() => setEditorMode('html')}
-                                       className="flex-shrink-0"
-                                     >
-                                       <Code2 className="w-4 h-4 mr-2" />
-                                       Edit HTML
-                                     </Button>
-                                   </div>
-                                 </div>
-                               ) : bodyHasAdvancedHtml ? (
-                                 <div className="p-6 bg-slate-50 border-b">
-                                   <div className="flex items-start justify-between gap-4">
-                                     <div className="min-w-0">
-                                       <div className="text-sm font-medium text-slate-700">Advanced HTML detected</div>
-                                       <p className="text-sm text-slate-500 mt-1">
-                                         This content includes email-HTML elements (tables/styles) that aren&apos;t safe to edit in Preview.
-                                         Use the HTML tab to avoid breaking layout.
-                                       </p>
-                                     </div>
-                                     <Button
-                                       type="button"
-                                       size="sm"
-                                       variant="outline"
-                                       onClick={() => setEditorMode('html')}
-                                       className="flex-shrink-0"
-                                     >
-                                       <Code2 className="w-4 h-4 mr-2" />
-                                       Edit HTML
-                                     </Button>
-                                   </div>
-                                 </div>
-                               ) : (
-                                 <RichTextEditor
-                                   content={bodyContent}
-                                   onChange={setBodyContent}
-                                   className={cn(isCanvasExpanded ? 'h-[680px]' : 'h-[560px]')}
-                                   placeholder={`Hi {{firstName}},
- 
- Write your email content here. Keep it concise and focused.
- 
- Best regards,
- ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
-                                 />
-                               )
-                             ) : (
-                               <Textarea
-                                 value={bodyContent}
-                                 onChange={(e) => setBodyContent(e.target.value)}
-                                 placeholder={bodyIsFullHtmlDocument ? 'Enter full email HTML...' : 'Enter HTML body content...'}
-                                 className={cn(
-                                   'w-full p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400',
-                                   isCanvasExpanded ? 'h-[680px]' : 'h-[560px]'
-                                 )}
-                               />
-                             )}
-                               </div>
+                      <div className="flex-1 overflow-auto pb-4">
+                        <div className="w-full h-full">
+                          <div className="bg-white rounded-lg shadow-lg border overflow-hidden h-full">
+                            <div className="grid grid-cols-2 h-full" style={{ minHeight: '600px' }}>
+                              {/* Editor Column */}
+                              <div className="p-3 border-r min-w-0 flex flex-col">
+                                {editorMode === 'preview' ? (
+                                  bodyIsFullHtmlDocument ? (
+                                    <div className="flex-1 flex flex-col">
+                                      <div className="p-6 bg-slate-50 rounded-lg">
+                                        <div className="flex items-start justify-between gap-4">
+                                          <div className="min-w-0">
+                                            <div className="text-sm font-medium text-slate-700">Branded HTML template detected</div>
+                                            <p className="text-sm text-slate-500 mt-1">
+                                              This template is full HTML. Use the HTML tab to edit safely without breaking layout.
+                                            </p>
+                                          </div>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => setEditorMode('html')}
+                                            className="flex-shrink-0"
+                                          >
+                                            <Code2 className="w-4 h-4 mr-2" />
+                                            Edit HTML
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : bodyHasAdvancedHtml ? (
+                                    <div className="flex-1 flex flex-col">
+                                      <div className="p-6 bg-slate-50 rounded-lg">
+                                        <div className="flex items-start justify-between gap-4">
+                                          <div className="min-w-0">
+                                            <div className="text-sm font-medium text-slate-700">Advanced HTML detected</div>
+                                            <p className="text-sm text-slate-500 mt-1">
+                                              This content includes email-HTML elements (tables/styles) that aren&apos;t safe to edit in Preview.
+                                              Use the HTML tab to avoid breaking layout.
+                                            </p>
+                                          </div>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => setEditorMode('html')}
+                                            className="flex-shrink-0"
+                                          >
+                                            <Code2 className="w-4 h-4 mr-2" />
+                                            Edit HTML
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <RichTextEditor
+                                      content={bodyContent}
+                                      onChange={setBodyContent}
+                                      className="flex-1 min-h-[500px]"
+                                      placeholder={`Hi {{firstName}},
 
-                              <div className="p-3 bg-slate-50">
-                                <div className="flex items-center justify-between gap-3 mb-2">
-                                  <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Preview</div>
-                                {!bodyIsFullHtmlDocument && (
-                                  <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                                    <Info className="w-3.5 h-3.5 text-slate-400" />
-                                    Footer + unsubscribe from Business Profile
-                                  </div>
+Write your email content here. Keep it concise and focused.
+
+Best regards,
+${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
+                                    />
+                                  )
+                                ) : (
+                                  <Textarea
+                                    value={bodyContent}
+                                    onChange={(e) => setBodyContent(e.target.value)}
+                                    placeholder={bodyIsFullHtmlDocument ? 'Enter full email HTML...' : 'Enter HTML body content...'}
+                                    className="w-full flex-1 min-h-[500px] p-4 font-mono text-sm border rounded-lg resize-none focus-visible:ring-1 focus-visible:ring-blue-500 bg-slate-900 text-green-400"
+                                  />
                                 )}
                               </div>
-                              <div
-                                className={cn(
-                                  'rounded-lg border bg-white overflow-hidden',
-                                  isCanvasExpanded ? 'h-[680px]' : 'h-[560px]'
-                                )}
-                              >
-                                <iframe
-                                  title="Email Preview"
-                                  srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
-                                  className="w-full h-full border-0"
-                                  sandbox="allow-same-origin"
-                                />
+
+                              {/* Preview Column */}
+                              <div className="p-3 bg-slate-50 min-w-0 flex flex-col">
+                                <div className="flex items-center justify-between gap-3 mb-2 flex-shrink-0">
+                                  <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Live Preview</div>
+                                  {!bodyIsFullHtmlDocument && (
+                                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                                      <Info className="w-3.5 h-3.5 text-slate-400" />
+                                      Footer + unsubscribe from Business Profile
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex-1 rounded-lg border bg-white overflow-hidden" style={{ minHeight: '500px' }}>
+                                  <iframe
+                                    title="Email Preview"
+                                    srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
+                                    className="w-full h-full border-0"
+                                    sandbox="allow-same-origin"
+                                    style={{ minHeight: '500px' }}
+                                  />
+                                </div>
                               </div>
                             </div>
-                             </div>
-                           </div>
-                         </div>
-                    </div>
+                          </div>
+                        </div>
+                      </div>
 
                     {/* Right Panel - Same as EmailBuilderPro */}
                     <div className="w-72 border-l bg-white flex flex-col">

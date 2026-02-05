@@ -1033,4 +1033,378 @@ Return JSON:
   return await generateJSON(prompt, { temperature: 0.4 });
 }
 
+// ==================== CAMPAIGN MIGRATION ====================
+
+/**
+ * Get migration status - shows campaigns that need migration
+ */
+router.get('/migration/status', requireAuth, async (req: Request, res: Response) => {
+  try {
+    // Get counts for migration status
+    const [totalCampaigns] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns);
+
+    const [legacyCampaigns] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(isNull(campaigns.creationMode));
+
+    const [manualCampaigns] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(eq(campaigns.creationMode, 'manual'));
+
+    const [agenticCampaigns] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(eq(campaigns.creationMode, 'agentic'));
+
+    const [campaignsWithoutIntake] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(and(
+        isNotNull(campaigns.clientAccountId),
+        isNull(campaigns.intakeRequestId)
+      ));
+
+    const [campaignsWithoutChannels] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns)
+      .where(isNull(campaigns.enabledChannels));
+
+    // Get sample legacy campaigns for preview
+    const sampleLegacy = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        type: campaigns.type,
+        status: campaigns.status,
+        clientAccountId: campaigns.clientAccountId,
+        creationMode: campaigns.creationMode,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(isNull(campaigns.creationMode))
+      .limit(10);
+
+    res.json({
+      success: true,
+      data: {
+        summary: {
+          total: totalCampaigns?.count || 0,
+          needsMigration: legacyCampaigns?.count || 0,
+          manual: manualCampaigns?.count || 0,
+          agentic: agenticCampaigns?.count || 0,
+          withoutIntake: campaignsWithoutIntake?.count || 0,
+          withoutChannels: campaignsWithoutChannels?.count || 0,
+        },
+        sampleLegacyCampaigns: sampleLegacy,
+        migrationRequired: (legacyCampaigns?.count || 0) > 0,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Admin Agentic] Migration status error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Run campaign migration - migrates legacy campaigns to new system
+ */
+router.post('/migration/run', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { dryRun = false } = req.body;
+    const userId = (req as any).user?.id;
+
+    console.log(`[Migration] Starting campaign migration (dryRun: ${dryRun})`);
+
+    // Track migration results
+    const results = {
+      creationModeUpdated: 0,
+      enabledChannelsSet: 0,
+      projectDataPopulated: 0,
+      dialModeSet: 0,
+      channelStatusInitialized: 0,
+      intakeRequestsCreated: 0,
+      intakeLinksUpdated: 0,
+      errors: [] as string[],
+    };
+
+    // Step 1: Set creation_mode to 'manual' for legacy campaigns
+    const legacyCampaigns = await db
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(isNull(campaigns.creationMode));
+
+    if (!dryRun && legacyCampaigns.length > 0) {
+      await db
+        .update(campaigns)
+        .set({ creationMode: 'manual', updatedAt: new Date() })
+        .where(isNull(campaigns.creationMode));
+    }
+    results.creationModeUpdated = legacyCampaigns.length;
+
+    // Step 2: Set enabled_channels based on campaign type
+    const campaignsWithoutChannels = await db
+      .select({ id: campaigns.id, type: campaigns.type })
+      .from(campaigns)
+      .where(isNull(campaigns.enabledChannels));
+
+    if (!dryRun) {
+      for (const camp of campaignsWithoutChannels) {
+        const channelsForType = camp.type === 'email' ? ['email'] :
+                               camp.type === 'combo' ? ['voice', 'email'] :
+                               ['voice'];
+        await db
+          .update(campaigns)
+          .set({ enabledChannels: channelsForType, updatedAt: new Date() })
+          .where(eq(campaigns.id, camp.id));
+      }
+    }
+    results.enabledChannelsSet = campaignsWithoutChannels.length;
+
+    // Step 3: Populate project data (landing_page_url, project_file_url)
+    const campaignsWithProjects = await db
+      .select({
+        campaignId: campaigns.id,
+        projectId: campaigns.projectId,
+        campaignLandingPage: campaigns.landingPageUrl,
+        campaignProjectFile: campaigns.projectFileUrl,
+      })
+      .from(campaigns)
+      .where(and(
+        isNotNull(campaigns.projectId),
+        sql`(${campaigns.landingPageUrl} IS NULL OR ${campaigns.projectFileUrl} IS NULL)`
+      ));
+
+    if (!dryRun) {
+      for (const camp of campaignsWithProjects) {
+        if (camp.projectId) {
+          const [project] = await db
+            .select({
+              landingPageUrl: clientProjects.landingPageUrl,
+              projectFileUrl: clientProjects.projectFileUrl,
+            })
+            .from(clientProjects)
+            .where(eq(clientProjects.id, camp.projectId));
+
+          if (project) {
+            await db
+              .update(campaigns)
+              .set({
+                landingPageUrl: camp.campaignLandingPage || project.landingPageUrl,
+                projectFileUrl: camp.campaignProjectFile || project.projectFileUrl,
+                updatedAt: new Date(),
+              })
+              .where(eq(campaigns.id, camp.campaignId));
+          }
+        }
+      }
+    }
+    results.projectDataPopulated = campaignsWithProjects.length;
+
+    // Step 4: Set dial_mode for campaigns without it
+    const campaignsWithoutDialMode = await db
+      .select({ id: campaigns.id, type: campaigns.type })
+      .from(campaigns)
+      .where(isNull(campaigns.dialMode));
+
+    if (!dryRun) {
+      for (const camp of campaignsWithoutDialMode) {
+        const dialModeForType = ['email', 'content_syndication'].includes(camp.type) ? 'manual' : 'ai_agent';
+        await db
+          .update(campaigns)
+          .set({ dialMode: dialModeForType as any, updatedAt: new Date() })
+          .where(eq(campaigns.id, camp.campaignId));
+      }
+    }
+    results.dialModeSet = campaignsWithoutDialMode.length;
+
+    // Step 5: Initialize channel_generation_status
+    const campaignsWithoutChannelStatus = await db
+      .select({ id: campaigns.id, enabledChannels: campaigns.enabledChannels })
+      .from(campaigns)
+      .where(isNull(campaigns.channelGenerationStatus));
+
+    if (!dryRun) {
+      for (const camp of campaignsWithoutChannelStatus) {
+        const channels = camp.enabledChannels || ['voice'];
+        const status: Record<string, string> = {};
+        if (channels.includes('voice')) status.voice = 'pending';
+        if (channels.includes('email')) status.email = 'pending';
+
+        await db
+          .update(campaigns)
+          .set({ channelGenerationStatus: status, updatedAt: new Date() })
+          .where(eq(campaigns.id, camp.id));
+      }
+    }
+    results.channelStatusInitialized = campaignsWithoutChannelStatus.length;
+
+    // Step 6: Create intake requests for campaigns with client associations but no intake
+    const campaignsNeedingIntake = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        type: campaigns.type,
+        clientAccountId: campaigns.clientAccountId,
+        projectId: campaigns.projectId,
+        campaignObjective: campaigns.campaignObjective,
+        productServiceInfo: campaigns.productServiceInfo,
+        successCriteria: campaigns.successCriteria,
+        targetAudienceDescription: campaigns.targetAudienceDescription,
+        targetQualifiedLeads: campaigns.targetQualifiedLeads,
+        enabledChannels: campaigns.enabledChannels,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(and(
+        isNotNull(campaigns.clientAccountId),
+        isNull(campaigns.intakeRequestId)
+      ));
+
+    if (!dryRun) {
+      for (const camp of campaignsNeedingIntake) {
+        try {
+          // Check if intake already exists for this campaign
+          const [existingIntake] = await db
+            .select({ id: campaignIntakeRequests.id })
+            .from(campaignIntakeRequests)
+            .where(eq(campaignIntakeRequests.campaignId, camp.id));
+
+          if (!existingIntake) {
+            const [newIntake] = await db
+              .insert(campaignIntakeRequests)
+              .values({
+                sourceType: 'api',
+                clientAccountId: camp.clientAccountId,
+                projectId: camp.projectId,
+                campaignId: camp.id,
+                status: 'completed',
+                priority: 'normal',
+                rawInput: {
+                  migratedFromLegacy: true,
+                  originalCampaignName: camp.name,
+                  originalCampaignType: camp.type,
+                  migratedAt: new Date().toISOString(),
+                  migratedBy: userId,
+                },
+                extractedContext: {
+                  objective: camp.campaignObjective || 'Migrated campaign - objective not specified',
+                  productServiceInfo: camp.productServiceInfo,
+                  successCriteria: camp.successCriteria,
+                  targetAudienceDescription: camp.targetAudienceDescription,
+                },
+                campaignType: camp.type,
+                requestedLeadCount: camp.targetQualifiedLeads,
+                requestedChannels: camp.enabledChannels || ['voice'],
+              })
+              .returning();
+
+            if (newIntake) {
+              // Link back to campaign
+              await db
+                .update(campaigns)
+                .set({ intakeRequestId: newIntake.id, updatedAt: new Date() })
+                .where(eq(campaigns.id, camp.id));
+
+              results.intakeLinksUpdated++;
+            }
+            results.intakeRequestsCreated++;
+          }
+        } catch (intakeError: any) {
+          results.errors.push(`Failed to create intake for campaign ${camp.id}: ${intakeError.message}`);
+        }
+      }
+    } else {
+      results.intakeRequestsCreated = campaignsNeedingIntake.length;
+      results.intakeLinksUpdated = campaignsNeedingIntake.length;
+    }
+
+    console.log('[Migration] Complete:', results);
+
+    res.json({
+      success: true,
+      dryRun,
+      data: results,
+      message: dryRun
+        ? 'Dry run complete. No changes made. Run with dryRun: false to apply changes.'
+        : 'Migration complete. All campaigns have been updated to work with the new agentic system.',
+    });
+  } catch (error: any) {
+    console.error('[Admin Agentic] Migration run error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Get campaigns list with new agentic fields for verification
+ */
+router.get('/campaigns', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { limit = '50', offset = '0', status, creationMode } = req.query;
+
+    let query = db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        type: campaigns.type,
+        status: campaigns.status,
+        clientAccountId: campaigns.clientAccountId,
+        clientAccountName: clientAccounts.name,
+        projectId: campaigns.projectId,
+        creationMode: campaigns.creationMode,
+        intakeRequestId: campaigns.intakeRequestId,
+        enabledChannels: campaigns.enabledChannels,
+        channelGenerationStatus: campaigns.channelGenerationStatus,
+        dialMode: campaigns.dialMode,
+        landingPageUrl: campaigns.landingPageUrl,
+        projectFileUrl: campaigns.projectFileUrl,
+        campaignObjective: campaigns.campaignObjective,
+        targetQualifiedLeads: campaigns.targetQualifiedLeads,
+        createdAt: campaigns.createdAt,
+        updatedAt: campaigns.updatedAt,
+      })
+      .from(campaigns)
+      .leftJoin(clientAccounts, eq(campaigns.clientAccountId, clientAccounts.id))
+      .orderBy(desc(campaigns.createdAt))
+      .limit(parseInt(limit as string))
+      .offset(parseInt(offset as string));
+
+    // Apply filters
+    const conditions = [];
+    if (status) {
+      conditions.push(eq(campaigns.status, status as any));
+    }
+    if (creationMode) {
+      conditions.push(eq(campaigns.creationMode, creationMode as string));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+
+    const campaignList = await query;
+
+    // Get total count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(campaigns);
+
+    res.json({
+      success: true,
+      data: campaignList,
+      pagination: {
+        total: countResult?.count || 0,
+        limit: parseInt(limit as string),
+        offset: parseInt(offset as string),
+      },
+    });
+  } catch (error: any) {
+    console.error('[Admin Agentic] List campaigns error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 export default router;

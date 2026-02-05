@@ -128,6 +128,166 @@ function getClientContext(req: Request): ClientAgenticContext {
   };
 }
 
+// ==================== CAMPAIGN ORDER ENDPOINTS ====================
+
+/**
+ * Get AI recommendation for campaign order based on goal
+ */
+router.post("/orders/recommend", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const { goal, contextUrls, contextFiles } = req.body;
+
+    if (!goal) {
+      return res.status(400).json({ success: false, message: "Goal is required" });
+    }
+
+    console.log(`[Client Agentic] Generating order recommendation for client ${context.clientAccountId}`);
+    console.log(`[Client Agentic] Goal: ${goal.substring(0, 100)}...`);
+
+    // Build context for AI
+    let additionalContext = "";
+    if (contextUrls && contextUrls.length > 0) {
+      additionalContext += `\nRelevant URLs provided: ${contextUrls.join(", ")}`;
+    }
+    if (contextFiles && contextFiles.length > 0) {
+      additionalContext += `\nFiles uploaded: ${contextFiles.map((f: any) => f.name).join(", ")}`;
+    }
+
+    const prompt = `You are a B2B campaign strategist. Analyze this campaign goal and recommend the best approach.
+
+GOAL: ${goal}
+${additionalContext}
+
+Based on this goal, provide a recommendation in the following JSON format:
+{
+  "recommendation": {
+    "campaignType": "high_quality_leads|bant_leads|sql|appointment_generation|lead_qualification|content_syndication|webinar_invite|live_webinar|on_demand_webinar|executive_dinner|leadership_forum|conference|combo|call|email|data_validation",
+    "suggestedVolume": number (realistic lead count based on goal),
+    "targetAudience": {
+      "industries": ["industry1", "industry2"],
+      "titles": ["title1", "title2"],
+      "companySize": "description of company size range"
+    },
+    "channels": ["voice", "email"] or ["voice"] or ["email"],
+    "estimatedCost": number (estimated total cost in USD),
+    "expectedResults": {
+      "meetings": "estimated meetings or appointments",
+      "qualifiedLeads": "estimated qualified leads"
+    }
+  },
+  "rationale": "2-3 sentences explaining why this approach is recommended for the stated goal"
+}
+
+Choose the most appropriate campaign type based on:
+- "high_quality_leads" for general MQL generation
+- "bant_leads" for budget/authority/need/timeline qualified leads
+- "sql" for sales-ready leads with confirmed interest
+- "appointment_generation" for meeting scheduling
+- "content_syndication" for whitepaper/asset distribution
+- "webinar_invite" for event registrations
+- "combo" for multi-channel voice + email campaigns
+- "call" for voice-only campaigns
+- "email" for email-only campaigns
+
+Return ONLY valid JSON, no markdown or explanation outside the JSON.`;
+
+    const result = await generateJSON(prompt, { temperature: 0.4 });
+
+    console.log(`[Client Agentic] Recommendation generated successfully`);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Order recommendation error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/**
+ * Create a new campaign order
+ */
+router.post("/orders/create", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const {
+      campaignType,
+      industries,
+      jobTitles,
+      companySizeMin,
+      companySizeMax,
+      geographies,
+      volumeRequested,
+      deliveryTimeline,
+      channels,
+      specialRequirements,
+      contextUrls,
+      contextFiles,
+      targetAccountFiles,
+      suppressionFiles,
+      deliveryMethod,
+      templateFiles,
+    } = req.body;
+
+    if (!volumeRequested || volumeRequested < 1) {
+      return res.status(400).json({ success: false, message: "Volume must be at least 1" });
+    }
+
+    console.log(`[Client Agentic] Creating order for client ${context.clientAccountId}`);
+
+    // Generate order number
+    const orderNumber = `WO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+
+    // Insert order into database
+    const [newOrder] = await db
+      .insert(clientPortalOrders)
+      .values({
+        clientAccountId: context.clientAccountId,
+        orderNumber,
+        status: "submitted",
+        requestedQuantity: volumeRequested,
+        approvedQuantity: null,
+        deliveredQuantity: 0,
+        orderMonth: new Date().getMonth() + 1,
+        orderYear: new Date().getFullYear(),
+        metadata: {
+          campaignType,
+          industries,
+          jobTitles,
+          companySizeMin,
+          companySizeMax,
+          geographies,
+          deliveryTimeline,
+          channels,
+          specialRequirements,
+          contextUrls,
+          contextFiles,
+          targetAccountFiles,
+          suppressionFiles,
+          deliveryMethod,
+          templateFiles,
+        },
+      })
+      .returning();
+
+    console.log(`[Client Agentic] Order ${orderNumber} created successfully`);
+
+    res.json({
+      success: true,
+      data: {
+        orderId: newOrder.id,
+        orderNumber: newOrder.orderNumber,
+        status: newOrder.status,
+      },
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Order creation error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // ==================== VOICE SIMULATION ENDPOINTS ====================
 
 /**
@@ -635,7 +795,7 @@ router.post("/reports/generate", async (req: Request, res: Response) => {
       success: true,
       data: {
         reportId: reportRecord.id,
-        status: "pending_review",
+        status: "submitted",
       },
       message: "Report generated and submitted for QA review",
     });

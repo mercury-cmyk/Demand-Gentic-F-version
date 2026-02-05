@@ -107,7 +107,7 @@ const EMAIL_TYPES = [
 ];
 
 // Client portal auth headers helper
-const getAuthHeaders = () => {
+const getAuthHeaders = (): Record<string, string> => {
   const token = localStorage.getItem('clientPortalToken');
   return token ? { Authorization: `Bearer ${token}` } : {};
 };

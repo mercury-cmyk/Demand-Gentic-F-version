@@ -88,7 +88,7 @@ const navigation = [
   { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
   { name: 'Order Requests', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList, description: 'AI-powered campaign ordering' },
   { name: 'Projects', href: '/client-portal/projects', icon: FolderKanban },
-  { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: Sparkles },
+  { name: 'Preview Studio', href: '/preview-studio', icon: Sparkles },
   { name: 'Voice Simulation', href: '/client-portal/voice-simulation', icon: PhoneCall },
   { name: 'Email Simulation', href: '/client-portal/email-simulation', icon: Mail },
   { name: 'Analytics', href: '/client-portal/dashboard?tab=reports', icon: BarChart3 },
