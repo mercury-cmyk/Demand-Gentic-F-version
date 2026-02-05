@@ -58,6 +58,7 @@ import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
 import CallRecordingsPage from "@/pages/call-recordings";
 import CallIntelligenceDashboard from "@/pages/call-intelligence-dashboard";
+import UnifiedIntelligencePage from "@/pages/unified-intelligence";
 
 // Lazy-loaded components
 const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
@@ -375,6 +376,7 @@ function AuthenticatedApp() {
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               <Route path="/call-recordings" component={CallRecordingsPage} />
               <Route path="/call-intelligence" component={CallIntelligenceDashboard} />
+              <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
               <Route path="/ai-call-analytics">

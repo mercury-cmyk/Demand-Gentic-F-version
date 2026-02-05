@@ -315,7 +315,6 @@ export default function ClientPortalDashboard() {
   });
 
   // Preview Studio - Campaign Context State
-  const [previewCampaignId, setPreviewCampaignId] = useState<string>('');
   const [previewAccountId, setPreviewAccountId] = useState<string>('');
   const [previewContactId, setPreviewContactId] = useState<string>('');
   const [previewAudienceAccounts, setPreviewAudienceAccounts] = useState<any[]>([]);
