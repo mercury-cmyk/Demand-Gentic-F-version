@@ -61,10 +61,16 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ['client-portal-lead-campaigns'],
     queryFn: async () => {
+      const token = getToken();
+      console.log('[QualifiedLeads] Fetching campaigns, token present:', !!token);
       const res = await fetch('/api/client-portal/qualified-leads/campaigns', {
-        headers: { Authorization: `Bearer ${getToken()}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return [];
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[QualifiedLeads] campaigns fetch failed:', res.status, errorText);
+        return [];
+      }
       return res.json();
     },
   });

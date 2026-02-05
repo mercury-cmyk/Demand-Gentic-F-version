@@ -25,7 +25,10 @@ export function RichTextEditor({ content, onChange, placeholder = "Write your me
       StarterKit.configure({
         heading: {
           levels: [1, 2]
-        }
+        },
+        // Disable extensions that are already added manually to avoid duplicates
+        link: false,
+        underline: false,
       }),
       Link.configure({
         openOnClick: false,

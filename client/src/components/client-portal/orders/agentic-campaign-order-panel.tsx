@@ -314,11 +314,13 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   // Create order
   const createOrderMutation = useMutation({
     mutationFn: async () => {
+      const token = getToken();
+      console.log('[OrderCreate] Starting order creation, token present:', !!token);
       const res = await fetch('/api/client-portal/agentic/orders/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           campaignType,
@@ -339,7 +341,11 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           templateFiles
         }),
       });
-      if (!res.ok) throw new Error('Failed to create order');
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[OrderCreate] Failed:', res.status, errorText);
+        throw new Error(`Failed to create order: ${res.status} - ${errorText}`);
+      }
       return res.json();
     },
     onSuccess: (data) => {

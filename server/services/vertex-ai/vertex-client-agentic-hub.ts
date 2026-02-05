@@ -336,12 +336,14 @@ Return JSON:
         optimizedCriteria?: any;
       }>(analysisPrompt, { temperature: 0.2 });
 
+      console.log('[VertexClientAgenticHub] Order analysis result:', JSON.stringify(analysis, null, 2));
+
       if (!analysis.isValid) {
         return {
           success: false,
-          message: `Order validation failed: ${analysis.validationNotes}`,
-          reasoning: analysis.validationNotes,
-          suggestedActions: analysis.recommendations,
+          message: `Order validation failed: ${analysis.validationNotes || "No specific validation notes provided."}`,
+          reasoning: analysis.validationNotes || "Order deemed invalid by AI analysis.",
+          suggestedActions: analysis.recommendations || [],
         };
       }
 
