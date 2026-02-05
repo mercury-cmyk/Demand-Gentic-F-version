@@ -23,22 +23,39 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { RichTextEditor } from '@/components/rich-text-editor';
 import {
-  Mail, Send, Save, Eye, Code2, Type, Sparkles, Copy, Check,
-  AlertTriangle, CheckCircle2, Info, ChevronDown, ChevronRight,
+  Mail, Send, Eye, Code2, Sparkles, Copy, Check,
+  AlertTriangle, CheckCircle2, Info, ChevronDown,
   Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle, Maximize2, Minimize2,
   User, Building2, AtSign, MousePointer, LayoutTemplate, Loader2,
-  Plus, X, Box
+  Plus
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const isFullHtmlDocument = (html: string) => /<!doctype html|<html[\s>]/i.test(html);
+const looksLikeFullHtmlDocument = (html: string) => /<!doctype html|<html[\s>]/i.test(html);
+const looksLikeHtmlFragment = (value: string) => /<\w+[^>]*>/.test(value);
+
+const normalizePlainTextToHtml = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const escaped = trimmed
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const paragraphs = escaped
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n/g, "<br />"))
+    .join("</p><p>");
+  return `<p>${paragraphs}</p>`;
+};
+
+const ensureHtmlBody = (value: string) =>
+  looksLikeHtmlFragment(value) ? value : normalizePlainTextToHtml(value);
 
 // Types
 interface Campaign {
@@ -75,6 +92,7 @@ interface GeneratedEmail {
   subject: string;
   preheader?: string;
   body: string;
+  bodyHtml?: string;
   cta?: string;
   heroTitle?: string;
   heroSubtitle?: string;
@@ -124,57 +142,89 @@ const TONES = [
   { value: 'consultative', label: 'Consultative' },
 ];
 
-const PERSONALIZATION_TOKENS = [
-  { token: '{{firstName}}', label: 'First Name', icon: User },
-  { token: '{{lastName}}', label: 'Last Name', icon: User },
-  { token: '{{company}}', label: 'Company', icon: Building2 },
-  { token: '{{email}}', label: 'Email', icon: AtSign },
-  { token: '{{jobTitle}}', label: 'Job Title', icon: User },
+// Contact Variables (from clientCrmContacts schema)
+const CONTACT_TOKENS = [
+  { token: '{{contact.firstName}}', label: 'First Name', icon: User, category: 'contact' },
+  { token: '{{contact.lastName}}', label: 'Last Name', icon: User, category: 'contact' },
+  { token: '{{contact.email}}', label: 'Email', icon: AtSign, category: 'contact' },
+  { token: '{{contact.phone}}', label: 'Phone', icon: User, category: 'contact' },
+  { token: '{{contact.mobile}}', label: 'Mobile', icon: User, category: 'contact' },
+  { token: '{{contact.title}}', label: 'Job Title', icon: User, category: 'contact' },
+  { token: '{{contact.department}}', label: 'Department', icon: User, category: 'contact' },
+  { token: '{{contact.linkedinUrl}}', label: 'LinkedIn URL', icon: User, category: 'contact' },
+  { token: '{{contact.company}}', label: 'Company (Contact)', icon: Building2, category: 'contact' },
 ];
+
+// Account Variables (from clientCrmAccounts schema)
+const ACCOUNT_TOKENS = [
+  { token: '{{account.name}}', label: 'Company Name', icon: Building2, category: 'account' },
+  { token: '{{account.domain}}', label: 'Domain', icon: Building2, category: 'account' },
+  { token: '{{account.industry}}', label: 'Industry', icon: Building2, category: 'account' },
+  { token: '{{account.employees}}', label: 'Employee Count', icon: Building2, category: 'account' },
+  { token: '{{account.annualRevenue}}', label: 'Annual Revenue', icon: Building2, category: 'account' },
+  { token: '{{account.city}}', label: 'City', icon: Building2, category: 'account' },
+  { token: '{{account.state}}', label: 'State', icon: Building2, category: 'account' },
+  { token: '{{account.country}}', label: 'Country', icon: Building2, category: 'account' },
+  { token: '{{account.phone}}', label: 'Company Phone', icon: Building2, category: 'account' },
+  { token: '{{account.website}}', label: 'Website', icon: Building2, category: 'account' },
+  { token: '{{account.accountType}}', label: 'Account Type', icon: Building2, category: 'account' },
+];
+
+// Sender/Campaign Variables
+const SENDER_TOKENS = [
+  { token: '{{sender.name}}', label: 'Sender Name', icon: User, category: 'sender' },
+  { token: '{{sender.title}}', label: 'Sender Title', icon: User, category: 'sender' },
+  { token: '{{sender.company}}', label: 'Sender Company', icon: Building2, category: 'sender' },
+  { token: '{{sender.email}}', label: 'Sender Email', icon: AtSign, category: 'sender' },
+  { token: '{{campaign.name}}', label: 'Campaign Name', icon: Building2, category: 'campaign' },
+];
+
+// Combined for backward compatibility
+const PERSONALIZATION_TOKENS = [...CONTACT_TOKENS, ...ACCOUNT_TOKENS, ...SENDER_TOKENS];
 
 // Sample email templates for client reference
 const SAMPLE_TEMPLATES: EmailTemplate[] = [
   {
     id: 'sample-cold-outreach',
     name: 'Cold Outreach - Professional',
-    subject: 'Quick question about {{company}}',
+    subject: 'Quick question about {{account.name}}',
     preheader: "I noticed something interesting about your team's approach...",
-    htmlContent: `<p>Hi {{firstName}},</p>
+    htmlContent: `<p>Hi {{contact.firstName}},</p>
 
-<p>I came across {{company}} and was impressed by your growth in the market.</p>
+<p>I came across {{account.name}} and was impressed by your growth in the {{account.industry}} market.</p>
 
 <p>We've helped similar companies in your space achieve significant results. Would you be open to a brief conversation to explore if we might be able to help?</p>
 
-<p>Best regards</p>`,
-    body: 'Hi {{firstName}},\n\nI came across {{company}} and was impressed by your growth...',
+<p>Best regards,<br/>{{sender.name}}<br/>{{sender.title}}</p>`,
+    body: 'Hi {{contact.firstName}},\n\nI came across {{account.name}} and was impressed by your growth...',
   },
   {
     id: 'sample-follow-up',
     name: 'Follow Up - Friendly',
     subject: 'Following up on my earlier note',
     preheader: 'Just wanted to make sure this landed in your inbox...',
-    htmlContent: `<p>Hi {{firstName}},</p>
+    htmlContent: `<p>Hi {{contact.firstName}},</p>
 
 <p>I wanted to follow up on my earlier message. I know things get busy, so I thought I'd reach out once more.</p>
 
 <p>Is there a better time for us to connect? Even 15 minutes would be great to explore if there's a fit.</p>
 
 <p>Thanks!</p>`,
-    body: 'Hi {{firstName}},\n\nI wanted to follow up on my earlier message...',
+    body: 'Hi {{contact.firstName}},\n\nI wanted to follow up on my earlier message...',
   },
   {
     id: 'sample-meeting-request',
     name: 'Meeting Request - Direct',
     subject: 'Can we schedule 15 minutes?',
-    preheader: 'I have an idea that might help {{company}}...',
-    htmlContent: `<p>Hi {{firstName}},</p>
+    preheader: 'I have an idea that might help {{account.name}}...',
+    htmlContent: `<p>Hi {{contact.firstName}},</p>
 
-<p>I'll be direct – I think we can help {{company}} improve your results significantly.</p>
+<p>I'll be direct – I think we can help {{account.name}} improve your results significantly.</p>
 
 <p>Can we schedule a quick 15-minute call this week? I'll share some specific ideas tailored to your situation.</p>
 
 <p>What works best for you?</p>`,
-    body: 'Hi {{firstName}},\n\nI\'ll be direct – I think we can help {{company}}...',
+    body: 'Hi {{contact.firstName}},\n\nI\'ll be direct – I think we can help {{account.name}}...',
   },
 ];
 
@@ -309,12 +359,12 @@ const analyzeEmail = (subject: string, body: string): SmartNudge[] => {
 // Generate email-safe HTML with business profile footer (CAN-SPAM compliance)
 const generateCleanHtml = (
   bodyContent: string,
-  organizationName: string = 'Your Company',
+  organizationName: string = '',
   profile?: BusinessProfile | null,
   forceOrgName?: string
 ): string => {
   // Build business address from profile (CAN-SPAM compliance requires physical address)
-  const companyName = forceOrgName || profile?.dbaName || profile?.legalBusinessName || organizationName;
+  const companyName = forceOrgName || profile?.dbaName || profile?.legalBusinessName || organizationName || '';
   const addressParts = profile ? [
     profile.addressLine1,
     profile.addressLine2,
@@ -362,6 +412,14 @@ const generateCleanHtml = (
     table { border-spacing: 0; }
     td { padding: 0; }
     img { border: 0; }
+    p { margin: 0 0 16px 0; }
+    h1, h2, h3 { margin: 0 0 16px 0; font-weight: 600; color: #111827; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 24px; }
+    h3 { font-size: 20px; }
+    ul, ol { margin: 0 0 16px 0; padding-left: 24px; }
+    li { margin: 0 0 8px 0; }
+    a { color: #2563eb; text-decoration: underline; }
   </style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
@@ -416,7 +474,7 @@ export function ClientEmailTemplateBuilder({
 
   // Preview state
   const [showPreview, setShowPreview] = useState(false);
-  const [previewMode, setPreviewMode] = useState<'gmail-desktop' | 'gmail-mobile' | 'outlook' | 'plaintext'>('gmail-desktop');
+  const [previewMode, setPreviewMode] = useState<'gmail-desktop' | 'gmail-mobile' | 'outlook'>('gmail-desktop');
 
   // Test email state
   const [showTestDialog, setShowTestDialog] = useState(false);
@@ -452,6 +510,7 @@ export function ClientEmailTemplateBuilder({
   });
 
   const businessProfile = businessProfileData?.profile;
+  const clientName = businessProfileData?.clientName || '';
 
   useEffect(() => {
     if (initialCampaignId) {
@@ -473,10 +532,25 @@ export function ClientEmailTemplateBuilder({
   const nudges = useMemo(() => analyzeEmail(subject, bodyContent), [subject, bodyContent]);
   const hasErrors = nudges.some(n => n.type === 'error');
 
+  const bodyIsFullHtmlDocument = useMemo(() => looksLikeFullHtmlDocument(bodyContent), [bodyContent]);
+
+  const bodyHasAdvancedHtml = useMemo(
+    () => /<table\b|<img\b|style=|<script\b|<iframe\b/i.test(bodyContent),
+    [bodyContent]
+  );
+
+  const normalizedBodyContent = useMemo(
+    () => (bodyIsFullHtmlDocument ? bodyContent : ensureHtmlBody(bodyContent)),
+    [bodyContent, bodyIsFullHtmlDocument]
+  );
+
   // Generate full HTML with business profile footer
   const fullHtml = useMemo(
-    () => generateCleanHtml(bodyContent, activeCampaignName || 'Your Campaign', businessProfile, overrideOrgName),
-    [bodyContent, activeCampaignName, businessProfile, overrideOrgName]
+    () =>
+      bodyIsFullHtmlDocument
+        ? bodyContent
+        : generateCleanHtml(normalizedBodyContent, clientName, businessProfile, overrideOrgName),
+    [bodyContent, clientName, businessProfile, overrideOrgName, bodyIsFullHtmlDocument, normalizedBodyContent]
   );
 
   // Plain text version with business profile footer
@@ -485,7 +559,7 @@ export function ClientEmailTemplateBuilder({
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/p>/gi, '\n\n')
       .replace(/<\/div>/gi, '\n')
-      .replace(/<li>/gi, '• ')
+      .replace(/<li>/gi, '- ')
       .replace(/<\/li>/gi, '\n')
       .replace(/<a[^>]+href="([^"]*)"[^>]*>([^<]*)<\/a>/gi, '$2 ($1)')
       .replace(/<[^>]+>/g, '')
@@ -496,18 +570,25 @@ export function ClientEmailTemplateBuilder({
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
+    if (bodyIsFullHtmlDocument) {
+      return text;
+    }
+
     // Build footer with business profile (CAN-SPAM compliance)
-    const companyName = overrideOrgName || businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign';
+    const companyName = overrideOrgName || businessProfile?.dbaName || businessProfile?.legalBusinessName || clientName || '';
     const addressLine = businessProfile
       ? `${businessProfile.addressLine1}${businessProfile.addressLine2 ? ', ' + businessProfile.addressLine2 : ''}\n${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}${businessProfile.country !== 'United States' ? '\n' + businessProfile.country : ''}`
       : '';
     const unsubscribeUrl = businessProfile?.customUnsubscribeUrl || '{{unsubscribe_url}}';
 
-    text += `\n\n---\n${companyName}`;
-    if (addressLine) text += `\n${addressLine}`;
-    text += `\n\nUnsubscribe: ${unsubscribeUrl}`;
+    if (companyName || addressLine) {
+      text += `\n\n---`;
+      if (companyName) text += `\n${companyName}`;
+      if (addressLine) text += `\n${addressLine}`;
+      text += `\n\nUnsubscribe: ${unsubscribeUrl}`;
+    }
     return text;
-  }, [bodyContent, activeCampaignName, businessProfile]);
+  }, [bodyContent, clientName, businessProfile, overrideOrgName, bodyIsFullHtmlDocument]);
 
   // Insert personalization token
   const insertToken = useCallback((token: string) => {
@@ -529,6 +610,7 @@ export function ClientEmailTemplateBuilder({
           tone,
           variants,
           brandPalette,
+          companyName: overrideOrgName?.trim() ? overrideOrgName.trim() : undefined,
         }),
       });
       if (!res.ok) {
@@ -603,7 +685,7 @@ export function ClientEmailTemplateBuilder({
   const useGeneratedEmail = (email: GeneratedEmail) => {
     setSubject(email.subject);
     setPreheader(email.preheader || '');
-    setBodyContent(email.html || email.body || email.intro || '');
+    setBodyContent(email.bodyHtml || email.html || email.body || email.intro || '');
     setShowAiGenerate(false);
     toast({
       title: 'Email Loaded',
@@ -685,7 +767,7 @@ export function ClientEmailTemplateBuilder({
                         <Input 
                             value={overrideOrgName} 
                             onChange={(e) => setOverrideOrgName(e.target.value)}
-                            placeholder={businessProfile?.dbaName || "Your Company"}
+                            placeholder={businessProfile?.dbaName || businessProfile?.legalBusinessName || businessProfileData?.clientName || "Organization name"}
                             className="h-9 bg-white pr-8"
                         />
                         <Building2 className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
@@ -738,7 +820,7 @@ export function ClientEmailTemplateBuilder({
                     <div className="flex items-center gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setShowPreview(true)}>
                         <Eye className="w-4 h-4 mr-1" />
-                        Preview
+                        Inbox Preview
                       </Button>
                       <Separator orientation="vertical" className="h-6" />
                       <Button
@@ -768,23 +850,23 @@ export function ClientEmailTemplateBuilder({
                   {/* Main Editor Area */}
                   <div className="flex-1 flex min-h-0 bg-slate-50">
                     {/* Main Canvas */}
-                    <div className="flex-1 flex flex-col min-h-0 p-6">
+                    <div className="flex-1 flex flex-col min-h-0 p-4">
                       {/* Editor Mode Toggle */}
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2 bg-white rounded-lg p-1 shadow-sm border">
                           <Button
-                            variant={editorMode === 'visual' ? 'secondary' : 'ghost'}
+                            variant={editorMode === 'preview' ? 'secondary' : 'ghost'}
                             size="sm"
-                            onClick={() => setEditorMode('visual')}
+                            onClick={() => setEditorMode('preview')}
                             className="text-xs"
                           >
-                            <Type className="w-3.5 h-3.5 mr-1" />
-                            Visual
+                            <Eye className="w-3.5 h-3.5 mr-1" />
+                            Preview
                           </Button>
                           <Button
-                            variant={editorMode === 'code' ? 'secondary' : 'ghost'}
+                            variant={editorMode === 'html' ? 'secondary' : 'ghost'}
                             size="sm"
-                            onClick={() => setEditorMode('code')}
+                            onClick={() => setEditorMode('html')}
                             className="text-xs"
                           >
                             <Code2 className="w-3.5 h-3.5 mr-1" />
@@ -808,64 +890,114 @@ export function ClientEmailTemplateBuilder({
                         </Button>
                       </div>
 
-                      {/* Email Canvas - Same width as main campaigns (600px) */}
+                      {/* Email Canvas */}
                       <div className="flex-1 flex justify-center overflow-auto pb-4">
                         <div
                           className={cn(
                             'w-full transition-all duration-200',
-                            isCanvasExpanded ? 'max-w-[1000px]' : 'max-w-[600px]'
+                            isCanvasExpanded ? 'max-w-[1600px]' : 'max-w-[1200px]'
                           )}
                         >
-                          <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
-                            {editorMode === 'visual' ? (
-                              <div className="min-h-[500px] bg-white">
-                                <RichTextEditor
-                                  content={bodyContent}
-                                  onChange={setBodyContent}
-                                  placeholder={`Hi {{firstName}},
+                            <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
+                             <div className="grid grid-cols-1 lg:grid-cols-2">
+                               <div className="p-3 border-b lg:border-b-0 lg:border-r">
+                                 {editorMode === 'preview' ? (
+                                   bodyIsFullHtmlDocument ? (
+                                     <div className="p-6 bg-slate-50 border-b">
+                                   <div className="flex items-start justify-between gap-4">
+                                     <div className="min-w-0">
+                                       <div className="text-sm font-medium text-slate-700">Branded HTML template detected</div>
+                                       <p className="text-sm text-slate-500 mt-1">
+                                         This template is full HTML. Use the HTML tab to edit safely without breaking layout.
+                                       </p>
+                                     </div>
+                                     <Button
+                                       type="button"
+                                       size="sm"
+                                       variant="outline"
+                                       onClick={() => setEditorMode('html')}
+                                       className="flex-shrink-0"
+                                     >
+                                       <Code2 className="w-4 h-4 mr-2" />
+                                       Edit HTML
+                                     </Button>
+                                   </div>
+                                 </div>
+                               ) : bodyHasAdvancedHtml ? (
+                                 <div className="p-6 bg-slate-50 border-b">
+                                   <div className="flex items-start justify-between gap-4">
+                                     <div className="min-w-0">
+                                       <div className="text-sm font-medium text-slate-700">Advanced HTML detected</div>
+                                       <p className="text-sm text-slate-500 mt-1">
+                                         This content includes email-HTML elements (tables/styles) that aren&apos;t safe to edit in Preview.
+                                         Use the HTML tab to avoid breaking layout.
+                                       </p>
+                                     </div>
+                                     <Button
+                                       type="button"
+                                       size="sm"
+                                       variant="outline"
+                                       onClick={() => setEditorMode('html')}
+                                       className="flex-shrink-0"
+                                     >
+                                       <Code2 className="w-4 h-4 mr-2" />
+                                       Edit HTML
+                                     </Button>
+                                   </div>
+                                 </div>
+                               ) : (
+                                 <RichTextEditor
+                                   content={bodyContent}
+                                   onChange={setBodyContent}
+                                   className={cn(isCanvasExpanded ? 'h-[680px]' : 'h-[560px]')}
+                                   placeholder={`Hi {{firstName}},
+ 
+ Write your email content here. Keep it concise and focused.
+ 
+ Best regards,
+ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
+                                 />
+                               )
+                             ) : (
+                               <Textarea
+                                 value={bodyContent}
+                                 onChange={(e) => setBodyContent(e.target.value)}
+                                 placeholder={bodyIsFullHtmlDocument ? 'Enter full email HTML...' : 'Enter HTML body content...'}
+                                 className={cn(
+                                   'w-full p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400',
+                                   isCanvasExpanded ? 'h-[680px]' : 'h-[560px]'
+                                 )}
+                               />
+                             )}
+                               </div>
 
-Write your email content here. Keep it concise and focused.
-
-Best regards,
-${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
+                              <div className="p-3 bg-slate-50">
+                                <div className="flex items-center justify-between gap-3 mb-2">
+                                  <div className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Preview</div>
+                                {!bodyIsFullHtmlDocument && (
+                                  <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                                    <Info className="w-3.5 h-3.5 text-slate-400" />
+                                    Footer + unsubscribe from Business Profile
+                                  </div>
+                                )}
+                              </div>
+                              <div
+                                className={cn(
+                                  'rounded-lg border bg-white overflow-hidden',
+                                  isCanvasExpanded ? 'h-[680px]' : 'h-[560px]'
+                                )}
+                              >
+                                <iframe
+                                  title="Email Preview"
+                                  srcDoc={fullHtml}
+                                  className="w-full h-full border-0"
+                                  sandbox="allow-same-origin"
                                 />
-                              </div>
-                            ) : (
-                              <div className="min-h-[500px]">
-                                <Textarea
-                                  value={bodyContent}
-                                  onChange={(e) => setBodyContent(e.target.value)}
-                                  placeholder="Enter HTML content..."
-                                  className="w-full min-h-[500px] p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400"
-                                />
-                              </div>
-                            )}
-
-                            {/* Auto-injected Footer Preview with Business Profile */}
-                            <div className="border-t bg-slate-50 p-4 text-center text-xs text-slate-500">
-                              <div className="font-semibold text-slate-600 mb-1">
-                                {overrideOrgName || businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign'}
-                              </div>
-                              {businessProfile && (
-                                <div className="text-slate-400 mb-2 text-[11px] leading-relaxed">
-                                  {businessProfile.addressLine1}
-                                  {businessProfile.addressLine2 && <><br />{businessProfile.addressLine2}</>}
-                                  <br />{businessProfile.city}, {businessProfile.state} {businessProfile.postalCode}
-                                  {businessProfile.country !== 'United States' && <><br />{businessProfile.country}</>}
-                                </div>
-                              )}
-                              <div className="text-slate-400">
-                                <span className="underline cursor-pointer">Unsubscribe</span>
-                                <span className="mx-2">|</span>
-                                <span className="underline cursor-pointer">Manage Preferences</span>
-                              </div>
-                              <div className="mt-2 text-[10px] text-slate-400 italic">
-                                ↑ Auto-injected at send time
                               </div>
                             </div>
-                          </div>
-                        </div>
-                      </div>
+                             </div>
+                           </div>
+                         </div>
                     </div>
 
                     {/* Right Panel - Same as EmailBuilderPro */}
@@ -909,25 +1041,78 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
 
                           <Separator />
 
-                          {/* Personalization Variables */}
+                          {/* Personalization Variables - Contact */}
                           <Collapsible defaultOpen>
                             <CollapsibleTrigger className="flex items-center gap-2 w-full">
                               <ChevronDown className="w-4 h-4 text-slate-400 transition-transform [[data-state=closed]_&]:-rotate-90" />
-                              <AtSign className="w-4 h-4 text-blue-500" />
-                              <h3 className="text-sm font-semibold text-slate-700">Variables</h3>
+                              <User className="w-4 h-4 text-blue-500" />
+                              <h3 className="text-sm font-semibold text-slate-700">Contact Variables</h3>
                             </CollapsibleTrigger>
                             <CollapsibleContent className="pt-3">
                               <div className="grid grid-cols-2 gap-1.5">
-                                {PERSONALIZATION_TOKENS.map((item) => (
+                                {CONTACT_TOKENS.map((item) => (
                                   <Button
                                     key={item.token}
                                     variant="outline"
                                     size="sm"
                                     onClick={() => insertToken(item.token)}
                                     className="justify-start text-xs h-8 px-2"
+                                    title={item.token}
                                   >
-                                    <item.icon className="w-3 h-3 mr-1.5" />
-                                    {item.label}
+                                    <item.icon className="w-3 h-3 mr-1.5 shrink-0" />
+                                    <span className="truncate">{item.label}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+
+                          {/* Personalization Variables - Account */}
+                          <Collapsible>
+                            <CollapsibleTrigger className="flex items-center gap-2 w-full">
+                              <ChevronDown className="w-4 h-4 text-slate-400 transition-transform [[data-state=closed]_&]:-rotate-90" />
+                              <Building2 className="w-4 h-4 text-purple-500" />
+                              <h3 className="text-sm font-semibold text-slate-700">Account Variables</h3>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="pt-3">
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {ACCOUNT_TOKENS.map((item) => (
+                                  <Button
+                                    key={item.token}
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => insertToken(item.token)}
+                                    className="justify-start text-xs h-8 px-2"
+                                    title={item.token}
+                                  >
+                                    <item.icon className="w-3 h-3 mr-1.5 shrink-0" />
+                                    <span className="truncate">{item.label}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+
+                          {/* Personalization Variables - Sender/Campaign */}
+                          <Collapsible>
+                            <CollapsibleTrigger className="flex items-center gap-2 w-full">
+                              <ChevronDown className="w-4 h-4 text-slate-400 transition-transform [[data-state=closed]_&]:-rotate-90" />
+                              <AtSign className="w-4 h-4 text-green-500" />
+                              <h3 className="text-sm font-semibold text-slate-700">Sender/Campaign</h3>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="pt-3">
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {SENDER_TOKENS.map((item) => (
+                                  <Button
+                                    key={item.token}
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => insertToken(item.token)}
+                                    className="justify-start text-xs h-8 px-2"
+                                    title={item.token}
+                                  >
+                                    <item.icon className="w-3 h-3 mr-1.5 shrink-0" />
+                                    <span className="truncate">{item.label}</span>
                                   </Button>
                                 ))}
                               </div>
@@ -956,13 +1141,14 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
 <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
   <tr>
     <td style="background-color: #2563eb; border-radius: 6px;">
-      <a href="https://example.com" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
-        Click Here
+      <a href="{{campaign.landing_page}}" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
+        Learn more
       </a>
     </td>
   </tr>
 </table>`;
                                   setBodyContent(prev => prev + ctaHtml);
+                                  setEditorMode('html');
                                 }}
                               >
                                 <Zap className="w-3 h-3 mr-1" />
@@ -1001,9 +1187,10 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                 </div>
               </div>
             </div>
+        </div>
         {/* AI Generate Sheet */}
         <Sheet open={showAiGenerate} onOpenChange={setShowAiGenerate}>
-            <SheetContent side="right" className="w-[100vw] sm:w-[520px] md:w-[640px] lg:w-[720px] p-0 border-l shadow-2xl">
+            <SheetContent side="right" className="w-[100vw] sm:w-[480px] md:w-[520px] lg:w-[560px] p-0 border-l shadow-2xl">
                 <div className="h-full flex flex-col">
                     <div className="p-6 border-b bg-slate-50">
                         <SheetHeader>
@@ -1130,7 +1317,13 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                             <h3 className="text-sm font-medium text-slate-500 uppercase tracking-wide mb-4">Results</h3>
                             {generatedEmails.length > 0 ? (
                             <div className="space-y-4">
-                                {generatedEmails.map((email, index) => (
+                                {generatedEmails.map((email, index) => {
+                                const sourceHtml = email.bodyHtml || email.html || email.body || email.intro || '';
+                                const previewHtml = looksLikeFullHtmlDocument(sourceHtml)
+                                  ? sourceHtml
+                                  : generateCleanHtml(ensureHtmlBody(sourceHtml), clientName, businessProfile, overrideOrgName);
+
+                                return (
                                 <Card key={index} className="overflow-hidden border-indigo-100 shadow-md">
                                     <CardHeader className="pb-2 bg-indigo-50/50 border-b border-indigo-100">
                                     <div className="flex items-center justify-between">
@@ -1164,8 +1357,13 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                     )}
                                     <div>
                                         <Label className="text-xs text-muted-foreground uppercase tracking-wider">Body Preview</Label>
-                                        <div className="text-sm whitespace-pre-wrap bg-slate-50 p-3 rounded border text-slate-700 mt-1 max-h-40 overflow-auto">
-                                        {email.body || email.intro}
+                                        <div className="bg-white mt-1 rounded border overflow-hidden h-40">
+                                          <iframe
+                                            title={`Generated Email Preview ${index + 1}`}
+                                            srcDoc={previewHtml}
+                                            className="w-full h-full border-0"
+                                            sandbox="allow-same-origin"
+                                          />
                                         </div>
                                     </div>
                                     <Button
@@ -1178,7 +1376,8 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                     </Button>
                                     </CardContent>
                                 </Card>
-                                ))}
+                                );
+                                })}
                             </div>
                             ) : (
                             <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-50 rounded-lg border border-dashed">
@@ -1282,15 +1481,6 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                     <Mail className="w-3.5 h-3.5 mr-1" />
                     Outlook
                   </Button>
-                  <Button
-                    variant={previewMode === 'plaintext' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => setPreviewMode('plaintext')}
-                    className="text-xs"
-                  >
-                    <FileText className="w-3.5 h-3.5 mr-1" />
-                    Plain Text
-                  </Button>
                 </div>
               </div>
               <DialogDescription className="sr-only">
@@ -1314,41 +1504,33 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
 
             {/* Preview Frame */}
             <div className="flex-1 overflow-hidden bg-slate-100 rounded-lg flex items-center justify-center p-4">
-              {previewMode === 'plaintext' ? (
-                <div className="w-full h-full bg-white rounded border overflow-auto p-6">
-                  <pre className="text-sm whitespace-pre-wrap font-mono text-slate-700">
-                    {plainTextVersion}
-                  </pre>
-                </div>
-              ) : (
-                <div
-                  className={cn(
-                    'bg-white shadow-xl overflow-hidden rounded-lg h-full',
-                    previewMode === 'gmail-mobile' ? 'w-[375px]' : 'w-full max-w-[700px]'
-                  )}
-                >
-                  {/* Simulated Email Client Header */}
+              <div
+                className={cn(
+                  'bg-white shadow-xl overflow-hidden rounded-lg h-full',
+                  previewMode === 'gmail-mobile' ? 'w-[375px]' : 'w-full max-w-[700px]'
+                )}
+              >
+                {/* Simulated Email Client Header */}
+                <div className={cn(
+                  'border-b px-4 py-3',
+                  previewMode === 'outlook' ? 'bg-[#0078d4]' : 'bg-white'
+                )}>
                   <div className={cn(
-                    'border-b px-4 py-3',
-                    previewMode === 'outlook' ? 'bg-[#0078d4]' : 'bg-white'
+                    'text-xs',
+                    previewMode === 'outlook' ? 'text-white' : 'text-slate-500'
                   )}>
-                    <div className={cn(
-                      'text-xs',
-                      previewMode === 'outlook' ? 'text-white' : 'text-slate-500'
-                    )}>
-                      {previewMode === 'outlook' ? 'Microsoft Outlook' : 'Gmail'}
-                    </div>
-                  </div>
-
-                  <div className="h-[calc(100%-52px)] overflow-y-auto">
-                    <iframe
-                      title="Email Preview"
-                      srcDoc={fullHtml}
-                      className="w-full h-full border-0"
-                    />
+                    {previewMode === 'outlook' ? 'Microsoft Outlook' : 'Gmail'}
                   </div>
                 </div>
-              )}
+
+                <div className="h-[calc(100%-52px)] overflow-y-auto">
+                  <iframe
+                    title="Email Preview"
+                    srcDoc={fullHtml}
+                    className="w-full h-full border-0"
+                  />
+                </div>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

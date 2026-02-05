@@ -130,10 +130,10 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
           {
             id: 'agentic-operator',
-            title: 'Agentic Operator',
+            title: 'AgentX',
             url: '/ai-studio/operator',
             roles: MANAGEMENT_ROLES,
-            description: 'Chat-based agent operations',
+            description: 'Unified agentic operations panel',
           },
           {
             id: 'agent-prompts',

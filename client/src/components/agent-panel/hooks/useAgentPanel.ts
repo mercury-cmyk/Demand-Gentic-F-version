@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
 const STORAGE_KEY = 'agent-panel-state';
+const COLLAPSED_WIDTH_PX = 48;
 
 export interface AgentPanelState {
   isOpen: boolean;
@@ -65,6 +66,33 @@ const getInitialState = (): AgentPanelState => {
 
 export function useAgentPanel(): UseAgentPanelReturn {
   const [state, setState] = useState<AgentPanelState>(getInitialState);
+
+  // Expose panel geometry via CSS vars so the app can reserve a consistent side region.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const root = document.documentElement;
+    const offsetPx = state.isOpen ? (state.isCollapsed ? COLLAPSED_WIDTH_PX : state.width) : 0;
+
+    root.style.setProperty('--agentx-panel-offset', `${offsetPx}px`);
+    root.style.setProperty('--agentx-panel-width', `${state.width}px`);
+    root.style.setProperty('--agentx-panel-collapsed-width', `${COLLAPSED_WIDTH_PX}px`);
+    root.dataset.agentxPanelOpen = state.isOpen ? 'true' : 'false';
+    root.dataset.agentxPanelCollapsed = state.isCollapsed ? 'true' : 'false';
+  }, [state.isCollapsed, state.isOpen, state.width]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const root = document.documentElement;
+    return () => {
+      root.style.setProperty('--agentx-panel-offset', '0px');
+      root.style.removeProperty('--agentx-panel-width');
+      root.style.removeProperty('--agentx-panel-collapsed-width');
+      root.removeAttribute('data-agentx-panel-open');
+      root.removeAttribute('data-agentx-panel-collapsed');
+    };
+  }, []);
 
   // Persist state to localStorage
   useEffect(() => {

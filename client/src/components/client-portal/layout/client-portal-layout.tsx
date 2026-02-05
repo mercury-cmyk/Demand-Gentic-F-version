@@ -2,7 +2,7 @@
  * Client Portal Layout
  *
  * DESIGN PRINCIPLES (aligned with main dashboard):
- * 1. Single, centralized Agentic Operator entry point - prominently placed at TOP
+ * 1. Single, centralized AgentX entry point - prominently placed at TOP
  * 2. Unified campaign management hub
  * 3. Campaign-bound templates and voice stimulation
  * 4. Clean, intentional navigation structure
@@ -67,16 +67,16 @@ interface ClientPortalLayoutProps {
 /**
  * Navigation Structure
  *
- * DESIGN: Centralized Agentic Operator at TOP, then unified campaign hub
+ * DESIGN: Centralized AgentX at TOP, then unified campaign hub
  */
 
-// Primary action - Agentic Operator (centralized AI entry point)
+// Primary action - AgentX (centralized AI entry point)
 const agenticOperator = {
-  name: 'Agentic Operator',
+  name: 'AgentX',
   href: '/client-portal/dashboard?tab=agent',
   icon: BotMessageSquare,
   badge: 'AI',
-  description: 'Your AI-powered command center',
+  description: 'Unified agentic operations panel',
 };
 
 // Main navigation - organized by priority
@@ -112,12 +112,12 @@ function ClientPortalAgentToggleButton() {
             onClick={agentPanel.togglePanel}
           >
             <BotMessageSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">AI Assistant</span>
+            <span className="hidden sm:inline">AgentX</span>
             <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          <p>AI Assistant - Your command center (Ctrl+/)</p>
+          <p>AgentX - Your command center (Ctrl+/)</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -228,7 +228,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   return (
     <AgentPanelProvider userRole="client" isClientPortal={true}>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background agentx-shell">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div
@@ -341,7 +341,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
           <div className="flex-1" />
 
-          {/* Agentic Operator Button in Header - Opens Side Panel */}
+          {/* AgentX Button in Header - Opens Side Panel */}
           <ClientPortalAgentToggleButton />
 
           {/* User Menu */}
@@ -428,7 +428,7 @@ export function ClientPortalAgentToggle() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>AI Assistant (Ctrl+/)</p>
+          <p>AgentX (Ctrl+/)</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

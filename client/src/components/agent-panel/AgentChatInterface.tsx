@@ -67,15 +67,35 @@ export function AgentChatInterface({
   isClientPortal,
   userRole,
 }: AgentChatInterfaceProps) {
-  const { setConversationId } = useAgentPanelContext();
+  const { setConversationId, setAgentStatus } = useAgentPanelContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<ExecutionPlan | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [isExecutingPlan, setIsExecutingPlan] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (isExecutingPlan) {
+      setAgentStatus('executing');
+      return;
+    }
+
+    if (isLoading) {
+      setAgentStatus('thinking');
+      return;
+    }
+
+    if (currentPlan) {
+      setAgentStatus('awaiting_review');
+      return;
+    }
+
+    setAgentStatus('idle');
+  }, [currentPlan, isExecutingPlan, isLoading, setAgentStatus]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -97,6 +117,10 @@ export function AgentChatInterface({
     };
   }, []);
 
+  const getAuthToken = useCallback(() => {
+    return localStorage.getItem(isClientPortal ? 'clientPortalToken' : 'token');
+  }, [isClientPortal]);
+
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
 
@@ -113,7 +137,7 @@ export function AgentChatInterface({
     setCurrentPlan(null);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const response = await fetch(`/api/agent-panel/chat?clientPortal=${isClientPortal}`, {
         method: 'POST',
         headers: {
@@ -162,7 +186,7 @@ export function AgentChatInterface({
     } finally {
       setIsLoading(false);
     }
-  }, [inputValue, isLoading, sessionId, conversationId, isClientPortal, setConversationId]);
+  }, [conversationId, getAuthToken, inputValue, isClientPortal, isLoading, sessionId, setConversationId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -172,8 +196,9 @@ export function AgentChatInterface({
   };
 
   const handlePlanApprove = async (planId: string) => {
+    setIsExecutingPlan(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       const response = await fetch(`/api/agent-panel/execute/${planId}`, {
         method: 'POST',
         headers: {
@@ -205,12 +230,14 @@ export function AgentChatInterface({
       setCurrentPlan(null);
     } catch (error) {
       console.error('Error executing plan:', error);
+    } finally {
+      setIsExecutingPlan(false);
     }
   };
 
   const handlePlanReject = async (planId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const token = getAuthToken();
       await fetch(`/api/agent-panel/reject/${planId}`, {
         method: 'POST',
         headers: {
@@ -280,7 +307,7 @@ export function AgentChatInterface({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask me anything..."
+              placeholder="Tell AgentX what you want done…"
               className="min-h-[44px] max-h-[120px] pr-10 resize-none"
               rows={1}
             />
@@ -325,7 +352,7 @@ function WelcomeMessage({
       <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
         <Bot className="h-8 w-8 text-primary" />
       </div>
-      <h3 className="font-semibold text-lg mb-2">Hello! I'm your AI Assistant</h3>
+      <h3 className="font-semibold text-lg mb-2">Hello! I’m AgentX</h3>
       <p className="text-sm text-muted-foreground max-w-[280px] mx-auto">
         {isClientPortal
           ? "I can help you view your campaigns, check orders, review billing, and understand your analytics."

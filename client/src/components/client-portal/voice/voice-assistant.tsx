@@ -249,7 +249,7 @@ export function VoiceAssistant({ open, onOpenChange, onNavigate }: VoiceAssistan
                 <span className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <MessageSquare className="h-4 w-4 text-primary" />
                 </span>
-                Agentic Operator
+                AgentX
               </SheetTitle>
               <p className="text-xs text-slate-300/80">Always-on chat for every user type.</p>
             </div>

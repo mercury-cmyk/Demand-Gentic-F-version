@@ -130,20 +130,36 @@ function generateClientToken(clientUser: typeof clientUsers.$inferSelect): strin
 
 function requireClientAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
-  
+
+  // Detailed logging for debugging auth issues
+  console.log("[Client Portal Auth] Path:", req.path);
+  console.log("[Client Portal Auth] Method:", req.method);
+  console.log("[Client Portal Auth] Auth header present:", !!authHeader);
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.warn("[Client Portal Auth] REJECTED - Missing or invalid auth header");
     return res.status(401).json({ message: "Authentication required" });
   }
 
   const token = authHeader.substring(7);
+
+  // Check for null/undefined token
+  if (!token || token === 'null' || token === 'undefined') {
+    console.warn("[Client Portal Auth] REJECTED - Token is null/undefined string");
+    return res.status(401).json({ message: "Invalid token - please log in again" });
+  }
+
   try {
     const payload = jwt.verify(token, JWT_SECRET) as ClientJWTPayload;
     if (!payload.isClient) {
+      console.warn("[Client Portal Auth] REJECTED - Token is not a client token");
       return res.status(401).json({ message: "Invalid client token" });
     }
+    console.log("[Client Portal Auth] SUCCESS - clientAccountId:", payload.clientAccountId);
     req.clientUser = payload;
     next();
-  } catch (error) {
+  } catch (error: any) {
+    console.warn("[Client Portal Auth] REJECTED - JWT verification failed:", error.message);
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 }
@@ -454,11 +470,16 @@ router.get('/campaigns', requireClientAuth, async (req, res) => {
  * Returns 5-10 sample accounts and 20-30 sample contacts for the client to preview personalization
  */
 router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (req, res) => {
+  const { campaignId } = req.params;
+  console.log('[CLIENT PORTAL] /campaigns/:campaignId/preview-audience - Request received');
+  console.log('[CLIENT PORTAL] campaignId:', campaignId);
+  console.log('[CLIENT PORTAL] clientAccountId:', req.clientUser?.clientAccountId);
+
   try {
     const clientAccountId = req.clientUser!.clientAccountId;
-    const { campaignId } = req.params;
 
     // Verify client has access to this campaign
+    // Check both UUID string match AND numeric ID for regularCampaignId
     const [accessCheck] = await db
       .select()
       .from(clientCampaignAccess)
@@ -467,13 +488,16 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
           eq(clientCampaignAccess.clientAccountId, clientAccountId),
           or(
             eq(clientCampaignAccess.campaignId, campaignId),
-            eq(clientCampaignAccess.regularCampaignId, parseInt(campaignId, 10) || 0)
+            eq(clientCampaignAccess.regularCampaignId, campaignId)
           )
         )
       )
       .limit(1);
 
+    console.log('[CLIENT PORTAL] Access check result:', accessCheck ? 'GRANTED' : 'DENIED');
+
     if (!accessCheck) {
+      console.warn('[CLIENT PORTAL] 403 - No access to campaign', campaignId, 'for client', clientAccountId);
       return res.status(403).json({ message: "You don't have access to this campaign" });
     }
 
@@ -1328,6 +1352,9 @@ router.get('/qualified-leads/export', requireClientAuth, async (req, res) => {
 
 // Get campaigns with QA-approved leads (for filtering) - MUST be before :id route
 router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => {
+  console.log('[CLIENT PORTAL] /qualified-leads/campaigns - Request received');
+  console.log('[CLIENT PORTAL] clientAccountId:', req.clientUser?.clientAccountId);
+
   try {
     // Get regular campaigns the client has access to
     const accessList = await db
@@ -1343,6 +1370,8 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
           isNotNull(clientCampaignAccess.regularCampaignId)
         )
       );
+
+    console.log('[CLIENT PORTAL] Found', accessList.length, 'campaigns with access');
 
     // Get lead counts per campaign - only published leads submitted to client
     const campaignData = await Promise.all(
@@ -1368,9 +1397,11 @@ router.get('/qualified-leads/campaigns', requireClientAuth, async (req, res) => 
       })
     );
 
+    console.log('[CLIENT PORTAL] Returning', campaignData.length, 'campaigns');
     res.json(campaignData);
-  } catch (error) {
-    console.error('[CLIENT PORTAL] Get lead campaigns error:', error);
+  } catch (error: any) {
+    console.error('[CLIENT PORTAL] Get lead campaigns error:', error.message);
+    console.error('[CLIENT PORTAL] Error stack:', error.stack);
     res.status(500).json({ message: "Failed to fetch campaigns" });
   }
 });

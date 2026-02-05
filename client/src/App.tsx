@@ -266,7 +266,7 @@ function AuthenticatedApp() {
     <SidebarProvider style={style as React.CSSProperties}>
       <AgentPanelProvider userRole={primaryRole} isClientPortal={false}>
         <CommandPalette />
-        <div className="flex h-screen w-full">
+        <div className="flex h-screen w-full agentx-shell">
           <AppSidebar userRoles={resolvedUserRoles} />
           <div className="flex flex-col flex-1 overflow-hidden">
             <TopBar

@@ -17,6 +17,7 @@ import { Router, Request, Response } from "express";
 import { db } from "../db";
 import {
   clientAccounts,
+  clientBusinessProfiles,
   clientPortalOrders,
   clientCampaignAccess,
   campaigns,
@@ -51,11 +52,74 @@ import { buildBrandedEmailHtml, type BrandPaletteKey } from "../../client/src/co
 
 const router = Router();
 
+function escapeHtml(value: string) {
+  return (value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function nl2br(value: string) {
+  return escapeHtml(value).replace(/\n/g, "<br/>");
+}
+
+function buildClientPortalBodyHtml(args: { copy: GeneratedEmailContent }) {
+  const { copy } = args;
+
+  const bullets = (copy.valueBullets || []).filter(Boolean).slice(0, 3);
+  const bulletHtml = bullets.length
+    ? `
+      <ul>
+        ${bullets
+          .map(
+            (b) =>
+              `<li>${escapeHtml(b)}</li>`
+          )
+          .join("")}
+      </ul>
+    `
+    : "";
+
+  const ctaUrl = "{{campaign.landing_page}}";
+  const ctaLabel = escapeHtml(copy.ctaLabel || "Learn more");
+  const ctaHtml = `<p><a href="${ctaUrl}">${ctaLabel}</a></p>`;
+
+  const heroTitle = (copy.heroTitle || "").trim();
+  const heroSubtitle = (copy.heroSubtitle || "").trim();
+  const intro = (copy.intro || "").trim();
+  const closingLine = (copy.closingLine || "").trim();
+
+  return `
+    <p>Hi {{firstName}},</p>
+    ${heroTitle ? `<h2>${escapeHtml(heroTitle)}</h2>` : ""}
+    ${heroSubtitle ? `<p>${escapeHtml(heroSubtitle)}</p>` : ""}
+    ${intro ? `<p>${nl2br(intro)}</p>` : ""}
+    ${bulletHtml}
+    ${ctaHtml}
+    ${closingLine ? `<p>${escapeHtml(closingLine)}</p>` : ""}
+  `.trim();
+}
+
 // ==================== MIDDLEWARE ====================
 
 // Extract client context from authenticated request
 function getClientContext(req: Request): ClientAgenticContext {
   const clientUser = (req as any).clientUser;
+
+  // Detailed logging for debugging auth issues
+  if (!clientUser) {
+    console.error("[Client Agentic] getClientContext: clientUser is undefined/null");
+    console.error("[Client Agentic] Auth header present:", !!req.headers.authorization);
+    throw new Error("Client authentication required - no clientUser on request");
+  }
+
+  if (!clientUser.clientAccountId) {
+    console.error("[Client Agentic] getClientContext: clientAccountId missing from clientUser:", JSON.stringify(clientUser, null, 2));
+    throw new Error("Invalid client session - missing clientAccountId");
+  }
+
   return {
     clientAccountId: clientUser.clientAccountId,
     clientUserId: clientUser.clientUserId,
@@ -70,8 +134,17 @@ function getClientContext(req: Request): ClientAgenticContext {
  * Create a campaign order with AI-powered optimization
  */
 router.post("/orders/create", async (req: Request, res: Response) => {
+  // Detailed request logging for debugging
+  console.log("[Client Agentic] /orders/create - Request received");
+  console.log("[Client Agentic] Auth header:", req.headers.authorization ? "Bearer ***" : "MISSING");
+  console.log("[Client Agentic] Content-Type:", req.headers["content-type"]);
+  console.log("[Client Agentic] Body keys:", req.body ? Object.keys(req.body) : "NO BODY");
+  console.log("[Client Agentic] clientUser present:", !!(req as any).clientUser);
+
   try {
     const context = getClientContext(req);
+    console.log("[Client Agentic] Context created for clientAccountId:", context.clientAccountId);
+
     const hub = createClientAgenticHub(context);
 
     const orderRequest: CampaignOrderRequest = {
@@ -97,10 +170,19 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       suppressionFiles: req.body.suppressionFiles, // Pass suppression files
     };
 
+    console.log("[Client Agentic] Order request prepared:", {
+      campaignType: orderRequest.campaignType,
+      volumeRequested: orderRequest.volumeRequested,
+      deliveryTimeline: orderRequest.deliveryTimeline,
+      channels: orderRequest.channels,
+    });
+
     const result = await hub.createCampaignOrder(orderRequest);
+    console.log("[Client Agentic] Order creation result:", result.success ? "SUCCESS" : "FAILED", result.message);
     res.json(result);
   } catch (error: any) {
-    console.error("[Client Agentic] Order creation error:", error);
+    console.error("[Client Agentic] Order creation error:", error.message);
+    console.error("[Client Agentic] Error stack:", error.stack);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -310,7 +392,7 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
 
     console.log("[Client Agentic] Generating emails with DeepSeek for client:", clientUser.email);
 
-    const { campaignId, emailType, tone, variants, brandPalette } = req.body;
+    const { campaignId, emailType, tone, variants, brandPalette, companyName: overrideCompanyName } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ success: false, message: "Campaign is required" });
@@ -318,6 +400,39 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
 
     const numVariants = Math.min(Math.max(parseInt(variants) || 1, 1), 3);
     const palette: BrandPaletteKey = brandPalette || 'indigo';
+
+    // Pull business profile data once to avoid placeholder footers.
+    const [businessProfile] = await db
+      .select()
+      .from(clientBusinessProfiles)
+      .where(eq(clientBusinessProfiles.clientAccountId, clientUser.clientAccountId))
+      .limit(1);
+
+    const [clientAccount] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientUser.clientAccountId))
+      .limit(1);
+
+    const companyName =
+      (typeof overrideCompanyName === "string" ? overrideCompanyName.trim() : "") ||
+      businessProfile?.dbaName ||
+      businessProfile?.legalBusinessName ||
+      clientAccount?.name ||
+      "";
+
+    const companyAddress = (() => {
+      if (!businessProfile?.addressLine1 || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode) {
+        return undefined;
+      }
+      const line1 = businessProfile.addressLine1;
+      const line2 = businessProfile.addressLine2 ? `, ${businessProfile.addressLine2}` : '';
+      const cityStateZip = `${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}`;
+      const country = businessProfile.country && businessProfile.country !== 'United States'
+        ? ` - ${businessProfile.country}`
+        : '';
+      return `${line1}${line2} - ${cityStateZip}${country}`;
+    })();
 
     const emails = [];
     for (let i = 0; i < numVariants; i++) {
@@ -332,11 +447,19 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
       const html = buildBrandedEmailHtml({
         copy: content,
         brandPalette: palette,
+        companyName,
+        companyAddress,
+        ctaUrl: "{{campaign.landing_page}}",
+        includeFooter: true,
       });
+
+      // Client Email Template Builder consumes a body fragment (no wrapper/footer).
+      const bodyHtml = buildClientPortalBodyHtml({ copy: content });
 
       emails.push({
         ...content,
         html,
+        bodyHtml,
         body: content.intro, // For backwards compatibility with simple body field
       });
     }
@@ -361,13 +484,45 @@ router.post("/emails/sequence", async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, message: "Authentication required" });
     }
 
-    const { campaignId, sequenceLength, sequenceType, brandPalette } = req.body;
+    const { campaignId, sequenceLength, sequenceType, brandPalette, companyName: overrideCompanyName } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ success: false, message: "Campaign is required" });
     }
 
     const palette: BrandPaletteKey = brandPalette || 'indigo';
+
+    const [businessProfile] = await db
+      .select()
+      .from(clientBusinessProfiles)
+      .where(eq(clientBusinessProfiles.clientAccountId, clientUser.clientAccountId))
+      .limit(1);
+
+    const [clientAccount] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientUser.clientAccountId))
+      .limit(1);
+
+    const companyName =
+      (typeof overrideCompanyName === "string" ? overrideCompanyName.trim() : "") ||
+      businessProfile?.dbaName ||
+      businessProfile?.legalBusinessName ||
+      clientAccount?.name ||
+      "";
+
+    const companyAddress = (() => {
+      if (!businessProfile?.addressLine1 || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode) {
+        return undefined;
+      }
+      const line1 = businessProfile.addressLine1;
+      const line2 = businessProfile.addressLine2 ? `, ${businessProfile.addressLine2}` : '';
+      const cityStateZip = `${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}`;
+      const country = businessProfile.country && businessProfile.country !== 'United States'
+        ? ` - ${businessProfile.country}`
+        : '';
+      return `${line1}${line2} - ${cityStateZip}${country}`;
+    })();
 
     const sequence = await generateClientEmailSequence({
       campaignId,
@@ -381,10 +536,16 @@ router.post("/emails/sequence", async (req: Request, res: Response) => {
       const html = buildBrandedEmailHtml({
         copy: email,
         brandPalette: palette,
+        companyName,
+        companyAddress,
+        ctaUrl: "{{campaign.landing_page}}",
+        includeFooter: true,
       });
+      const bodyHtml = buildClientPortalBodyHtml({ copy: email });
       return {
         ...email,
         html,
+        bodyHtml,
         body: email.intro, // For backwards compatibility
       };
     });

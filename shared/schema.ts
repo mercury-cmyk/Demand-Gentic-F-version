@@ -6613,6 +6613,83 @@ export const clientPortalOrderContacts = pgTable("client_portal_order_contacts",
   orderContactIdx: uniqueIndex("client_portal_order_contacts_unique_idx").on(table.orderId, table.verificationContactId),
 }));
 
+// ==================== AGENTIC CAMPAIGN INTAKE & SESSIONS ====================
+
+// Campaign Intake Requests - agentic campaign order intake queue
+export const campaignIntakeRequests = pgTable("campaign_intake_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceType: text("source_type"), // web_form | client_portal | api | agentic_hub
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
+  clientOrderId: varchar("client_order_id").references(() => clientPortalOrders.id, { onDelete: 'set null' }),
+  agenticSessionId: varchar("agentic_session_id"),
+
+  // Raw intake payload and extracted context
+  rawInput: jsonb("raw_input").$type<Record<string, unknown>>(),
+  extractedContext: jsonb("extracted_context").$type<Record<string, unknown>>(),
+  contextSources: jsonb("context_sources").$type<Record<string, unknown>[]>(),
+
+  // Workflow
+  status: text("status").default('pending'),
+  priority: text("priority").default('normal'),
+  assignedPmId: varchar("assigned_pm_id").references(() => users.id, { onDelete: 'set null' }),
+  assignedAt: timestamp("assigned_at"),
+
+  // QA + approval
+  qsoReviewedById: varchar("qso_reviewed_by_id").references(() => users.id, { onDelete: 'set null' }),
+  qsoReviewedAt: timestamp("qso_reviewed_at"),
+  qsoNotes: text("qso_notes"),
+  approvedById: varchar("approved_by_id").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+
+  // Campaign linkage
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+
+  // Requested params
+  requestedStartDate: timestamp("requested_start_date"),
+  requestedLeadCount: integer("requested_lead_count"),
+  estimatedCost: numeric("estimated_cost"),
+  requestedChannels: jsonb("requested_channels").$type<string[]>(),
+  campaignType: text("campaign_type"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientAccountIdx: index("campaign_intake_requests_client_account_idx").on(table.clientAccountId),
+  statusIdx: index("campaign_intake_requests_status_idx").on(table.status),
+  createdAtIdx: index("campaign_intake_requests_created_at_idx").on(table.createdAt),
+}));
+
+// Agentic Campaign Sessions - conversational campaign creation state
+export const agenticCampaignSessions = pgTable("agentic_campaign_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  intakeRequestId: varchar("intake_request_id"),
+
+  currentStep: text("current_step").default('context'),
+  completedSteps: jsonb("completed_steps").$type<string[]>(),
+  conversationHistory: jsonb("conversation_history").$type<Record<string, unknown>[]>(),
+  approvals: jsonb("approvals").$type<Record<string, unknown>>(),
+
+  // Step configurations
+  contextConfig: jsonb("context_config").$type<Record<string, unknown>>(),
+  audienceConfig: jsonb("audience_config").$type<Record<string, unknown>>(),
+  voiceConfig: jsonb("voice_config").$type<Record<string, unknown>>(),
+  phoneConfig: jsonb("phone_config").$type<Record<string, unknown>>(),
+  contentConfig: jsonb("content_config").$type<Record<string, unknown>>(),
+  reviewConfig: jsonb("review_config").$type<Record<string, unknown>>(),
+
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  createdByIdx: index("agentic_campaign_sessions_created_by_idx").on(table.createdBy),
+  currentStepIdx: index("agentic_campaign_sessions_current_step_idx").on(table.currentStep),
+}));
+
+export type CampaignIntakeRequest = typeof campaignIntakeRequests.$inferSelect;
+export type AgenticCampaignSession = typeof agenticCampaignSessions.$inferSelect;
+
 // Relations for Client Portal
 export const clientAccountsRelations = relations(clientAccounts, ({ one, many }) => ({
   createdBy: one(users, { fields: [clientAccounts.createdBy], references: [users.id] }),

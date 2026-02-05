@@ -6,9 +6,10 @@ import {
   BarChart3,
   Users,
   Phone,
-  Mail,
   Search,
   Plus,
+  Database,
+  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -134,6 +135,33 @@ const qualityAnalystActions: QuickAction[] = [
   },
 ];
 
+const dataOpsActions: QuickAction[] = [
+  {
+    id: 'imports',
+    label: 'Imports',
+    icon: Database,
+    prompt: 'Show me today’s imports, failures, and retry status',
+  },
+  {
+    id: 'quality',
+    label: 'Data Quality',
+    icon: ShieldCheck,
+    prompt: 'Run a data quality check and summarize anomalies, duplicates, or missing fields',
+  },
+  {
+    id: 'suppressions',
+    label: 'Suppressions',
+    icon: FileText,
+    prompt: 'Show recent suppression list changes and contacts flagged for suppression',
+  },
+  {
+    id: 'search',
+    label: 'Search',
+    icon: Search,
+    prompt: 'Help me find records where ',
+  },
+];
+
 function getActionsForRole(role: string, isClientPortal: boolean): QuickAction[] {
   if (isClientPortal) {
     return clientPortalActions;
@@ -146,6 +174,8 @@ function getActionsForRole(role: string, isClientPortal: boolean): QuickAction[]
       return campaignManagerActions;
     case 'quality_analyst':
       return qualityAnalystActions;
+    case 'data_ops':
+      return dataOpsActions;
     default:
       return adminActions.slice(0, 4); // Default subset
   }

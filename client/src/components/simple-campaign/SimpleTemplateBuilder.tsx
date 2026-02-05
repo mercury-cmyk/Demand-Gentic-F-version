@@ -3,7 +3,7 @@
  * 
  * Full-screen email editor with:
  * - Left/Main Area (70%): Email Canvas at 600px, text-first
- * - Right Sidebar: Components (drag & drop) + AI Assistant
+ * - Right Sidebar: Components (drag & drop) + AgentX
  * - Top Bar: Preview, Save, Send Test, Back to Campaign
  * 
  * Design Philosophy:
@@ -201,6 +201,25 @@ const analyzeEmail = (subject: string, body: string): SmartNudge[] => {
   return nudges;
 };
 
+const looksLikeHtmlFragment = (value: string) => /<\w+[^>]*>/.test(value);
+
+const normalizePlainTextToHtml = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const escaped = trimmed
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const paragraphs = escaped
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n/g, "<br />"))
+    .join("</p><p>");
+  return `<p>${paragraphs}</p>`;
+};
+
+const ensureHtmlBody = (value: string) =>
+  looksLikeHtmlFragment(value) ? value : normalizePlainTextToHtml(value);
+
 // Generate email-safe HTML with inline CSS
 const generateCleanHtml = (bodyContent: string, organizationName: string, organizationAddress: string): string => {
   const footer = `
@@ -241,6 +260,14 @@ const generateCleanHtml = (bodyContent: string, organizationName: string, organi
     table { border-spacing: 0; }
     td { padding: 0; }
     img { border: 0; }
+    p { margin: 0 0 16px 0; }
+    h1, h2, h3 { margin: 0 0 16px 0; font-weight: 600; color: #111827; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 24px; }
+    h3 { font-size: 20px; }
+    ul, ol { margin: 0 0 16px 0; padding-left: 24px; }
+    li { margin: 0 0 8px 0; }
+    a { color: #2563eb; text-decoration: underline; }
   </style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
@@ -522,11 +549,11 @@ export function SimpleTemplateBuilder({
   
   // UI state
   const [showPreview, setShowPreview] = useState(false);
-  const [previewMode, setPreviewMode] = useState<"gmail-desktop" | "gmail-mobile" | "outlook" | "plaintext">("gmail-desktop");
+  const [previewMode, setPreviewMode] = useState<"gmail-desktop" | "gmail-mobile" | "outlook">("gmail-desktop");
   const [testEmail, setTestEmail] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   
-  // AI Assistant state
+  // AgentX state
   const [outreachType, setOutreachType] = useState("cold-outreach");
   const [tone, setTone] = useState("professional");
   const [aiContext, setAiContext] = useState("");
@@ -701,18 +728,23 @@ export function SimpleTemplateBuilder({
   const hasErrors = nudges.some(n => n.type === "error");
   const hasWarnings = nudges.some(n => n.type === "warning");
   
+  const normalizedBodyContent = useMemo(() => {
+    if (useBrandedTemplate) return bodyContent;
+    return ensureHtmlBody(bodyContent);
+  }, [bodyContent, useBrandedTemplate]);
+
   // Generate full HTML
   const fullHtml = useMemo(() => {
     if (useBrandedTemplate) {
       return bodyContent;
     }
-    return generateCleanHtml(bodyContent, orgName, orgAddress);
-  }, [bodyContent, orgName, orgAddress, useBrandedTemplate]);
+    return generateCleanHtml(normalizedBodyContent, orgName, orgAddress);
+  }, [bodyContent, orgName, orgAddress, useBrandedTemplate, normalizedBodyContent]);
 
   const brandedPreviewHtml = useMemo(() => {
-    if (!useBrandedTemplate) return bodyContent;
+    if (!useBrandedTemplate) return normalizedBodyContent;
     return injectClickCaptureScript(bodyContent);
-  }, [bodyContent, useBrandedTemplate]);
+  }, [bodyContent, useBrandedTemplate, normalizedBodyContent]);
   
   // Generate plain text version
   const plainTextVersion = useMemo(() => {
@@ -1090,17 +1122,17 @@ export function SimpleTemplateBuilder({
           
           {/* Center Toolbar */}
           <div className="flex items-center gap-2">
-            {/* AI Assistant Sheet */}
+            {/* AgentX Sheet */}
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2 border-purple-200 hover:bg-purple-50 hover:text-purple-700">
                   <Sparkles className="w-4 h-4 text-purple-500" />
-                  AI Assistant
+                  AgentX
                 </Button>
               </SheetTrigger>
               <SheetContent className="w-[90vw] sm:w-[500px] overflow-y-auto">
                 <SheetHeader>
-                  <SheetTitle>AI Assistant</SheetTitle>
+                  <SheetTitle>AgentX</SheetTitle>
                   <SheetDescription>Generate content and get deliverability insights.</SheetDescription>
                 </SheetHeader>
                 <div className="mt-6 space-y-6">
@@ -1710,9 +1742,6 @@ export function SimpleTemplateBuilder({
                   <Button variant={previewMode === "outlook" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("outlook")} className="text-xs">
                     <Mail className="w-3.5 h-3.5 mr-1" /> Outlook
                   </Button>
-                  <Button variant={previewMode === "plaintext" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("plaintext")} className="text-xs">
-                    <FileText className="w-3.5 h-3.5 mr-1" /> Plain Text
-                  </Button>
                 </div>
               </div>
               <DialogDescription className="sr-only">
@@ -1740,32 +1769,24 @@ export function SimpleTemplateBuilder({
             
             {/* Preview Frame */}
             <div className="flex-1 overflow-hidden bg-slate-100 rounded-lg flex items-center justify-center p-4">
-              {previewMode === "plaintext" ? (
-                <div className="w-full h-full bg-white rounded border overflow-auto p-6">
-                  <pre className="text-sm whitespace-pre-wrap font-mono text-slate-700">
-                    {plainTextVersion}
-                  </pre>
-                </div>
-              ) : (
-                <div
-                  className={`bg-white shadow-xl overflow-hidden rounded-lg h-full ${
-                    previewMode === "gmail-mobile" ? "w-[375px]" : "w-full max-w-[700px]"
-                  }`}
-                >
-                  <div className={`border-b px-4 py-3 ${previewMode === "outlook" ? "bg-[#0078d4]" : "bg-white"}`}>
-                    <div className={`text-xs ${previewMode === "outlook" ? "text-white" : "text-slate-500"}`}>
-                      {previewMode === "outlook" ? "Microsoft Outlook" : "Gmail"}
-                    </div>
-                  </div>
-                  <div className="h-[calc(100%-52px)] overflow-y-auto">
-                    <iframe
-                      title="Email Preview"
-                      srcDoc={fullHtml}
-                      className="w-full h-full border-0"
-                    />
+              <div
+                className={`bg-white shadow-xl overflow-hidden rounded-lg h-full ${
+                  previewMode === "gmail-mobile" ? "w-[375px]" : "w-full max-w-[700px]"
+                }`}
+              >
+                <div className={`border-b px-4 py-3 ${previewMode === "outlook" ? "bg-[#0078d4]" : "bg-white"}`}>
+                  <div className={`text-xs ${previewMode === "outlook" ? "text-white" : "text-slate-500"}`}>
+                    {previewMode === "outlook" ? "Microsoft Outlook" : "Gmail"}
                   </div>
                 </div>
-              )}
+                <div className="h-[calc(100%-52px)] overflow-y-auto">
+                  <iframe
+                    title="Email Preview"
+                    srcDoc={fullHtml}
+                    className="w-full h-full border-0"
+                  />
+                </div>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

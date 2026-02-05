@@ -85,7 +85,22 @@ export function buildBrandedEmailHtml(args: {
   const palette = { ...basePalette, ...paletteOverrides };
   const bullets = copy.valueBullets.slice(0, 3);
   while (bullets.length < 3) bullets.push("Clear value tailored to your team.");
-  const resolvedAddress = companyAddress || "123 Business St, Suite 500 - San Francisco, CA 94105";
+  const resolvedCompanyName = (companyName || "").trim();
+  const resolvedAddress = (companyAddress || "").trim();
+  const footerRow = includeFooter
+    ? `
+        <tr>
+          <td style="padding: 28px 32px; background:#0f172a; color:#e2e8f0; text-align:center;">
+            ${resolvedCompanyName ? `<div style="font-weight:700; font-size:15px; margin-bottom: 8px;">${escapeHtml(resolvedCompanyName)}</div>` : ""}
+            ${resolvedAddress ? `<div style="font-size:13px; opacity:0.8; margin-bottom: 16px;">${escapeHtml(resolvedAddress)}</div>` : ""}
+            <div>
+              <a href="{{unsubscribe_url}}" style="color:${palette.accent}; text-decoration:none; margin:0 12px; font-size: 13px;">Unsubscribe</a>
+              <a href="{{preferences_url}}" style="color:${palette.accent}; text-decoration:none; margin:0 12px; font-size: 13px;">Manage Preferences</a>
+            </div>
+          </td>
+        </tr>
+      `
+    : "";
 
   // Ensure CTA URL is always valid and clickable
   let resolvedCta = copy.ctaUrl || ctaUrl || "https://example.com";
@@ -122,9 +137,7 @@ export function buildBrandedEmailHtml(args: {
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 20px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); overflow: hidden;">
         <tr>
           <td style="padding: 40px 32px; background: ${palette.heroGradient}; color: #ffffff;">
-            <div style="font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.95; font-weight: 700; margin-bottom: 12px;">
-              ${escapeHtml(companyName || "Your Company")}
-            </div>
+            ${resolvedCompanyName ? `<div style="font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.95; font-weight: 700; margin-bottom: 12px;">${escapeHtml(resolvedCompanyName)}</div>` : ""}
             <div data-block="heading" style="font-size: 32px; font-weight: 800; line-height: 1.2; margin-bottom: 12px;">
               ${escapeHtml(copy.heroTitle)}
             </div>
@@ -159,16 +172,7 @@ export function buildBrandedEmailHtml(args: {
             </div>
           </td>
         </tr>
-        <tr>
-          <td style="padding: 28px 32px; background:#0f172a; color:#e2e8f0; text-align:center;">
-            <div style="font-weight:700; font-size:15px; margin-bottom: 8px;">${escapeHtml(companyName || "Your Company")}</div>
-            <div style="font-size:13px; opacity:0.8; margin-bottom: 16px;">${escapeHtml(resolvedAddress)}</div>
-            <div>
-              <a href="{{unsubscribe_url}}" style="color:${palette.accent}; text-decoration:none; margin:0 12px; font-size: 13px;">Unsubscribe</a>
-              <a href="#" style="color:${palette.accent}; text-decoration:none; margin:0 12px; font-size: 13px;">Preferences</a>
-            </div>
-          </td>
-        </tr>
+        ${footerRow}
       </table>
     </div>
   </body>

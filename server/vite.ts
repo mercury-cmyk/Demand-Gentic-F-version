@@ -24,6 +24,7 @@ export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,
     hmr: false, // Disable HMR to prevent WebSocket conflicts and reload loops
+    ws: false, // Disable Vite websocket server entirely
     allowedHosts: true as const,
   };
 
@@ -60,8 +61,16 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
-      const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      let page = await vite.transformIndexHtml(url, template);
+      // Strip Vite HMR client script to prevent ws:// connection attempts
+      page = page.replace(
+        /<script\b[^>]*src="\/\@vite\/client"[^>]*><\/script>/g,
+        "",
+      );
+      res
+        .status(200)
+        .set({ "Content-Type": "text/html", "Cache-Control": "no-store" })
+        .end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);

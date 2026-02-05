@@ -14,11 +14,11 @@ import {
   Copy, 
   Check, 
   RefreshCw,
+  ArrowLeft,
   Save
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { PageNav } from "@/components/layout/page-nav";
 
 export default function AIContentGeneratorPage() {
   const [, setLocation] = useLocation();
@@ -162,21 +162,18 @@ ${ctaGoal || 'Learn more'} 👇
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header with Navigation */}
-      <div className="p-6 border-b border-border/60 bg-card/70 backdrop-blur-sm">
-        <PageNav 
-          breadcrumbs={[
-            { label: "Content Studio", href: "/content-studio" },
-            { label: "AI Generator" }
-          ]}
-          showBack={true}
-          className="mb-4"
-        />
-        <div>
-          <h1 className="text-2xl font-bold">AI Content Generator</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Create high-quality content powered by AI
-          </p>
+      {/* Header */}
+      <div className="flex items-center justify-between p-6 border-b border-border/60 bg-card/70 backdrop-blur-sm">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => setLocation("/content-studio")}>
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">AI Content Generator</h1>
+            <p className="text-muted-foreground mt-1">
+              Create high-quality content powered by AI
+            </p>
+          </div>
         </div>
       </div>
 

@@ -3,19 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot,
   X,
-  Minimize2,
-  Maximize2,
-  MessageSquare,
-  Sparkles,
-  ChevronLeft,
   ChevronRight,
   RotateCcw,
-  History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentChatInterface } from './AgentChatInterface';
@@ -28,11 +20,12 @@ interface AgentSidePanelProps {
 export function AgentSidePanel({ className }: AgentSidePanelProps) {
   const {
     state,
-    togglePanel,
+    openPanel,
     closePanel,
     setWidth,
     toggleCollapse,
     resetSession,
+    agentStatus,
     userRole,
     isClientPortal,
   } = useAgentPanelContext();
@@ -41,6 +34,30 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const startWidthRef = useRef(state.width);
   const startXRef = useRef(0);
+
+  const prettyRole = isClientPortal
+    ? 'Client'
+    : userRole
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const statusLabel =
+    agentStatus === 'thinking'
+      ? 'Thinking'
+      : agentStatus === 'awaiting_review'
+        ? 'Awaiting review'
+        : agentStatus === 'executing'
+          ? 'Executing'
+          : 'Ready';
+
+  const statusDotClass =
+    agentStatus === 'thinking'
+      ? 'bg-sky-500'
+      : agentStatus === 'awaiting_review'
+        ? 'bg-amber-500'
+        : agentStatus === 'executing'
+          ? 'bg-violet-500'
+          : 'bg-green-500';
 
   // Handle resize
   useEffect(() => {
@@ -100,7 +117,33 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
   };
 
   if (!state.isOpen) {
-    return null;
+    return (
+      <div className={cn('fixed right-0 top-1/2 -translate-y-1/2 z-50', className)}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={openPanel}
+              className={cn(
+                'h-14 w-12 px-0 rounded-l-xl rounded-r-none border-r-0',
+                'bg-card/95 backdrop-blur shadow-lg hover:bg-card'
+              )}
+              data-testid="button-agentx-edge-handle"
+            >
+              <div className="flex flex-col items-center justify-center gap-1">
+                <Bot className="h-5 w-5 text-primary" />
+                <span className="text-[10px] font-semibold leading-none text-muted-foreground">
+                  AgentX
+                </span>
+              </div>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <p>Open AgentX (Ctrl+/) • {statusLabel}</p>
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    );
   }
 
   return (
@@ -145,7 +188,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p>Expand Agent Panel (Ctrl+/)</p>
+                <p>Expand AgentX (Ctrl+/)</p>
               </TooltipContent>
             </Tooltip>
 
@@ -161,7 +204,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p>Close Panel</p>
+                <p>Close AgentX</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -172,12 +215,18 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <Bot className="h-5 w-5 text-primary" />
-                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                  <span
+                    className={cn(
+                      'absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full',
+                      statusDotClass,
+                      agentStatus === 'thinking' && 'animate-pulse'
+                    )}
+                  />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-sm">AI Assistant</h3>
+                  <h3 className="font-semibold text-sm">AgentX</h3>
                   <p className="text-xs text-muted-foreground">
-                    {isClientPortal ? 'Client Portal' : userRole}
+                    {statusLabel} <span className="text-muted-foreground/40">•</span> {prettyRole}
                   </p>
                 </div>
               </div>
@@ -227,7 +276,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Close (Ctrl+/)</p>
+                    <p>Close AgentX (Ctrl+/)</p>
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -273,7 +322,7 @@ export function AgentPanelToggle() {
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        <p>AI Assistant (Ctrl+/)</p>
+        <p>AgentX (Ctrl+/)</p>
       </TooltipContent>
     </Tooltip>
   );

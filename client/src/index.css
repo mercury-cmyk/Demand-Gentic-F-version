@@ -40,6 +40,24 @@
   .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background: #718096;
   }
+
+  /* Reserve space for the fixed AgentX side panel when open/collapsed (desktop). */
+  .agentx-shell {
+    padding-right: 0px;
+    transition: padding-right 150ms ease;
+  }
+
+  @media (min-width: 1024px) {
+    .agentx-shell {
+      padding-right: var(--agentx-panel-offset, 0px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agentx-shell {
+      transition: none;
+    }
+  }
 }
 
 /* LIGHT MODE - Enterprise AI-first Design System */

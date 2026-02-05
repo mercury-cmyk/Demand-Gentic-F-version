@@ -315,6 +315,7 @@ export default function ClientPortalDashboard() {
   });
 
   // Preview Studio - Campaign Context State
+  const [previewCampaignId, setPreviewCampaignId] = useState<string>('');
   const [previewAccountId, setPreviewAccountId] = useState<string>('');
   const [previewContactId, setPreviewContactId] = useState<string>('');
   const [previewAudienceAccounts, setPreviewAudienceAccounts] = useState<any[]>([]);
@@ -976,7 +977,7 @@ export default function ClientPortalDashboard() {
   return (
     <div className="flex h-screen bg-[#F8F9FA] dark:bg-[#0B1120] font-sans">
       {/* Enterprise Sidebar */}
-      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} bg-white dark:bg-slate-900/95 border-r border-slate-200/60 dark:border-slate-800 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] fixed h-full z-50 shadow-sm`}>
+      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} bg-white dark:bg-slate-900/95 border-r border-slate-200/60 dark:border-slate-800 flex flex-col transition-all duration-300 ease-sidebar fixed h-full z-50 shadow-sm`}>
         {/* Workspace Header */}
         <div className="h-16 flex items-center px-6 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between w-full">
@@ -1325,8 +1326,8 @@ export default function ClientPortalDashboard() {
                     <div className="text-center py-8 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                       <p>No orders yet</p>
-                      <Button variant="link" onClick={() => setShowCampaignWizard(true)}>
-                        Create your first campaign
+                      <Button variant="link" onClick={() => setShowOrderPanel(true)}>
+                        Submit your first campaign request
                       </Button>
                     </div>
                   ) : (
@@ -1462,7 +1463,7 @@ export default function ClientPortalDashboard() {
                   className="gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 w-full sm:w-auto"
                 >
                   <Bot className="h-4 w-4" />
-                  Create Campaign Order
+                  New Campaign Request
                 </Button>
               </div>
             </div>
@@ -1476,9 +1477,9 @@ export default function ClientPortalDashboard() {
                   </div>
                   <div className="flex-1 space-y-3 w-full">
                     <div>
-                      <h4 className="font-semibold text-lg text-violet-800 dark:text-violet-300">AI-Powered Campaign Ordering</h4>
+                      <h4 className="font-semibold text-lg text-violet-800 dark:text-violet-300">Submit a Campaign Request</h4>
                       <p className="text-sm text-violet-700 dark:text-violet-400 mt-1 leading-relaxed">
-                        Simply describe what you need and our AI agent will help create the perfect campaign. Tell us your goals, target audience, and preferences - we'll handle the rest.
+                        Describe your campaign goals, target audience, budget, and timeline - our AI agent will capture all the details. The DemandGentic team will configure and launch your campaign with our best-in-class AI voice agents.
                       </p>
                     </div>
                     <Button
@@ -1487,7 +1488,7 @@ export default function ClientPortalDashboard() {
                       onClick={() => setShowOrderPanel(true)}
                     >
                       <Sparkles className="h-4 w-4 mr-2" />
-                      Start AI Campaign Order
+                      Submit Campaign Request
                     </Button>
                   </div>
                 </div>
@@ -1673,12 +1674,12 @@ export default function ClientPortalDashboard() {
                       </div>
                       <h4 className="font-semibold text-lg mb-2">No campaigns yet</h4>
                        <p className="text-muted-foreground text-center mb-4 max-w-md">
-                         {campaigns.length === 0 ? 'Create your first campaign to start reaching your audience with AI-powered outreach.' : 'No campaigns match your current filters.'}
+                         {campaigns.length === 0 ? 'Submit a campaign request and our team will configure and launch your AI-powered outreach.' : 'No campaigns match your current filters.'}
                        </p>
                        {campaigns.length === 0 && (
                          <Button onClick={() => setShowOrderPanel(true)} className="bg-gradient-to-r from-violet-600 to-purple-600">
                            <Bot className="h-4 w-4 mr-2" />
-                           Order Your First Campaign
+                           Submit Your First Request
                          </Button>
                        )}
                     </CardContent>
@@ -4100,7 +4101,9 @@ export default function ClientPortalDashboard() {
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
 
-      {/* Campaign Creation Wizard - Enhanced multi-step wizard */}
+      {/* Campaign Creation Wizard - Disabled for order-only mode
+          Clients now submit campaign requests via the AI agent order panel.
+          Campaign configuration is handled by the DemandGentic team.
       <CampaignCreationWizard
         open={showCampaignWizard}
         onOpenChange={setShowCampaignWizard}
@@ -4109,6 +4112,7 @@ export default function ClientPortalDashboard() {
           queryClient.invalidateQueries({ queryKey: ['work-orders'] });
         }}
       />
+      */}
 
       {/* Preview Studio - AI Agent voice preview and testing */}
       <PreviewStudio

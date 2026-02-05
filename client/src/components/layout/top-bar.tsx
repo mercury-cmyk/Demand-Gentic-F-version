@@ -53,7 +53,7 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
       <div className="flex items-center gap-2 sm:gap-3">
         <ThemeToggle />
 
-        {/* AI Assistant Toggle */}
+        {/* AgentX Toggle */}
         {agentPanel && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -72,7 +72,7 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>AI Assistant (Ctrl+/)</p>
+              <p>AgentX (Ctrl+/)</p>
             </TooltipContent>
           </Tooltip>
         )}

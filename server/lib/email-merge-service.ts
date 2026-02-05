@@ -152,6 +152,7 @@ export async function getMergeDataForContact(
     campaign: campaign ? {
       id: campaign.id,
       name: campaign.name || '',
+      landing_page: campaign.landingPageUrl || '',
     } : undefined,
     sender: sender ? {
       name: sender.fromName || '',

@@ -237,7 +237,9 @@ interface FormData {
   openingScript: string;
 
   // Step 6: Audience
-  audienceSource: 'own_data' | 'request_handling';
+  audienceSource: 'lists' | 'advanced_filters' | 'request_handling';
+  selectedLists: string[];
+  selectedSegments: string[];
   selectedAccounts: string[];
   selectedContacts: string[];
   targetIndustries: string[];
@@ -245,6 +247,7 @@ interface FormData {
   targetRegions: string[];
   targetCompanySize: string;
   targetLeadCount: number | undefined;
+  useProjectDocuments: boolean;
 
   // Additional
   priority: 'low' | 'normal' | 'high' | 'urgent';
@@ -277,7 +280,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     agentPersona: '',
     agentTone: 'professional',
     openingScript: '',
-    audienceSource: 'request_handling',
+    audienceSource: 'lists',
+    selectedLists: [],
+    selectedSegments: [],
     selectedAccounts: [],
     selectedContacts: [],
     targetIndustries: [],
@@ -285,6 +290,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     targetRegions: [],
     targetCompanySize: '',
     targetLeadCount: undefined,
+    useProjectDocuments: true,
     priority: 'normal',
     startDate: '',
     endDate: '',
@@ -1214,128 +1220,148 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                 >
                   <div className="text-center mb-8">
                     <h3 className="text-lg font-semibold mb-2">Define your target audience</h3>
-                    <p className="text-muted-foreground">Use your own data or let us find the right prospects</p>
+                    <p className="text-muted-foreground">Select from lists, use advanced filters, or let us handle targeting</p>
                   </div>
 
                   <div className="max-w-3xl mx-auto">
-                    {/* Audience Source Toggle */}
-                    <div className="grid md:grid-cols-2 gap-4 mb-8">
+                    {/* Audience Source Toggle - 3 Options */}
+                    <div className="grid md:grid-cols-3 gap-4 mb-8">
                       <button
-                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'own_data' }))}
+                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'lists' }))}
                         className={cn(
-                          'flex flex-col items-center p-6 rounded-xl border-2 transition-all',
-                          formData.audienceSource === 'own_data'
+                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
+                          formData.audienceSource === 'lists'
                             ? 'border-primary bg-primary/5'
                             : 'border-border hover:border-primary/50'
                         )}
                       >
-                        <Database className="h-12 w-12 mb-4 text-primary" />
-                        <h4 className="font-semibold mb-2">Use My Data</h4>
-                        <p className="text-sm text-muted-foreground text-center">
-                          Select from your uploaded accounts and contacts
+                        <Database className="h-10 w-10 mb-3 text-primary" />
+                        <h4 className="font-semibold mb-1">Select Lists</h4>
+                        <p className="text-xs text-muted-foreground text-center">
+                          Choose from existing segments & lists
+                        </p>
+                      </button>
+
+                      <button
+                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'advanced_filters' }))}
+                        className={cn(
+                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
+                          formData.audienceSource === 'advanced_filters'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:border-primary/50'
+                        )}
+                      >
+                        <Target className="h-10 w-10 mb-3 text-primary" />
+                        <h4 className="font-semibold mb-1">Advanced Filters</h4>
+                        <p className="text-xs text-muted-foreground text-center">
+                          Filter by criteria from project docs
                         </p>
                       </button>
 
                       <button
                         onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'request_handling' }))}
                         className={cn(
-                          'flex flex-col items-center p-6 rounded-xl border-2 transition-all',
+                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
                           formData.audienceSource === 'request_handling'
                             ? 'border-primary bg-primary/5'
                             : 'border-border hover:border-primary/50'
                         )}
                       >
-                        <Sparkles className="h-12 w-12 mb-4 text-primary" />
-                        <h4 className="font-semibold mb-2">Let Us Handle It</h4>
-                        <p className="text-sm text-muted-foreground text-center">
-                          We'll source and qualify the right prospects for you
+                        <Sparkles className="h-10 w-10 mb-3 text-primary" />
+                        <h4 className="font-semibold mb-1">We'll Handle It</h4>
+                        <p className="text-xs text-muted-foreground text-center">
+                          We'll source the right prospects
                         </p>
                       </button>
                     </div>
 
-                    {formData.audienceSource === 'own_data' ? (
+                    {formData.audienceSource === 'lists' && (
                       <div className="space-y-6">
-                        {/* Account Selection */}
+                        {/* Segment/List Selection */}
                         <div className="space-y-3">
-                          <Label className="text-base">Select Accounts</Label>
+                          <Label className="text-base flex items-center gap-2">
+                            <Database className="h-4 w-4" />
+                            Select Segments & Lists
+                          </Label>
+                          <p className="text-sm text-muted-foreground">
+                            Choose from your existing contact segments and account lists
+                          </p>
                           {accountsLoading ? (
                             <div className="flex items-center justify-center py-8">
                               <Loader2 className="h-6 w-6 animate-spin" />
                             </div>
-                          ) : clientAccounts.length > 0 ? (
-                            <ScrollArea className="h-48 border rounded-lg p-4">
-                              <div className="space-y-2">
-                                {clientAccounts.map((account: any) => (
-                                  <div key={account.id} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
-                                    <Checkbox
-                                      checked={formData.selectedAccounts.includes(account.id)}
-                                      onCheckedChange={(checked) => {
-                                        setFormData(prev => ({
-                                          ...prev,
-                                          selectedAccounts: checked
-                                            ? [...prev.selectedAccounts, account.id]
-                                            : prev.selectedAccounts.filter(id => id !== account.id)
-                                        }));
-                                      }}
-                                    />
-                                    <div className="flex-1">
-                                      <p className="font-medium">{account.name}</p>
-                                      <p className="text-sm text-muted-foreground">{account.industry}</p>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </ScrollArea>
                           ) : (
-                            <Card className="p-6 text-center">
-                              <Database className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                              <p className="text-muted-foreground">No accounts uploaded yet</p>
-                              <Button variant="link" className="mt-2">Upload Accounts</Button>
-                            </Card>
-                          )}
-                        </div>
+                            <ScrollArea className="h-64 border rounded-lg p-4">
+                              <div className="space-y-4">
+                                {/* Contact Segments */}
+                                <div>
+                                  <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Contact Segments</h5>
+                                  <div className="space-y-2">
+                                    {/* Placeholder segments - these should come from API */}
+                                    {['Enterprise Decision Makers', 'Mid-Market IT Leaders', 'Healthcare Executives', 'Financial Services Contacts'].map((segment, idx) => (
+                                      <div key={`seg-${idx}`} className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border">
+                                        <Checkbox
+                                          checked={formData.selectedSegments.includes(`segment-${idx}`)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedSegments: checked
+                                                ? [...prev.selectedSegments, `segment-${idx}`]
+                                                : prev.selectedSegments.filter(id => id !== `segment-${idx}`)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{segment}</p>
+                                          <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 5000 + 500).toLocaleString()} contacts</p>
+                                        </div>
+                                        <Badge variant="secondary" className="text-xs">Segment</Badge>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
 
-                        {/* Contact Selection */}
-                        <div className="space-y-3">
-                          <Label className="text-base">Select Contacts</Label>
-                          {contactsLoading ? (
-                            <div className="flex items-center justify-center py-8">
-                              <Loader2 className="h-6 w-6 animate-spin" />
-                            </div>
-                          ) : clientContacts.length > 0 ? (
-                            <ScrollArea className="h-48 border rounded-lg p-4">
-                              <div className="space-y-2">
-                                {clientContacts.map((contact: any) => (
-                                  <div key={contact.id} className="flex items-center gap-3 p-2 hover:bg-muted rounded">
-                                    <Checkbox
-                                      checked={formData.selectedContacts.includes(contact.id)}
-                                      onCheckedChange={(checked) => {
-                                        setFormData(prev => ({
-                                          ...prev,
-                                          selectedContacts: checked
-                                            ? [...prev.selectedContacts, contact.id]
-                                            : prev.selectedContacts.filter(id => id !== contact.id)
-                                        }));
-                                      }}
-                                    />
-                                    <div className="flex-1">
-                                      <p className="font-medium">{contact.firstName} {contact.lastName}</p>
-                                      <p className="text-sm text-muted-foreground">{contact.jobTitle}</p>
-                                    </div>
+                                {/* Account Lists */}
+                                <div>
+                                  <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Account Lists</h5>
+                                  <div className="space-y-2">
+                                    {['Target Account List Q1', 'Fortune 500 Tech', 'Named Accounts 2024', 'Expansion Targets'].map((list, idx) => (
+                                      <div key={`list-${idx}`} className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border">
+                                        <Checkbox
+                                          checked={formData.selectedLists.includes(`list-${idx}`)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedLists: checked
+                                                ? [...prev.selectedLists, `list-${idx}`]
+                                                : prev.selectedLists.filter(id => id !== `list-${idx}`)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{list}</p>
+                                          <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 500 + 50).toLocaleString()} accounts</p>
+                                        </div>
+                                        <Badge variant="outline" className="text-xs">List</Badge>
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
+                                </div>
                               </div>
                             </ScrollArea>
-                          ) : (
-                            <Card className="p-6 text-center">
-                              <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                              <p className="text-muted-foreground">No contacts uploaded yet</p>
-                              <Button variant="link" className="mt-2">Upload Contacts</Button>
-                            </Card>
+                          )}
+                          {(formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
+                            <div className="p-3 bg-primary/5 rounded-lg">
+                              <p className="text-sm font-medium">
+                                Selected: {formData.selectedSegments.length} segments, {formData.selectedLists.length} lists
+                              </p>
+                            </div>
                           )}
                         </div>
                       </div>
-                    ) : (
+                    )}
+
+                    {formData.audienceSource === 'advanced_filters' && (
                       <div className="space-y-6">
                         {/* Target Industries */}
                         <div className="space-y-2">
@@ -1498,6 +1524,70 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                               }))}
                             />
                           </div>
+                        </div>
+
+                        {/* Use Project Documents Toggle */}
+                        <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-primary" />
+                            <div>
+                              <p className="font-medium text-sm">Use Project Documents</p>
+                              <p className="text-xs text-muted-foreground">Auto-populate filters from uploaded project context</p>
+                            </div>
+                          </div>
+                          <Switch
+                            checked={formData.useProjectDocuments}
+                            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, useProjectDocuments: checked }))}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {formData.audienceSource === 'request_handling' && (
+                      <div className="space-y-6">
+                        <Card className="p-6 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+                          <div className="flex items-start gap-4">
+                            <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                              <Sparkles className="h-6 w-6 text-primary" />
+                            </div>
+                            <div>
+                              <h4 className="font-semibold mb-2">We'll Handle the Targeting</h4>
+                              <p className="text-sm text-muted-foreground mb-4">
+                                Our team will source and qualify the right prospects based on your campaign goals and project context.
+                                You'll have the opportunity to review and approve the target list before launch.
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="secondary" className="gap-1">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Data Verification
+                                </Badge>
+                                <Badge variant="secondary" className="gap-1">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Lead Scoring
+                                </Badge>
+                                <Badge variant="secondary" className="gap-1">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Intent Signals
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+
+                        <div className="space-y-2">
+                          <Label>Target Lead Count (Optional)</Label>
+                          <Input
+                            type="number"
+                            placeholder="e.g., 500"
+                            value={formData.targetLeadCount || ''}
+                            onChange={(e) => setFormData(prev => ({
+                              ...prev,
+                              targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
+                            }))}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Specify how many qualified leads you'd like us to target
+                          </p>
                         </div>
                       </div>
                     )}

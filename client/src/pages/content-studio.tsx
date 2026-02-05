@@ -32,8 +32,7 @@ import {
   XCircle,
   RefreshCw,
   Clock,
-  ExternalLink,
-  Eye
+  ExternalLink
 } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,7 +40,6 @@ import { type ContentAsset } from "@shared/schema";
 import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { PageNav } from "@/components/layout/page-nav";
 
 const createAssetSchema = z.object({
   assetType: z.enum([
@@ -199,44 +197,31 @@ export default function ContentStudioPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header with Navigation */}
-      <div className="p-6 border-b">
-        {/* Breadcrumb Navigation */}
-        <PageNav 
-          breadcrumbs={[{ label: "Content Studio" }]}
-          showBack={true}
-          className="mb-4"
-        />
-        
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Content Studio</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              AI-powered content creation, management, and publishing
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setLocation("/preview-studio")}>
-              <Eye className="w-4 h-4 mr-2" />
-              Preview Studio
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setLocation("/content-studio/calendar")}>
-              <Calendar className="w-4 h-4 mr-2" />
-              Calendar
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setLocation("/content-studio/analytics")}>
-              <BarChart3 className="w-4 h-4 mr-2" />
-              Analytics
-            </Button>
-            <Button size="sm" onClick={() => setLocation("/content-studio/ai-generator")} data-testid="button-ai-generator">
-              <Sparkles className="w-4 h-4 mr-2" />
-              AI Generator
-            </Button>
-            <Button size="sm" onClick={() => setCreateDialogOpen(true)} data-testid="button-create-asset">
-              <Plus className="w-4 h-4 mr-2" />
-              Create Asset
-            </Button>
-          </div>
+      {/* Header */}
+      <div className="flex items-center justify-between p-6 border-b">
+        <div>
+          <h1 className="text-3xl font-bold">Content Studio</h1>
+          <p className="text-muted-foreground mt-1">
+            AI-powered content creation, management, and publishing
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setLocation("/content-studio/calendar")}>
+            <Calendar className="w-4 h-4 mr-2" />
+            Calendar
+          </Button>
+          <Button variant="outline" onClick={() => setLocation("/content-studio/analytics")}>
+            <BarChart3 className="w-4 h-4 mr-2" />
+            Analytics
+          </Button>
+          <Button onClick={() => setLocation("/content-studio/ai-generator")} data-testid="button-ai-generator">
+            <Sparkles className="w-4 h-4 mr-2" />
+            AI Generator
+          </Button>
+          <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-create-asset">
+            <Plus className="w-4 h-4 mr-2" />
+            Create Asset
+          </Button>
         </div>
       </div>
 

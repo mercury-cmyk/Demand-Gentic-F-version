@@ -36,6 +36,7 @@ import {
   virtualAgents,
   clientProjects,
   verificationCampaigns,
+  campaignIntakeRequests,
 } from "@shared/schema";
 import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
 
@@ -422,19 +423,61 @@ Return JSON:
         })
         .returning();
 
-      this.emit("agent:completed", "campaign_order", order);
+      // 5. Create Campaign Intake Request for Admin Review
+      const [intakeRequest] = await db.insert(campaignIntakeRequests).values({
+        sourceType: 'client_agentic',
+        clientAccountId: this.context.clientAccountId,
+        clientOrderId: order.id,
+        rawInput: JSON.stringify({
+          campaignType: request.campaignType,
+          targetAudience: request.targetAudience,
+          specialRequirements: request.specialRequirements,
+          channels: request.channels,
+        }),
+        extractedContext: {
+          objective: request.campaignType,
+          targetIndustries: request.targetAudience.industries || [],
+          targetTitles: request.targetAudience.jobTitles || [],
+          geographies: request.targetAudience.geographies || [],
+          channels: request.channels,
+          specialRequirements: request.specialRequirements,
+        },
+        contextSources: {
+          urls: request.contextUrls || [],
+          documents: request.contextFiles || [],
+          targetAccountFiles: request.targetAccountFiles || [],
+          suppressionFiles: request.suppressionFiles || [],
+        },
+        status: 'pending',
+        priority: 'normal',
+        campaignId: campaign.id,
+        projectId: project.id,
+        requestedStartDate: new Date(),
+        requestedLeadCount: request.volumeRequested,
+        estimatedCost: analysis.estimatedCost.toString(),
+      }).returning();
+
+      // Update project with intake request reference
+      await db.update(clientProjects)
+        .set({ intakeRequestId: intakeRequest.id })
+        .where(eq(clientProjects.id, project.id));
+
+      this.emit("agent:completed", "campaign_order", { order, intakeRequest });
 
       return {
         success: true,
         data: {
           orderId: order.id,
           orderNumber: order.orderNumber,
+          intakeRequestId: intakeRequest.id,
+          projectId: project.id,
+          campaignId: campaign.id,
           estimatedDeliveryDate,
           estimatedCost: analysis.estimatedCost,
           breakdown: analysis.costBreakdown,
           status: "pending_approval",
         },
-        message: `Campaign order ${orderNumber} created successfully. Estimated delivery: ${analysis.estimatedDeliveryDays} days. Estimated cost: $${analysis.estimatedCost.toLocaleString()}`,
+        message: `Campaign order ${orderNumber} created successfully. Your request has been submitted to the DemandGentic team for review. Estimated delivery: ${analysis.estimatedDeliveryDays} days. Estimated cost: $${analysis.estimatedCost.toLocaleString()}`,
         reasoning: analysis.validationNotes,
         suggestedActions: analysis.recommendations,
       };

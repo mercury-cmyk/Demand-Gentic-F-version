@@ -40,6 +40,7 @@ import { EmailCampaignPanel, type EmailStats } from "@/components/campaigns/emai
 import { AgentAssignmentDialog } from "@/components/campaigns/agent-assignment-dialog";
 import { VoiceSelectionDialog } from "@/components/campaigns/voice-selection-dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CampaignCreationWizard } from "@/components/client-portal/campaigns";
 
 type EmailStatsResponse = {
   totalSent: number;
@@ -80,6 +81,7 @@ export default function CampaignsPage() {
   const [selectedCampaignForAgents, setSelectedCampaignForAgents] = useState<any>(null);
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [selectedCampaignForVoice, setSelectedCampaignForVoice] = useState<any>(null);
+  const [showCampaignWizard, setShowCampaignWizard] = useState(false);
 
   // Sync tab with URL parameter
   useEffect(() => {
@@ -352,7 +354,7 @@ export default function CampaignsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
+          <Button className="gap-2 shadow-sm" onClick={() => setShowCampaignWizard(true)}>
             <Plus className="w-4 h-4" />
             New Campaign
           </Button>
@@ -722,6 +724,20 @@ export default function CampaignsPage() {
         campaign={selectedCampaignForVoice}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+        }}
+      />
+
+      {/* Campaign Creation Wizard - Admin Mode */}
+      <CampaignCreationWizard
+        open={showCampaignWizard}
+        onOpenChange={setShowCampaignWizard}
+        mode="admin"
+        onSuccess={(campaign) => {
+          queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+          toast({
+            title: "Campaign Created",
+            description: `Campaign "${campaign?.name || 'New Campaign'}" has been created successfully.`,
+          });
         }}
       />
         </div>

@@ -41,7 +41,8 @@ export function RichTextEditor({ content, onChange, placeholder = "Write your me
     content,
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none focus:outline-none min-h-[300px] px-4 py-3',
+        // Make the editor height-flexible so parents can control it (e.g. full-height panes).
+        class: 'prose prose-sm max-w-none focus:outline-none flex-1 min-h-[300px] px-4 py-3',
       },
     },
     onUpdate: ({ editor }) => {
@@ -77,7 +78,7 @@ export function RichTextEditor({ content, onChange, placeholder = "Write your me
   };
 
   return (
-    <div className={cn("border rounded-md overflow-hidden", className)}>
+    <div className={cn("border rounded-md overflow-hidden flex flex-col", className)}>
       {/* Toolbar */}
       <div className="flex items-center gap-1 p-2 border-b bg-muted/30 flex-wrap">
         <Button
@@ -221,7 +222,7 @@ export function RichTextEditor({ content, onChange, placeholder = "Write your me
       </div>
 
       {/* Editor Content */}
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="flex-1 overflow-y-auto flex flex-col" />
     </div>
   );
 }

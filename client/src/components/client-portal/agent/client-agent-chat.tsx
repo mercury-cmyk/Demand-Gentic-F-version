@@ -274,7 +274,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
             <Bot className="h-4 w-4 text-white" />
           </div>
           <div>
-            <CardTitle className="text-sm font-semibold">AI Assistant</CardTitle>
+            <CardTitle className="text-sm font-semibold">AgentX</CardTitle>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -297,7 +297,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
               <div className="h-16 w-16 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mx-auto mb-4">
                 <Sparkles className="h-8 w-8 text-white" />
               </div>
-              <h3 className="text-lg font-semibold mb-2">Hello! I'm your AI Assistant</h3>
+              <h3 className="text-lg font-semibold mb-2">Hello! I’m AgentX</h3>
               <p className="text-sm text-muted-foreground max-w-sm mx-auto">
                 I can help you manage campaigns, create orders, check billing, view reports, and more. Just ask!
               </p>
@@ -455,7 +455,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
         </div>
 
         <p className="text-xs text-muted-foreground text-center mt-2">
-          AI can make mistakes. Verify important information.
+          Verify important information before acting.
         </p>
       </div>
     </Card>
@@ -476,7 +476,7 @@ export function ClientAgentPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-[400px] sm:w-[450px] p-0">
         <SheetHeader className="sr-only">
-          <SheetTitle>AI Agent Assistant</SheetTitle>
+          <SheetTitle>AgentX</SheetTitle>
         </SheetHeader>
         <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none" />
       </SheetContent>
@@ -500,7 +500,7 @@ export function ClientAgentButton({ onNavigate }: { onNavigate?: (section: strin
       </SheetTrigger>
       <SheetContent side="right" className="w-[400px] sm:w-[450px] p-0">
         <SheetHeader className="sr-only">
-          <SheetTitle>AI Agent Assistant</SheetTitle>
+          <SheetTitle>AgentX</SheetTitle>
         </SheetHeader>
         <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none" />
       </SheetContent>

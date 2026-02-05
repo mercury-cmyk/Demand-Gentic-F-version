@@ -13,7 +13,7 @@ export default defineConfig({
       transformIndexHtml(html) {
         // Remove Vite HMR client injection to prevent websocket attempts in dev
         return html.replace(
-          /<script\s+type="module"\s+src="\/@vite\/client"><\/script>/g,
+          /<script\b[^>]*src="\/\@vite\/client"[^>]*><\/script>/g,
           "",
         );
       },

@@ -1,5 +1,7 @@
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode, useCallback, useMemo, useState } from 'react';
 import { useAgentPanel, type AgentPanelState } from './hooks/useAgentPanel';
+
+export type AgentXStatus = 'idle' | 'thinking' | 'awaiting_review' | 'executing';
 
 interface AgentPanelContextValue {
   state: AgentPanelState;
@@ -10,6 +12,8 @@ interface AgentPanelContextValue {
   toggleCollapse: () => void;
   setConversationId: (id: string | null) => void;
   resetSession: () => void;
+  agentStatus: AgentXStatus;
+  setAgentStatus: (status: AgentXStatus) => void;
   // User role context
   userRole: string;
   isClientPortal: boolean;
@@ -29,12 +33,24 @@ export function AgentPanelProvider({
   isClientPortal = false,
 }: AgentPanelProviderProps) {
   const panelState = useAgentPanel();
+  const [agentStatus, setAgentStatus] = useState<AgentXStatus>('idle');
 
-  const value: AgentPanelContextValue = {
-    ...panelState,
-    userRole,
-    isClientPortal,
-  };
+  const resetSession = useCallback(() => {
+    panelState.resetSession();
+    setAgentStatus('idle');
+  }, [panelState]);
+
+  const value: AgentPanelContextValue = useMemo(
+    () => ({
+      ...panelState,
+      resetSession,
+      agentStatus,
+      setAgentStatus,
+      userRole,
+      isClientPortal,
+    }),
+    [agentStatus, isClientPortal, panelState, resetSession, userRole]
+  );
 
   return (
     <AgentPanelContext.Provider value={value}>
