@@ -48,6 +48,7 @@ import {
   Building2,
   User,
   Lightbulb,
+  Bot,
   Zap,
   AlertCircle,
   Loader2,
@@ -73,6 +74,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 import { buildBrandedEmailHtml, type BrandPaletteKey, type BrandPaletteOverrides, type EmailTemplateCopy } from "@/components/email-builder/ai-email-template";
 
 // Content Block Types for Visual Editor
@@ -1131,9 +1133,19 @@ export function SimpleTemplateBuilder({
                 </Button>
               </SheetTrigger>
               <SheetContent className="w-[90vw] sm:w-[500px] overflow-y-auto">
-                <SheetHeader>
-                  <SheetTitle>AgentX</SheetTitle>
-                  <SheetDescription>Generate content and get deliverability insights.</SheetDescription>
+                <SheetHeader className="pb-6 border-b">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-100">
+                         <Bot className="h-6 w-6 text-purple-600" />
+                      </div>
+                      <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full border-[2px] border-white bg-green-500 animate-pulse shadow-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <SheetTitle className="text-left text-lg font-semibold tracking-tight">AgentX</SheetTitle>
+                      <SheetDescription className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Content Copilot</SheetDescription>
+                    </div>
+                  </div>
                 </SheetHeader>
                 <div className="mt-6 space-y-6">
                   {/* AI Form */}
@@ -1429,7 +1441,7 @@ export function SimpleTemplateBuilder({
                           </Button>
                         </div>
                         <iframe
-                          srcDoc={brandedPreviewHtml}
+                          srcDoc={sanitizeHtmlForIframePreview(brandedPreviewHtml)}
                           className="w-full h-full border-0 pt-12"
                           style={{ background: '#f3f4f6' }}
                           title="Email Preview"
@@ -1782,7 +1794,7 @@ export function SimpleTemplateBuilder({
                 <div className="h-[calc(100%-52px)] overflow-y-auto">
                   <iframe
                     title="Email Preview"
-                    srcDoc={fullHtml}
+                    srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                     className="w-full h-full border-0"
                   />
                 </div>

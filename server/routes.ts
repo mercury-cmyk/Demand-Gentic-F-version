@@ -77,9 +77,12 @@ import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
+import agentDefaultsRouter from './routes/agent-defaults';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
+import adminProjectRequestsRouter from './routes/admin-project-requests';
+import clientAssignmentRouter from './routes/client-assignment';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -9534,8 +9537,8 @@ export function registerRoutes(app: Express) {
         .set({
           verificationStatus: dbStatus,
           aiValidationResult: aiResult as any,
-          validationConfidence: aiResult.validation_confidence.toString(),
-          extractedData: aiResult.extracted_data,
+          validationConfidence: aiResult.confidence.toString(),
+          extractedData: aiResult.matchDetails,
           updatedAt: new Date(),
         })
         .where(eq(leadVerifications.id, verification.id))
@@ -9546,12 +9549,12 @@ export function registerRoutes(app: Express) {
         .set({
           verificationId: verification.id,
           verificationStatus: dbStatus,
-          qaDecision: aiResult.comments,
+          qaDecision: aiResult.findings.join('; '),
           updatedAt: new Date(),
         })
         .where(eq(leads.id, leadId));
 
-      console.log('[Lead Verification] AI validation completed:', dbStatus, 'Confidence:', aiResult.validation_confidence);
+      console.log('[Lead Verification] AI validation completed:', dbStatus, 'Confidence:', aiResult.confidence);
 
       res.json({
         success: true,
@@ -10228,108 +10231,6 @@ export function registerRoutes(app: Express) {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Failed to delete phone suppression" });
-    }
-  });
-
-  // ==================== CAMPAIGN ORDERS (Client Portal) ====================
-
-  app.get("/api/orders", requireAuth, async (req, res) => {
-    try {
-      const orders = await storage.getCampaignOrders();
-      res.json(orders);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch orders" });
-    }
-  });
-
-  app.get("/api/orders/:id", requireAuth, async (req, res) => {
-    try {
-      const order = await storage.getCampaignOrder(req.params.id);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch order" });
-    }
-  });
-
-  app.post("/api/orders", requireAuth, requireRole('admin', 'client_user'), async (req, res) => {
-    try {
-      const validated = insertCampaignOrderSchema.parse(req.body);
-      const order = await storage.createCampaignOrder(validated);
-      res.status(201).json(order);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Validation failed", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create order" });
-    }
-  });
-
-  app.patch("/api/orders/:id", requireAuth, requireRole('admin', 'client_user'), async (req, res) => {
-    try {
-      const order = await storage.updateCampaignOrder(req.params.id, req.body);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to update order" });
-    }
-  });
-
-  app.post("/api/orders/:id/submit", requireAuth, requireRole('admin', 'client_user'), async (req, res) => {
-    try {
-      const order = await storage.updateCampaignOrder(req.params.id, {
-        status: 'submitted',
-        submittedAt: new Date()
-      });
-
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to submit order" });
-    }
-  });
-
-  // ==================== ORDER-CAMPAIGN LINKS (Bridge Model) ====================
-
-  app.get("/api/orders/:orderId/campaign-links", requireAuth, async (req, res) => {
-    try {
-      const links = await storage.getOrderCampaignLinks(req.params.orderId);
-      res.json(links);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch campaign links" });
-    }
-  });
-
-  app.post("/api/orders/:orderId/campaign-links", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
-    try {
-      const validated = insertOrderCampaignLinkSchema.parse({
-        ...req.body,
-        orderId: req.params.orderId
-      });
-
-      const link = await storage.createOrderCampaignLink(validated);
-      res.status(201).json(link);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Validation failed", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to link campaign" });
-    }
-  });
-
-  app.delete("/api/orders/:orderId/campaign-links/:linkId", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
-    try {
-      await storage.deleteOrderCampaignLink(req.params.linkId);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to unlink campaign" });
     }
   });
 
@@ -11903,31 +11804,52 @@ export function registerRoutes(app: Express) {
                   }
                 }
 
-                // 3. Update call_sessions table and store recording to S3/GCS
-                const { callSessions } = await import('@shared/schema');
-                const sessionsForCall = await db.select().from(callSessions).where(eq(callSessions.telnyxCallId, callControlId));
+                // 3. Update callSession (Unified system) & Trigger Transcription & Store to S3/GCS
+                const { callSessions: callSessionsTable } = await import('@shared/schema');
+                const sessionsForCall = await db.select().from(callSessionsTable).where(eq(callSessionsTable.telnyxCallId, callControlId));
 
                 if (sessionsForCall && sessionsForCall.length > 0) {
-                  const { storeCallSessionRecording } = await import('./services/recording-storage');
-                  
-                  for (const session of sessionsForCall) {
-                    try {
-                      // Store recording to S3/GCS and update session record
-                      const s3Key = await storeCallSessionRecording(
-                        session.id,
-                        recordingUrl,
-                        undefined // duration is not provided by this event
-                      );
-                      
-                      if (s3Key) {
-                        console.log(`[Telnyx Webhook] ✅ Stored call session ${session.id} recording to S3: ${s3Key}`);
-                      } else {
-                        console.log(`[Telnyx Webhook] ⚠️ Could not store call session ${session.id} recording to S3`);
-                      }
-                    } catch (sessionError) {
-                      console.error(`[Telnyx Webhook] Error storing call session ${session.id} recording:`, sessionError);
-                    }
-                  }
+                   for (const session of sessionsForCall) {
+                       // Update recording details
+                       await db.update(callSessionsTable)
+                         .set({
+                           recordingUrl,
+                           recordingStatus: 'stored',
+                           recordingDurationSec: payload?.duration_secs || 0
+                         })
+                         .where(eq(callSessionsTable.id, session.id));
+
+                       console.log(`[Telnyx Webhook] ✅ Updated callSession ${session.id} with recording URL`);
+
+                       // Trigger Google Transcription (Vertex/STT)
+                       try {
+                         const { transcribeCallSession } = await import('./services/google-transcription');
+                         // Trigger asynchronously
+                         transcribeCallSession(session.id).then(success => {
+                             if (success) console.log(`[Telnyx Webhook] 📝 Transcription triggered for session ${session.id}`);
+                         });
+                       } catch (err) {
+                          console.error("[Telnyx Webhook] Failed to import/trigger transcription", err);
+                       }
+
+                       // Store recording to S3/GCS
+                       try {
+                         const { storeCallSessionRecording } = await import('./services/recording-storage');
+                         const s3Key = await storeCallSessionRecording(
+                           session.id,
+                           recordingUrl,
+                           undefined // duration is not provided by this event
+                         );
+
+                         if (s3Key) {
+                           console.log(`[Telnyx Webhook] ✅ Stored call session ${session.id} recording to S3: ${s3Key}`);
+                         } else {
+                           console.log(`[Telnyx Webhook] ⚠️ Could not store call session ${session.id} recording to S3`);
+                         }
+                       } catch (sessionError) {
+                         console.error(`[Telnyx Webhook] Error storing call session ${session.id} recording:`, sessionError);
+                       }
+                   }
                 }
               }
             } catch (error) {
@@ -12214,7 +12136,7 @@ export function registerRoutes(app: Express) {
   // Trigger transcription for a lead (async - returns immediately)
   app.post("/api/leads/:id/transcribe", requireAuth, async (req, res) => {
     try {
-      const { transcribeLeadCall } = await import('./services/assemblyai-transcription');
+      const { transcribeLeadCall } = await import('./services/google-transcription');
       const { leads } = await import('@shared/schema');
 
       // Update status to pending
@@ -13154,6 +13076,7 @@ Provide JSON response with:
 
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
+  app.use("/api/agent-defaults", agentDefaultsRouter);
 
   // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================
 
@@ -13380,6 +13303,12 @@ Provide JSON response with:
   // ==================== CLIENT PORTAL (Must be before catch-all /api routes) ====================
   // ==================== CAMPAIGN WIZARD (ADMIN) ====================
   app.use('/api/campaign-wizard', campaignWizardRouter);
+
+  // ==================== ADMIN PROJECT REQUESTS ====================
+  app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
+
+  // ==================== CLIENT HIERARCHY / ASSIGNMENT ====================
+  app.use('/api/admin', requireAuth, clientAssignmentRouter);
 
   app.use('/api/client-portal', clientPortalRouter);
 

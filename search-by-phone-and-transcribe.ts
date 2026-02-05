@@ -2,7 +2,7 @@ import { pool, db } from "./server/db";
 import { leads } from "./shared/schema";
 import { eq } from "drizzle-orm";
 import { searchRecordingsByDialedNumber } from "./server/services/telnyx-recordings";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 
 async function searchByPhoneAndTranscribe() {
   const args = process.argv.slice(2);

@@ -82,6 +82,7 @@ export default function CampaignsPage() {
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [selectedCampaignForVoice, setSelectedCampaignForVoice] = useState<any>(null);
   const [showCampaignWizard, setShowCampaignWizard] = useState(false);
+  const [editCampaignId, setEditCampaignId] = useState<string | null>(null);
 
   // Sync tab with URL parameter
   useEffect(() => {
@@ -268,6 +269,14 @@ export default function CampaignsPage() {
   };
 
   const handleEditClick = (campaign: any) => {
+    // Use the Campaign Creation Wizard for agentic campaigns (created from project requests)
+    if (campaign.creationMode === 'agentic') {
+      setEditCampaignId(campaign.id);
+      setShowCampaignWizard(true);
+      return;
+    }
+
+    // Legacy edit pages for other campaigns
     if (campaign.type === 'call' || campaign.type === 'telemarketing') {
       setLocation(`/campaigns/phone/${campaign.id}/edit`);
     } else {
@@ -727,17 +736,24 @@ export default function CampaignsPage() {
         }}
       />
 
-      {/* Campaign Creation Wizard - Admin Mode */}
+      {/* Campaign Creation Wizard - Admin Mode (Create & Edit) */}
       <CampaignCreationWizard
         open={showCampaignWizard}
-        onOpenChange={setShowCampaignWizard}
+        onOpenChange={(open) => {
+          setShowCampaignWizard(open);
+          if (!open) {
+            setEditCampaignId(null); // Clear edit ID when closing
+          }
+        }}
         mode="admin"
+        campaignId={editCampaignId || undefined}
         onSuccess={(campaign) => {
           queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
           toast({
-            title: "Campaign Created",
-            description: `Campaign "${campaign?.name || 'New Campaign'}" has been created successfully.`,
+            title: editCampaignId ? "Campaign Updated" : "Campaign Created",
+            description: `Campaign "${campaign?.name || 'Campaign'}" has been ${editCampaignId ? 'updated' : 'created'} successfully.`,
           });
+          setEditCampaignId(null);
         }}
       />
         </div>

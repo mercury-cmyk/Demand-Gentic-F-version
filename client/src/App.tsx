@@ -51,7 +51,6 @@ import AIContentGeneratorPage from "@/pages/ai-content-generator";
 import SocialMediaPublisherPage from "@/pages/social-media-publisher";
 import SuppressionsPage from "@/pages/suppressions";
 import TelemarketingSuppressionListPage from "@/pages/telemarketing-suppression-list";
-import OrdersPage from "@/pages/orders";
 import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
@@ -95,11 +94,14 @@ import LeadFormsPage from "@/pages/lead-forms";
 import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
 import ClientPortalAdmin from "@/pages/client-portal-admin";
-import ClientPortalOrderDetail from "@/pages/client-portal-order-detail";
+import AdminProjectRequests from "@/pages/admin-project-requests";
 import ClientPortalLogin from "@/pages/client-portal-login";
 import ClientPortalJoin from "@/pages/client-portal-join";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
+import ClientPortalVoiceSimulation from "@/pages/client-portal-voice-simulation";
+import ClientPortalEmailSimulation from "@/pages/client-portal-email-simulation";
+import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
@@ -113,6 +115,8 @@ import CreateAIAgentPage from "@/pages/create-ai-agent";
 import CampaignTestPage from "@/pages/campaign-test";
 import IntelligentCampaignCreatePage from "@/pages/intelligent-campaign-create";
 import PreviewStudioPage from "@/pages/preview-studio";
+import VoiceSimulationPage from "@/pages/voice-simulation";
+import EmailSimulationPage from "@/pages/email-simulation";
 
 // Settings Hub Pages
 import SettingsIndexPage from "@/pages/settings/index";
@@ -364,8 +368,7 @@ function AuthenticatedApp() {
               <Route path="/telemarketing/suppressions" component={TelemarketingSuppressionListPage} />
               <Route path="/telemarketing-suppression-list" component={TelemarketingSuppressionListPage} />
               
-              {/* Orders & Imports */}
-              <Route path="/orders" component={OrdersPage} />
+              {/* Imports */}
               <Route path="/imports" component={ImportsPage} />
               
               {/* Reports & Analytics */}
@@ -467,13 +470,17 @@ function AuthenticatedApp() {
               
               {/* Client Portal & Hierarchy Management */}
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
-              <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
+              <Route path="/admin/project-requests" component={AdminProjectRequests} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />
               
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
+
+              {/* Simulation Pages */}
+              <Route path="/voice-simulation" component={VoiceSimulationPage} />
+              <Route path="/email-simulation" component={EmailSimulationPage} />
 
               {/* AI Studio Dashboard (new) */}
               <Route path="/ai-studio">
@@ -545,6 +552,9 @@ function Router() {
       <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
       <Route path="/client-portal/dashboard" component={ClientPortalDashboard} />
       <Route path="/client-portal/simulations" component={ClientPortalSimulations} />
+      <Route path="/client-portal/preview-studio" component={ClientPortalPreviewStudio} />
+      <Route path="/client-portal/voice-simulation" component={ClientPortalVoiceSimulation} />
+      <Route path="/client-portal/email-simulation" component={ClientPortalEmailSimulation} />
       <Route>
         <ProtectedRoute>
           <AuthenticatedApp />

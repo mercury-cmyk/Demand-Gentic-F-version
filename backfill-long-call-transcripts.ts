@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { dialerCallAttempts } from "./shared/schema";
 import { eq } from "drizzle-orm";
 import { fetchTelnyxRecording } from "./server/services/telnyx-recordings";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 
 const TRANSCRIPT_MARKER = "[Call Transcript]";
 const INTEREST_REGEX = /(interested|schedule|book|meeting|demo|follow[- ]?up|send (me|us)|next step|calendar)/i;

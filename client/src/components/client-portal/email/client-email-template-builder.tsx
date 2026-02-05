@@ -36,6 +36,7 @@ import {
   Plus
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { sanitizeHtmlForIframePreview } from '@/lib/html-preview';
 
 const looksLikeFullHtmlDocument = (html: string) => /<!doctype html|<html[\s>]/i.test(html);
 const looksLikeHtmlFragment = (value: string) => /<\w+[^>]*>/.test(value);
@@ -989,7 +990,7 @@ export function ClientEmailTemplateBuilder({
                               >
                                 <iframe
                                   title="Email Preview"
-                                  srcDoc={fullHtml}
+                                  srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                                   className="w-full h-full border-0"
                                   sandbox="allow-same-origin"
                                 />
@@ -1360,7 +1361,7 @@ export function ClientEmailTemplateBuilder({
                                         <div className="bg-white mt-1 rounded border overflow-hidden h-40">
                                           <iframe
                                             title={`Generated Email Preview ${index + 1}`}
-                                            srcDoc={previewHtml}
+                                            srcDoc={sanitizeHtmlForIframePreview(previewHtml)}
                                             className="w-full h-full border-0"
                                             sandbox="allow-same-origin"
                                           />
@@ -1526,7 +1527,7 @@ export function ClientEmailTemplateBuilder({
                 <div className="h-[calc(100%-52px)] overflow-y-auto">
                   <iframe
                     title="Email Preview"
-                    srcDoc={fullHtml}
+                    srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                     className="w-full h-full border-0"
                   />
                 </div>

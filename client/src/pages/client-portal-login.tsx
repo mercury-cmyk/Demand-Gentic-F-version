@@ -25,17 +25,21 @@ export default function ClientPortalLogin() {
         body: JSON.stringify({ email, password }),
       });
 
-      if (!response.ok) {
-        throw new Error('Invalid credentials');
-      }
+      const data = await response.json().catch(() => null as any);
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.message || `Login failed (${response.status})`);
+      }
       localStorage.setItem('clientPortalToken', data.token);
       localStorage.setItem('clientPortalUser', JSON.stringify(data.user));
       toast({ title: 'Login successful' });
       setLocation('/client-portal/dashboard');
     } catch (error) {
-      toast({ title: 'Login failed', description: 'Please check your credentials', variant: 'destructive' });
+      toast({
+        title: 'Login failed',
+        description: error instanceof Error ? error.message : 'Please check your credentials',
+        variant: 'destructive',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -62,6 +66,7 @@ export default function ClientPortalLogin() {
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="you@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -83,6 +88,7 @@ export default function ClientPortalLogin() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10"
                   required
+                  autoComplete="current-password"
                   data-testid="input-password"
                 />
               </div>

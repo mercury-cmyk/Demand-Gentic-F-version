@@ -11,11 +11,22 @@ export default defineConfig({
       name: "disable-vite-client",
       enforce: "post",
       transformIndexHtml(html) {
-        // Remove Vite HMR client injection to prevent websocket attempts in dev
-        return html.replace(
-          /<script\b[^>]*src="\/\@vite\/client"[^>]*><\/script>/g,
-          "",
-        );
+        // Remove Vite client injection to prevent websocket attempts in dev.
+        // Handles relative and absolute URLs (e.g. when behind a tunnel/proxy).
+        return html
+          .replace(
+            /<script\b[^>]*src=(["'])[^"']*\/\@vite\/client\1[^>]*>\s*<\/script>/gi,
+            "",
+          )
+          .replace(
+            /<script\b[^>]*>\s*import\s+(["'])[^"']*\/\@vite\/client\1;?\s*<\/script>/gi,
+            "",
+          )
+          .replace(
+            /<script\b[^>]*>\s*import\(\s*(["'])[^"']*\/\@vite\/client\1\s*\)\s*;?\s*<\/script>/gi,
+            "",
+          )
+          .replace(/\/\@vite\/client\b/gi, "/__vite_client_disabled__");
       },
     },
     ...(process.env.NODE_ENV !== "production" &&

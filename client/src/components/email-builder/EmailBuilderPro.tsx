@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 import {
   Eye,
   Send,
@@ -797,7 +798,7 @@ Your Name`}
                   <div className="h-[calc(100%-52px)] overflow-y-auto">
                     <iframe
                       title="Email Preview"
-                      srcDoc={fullHtml}
+                      srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                       className="w-full h-full border-0"
                     />
                   </div>

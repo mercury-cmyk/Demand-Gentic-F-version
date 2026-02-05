@@ -2,7 +2,7 @@ import "dotenv/config";
 import axios from "axios";
 import fetch from "node-fetch";
 import { pool } from "./server/db";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 import { uploadToS3, getPresignedDownloadUrl } from "./server/lib/s3";
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;

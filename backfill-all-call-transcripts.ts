@@ -1,5 +1,5 @@
 import { pool, db } from "./server/db";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 import { dialerCallAttempts } from "./shared/schema";
 import { eq } from "drizzle-orm";
 

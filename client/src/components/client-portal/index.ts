@@ -10,7 +10,7 @@ export { VoiceAssistant } from './voice/voice-assistant';
 export { ClientAgentChat, ClientAgentButton } from './agent/client-agent-chat';
 
 // Simulation
-export { CampaignSimulationPanel } from './simulation/campaign-simulation-panel';
+export { SimulationStudioPanel as CampaignSimulationPanel } from './simulation-studio/simulation-studio-panel';
 
 // Leads
 export * from './leads';
@@ -20,9 +20,6 @@ export * from './campaigns';
 
 // Reports
 export { AgenticReportsPanel } from './reports/agentic-reports-panel';
-
-// Orders
-export { AgenticCampaignOrderPanel } from './orders/agentic-campaign-order-panel';
 
 // Email
 export { EmailTemplateGeneratorPanel } from './email/email-template-generator-panel';

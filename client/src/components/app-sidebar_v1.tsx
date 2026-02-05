@@ -170,12 +170,6 @@ const getNavSections = (): NavSection[] => [
         ],
       },
       {
-        title: "Projects Management",
-        url: "/orders",
-        icon: Briefcase,
-        roles: ["admin", "campaign_manager", "client_user"],
-      },
-      {
         title: "Engagement Analytics",
         url: "/engagement-analytics",
         icon: Activity,

@@ -105,7 +105,7 @@ setInterval(() => {
 router.post('/start', async (req: Request, res: Response) => {
   try {
     const clientUser = (req as any).clientUser;
-    const { campaignId, contactData } = req.body;
+    const { campaignId, contactData, voiceId, mode } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ error: 'Campaign ID is required' });
@@ -190,6 +190,11 @@ router.post('/start', async (req: Request, res: Response) => {
       console.log('[Simulation] No virtual agent assignment found');
     }
 
+    // Override voice if provided in request
+    if (voiceId) {
+      agentInfo.voice = voiceId;
+    }
+
     // Use provided contact data or generate mock contact
     let simulationContact: MockContact;
     if (contactData && (contactData.contactName || contactData.accountName)) {
@@ -212,7 +217,7 @@ router.post('/start', async (req: Request, res: Response) => {
     const systemPrompt = buildSimulationPrompt(campaign, agentPersona, simulationContact);
 
     // Generate first message based on campaign with contact data
-    const firstMessage = generateFirstMessage(campaign, simulationContact);
+    const firstMessage = generateFirstMessage(campaign, simulationContact, mode);
 
     // Create session
     const sessionId = uuidv4();
@@ -412,7 +417,23 @@ async function generateGeminiResponse(
  * Generate first message based on campaign data and mock contact
  * Uses the standard opening format: "Hello, may I please speak with [Name], the [Title] at [Company]?"
  */
-function generateFirstMessage(campaign: any, mockContact: MockContact): string {
+function generateFirstMessage(campaign: any, mockContact: MockContact, mode?: string): string {
+  if (mode === 'email') {
+    return `Subject: Partnership with ${mockContact.accountName}
+
+Hi ${mockContact.firstName},
+
+I hope you're having a great week.
+
+I'm reaching out because I believe we can help ${mockContact.accountName} achieve its growth goals this quarter.
+
+Would you be open to a brief conversation?
+
+Best regards,
+${campaign.aiAgentSettings?.persona?.name || 'AI Assistant'}
+${campaign.aiAgentSettings?.persona?.companyName || 'DemandGentic'}`;
+  }
+
   // Check if campaign has AI agent settings with opening script
   if (campaign.aiAgentSettings?.scripts?.opening) {
     // Substitute mock contact variables in the custom opening script

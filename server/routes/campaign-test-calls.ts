@@ -11,8 +11,10 @@ import {
   campaignAgentAssignments,
   insertCampaignTestCallSchema,
   type CampaignTestCall,
+  workOrders, // Import workOrders
 } from "@shared/schema";
 import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
+import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { env } from "../env";
 import { getOrganizationById } from "../services/problem-intelligence/organization-service";
 
@@ -41,8 +43,9 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
   try {
     const { campaignId } = req.params;
     const userId = (req as any).user?.id;
+    const isWorkOrderSource = req.query.source === 'work_order';
 
-    console.log("[Campaign Test Call] Request received:", { campaignId, userId, body: req.body });
+    console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });
 
     // Validate request body
     const validatedData = initiateTestCallSchema.parse({
@@ -52,69 +55,125 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
 
     console.log("[Campaign Test Call] Validated data:", validatedData);
 
-    // Get the campaign
-    const campaign = await storage.getCampaign(campaignId);
-    console.log("[Campaign Test Call] Campaign lookup result:", campaign ? { id: campaign.id, type: campaign.type, dialMode: campaign.dialMode } : null);
-    
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
-    }
-
-    // Verify campaign is a call campaign with AI agent mode (ai_agent or hybrid)
-    if (campaign.type !== "call") {
-      return res.status(400).json({ message: "Test calls are only available for call campaigns" });
-    }
-
-    if (campaign.dialMode !== "ai_agent" && campaign.dialMode !== "hybrid") {
-      return res.status(400).json({
-        message: "Test calls are only available for AI Agent or Hybrid campaigns",
-        dialMode: campaign.dialMode,
-        requiredDialMode: "ai_agent or hybrid"
-      });
-    }
-
-    // Fetch campaign organization for organization name
-    // Priority: campaignOrg.name > aiSettings.persona.companyName > fallback
+    let campaign: any;
+    let assignment: any;
     let campaignOrganizationName: string | undefined;
-    const campaignOrgId = (campaign as any).problemIntelligenceOrgId;
-    if (campaignOrgId) {
-      try {
-        const campaignOrg = await getOrganizationById(campaignOrgId);
-        if (campaignOrg) {
-          campaignOrganizationName = campaignOrg.name;
-          console.log(`[Campaign Test Call] Using organization: ${campaignOrganizationName} (${campaignOrgId})`);
-        }
-      } catch (err) {
-        console.warn(`[Campaign Test Call] Failed to fetch organization ${campaignOrgId}:`, err);
+
+    if (isWorkOrderSource) {
+      // Logic for Test Call from Campaign Creation Wizard (Draft Work Order)
+      const [workOrder] = await db.select().from(workOrders).where(eq(workOrders.id, campaignId)).limit(1);
+      
+      if (!workOrder) {
+        return res.status(404).json({ message: "Work Order draft not found", requestedId: campaignId });
       }
-    }
 
-    // Get the virtual agent assigned to this campaign
-    const [assignment] = await db
-      .select({
-        virtualAgentId: campaignAgentAssignments.virtualAgentId,
-        agentName: virtualAgents.name,
-        systemPrompt: virtualAgents.systemPrompt,
-        firstMessage: virtualAgents.firstMessage,
-        voice: virtualAgents.voice,
-        settings: virtualAgents.settings,
-      })
-      .from(campaignAgentAssignments)
-      .innerJoin(virtualAgents, eq(virtualAgents.id, campaignAgentAssignments.virtualAgentId))
-      .where(
-        and(
-          eq(campaignAgentAssignments.campaignId, campaignId),
-          eq(campaignAgentAssignments.agentType, "ai"),
-          eq(campaignAgentAssignments.isActive, true)
-        )
-      )
-      .limit(1);
+      // Construct Mock Campaign Object
+      campaign = {
+        id: workOrder.id,
+        type: 'call',
+        dialMode: 'ai_agent',
+        status: 'draft',
+        // Mock organization ID lookup if needed, or null
+        problemIntelligenceOrgId: null, 
+      };
 
-    if (!assignment) {
-      return res.status(400).json({
-        message: "No AI agent assigned to this campaign",
-        suggestion: "Please assign a virtual agent to the campaign before testing"
-      });
+      // Construct Mock Agent Assignment from Work Order Config
+      const config = workOrder.campaignConfig as any;
+      
+      // Safety check for empty aiAgent config
+      const aiConfig = config.aiAgent || {};
+      const agentPersona = aiConfig.persona || 'Helpful Assistant';
+      const agentTone = aiConfig.tone || 'professional';
+      const openingScript = aiConfig.openingScript || 'Hello, this is a test call.';
+      const voiceId = aiConfig.voice || 'Fenrir';
+
+      // Build system prompt dynamically
+      const basePrompt = `You are ${agentPersona}. Tone: ${agentTone}. Objective: ${config.objective || 'N/A'}.`;
+      
+      // In a real scenario, we might want to use the same rigorous prompt builder as the main campaigns
+      let systemPrompt = basePrompt;
+      try {
+         systemPrompt = await buildAgentSystemPrompt(basePrompt);
+      } catch (err) {
+         console.warn("[Campaign Test Call] Failed to build full system prompt for Work Order, using base:", err);
+      }
+
+      assignment = {
+        virtualAgentId: 'temp_work_order_agent',
+        agentName: agentPersona,
+        systemPrompt: systemPrompt,
+        firstMessage: openingScript,
+        voice: voiceId,
+        settings: {}, // Default settings
+      };
+      
+      console.log("[Campaign Test Call] Using Work Order Configuration for Test.");
+
+    } else {
+        // Standard Logic: Get the campaign from DB
+        campaign = await storage.getCampaign(campaignId);
+        console.log("[Campaign Test Call] Campaign lookup result:", campaign ? { id: campaign.id, type: campaign.type, dialMode: campaign.dialMode } : null);
+        
+        if (!campaign) {
+          return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
+        }
+
+        // Verify campaign is a call campaign with AI agent mode (ai_agent or hybrid)
+        if (campaign.type !== "call") {
+          return res.status(400).json({ message: "Test calls are only available for call campaigns" });
+        }
+
+        if (campaign.dialMode !== "ai_agent" && campaign.dialMode !== "hybrid") {
+          return res.status(400).json({
+            message: "Test calls are only available for AI Agent or Hybrid campaigns",
+            dialMode: campaign.dialMode,
+            requiredDialMode: "ai_agent or hybrid"
+          });
+        }
+
+        // Fetch campaign organization for organization name
+        const campaignOrgId = (campaign as any).problemIntelligenceOrgId;
+        if (campaignOrgId) {
+          try {
+            const campaignOrg = await getOrganizationById(campaignOrgId);
+            if (campaignOrg) {
+              campaignOrganizationName = campaignOrg.name;
+              console.log(`[Campaign Test Call] Using organization: ${campaignOrganizationName} (${campaignOrgId})`);
+            }
+          } catch (err) {
+            console.warn(`[Campaign Test Call] Failed to fetch organization ${campaignOrgId}:`, err);
+          }
+        }
+
+        // Get the virtual agent assigned to this campaign
+        const [dbAssignment] = await db
+          .select({
+            virtualAgentId: campaignAgentAssignments.virtualAgentId,
+            agentName: virtualAgents.name,
+            systemPrompt: virtualAgents.systemPrompt,
+            firstMessage: virtualAgents.firstMessage,
+            voice: virtualAgents.voice,
+            settings: virtualAgents.settings,
+          })
+          .from(campaignAgentAssignments)
+          .innerJoin(virtualAgents, eq(virtualAgents.id, campaignAgentAssignments.virtualAgentId))
+          .where(
+            and(
+              eq(campaignAgentAssignments.campaignId, campaignId),
+              eq(campaignAgentAssignments.agentType, "ai"),
+              eq(campaignAgentAssignments.isActive, true)
+            )
+          )
+          .limit(1);
+        
+        assignment = dbAssignment;
+
+        if (!assignment) {
+          return res.status(400).json({
+            message: "No AI agent assigned to this campaign",
+            suggestion: "Please assign a virtual agent to the campaign before testing"
+          });
+        }
     }
 
     // Check environment configuration

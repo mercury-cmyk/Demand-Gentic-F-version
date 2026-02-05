@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, User, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 
 interface EmailTemplate {
   id: string;
@@ -107,7 +108,7 @@ export function TemplatePreviewModal({
                     </style>
                   </head>
                   <body>
-                    ${template.htmlContent}
+                    ${sanitizeHtmlForIframePreview(template.htmlContent)}
                   </body>
                 </html>
               `}

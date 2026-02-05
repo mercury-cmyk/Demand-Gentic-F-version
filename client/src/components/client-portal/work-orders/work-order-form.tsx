@@ -1,14 +1,19 @@
 /**
  * Work Order Form Component
  *
- * Allows clients to submit work orders (campaign requests) that flow to admin review.
- * Connects to: Projects, Campaigns, QA, and Leads
+ * "Agentic Order Request" - AI-driven campaign creation wizard.
+ * Allows clients to describe goals in natural language, which are then parsed (simulated) into campaign config.
+ *
+ * Features:
+ * - Natural Language Input ('Describe Goal')
+ * - Quick Start Templates
+ * - Context/Resource Uploads
+ * - Multi-step Wizard Flow
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,7 +29,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -32,10 +36,12 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
   FileText, Phone, Mail, Target, Users, Building2, MapPin,
-  Calendar, DollarSign, Loader2, Send, Save, CheckCircle2,
-  Sparkles, AlertCircle
+  Calendar, Loader2, CheckCircle2,
+  Sparkles, Upload, FileUp, X, ChevronRight, ArrowLeft,
+  Box, Lightbulb
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Card, CardContent } from "@/components/ui/card";
 
 interface WorkOrderFormProps {
   open: boolean;
@@ -55,39 +61,34 @@ interface WorkOrder {
   submittedAt?: string;
 }
 
+const QUICK_EXAMPLES = [
+  {
+    title: "ABM + Technographic Targeting",
+    description: "Account-aware outreach with firmographic filters (revenue, employees), technology stack targeting (AWS/Azure), SIC/NAICS codes.",
+    icon: Building2
+  },
+  {
+    title: "Content Syndication (CS)",
+    description: "Whitepaper/asset distribution with MQL generation, seniority targeting, industry NAICS codes, and multi-region reach.",
+    icon: FileText
+  },
+];
+
 const ORDER_TYPES = [
-  { value: 'lead_generation', label: 'Lead Generation', icon: Target, description: 'Generate new qualified leads for your sales team' },
-  { value: 'call_campaign', label: 'AI Call Campaign', icon: Phone, description: 'Automated AI-powered calling campaign' },
-  { value: 'email_campaign', label: 'Email Campaign', icon: Mail, description: 'Email outreach and nurture campaign' },
-  { value: 'combo_campaign', label: 'Call + Email Combo', icon: Sparkles, description: 'Combined multi-channel outreach' },
-  { value: 'appointment_setting', label: 'Appointment Setting', icon: Calendar, description: 'Book meetings with qualified prospects' },
-  { value: 'data_enrichment', label: 'Data Enrichment', icon: Users, description: 'Enrich and verify your contact data' },
-  { value: 'market_research', label: 'Market Research', icon: Building2, description: 'Gather market intelligence through calls' },
-  { value: 'custom', label: 'Custom Request', icon: FileText, description: 'Other specialized requirements' },
-];
-
-const PRIORITY_OPTIONS = [
-  { value: 'low', label: 'Low', color: 'bg-slate-100 text-slate-700' },
-  { value: 'normal', label: 'Normal', color: 'bg-blue-100 text-blue-700' },
-  { value: 'high', label: 'High', color: 'bg-orange-100 text-orange-700' },
-  { value: 'urgent', label: 'Urgent', color: 'bg-red-100 text-red-700' },
-];
-
-const COMPANY_SIZES = [
-  { value: '1-10', label: '1-10 employees' },
-  { value: '11-50', label: '11-50 employees' },
-  { value: '51-200', label: '51-200 employees' },
-  { value: '201-500', label: '201-500 employees' },
-  { value: '501-1000', label: '501-1000 employees' },
-  { value: '1001-5000', label: '1001-5000 employees' },
-  { value: '5001+', label: '5001+ employees' },
+  { value: 'lead_generation', label: 'Lead Generation', icon: Target },
+  { value: 'call_campaign', label: 'AI Call Campaign', icon: Phone },
+  { value: 'email_campaign', label: 'Email Campaign', icon: Mail },
+  { value: 'combo_campaign', label: 'Call + Email Combo', icon: Sparkles },
+  { value: 'appointment_setting', label: 'Appointment Setting', icon: Calendar },
+  { value: 'data_enrichment', label: 'Data Enrichment', icon: Users },
+  { value: 'market_research', label: 'Market Research', icon: Building2 },
+  { value: 'custom', label: 'Custom Request', icon: FileText },
 ];
 
 export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
-  const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -106,28 +107,35 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     estimatedBudget: undefined as number | undefined,
     clientNotes: '',
     specialRequirements: '',
+    // Agentic specific fields
+    targetUrls: [] as string[],
+    deliveryMethod: 'email',
   });
 
-  // Temporary input states for array fields
+  // Temporary input states
   const [industryInput, setIndustryInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
-  const [regionInput, setRegionInput] = useState('');
+  const [urlInput, setUrlInput] = useState('');
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 
   // Create work order mutation
   const createMutation = useMutation({
     mutationFn: async (submitNow: boolean) => {
+      // Auto-generate title if missing
+      const submissionData = {
+        ...formData,
+        title: formData.title || `Agentic Order - ${new Date().toLocaleDateString()}`,
+        submitNow,
+      };
+
       const res = await fetch('/api/client-portal/work-orders/client', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${getToken()}`,
         },
-        body: JSON.stringify({
-          ...formData,
-          submitNow,
-        }),
+        body: JSON.stringify(submissionData),
       });
       if (!res.ok) {
         const error = await res.json();
@@ -138,10 +146,12 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     onSuccess: (data, submitNow) => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       toast({
-        title: submitNow ? 'Direct Agentic Order Submitted!' : 'Draft Saved',
+        title: submitNow ? 'Agentic Order Submitted!' : 'Draft Saved',
         description: submitNow
-          ? `Order ${data.workOrder.orderNumber} has been submitted for review`
-          : 'Your Direct Agentic Order has been saved as a draft',
+          ? `Order ${data.workOrder.orderNumber} has been received. Agents are reviewing your instructions.`
+          : 'Your Agentic Order has been saved as a draft',
+        variant: "default", 
+        className: "bg-emerald-600 text-white border-none"
       });
       onSuccess?.(data.workOrder);
       onOpenChange(false);
@@ -173,14 +183,16 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
       estimatedBudget: undefined,
       clientNotes: '',
       specialRequirements: '',
+      targetUrls: [],
+      deliveryMethod: 'email',
     });
     setStep(1);
     setIndustryInput('');
     setTitleInput('');
-    setRegionInput('');
+    setUrlInput('');
   };
 
-  const handleAddItem = (field: 'targetIndustries' | 'targetTitles' | 'targetRegions', value: string) => {
+  const handleAddItem = (field: 'targetIndustries' | 'targetTitles' | 'targetUrls', value: string) => {
     if (value.trim()) {
       setFormData(prev => ({
         ...prev,
@@ -189,538 +201,365 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     }
   };
 
-  const handleRemoveItem = (field: 'targetIndustries' | 'targetTitles' | 'targetRegions', index: number) => {
+  const handleRemoveItem = (field: 'targetIndustries' | 'targetTitles' | 'targetUrls', index: number) => {
     setFormData(prev => ({
       ...prev,
       [field]: prev[field].filter((_, i) => i !== index),
     }));
   };
 
-  const isStepValid = (stepNum: number) => {
-    switch (stepNum) {
-      case 1:
-        return formData.title.trim().length > 0;
-      case 2:
-        return true; // Targeting is optional
-      case 3:
-        return true; // Additional details are optional
-      default:
-        return true;
-    }
+  const handleQuickExample = (example: typeof QUICK_EXAMPLES[0]) => {
+    setFormData(prev => ({
+      ...prev,
+      title: example.title,
+      description: example.description
+    }));
+    toast({
+      title: "Template Applied",
+      description: "Goal description updated from example.",
+    })
   };
 
-  const selectedOrderType = ORDER_TYPES.find(t => t.value === formData.orderType);
+  const isStepValid = (stepNum: number) => {
+    if (stepNum === 1) return formData.description.trim().length > 0;
+    return true;
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Create Direct Agentic Order
-          </DialogTitle>
-          <DialogDescription>
-            Submit a new Direct Agentic Order to request campaigns, lead generation, or other services
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Progress Steps */}
-        <div className="flex items-center justify-center gap-2 py-4">
-          {[1, 2, 3].map((s) => (
-            <div key={s} className="flex items-center">
-              <button
-                onClick={() => s < step && setStep(s)}
-                className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors',
-                  step >= s
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground'
-                )}
-              >
-                {step > s ? <CheckCircle2 className="w-4 h-4" /> : s}
-              </button>
-              {s < 3 && (
-                <div className={cn(
-                  'w-16 h-1 mx-2',
-                  step > s ? 'bg-primary' : 'bg-muted'
-                )} />
-              )}
+      <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col p-0 gap-0 border-none rounded-xl">
+        {/* Header - Green Background as per user design */}
+        <div className="bg-[#0FA97F] text-white p-6 pb-20 relative overflow-hidden">
+            {/* Texture/Pattern overlay if needed, for now just clean green */}
+          <DialogHeader className="relative z-10">
+            <div className="flex items-center justify-between">
+                <DialogTitle className="text-2xl font-normal tracking-wide flex items-center gap-3">
+                    <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+                        <Box className="h-6 w-6 text-white" />
+                    </div>
+                    Agentic Order Request
+                </DialogTitle>
+                <button onClick={() => onOpenChange(false)} className="text-white/70 hover:text-white transition-colors">
+                    <X className="w-5 h-5" />
+                </button>
             </div>
-          ))}
-        </div>
-        <div className="flex justify-center gap-8 text-xs text-muted-foreground mb-4">
-          <span className={step >= 1 ? 'text-primary font-medium' : ''}>Request Details</span>
-          <span className={step >= 2 ? 'text-primary font-medium' : ''}>Targeting</span>
-          <span className={step >= 3 ? 'text-primary font-medium' : ''}>Review</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-1">
-          {/* Step 1: Request Details */}
-          {step === 1 && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="title">Request Title *</Label>
-                <Input
-                  id="title"
-                  placeholder="e.g., Q1 Lead Generation Campaign"
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Request Type</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  {ORDER_TYPES.map((type) => (
-                    <button
-                      key={type.value}
-                      onClick={() => setFormData(prev => ({ ...prev, orderType: type.value }))}
-                      className={cn(
-                        'flex items-start gap-3 p-3 rounded-lg border text-left transition-colors',
-                        formData.orderType === type.value
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      )}
-                    >
-                      <type.icon className={cn(
-                        'h-5 w-5 mt-0.5',
-                        formData.orderType === type.value ? 'text-primary' : 'text-muted-foreground'
-                      )} />
-                      <div>
-                        <div className="font-medium text-sm">{type.label}</div>
-                        <div className="text-xs text-muted-foreground">{type.description}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <Select
-                    value={formData.priority}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, priority: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PRIORITY_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          <div className="flex items-center gap-2">
-                            <Badge className={opt.color}>{opt.label}</Badge>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Target Lead Count</Label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 500"
-                    value={formData.targetLeadCount || ''}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
-                    }))}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea
-                  placeholder="Describe your campaign goals, target audience, and any specific requirements..."
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  rows={4}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Step 2: Targeting */}
-          {step === 2 && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <Label>Target Industries</Label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add industry (press Enter)"
-                    value={industryInput}
-                    onChange={(e) => setIndustryInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddItem('targetIndustries', industryInput);
-                        setIndustryInput('');
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      handleAddItem('targetIndustries', industryInput);
-                      setIndustryInput('');
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {formData.targetIndustries.map((industry, idx) => (
-                    <Badge key={idx} variant="secondary" className="gap-1">
-                      {industry}
-                      <button
-                        onClick={() => handleRemoveItem('targetIndustries', idx)}
-                        className="ml-1 hover:text-destructive"
-                      >
-                        ×
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Target Job Titles</Label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add job title (press Enter)"
-                    value={titleInput}
-                    onChange={(e) => setTitleInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddItem('targetTitles', titleInput);
-                        setTitleInput('');
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      handleAddItem('targetTitles', titleInput);
-                      setTitleInput('');
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {formData.targetTitles.map((title, idx) => (
-                    <Badge key={idx} variant="secondary" className="gap-1">
-                      {title}
-                      <button
-                        onClick={() => handleRemoveItem('targetTitles', idx)}
-                        className="ml-1 hover:text-destructive"
-                      >
-                        ×
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Company Size</Label>
-                  <Select
-                    value={formData.targetCompanySize}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, targetCompanySize: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select size range" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COMPANY_SIZES.map((size) => (
-                        <SelectItem key={size.value} value={size.value}>
-                          {size.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Target Account Count</Label>
-                  <Input
-                    type="number"
-                    placeholder="e.g., 1000"
-                    value={formData.targetAccountCount || ''}
-                    onChange={(e) => setFormData(prev => ({
-                      ...prev,
-                      targetAccountCount: e.target.value ? parseInt(e.target.value) : undefined
-                    }))}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Target Regions</Label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add region (press Enter)"
-                    value={regionInput}
-                    onChange={(e) => setRegionInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddItem('targetRegions', regionInput);
-                        setRegionInput('');
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      handleAddItem('targetRegions', regionInput);
-                      setRegionInput('');
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {formData.targetRegions.map((region, idx) => (
-                    <Badge key={idx} variant="secondary" className="gap-1">
-                      {region}
-                      <button
-                        onClick={() => handleRemoveItem('targetRegions', idx)}
-                        className="ml-1 hover:text-destructive"
-                      >
-                        ×
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Requested Start Date</Label>
-                  <Input
-                    type="date"
-                    value={formData.requestedStartDate}
-                    onChange={(e) => setFormData(prev => ({ ...prev, requestedStartDate: e.target.value }))}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Requested End Date</Label>
-                  <Input
-                    type="date"
-                    value={formData.requestedEndDate}
-                    onChange={(e) => setFormData(prev => ({ ...prev, requestedEndDate: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Estimated Budget ($)</Label>
-                <Input
-                  type="number"
-                  placeholder="e.g., 10000"
-                  value={formData.estimatedBudget || ''}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    estimatedBudget: e.target.value ? parseFloat(e.target.value) : undefined
-                  }))}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Review */}
-          {step === 3 && (
-            <div className="space-y-6">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    {selectedOrderType && <selectedOrderType.icon className="h-5 w-5 text-primary" />}
-                    {formData.title || 'Untitled Request'}
-                  </CardTitle>
-                  <CardDescription>{selectedOrderType?.description}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Type:</span>{' '}
-                      <span className="font-medium">{selectedOrderType?.label}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Priority:</span>{' '}
-                      <Badge className={PRIORITY_OPTIONS.find(p => p.value === formData.priority)?.color}>
-                        {PRIORITY_OPTIONS.find(p => p.value === formData.priority)?.label}
-                      </Badge>
-                    </div>
-                    {formData.targetLeadCount && (
-                      <div>
-                        <span className="text-muted-foreground">Target Leads:</span>{' '}
-                        <span className="font-medium">{formData.targetLeadCount.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {formData.estimatedBudget && (
-                      <div>
-                        <span className="text-muted-foreground">Budget:</span>{' '}
-                        <span className="font-medium">${formData.estimatedBudget.toLocaleString()}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {formData.description && (
-                    <div>
-                      <div className="text-sm text-muted-foreground mb-1">Description:</div>
-                      <p className="text-sm bg-muted p-3 rounded">{formData.description}</p>
-                    </div>
-                  )}
-
-                  {(formData.targetIndustries.length > 0 || formData.targetTitles.length > 0) && (
-                    <div className="space-y-2">
-                      {formData.targetIndustries.length > 0 && (
-                        <div>
-                          <div className="text-sm text-muted-foreground mb-1">Industries:</div>
-                          <div className="flex flex-wrap gap-1">
-                            {formData.targetIndustries.map((i, idx) => (
-                              <Badge key={idx} variant="outline">{i}</Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {formData.targetTitles.length > 0 && (
-                        <div>
-                          <div className="text-sm text-muted-foreground mb-1">Job Titles:</div>
-                          <div className="flex flex-wrap gap-1">
-                            {formData.targetTitles.map((t, idx) => (
-                              <Badge key={idx} variant="outline">{t}</Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {(formData.requestedStartDate || formData.requestedEndDate) && (
-                    <div className="flex gap-4 text-sm">
-                      {formData.requestedStartDate && (
-                        <div>
-                          <span className="text-muted-foreground">Start:</span>{' '}
-                          <span className="font-medium">{formData.requestedStartDate}</span>
-                        </div>
-                      )}
-                      {formData.requestedEndDate && (
-                        <div>
-                          <span className="text-muted-foreground">End:</span>{' '}
-                          <span className="font-medium">{formData.requestedEndDate}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <div className="space-y-2">
-                <Label>Additional Notes (Optional)</Label>
-                <Textarea
-                  placeholder="Any additional information for our team..."
-                  value={formData.clientNotes}
-                  onChange={(e) => setFormData(prev => ({ ...prev, clientNotes: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Special Requirements (Optional)</Label>
-                <Textarea
-                  placeholder="Any specific requirements or constraints..."
-                  value={formData.specialRequirements}
-                  onChange={(e) => setFormData(prev => ({ ...prev, specialRequirements: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <DialogFooter className="flex-shrink-0 gap-2 pt-4 border-t">
-          {step > 1 && (
-            <Button variant="outline" onClick={() => setStep(step - 1)}>
-              Back
-            </Button>
-          )}
-          <div className="flex-1" />
-
-          {step < 3 ? (
-            <Button
-              onClick={() => setStep(step + 1)}
-              disabled={!isStepValid(step)}
-            >
-              Continue
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => createMutation.mutate(false)}
-                disabled={createMutation.isPending}
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4 mr-2" />
-                )}
-                Save Draft
-              </Button>
-              <Button
-                onClick={() => setShowConfirmSubmit(true)}
-                disabled={createMutation.isPending || !formData.title}
-              >
-                {createMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4 mr-2" />
-                )}
-                Submit Request
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-
-      {/* Confirm Submit Dialog */}
-      <Dialog open={showConfirmSubmit} onOpenChange={setShowConfirmSubmit}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Submit Direct Agentic Order?</DialogTitle>
-            <DialogDescription>
-              Once submitted, your Direct Agentic Order will be reviewed by our team. You'll receive updates on its progress.
+            <DialogDescription className="text-white/90 text-sm mt-1 ml-11">
+              Directly instruct agents to execute your campaign
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowConfirmSubmit(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                setShowConfirmSubmit(false);
-                createMutation.mutate(true);
-              }}
-            >
-              <Send className="h-4 w-4 mr-2" />
-              Submit
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+
+        {/* Wizard Panel - Overlapping Card */}
+        <div className="flex-1 flex flex-col bg-white dark:bg-slate-950 -mt-12 rounded-t-3xl z-20 mx-0 overflow-hidden shadow-2xl h-full">
+            {/* Stepper */}
+            <div className="flex justify-center items-center py-6 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-4">
+                    {[
+                        { num: 1, label: "Describe Goal" },
+                        { num: 2, label: "Configure" },
+                        { num: 3, label: "Review & Submit" }
+                    ].map((s, idx, arr) => (
+                        <div key={s.num} className="flex items-center">
+                            <div className={cn(
+                                "flex items-center gap-2 px-4 py-1 rounded-full transition-colors",
+                                step === s.num ? "bg-emerald-50 text-emerald-700 font-medium" : 
+                                step > s.num ? "text-emerald-600" : "text-slate-400"
+                            )}>
+                                <div className={cn(
+                                    "w-6 h-6 rounded flex items-center justify-center text-xs font-bold",
+                                    step === s.num ? "bg-emerald-600 text-white" :
+                                    step > s.num ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+                                )}>
+                                    {step > s.num ? <CheckCircle2 className="w-4 h-4" /> : s.num}
+                                </div>
+                                <span>{s.label}</span>
+                            </div>
+                            {idx < arr.length - 1 && (
+                                <div className="w-12 h-[2px] bg-slate-100 mx-2" />
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8 bg-white dark:bg-slate-950">
+            {/* Step 1: Describe Goal */}
+            {step === 1 && (
+                <div className="space-y-8 max-w-3xl mx-auto text-center">
+                    <div className="space-y-2">
+                        <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+                            <Sparkles className="w-6 h-6" />
+                        </div>
+                        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
+                            What would you like to achieve?
+                        </h2>
+                        <p className="text-slate-500 max-w-lg mx-auto">
+                            Describe your campaign goal in natural language and our AI will recommend the best approach.
+                        </p>
+                    </div>
+
+                    <div className="relative">
+                        <Card className="border-slate-200 shadow-sm overflow-hidden text-left">
+                            <CardContent className="p-0">
+                                <Textarea
+                                    placeholder="Example: I want to generate 200 qualified leads from IT directors at mid-size healthcare companies in the US who might be interested in our cybersecurity solution..."
+                                    value={formData.description}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                                    className="min-h-[180px] w-full resize-none border-0 focus-visible:ring-0 p-6 text-base placeholder:text-slate-300 leading-relaxed"
+                                />
+                                <div className="border-t bg-slate-50 px-4 py-2 flex justify-between items-center">
+                                    <span className="text-xs text-slate-400 flex items-center gap-1">
+                                        <Lightbulb className="w-3 h-3" /> AI will parse targeting from this text
+                                    </span>
+                                    <span className="text-xs text-slate-400">{formData.description.length} chars</span>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    <div className="space-y-4 pt-4 text-left">
+                        <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
+                            <Lightbulb className="w-4 h-4 text-amber-500" />
+                            Quick Examples — Click to populate:
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {QUICK_EXAMPLES.map((ex, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => handleQuickExample(ex)}
+                                    className="text-left p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all group bg-slate-50/50 hover:bg-white"
+                                >
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="p-1.5 rounded bg-blue-100 text-blue-600 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
+                                            <ex.icon className="w-4 h-4" />
+                                        </div>
+                                        <h4 className="font-semibold text-slate-900 dark:text-slate-200 text-sm">{ex.title}</h4>
+                                    </div>
+                                    <p className="text-xs text-slate-500 leading-relaxed">{ex.description}</p>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Step 2: Configure */}
+            {step === 2 && (
+                <div className="space-y-6 max-w-3xl mx-auto">
+                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-lg flex gap-3">
+                        <Sparkles className="w-5 h-5 text-emerald-600 mt-0.5" />
+                        <div>
+                            <h4 className="text-sm font-medium text-emerald-900">AI Analysis</h4>
+                            <p className="text-sm text-emerald-700 mt-1">
+                                Based on your description, we've pre-configured the following targeting parameters. Please refine if needed.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6">
+                         <div className="space-y-3">
+                            <Label>Campaign Type</Label>
+                            <Select 
+                                value={formData.orderType} 
+                                onValueChange={(val) => setFormData(prev => ({ ...prev, orderType: val }))}
+                            >
+                                <SelectTrigger className="bg-white">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {ORDER_TYPES.map(t => (
+                                        <SelectItem key={t.value} value={t.value}>
+                                            <div className="flex items-center gap-2">
+                                                <t.icon className="w-4 h-4" /> {t.label}
+                                            </div>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-3">
+                             <Label>Lead Volume Target</Label>
+                             <Input 
+                                type="number" 
+                                placeholder="e.g. 500" 
+                                value={formData.targetLeadCount || ''}
+                                onChange={(e) => setFormData(prev => ({ ...prev, targetLeadCount: parseInt(e.target.value) }))}
+                                className="bg-white"
+                             />
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <Label>Target Industries</Label>
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Add industry..."
+                                value={industryInput}
+                                onChange={(e) => setIndustryInput(e.target.value)}
+                                className="bg-white"
+                                onKeyDown={(e) => {
+                                    if(e.key === 'Enter') { e.preventDefault(); handleAddItem('targetIndustries', industryInput); setIndustryInput(''); }
+                                }}
+                            />
+                            <Button variant="secondary" type="button" onClick={() => { handleAddItem('targetIndustries', industryInput); setIndustryInput(''); }}>Add</Button>
+                        </div>
+                        {formData.targetIndustries.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {formData.targetIndustries.map((ind, i) => (
+                                    <Badge key={i} variant="outline" className="bg-white">
+                                        {ind} <button onClick={() => handleRemoveItem('targetIndustries', i)} className="ml-1 hover:text-red-500">×</button>
+                                    </Badge>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-3">
+                        <Label>Target Job Titles</Label>
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Add job title..."
+                                value={titleInput}
+                                onChange={(e) => setTitleInput(e.target.value)}
+                                className="bg-white"
+                                onKeyDown={(e) => {
+                                    if(e.key === 'Enter') { e.preventDefault(); handleAddItem('targetTitles', titleInput); setTitleInput(''); }
+                                }}
+                            />
+                            <Button variant="secondary" type="button" onClick={() => { handleAddItem('targetTitles', titleInput); setTitleInput(''); }}>Add</Button>
+                        </div>
+                         {formData.targetTitles.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {formData.targetTitles.map((t, i) => (
+                                    <Badge key={i} variant="outline" className="bg-white">
+                                        {t} <button onClick={() => handleRemoveItem('targetTitles', i)} className="ml-1 hover:text-red-500">×</button>
+                                    </Badge>
+                                ))}
+                            </div>
+                         )}
+                    </div>
+                    
+                    <div className="space-y-3">
+                         <Label>Reference URLs (Optional)</Label>
+                         <div className="flex gap-2">
+                            <Input
+                                placeholder="https://..."
+                                value={urlInput}
+                                onChange={(e) => setUrlInput(e.target.value)}
+                                className="bg-white"
+                                onKeyDown={(e) => {
+                                    if(e.key === 'Enter') { e.preventDefault(); handleAddItem('targetUrls', urlInput); setUrlInput(''); }
+                                }}
+                            />
+                            <Button variant="secondary" type="button" onClick={() => { handleAddItem('targetUrls', urlInput); setUrlInput(''); }}>Add</Button>
+                        </div>
+                         {formData.targetUrls.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {formData.targetUrls.map((u, i) => (
+                                    <Badge key={i} variant="outline" className="bg-white max-w-full truncate">
+                                        <span className="truncate">{u}</span> <button onClick={() => handleRemoveItem('targetUrls', i)} className="ml-1 hover:text-red-500">×</button>
+                                    </Badge>
+                                ))}
+                            </div>
+                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Step 3: Review */}
+            {step === 3 && (
+                <div className="max-w-3xl mx-auto space-y-8 pt-4">
+                    <div className="text-center space-y-2">
+                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-in zoom-in-50 duration-300">
+                            <CheckCircle2 className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-2xl font-semibold text-slate-900">Ready to Launch</h3>
+                        <p className="text-slate-500">
+                            Our agents will review your request and begin execution within 24 hours.
+                        </p>
+                    </div>
+
+                    <Card className="border-slate-200">
+                        <CardContent className="p-8 space-y-6">
+                            <div>
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Goal Statement</h4>
+                                <div className="p-4 bg-slate-50 rounded-lg border border-slate-100 text-slate-700 italic">
+                                    "{formData.description}"
+                                </div>
+                            </div>
+
+                            <Separator />
+
+                            <div className="grid grid-cols-2 gap-y-6 gap-x-12">
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Campaign Specs</h4>
+                                    <ul className="space-y-2 text-sm">
+                                        <li className="flex justify-between">
+                                            <span className="text-slate-500">Type:</span>
+                                            <span className="font-medium text-slate-900">{ORDER_TYPES.find(t => t.value === formData.orderType)?.label}</span>
+                                        </li>
+                                        <li className="flex justify-between">
+                                            <span className="text-slate-500">Priority:</span>
+                                            <span className="font-medium text-slate-900 capitalize">{formData.priority}</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Targeting</h4>
+                                    <ul className="space-y-2 text-sm">
+                                        <li className="flex justify-between">
+                                            <span className="text-slate-500">Industries:</span>
+                                            <span className="font-medium text-slate-900">{formData.targetIndustries.length || 'Open'}</span>
+                                        </li>
+                                        <li className="flex justify-between">
+                                            <span className="text-slate-500">Titles:</span>
+                                            <span className="font-medium text-slate-900">{formData.targetTitles.length || 'Open'}</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
+            </div>
+
+            {/* Sticky Footer */}
+            <div className="bg-white dark:bg-slate-900 border-t border-slate-200 p-6 flex justify-between items-center z-30">
+                <Button variant="ghost" disabled={step === 1} onClick={() => setStep(s => s - 1)} className="text-slate-500 hover:text-slate-900">
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                </Button>
+                
+                {step < 3 ? (
+                    <Button 
+                        onClick={() => setStep(s => s + 1)} 
+                        disabled={!isStepValid(step)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+                    >
+                        Next Step <ChevronRight className="w-4 h-4 ml-2" />
+                    </Button>
+                ) : (
+                    <div className="flex gap-3">
+                         <Button 
+                            variant="outline" 
+                            onClick={() => createMutation.mutate(false)}
+                            disabled={createMutation.isPending}
+                        >
+                            Save Draft
+                        </Button>
+                        <Button 
+                            onClick={() => createMutation.mutate(true)}
+                            disabled={createMutation.isPending}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+                        >
+                            {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Submit Request
+                        </Button>
+                    </div>
+                )}
+            </div>
+        </div>
+      </DialogContent>
     </Dialog>
   );
 }

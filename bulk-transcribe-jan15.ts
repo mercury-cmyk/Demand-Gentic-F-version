@@ -97,7 +97,7 @@ async function transcribeWithWhisper(recordingUrl: string, model: string): Promi
     console.log(`[Google STT] Transcribing with Google Cloud Speech-to-Text...`);
     
     // Dynamic import to get transcription service
-    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const { submitTranscription } = await import('./server/services/google-transcription');
     const transcript = await submitTranscription(recordingUrl);
     
     if (!transcript) {
@@ -110,10 +110,6 @@ async function transcribeWithWhisper(recordingUrl: string, model: string): Promi
     console.error('[Google STT] Error:', error);
     return null;
   }
-}
-
-  const data = await response.json();
-  return data.text || null;
 }
 
 async function run() {

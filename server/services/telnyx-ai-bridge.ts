@@ -26,6 +26,7 @@ import { eq } from "drizzle-orm";
 import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
 import { processDisposition } from "./disposition-engine";
+import { getGoogleVoiceConfig } from "./voice-constants";
 
 
 export interface TelnyxCallEvent {
@@ -815,18 +816,11 @@ export class TelnyxAiBridge extends EventEmitter {
   private async speakWithGoogle(callControlId: string, text: string, voice: string): Promise<void> {
     const ttsClient = new TextToSpeechClient();
     
-    // Map Gemini voice names to Google Cloud Journey/Studio voices
-    // alloy/shimmer/nova/aoede/kore -> Female Journey (F)
-    // echo/fable/onyx/puck/charon -> Male Journey (D)
-    const voiceLower = voice.toLowerCase();
-    
-    let googleVoice = "en-US-Journey-F"; // Default Female
-    // Male indicators found in Gemini voice names
-    if (["echo", "fable", "onyx", "ash", "charon", "fenrir", "puck"].some(v => voiceLower.includes(v))) {
-        googleVoice = "en-US-Journey-D"; // Male
-    }
+    // Use centralized voice configuration for consistent mapping
+    const voiceConfig = getGoogleVoiceConfig(voice);
+    const googleVoice = voiceConfig.googleVoiceName;
 
-    console.log(`[TelnyxAiBridge] Generating natural speech with Google TTS (voice: ${googleVoice} from ${voice})`);
+    console.log(`[TelnyxAiBridge] Generating natural speech with Google TTS (voice: ${googleVoice} from ${voice} - ${voiceConfig.description})`);
     
     const request = {
       input: { text },
@@ -1438,6 +1432,13 @@ export class TelnyxAiBridge extends EventEmitter {
         if (call && callId) {
           call.isAnswered = true; // Mark as answered so polling loop knows
           console.log(`[TelnyxAiBridge] Call answered via webhook: ${callId}`);
+
+          // Start recording immediately
+          // We use dual channels for better transcription diarization (Agent vs Prospect)
+          this.startRecording(callControlId).catch(err => {
+            console.error(`[TelnyxAiBridge] Failed to start recording on answer:`, err);
+          });
+
           // Speak opening message
           const openingMessage = call.agent.getOpeningMessage();
           const voiceSetting = call.agent.getVoiceSetting();
@@ -1487,6 +1488,32 @@ export class TelnyxAiBridge extends EventEmitter {
           this.activeCalls.delete(callId);
         }
         break;
+    }
+  }
+
+  // Start recording the call
+  private async startRecording(callControlId: string): Promise<void> {
+    const callId = this.getCallIdByControlId(callControlId);
+    console.log(`[TelnyxAiBridge] Starting recording for call: ${callControlId} (Call ID: ${callId})`);
+
+    const response = await this.telnyxFetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/record_start`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        format: "mp3",
+        channels: "dual", // Stereo recording for better diarization
+        play_beep: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // Don't throw - recording failure shouldn't kill the call
+      console.error(`[TelnyxAiBridge] Failed to start recording: ${response.status} - ${errorText}`);
+    } else {
+      console.log(`[TelnyxAiBridge] Recording started successfully for ${callControlId}`);
     }
   }
 

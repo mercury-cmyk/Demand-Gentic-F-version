@@ -56,6 +56,202 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
+// Components for Client Profile and Settings
+const ClientProfileEditor = ({ client, onSave, isLoading }: { client: any; onSave: (data: any) => void; isLoading: boolean }) => {
+  const [data, setData] = useState(client.profile || {});
+
+  const handleChange = (field: string, value: any) => {
+    setData((prev: any) => ({ ...prev, [field]: value }));
+  };
+
+  const handleArrayChange = (field: string, value: string) => {
+    const arr = value.split(',').map(s => s.trim()).filter(Boolean);
+    handleChange(field, arr);
+  };
+
+  return (
+    <div className="space-y-6 pt-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Business Summary</Label>
+          <Textarea 
+            value={data.summary || ''} 
+            onChange={(e) => handleChange('summary', e.target.value)}
+            placeholder="What does the client do?" 
+            rows={3}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Problem Solved</Label>
+          <Textarea 
+            value={data.problemSolved || ''} 
+            onChange={(e) => handleChange('problemSolved', e.target.value)}
+            placeholder="What core problems do they solve?" 
+             rows={3}
+          />
+        </div>
+      </div>
+      
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Target Audience</Label>
+          <Input 
+            value={data.targetAudience || ''} 
+            onChange={(e) => handleChange('targetAudience', e.target.value)}
+            placeholder="Who are they selling to?" 
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Engagement Model</Label>
+          <Input 
+            value={data.engagementModel || ''} 
+            onChange={(e) => handleChange('engagementModel', e.target.value)}
+            placeholder="How do we work with them?" 
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+            <Label>Products (comma separated)</Label>
+            <Input 
+                value={(data.products || []).join(', ')} 
+                onChange={(e) => handleArrayChange('products', e.target.value)}
+            />
+        </div>
+        <div className="space-y-2">
+            <Label>Services (comma separated)</Label>
+            <Input 
+                value={(data.services || []).join(', ')} 
+                onChange={(e) => handleArrayChange('services', e.target.value)}
+            />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+            <Label>Industries (comma separated)</Label>
+            <Input 
+                value={(data.industries || []).join(', ')} 
+                onChange={(e) => handleArrayChange('industries', e.target.value)}
+            />
+        </div>
+         <div className="space-y-2">
+            <Label>Key Differentiators</Label>
+            <Textarea 
+                value={data.differentiators || ''} 
+                onChange={(e) => handleChange('differentiators', e.target.value)}
+                placeholder="Why them?"
+            />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+            <Label>Priorities (comma separated)</Label>
+            <Input 
+                value={(data.priorities || []).join(', ')} 
+                onChange={(e) => handleArrayChange('priorities', e.target.value)}
+            />
+        </div>
+        <div className="space-y-2">
+            <Label>Constraints (comma separated)</Label>
+            <Input 
+                value={(data.constraints || []).join(', ')} 
+                onChange={(e) => handleArrayChange('constraints', e.target.value)}
+            />
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={() => onSave({ profile: data })} disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Save Profile
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+const ClientSettingsEditor = ({ client, onSave, isLoading }: { client: any; onSave: (data: any) => void; isLoading: boolean }) => {
+  const [data, setData] = useState(client.settings || {});
+  
+  const handleChange = (field: string, value: any) => {
+    setData((prev: any) => ({ ...prev, [field]: value }));
+  };
+
+  const handleFeatureToggle = (feature: string, enabled: boolean) => {
+      setData((prev: any) => ({
+          ...prev,
+          featureVisibility: {
+              ...(prev.featureVisibility || {}),
+              [feature]: enabled
+          }
+      }));
+  };
+
+  const updateNestedJson = (field: string, key: string, value: any) => {
+      try {
+        const parsed = JSON.parse(value);
+        setData((prev: any) => ({ ...prev, [field]: parsed }));
+      } catch (e) {
+        // invalid json, ignore
+      }
+  };
+
+  return (
+    <div className="space-y-6 pt-4">
+      <div className="space-y-4 border p-4 rounded-lg">
+        <h4 className="font-medium">Feature Visibility</h4>
+        <div className="grid grid-cols-2 gap-4">
+            {['showBilling', 'showLeads', 'showRecordings', 'showProjectDetails'].map((feature) => (
+                <div key={feature} className="flex items-center space-x-2">
+                    <Switch 
+                        checked={data.featureVisibility?.[feature] ?? client.visibilitySettings?.[feature] ?? true}
+                        onCheckedChange={(checked) => handleFeatureToggle(feature, checked)}
+                    />
+                    <Label>{feature.replace(/([A-Z])/g, ' $1').trim()}</Label>
+                </div>
+            ))}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Default Campaign Types (comma separated)</Label>
+        <Input 
+            value={(data.defaultCampaignTypes || client.visibilitySettings?.allowedCampaignTypes || []).join(', ')} 
+            onChange={(e) => handleChange('defaultCampaignTypes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+        />
+      </div>
+
+       <div className="space-y-2">
+        <Label>Preferred Workflows (comma separated)</Label>
+        <Input 
+            value={(data.preferredWorkflows || []).join(', ')} 
+            onChange={(e) => handleChange('preferredWorkflows', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Agent Defaults (JSON)</Label>
+        <Textarea 
+            defaultValue={JSON.stringify(data.agentDefaults || {}, null, 2)}
+            onChange={(e) => updateNestedJson('agentDefaults', 'val', e.target.value)}
+            className="font-mono text-sm"
+            rows={5}
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={() => onSave({ settings: data })} disabled={isLoading}>
+           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+           Save Settings
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 interface BillingConfig {
   clientAccountId: string;
   defaultBillingModel: string;
@@ -258,6 +454,22 @@ export default function ClientPortalAdmin() {
     },
     onError: () => {
       toast({ title: 'Failed to remove client', variant: 'destructive' });
+    },
+  });
+
+  const updateClientMutation = useMutation({
+    mutationFn: async (payload: Partial<any>) => {
+      if (!selectedClient) throw new Error('No client selected');
+      return apiRequest('PATCH', `/api/client-portal/admin/clients/${selectedClient.id}`, payload);
+    },
+    onSuccess: (updatedClient) => {
+      setSelectedClient((prev) => prev ? { ...prev, ...updatedClient } : updatedClient);
+      setClientDetail((prev: any) => prev ? { ...prev, ...updatedClient } : prev);
+      queryClient.invalidateQueries({ queryKey: ['/api/client-portal/admin/clients'] });
+      toast({ title: 'Client updated successfully' });
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || 'Failed to update client', variant: 'destructive' });
     },
   });
 
@@ -618,8 +830,25 @@ export default function ClientPortalAdmin() {
               </CardHeader>
               <CardContent>
                 {selectedClient && clientDetail ? (
-                  <div className="space-y-6">
-                    <div className="grid gap-4 lg:grid-cols-2">
+                  <Tabs defaultValue="overview" className="w-full">
+                    <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent mb-6">
+                      <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Overview</TabsTrigger>
+                      <TabsTrigger value="profile" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Profile</TabsTrigger>
+                      <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
+                      <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="profile">
+                        <ClientProfileEditor client={clientDetail} onSave={updateClientMutation.mutate} isLoading={updateClientMutation.isPending} />
+                    </TabsContent>
+
+                    <TabsContent value="settings">
+                        <ClientSettingsEditor client={clientDetail} onSave={updateClientMutation.mutate} isLoading={updateClientMutation.isPending} />
+                    </TabsContent>
+
+                    <TabsContent value="overview">
+                      <div className="space-y-6">
+                        <div className="grid gap-4 lg:grid-cols-2">
                       <div className="rounded-xl border p-4 space-y-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -740,9 +969,13 @@ export default function ClientPortalAdmin() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </TabsContent>
 
-                    {/* Users Section */}
-                    <div>
+                <TabsContent value="users">
+                    <div className="pt-4 space-y-6">
+                        {/* Users Section */}
+                        <div>
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="font-semibold flex items-center gap-2">
                           <Users className="h-4 w-4" />
@@ -881,6 +1114,8 @@ export default function ClientPortalAdmin() {
                       )}
                     </div>
                   </div>
+                  </TabsContent>
+                  </Tabs>
                 ) : (
                   <p className="text-muted-foreground text-center py-12">
                     Select a client to view and manage their details

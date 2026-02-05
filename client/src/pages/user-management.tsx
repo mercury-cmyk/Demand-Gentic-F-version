@@ -313,6 +313,7 @@ export default function UserManagementPage() {
                   <Input
                     data-testid="input-email"
                     type="email"
+                    autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="john.doe@company.com"
@@ -323,6 +324,7 @@ export default function UserManagementPage() {
                   <Input
                     data-testid="input-password"
                     type="password"
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={editingUser ? "Leave blank to keep current" : "••••••••"}

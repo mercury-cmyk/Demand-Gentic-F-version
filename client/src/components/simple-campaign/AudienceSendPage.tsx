@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import type { FilterGroup } from "@shared/filter-types";
 
@@ -932,7 +933,7 @@ export function AudienceSendPage({
               <div className="max-w-[600px] mx-auto bg-white rounded-lg shadow overflow-hidden">
                 <iframe
                   title="Email Preview"
-                  srcDoc={template.htmlContent}
+                  srcDoc={sanitizeHtmlForIframePreview(template.htmlContent)}
                   className="w-full min-h-[400px] border-0"
                 />
               </div>

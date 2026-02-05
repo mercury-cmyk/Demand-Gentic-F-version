@@ -1,7 +1,7 @@
 import { pool, db } from "./server/db";
 import { eq } from "drizzle-orm";
 import { dialerCallAttempts } from "./shared/schema";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 import { fetchTelnyxRecording } from "./server/services/telnyx-recordings";
 
 const TRANSCRIPT_MARKER = "[Call Transcript]";

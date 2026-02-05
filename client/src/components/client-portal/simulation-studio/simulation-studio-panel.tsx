@@ -16,9 +16,79 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Bot, Send, Loader2, User, Sparkles, Phone, MessageSquare, Mic, MicOff, Volume2, VolumeX, Play, Square, RefreshCw, Building2, UserCircle, Target, Brain, Zap, Info, X, Settings, History } from 'lucide-react';
+import { Bot, Send, Loader2, User, Sparkles, Phone, MessageSquare, Mic, MicOff, Volume2, VolumeX, Play, Square, RefreshCw, Building2, UserCircle, Target, Brain, Zap, Info, X, Settings, History, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const AI_VOICES = [
+  // ============ GEMINI VOICES (Google) ============
+  {
+    id: 'Puck',
+    name: 'Puck',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Natural, Soft, Storytelling',
+    description: 'A youthful, enthusiastic voice with high energy.',
+    bestFor: ['Product Launches', 'Cold Calling'],
+    color: 'from-orange-500 to-amber-500',
+    provider: 'gemini'
+  },
+  {
+    id: 'Charon',
+    name: 'Charon',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Deep, Resonant, Authoritative',
+    description: 'A rich, bass-heavy voice that conveys wisdom and experience.',
+    bestFor: ['Enterprise Sales', 'Executive Outreach'],
+    color: 'from-slate-600 to-slate-800',
+    provider: 'gemini'
+  },
+  {
+    id: 'Fenrir',
+    name: 'Fenrir',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Deep, Intense, Cinematic',
+    description: 'A strong, assertive voice that commands attention.',
+    bestFor: ['Sales Calls', 'Lead Qualification'],
+    color: 'from-blue-500 to-indigo-600',
+    provider: 'gemini'
+  },
+  {
+    id: 'Kore',
+    name: 'Kore',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Balanced, Clear, Professional',
+    description: 'A gentle, reassuring voice that puts people at ease.',
+    bestFor: ['Healthcare', 'Insurance'],
+    color: 'from-green-400 to-emerald-500',
+    provider: 'gemini'
+  },
+  {
+    id: 'Aoede',
+    name: 'Aoede',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Bright, Expressive, Engaging',
+    description: 'A cheerful, welcoming voice that creates instant rapport.',
+    bestFor: ['Appointment Setting', 'Customer Outreach'],
+    color: 'from-rose-400 to-pink-500',
+    provider: 'gemini'
+  },
+  {
+    id: 'Leda',
+    name: 'Leda',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Professional & Articulate',
+    description: 'A clear, polished voice with executive presence.',
+    bestFor: ['Executive Outreach', 'Consulting'],
+    color: 'from-violet-500 to-purple-600',
+    provider: 'gemini'
+  }
+];
 
 // --- Type Definitions ---
 interface Message {
@@ -53,7 +123,8 @@ interface SimulationStudioPanelProps {
 // --- Main Component ---
 export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialCampaignId }: SimulationStudioPanelProps) {
   const [view, setView] = useState<'setup' | 'simulation'>('setup');
-  const [mode, setMode] = useState<'text' | 'voice'>('voice');
+  const [mode, setMode] = useState<'text' | 'voice' | 'email'>('voice');
+  const [selectedVoice, setSelectedVoice] = useState<string>('Puck');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -95,7 +166,11 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
       const res = await fetch('/api/client-portal/simulation/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ campaignId: selectedCampaignId, mode }),
+        body: JSON.stringify({ 
+          campaignId: selectedCampaignId, 
+          mode,
+          voiceId: mode === 'voice' ? selectedVoice : undefined
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to start simulation');
       return res.json();
@@ -266,7 +341,37 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
   }, [messages]);
 
   // --- UI Rendering ---
+  const renderEmail = (msg: Message, index: number) => {
+    return (
+      <motion.div
+        key={index}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: index * 0.05 }}
+        className="mb-4"
+      >
+        <Card className={cn(
+          "border-l-4",
+          msg.role === 'user' ? "border-l-blue-500 ml-8" : "border-l-amber-500 mr-8"
+        )}>
+           <CardHeader className="py-2 px-4 bg-muted/20 flex flex-row justify-between items-center rounded-t-lg">
+             <div className="flex items-center gap-2">
+               <div className="font-semibold text-sm">{msg.role === 'user' ? 'You' : 'AI Agent'}</div>
+               <div className="text-xs text-muted-foreground">&lt;{msg.role === 'user' ? 'client@example.com' : 'ai@demandgentic.com'}&gt;</div>
+             </div>
+             <div className="text-xs text-muted-foreground">{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+           </CardHeader>
+           <CardContent className="p-4 whitespace-pre-wrap font-sans text-sm leading-relaxed">
+             {msg.content}
+           </CardContent>
+        </Card>
+      </motion.div>
+    );
+  };
+
   const renderMessage = (msg: Message, index: number) => {
+    if (mode === 'email') return renderEmail(msg, index);
+
     const Icon = { user: User, assistant: Bot, system: Info, error: X }[msg.role];
     const bgColor = {
       user: 'bg-blue-100 dark:bg-blue-900/30',
@@ -301,8 +406,8 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
   };
 
   const SetupView = () => (
-    <div className="flex flex-col items-center justify-center h-full p-8 bg-gray-50 dark:bg-gray-900/50">
-      <Card className="w-full max-w-lg shadow-2xl">
+    <div className="flex flex-col items-center justify-center h-full p-8 bg-gray-50 dark:bg-gray-900/50 overflow-y-auto">
+      <Card className={cn("w-full shadow-2xl transition-all duration-300", mode === 'voice' ? "max-w-4xl" : "max-w-lg")}>
         <CardHeader className="text-center">
           <div className="flex justify-center items-center mb-2">
             <Sparkles className="h-8 w-8 text-amber-500" />
@@ -318,17 +423,67 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
                 <SelectValue placeholder={campaignsLoading ? "Loading..." : "Choose a campaign"} />
               </SelectTrigger>
               <SelectContent>
-                {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {campaigns.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-3">
             <Label className="font-medium">Interaction Mode</Label>
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant={mode === 'voice' ? 'default' : 'outline'} onClick={() => setMode('voice')} className="flex items-center gap-2 h-12"><Phone /> Voice Call</Button>
-              <Button variant={mode === 'text' ? 'default' : 'outline'} onClick={() => setMode('text')} className="flex items-center gap-2 h-12"><MessageSquare /> Text Chat</Button>
+            <div className="grid grid-cols-3 gap-2">
+              <Button variant={mode === 'voice' ? 'default' : 'outline'} onClick={() => setMode('voice')} className="flex items-center gap-2 h-12"><Phone className="h-4 w-4" /> Voice Call</Button>
+              <Button variant={mode === 'email' ? 'default' : 'outline'} onClick={() => setMode('email')} className="flex items-center gap-2 h-12"><Mail className="h-4 w-4" /> Email Sim</Button>
+              <Button variant={mode === 'text' ? 'default' : 'outline'} onClick={() => setMode('text')} className="flex items-center gap-2 h-12"><MessageSquare className="h-4 w-4" /> Text Chat</Button>
             </div>
           </div>
+
+          {mode === 'voice' && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }} 
+              animate={{ opacity: 1, height: 'auto' }}
+              className="space-y-3"
+            >
+              <Label className="font-medium">Select Agent Voice</Label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {AI_VOICES.map((voice) => (
+                  <div
+                    key={voice.id}
+                    onClick={() => setSelectedVoice(voice.id)}
+                    className={cn(
+                      "cursor-pointer rounded-xl border p-4 transition-all hover:shadow-md relative overflow-hidden group",
+                      selectedVoice === voice.id 
+                        ? "border-primary bg-primary/5 ring-1 ring-primary" 
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    <div className={`absolute inset-0 bg-gradient-to-br ${voice.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
+                    <div className="relative flex items-start gap-4">
+                      <div className={cn(
+                        "flex items-center justify-center w-10 h-10 rounded-full text-white shadow-sm bg-gradient-to-br",
+                        voice.color
+                      )}>
+                        {voice.gender === 'male' ? <User className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className="font-semibold text-sm truncate">{voice.name}</h4>
+                          {selectedVoice === voice.id && (
+                            <Zap className="h-3 w-3 text-primary fill-primary animate-pulse" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-4">{voice.accent}</Badge>
+                          <Badge variant="outline" className="px-1.5 py-0 text-[10px] h-4">{voice.gender}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2">{voice.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
           <Button
             onClick={handleStart}
             disabled={!selectedCampaignId || startSimulationMutation.isPending}
@@ -388,12 +543,15 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
         </CardContent>
       </Card>
 
-      {/* Right Panel: Chat/Transcript */}
-      <Card className="md:col-span-2 flex flex-col h-full">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><History className="inline-block" /> Conversation Transcript</CardTitle>
+      {/* Right Panel: Chat/Transcript/Email */}
+      <Card className="md:col-span-2 flex flex-col h-full bg-slate-50 dark:bg-slate-900/50">
+        <CardHeader className="border-b bg-card">
+          <CardTitle className="flex items-center gap-2">
+            {mode === 'email' ? <Mail className="inline-block" /> : <History className="inline-block" />} 
+            {mode === 'email' ? "Email Thread" : "Conversation Transcript"}
+          </CardTitle>
         </CardHeader>
-        <CardContent className="flex-grow overflow-hidden">
+        <CardContent className="flex-grow overflow-hidden p-6">
           <ScrollArea className="h-full pr-4" ref={scrollRef}>
             <div className="space-y-4">
               {messages.map(renderMessage)}
@@ -401,14 +559,14 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
             </div>
           </ScrollArea>
         </CardContent>
-        <div className="p-4 border-t">
+        <div className="p-4 border-t bg-card">
           <div className="relative">
             <Input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={mode === 'voice' ? "Listening..." : "Type your message..."}
+              placeholder={mode === 'voice' ? "Listening..." : mode === 'email' ? "Write a reply..." : "Type your message..."}
               className="pr-12"
               disabled={chatMutation.isPending || (mode === 'voice' && isListening)}
             />

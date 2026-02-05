@@ -103,7 +103,7 @@ async function fixFailedRecording(toNumber: string, fromNumber?: string) {
           // Trigger transcription
           console.log('\nTriggering transcription...');
           try {
-            const { submitTranscription } = await import('../server/services/assemblyai-transcription');
+            const { submitTranscription } = await import('../server/services/google-transcription');
             const transcript = await submitTranscription(freshUrl);
             if (transcript) {
               await db.update(callSessions)
@@ -185,7 +185,7 @@ async function fixFailedRecording(toNumber: string, fromNumber?: string) {
             // Trigger transcription
             console.log('\nTriggering transcription...');
             try {
-              const { submitTranscription } = await import('../server/services/assemblyai-transcription');
+              const { submitTranscription } = await import('../server/services/google-transcription');
               const transcript = await submitTranscription(downloadUrl);
               if (transcript) {
                 await db.update(callSessions)

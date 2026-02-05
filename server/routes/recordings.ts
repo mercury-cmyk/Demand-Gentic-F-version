@@ -1486,7 +1486,7 @@ router.post('/:id/transcribe', async (req: Request, res: Response) => {
     const { source } = req.body; // 'telnyx' | 'call_sessions' | 'leads'
 
     // Import transcription service - uses Google Speech-to-Text (synchronous)
-    const { submitTranscription } = await import('../services/assemblyai-transcription');
+    const { submitTranscription } = await import('../services/google-transcription');
 
     let recordingUrl: string | null = null;
     let recordSource: string = source || 'call_sessions';
@@ -1914,7 +1914,7 @@ router.post('/:id/retry-sync', async (req: Request, res: Response) => {
     let transcriptStatus: string = 'not_requested';
     if (transcribe) {
       try {
-        const { submitTranscription } = await import('../services/assemblyai-transcription');
+        const { submitTranscription } = await import('../services/google-transcription');
         const transcript = await submitTranscription(freshUrl);
         if (transcript) {
           await db.update(callSessions)
@@ -2081,7 +2081,7 @@ async function handleDialerRecordingSync(
   let transcriptStatus: string = 'not_requested';
   if (transcribe && !dialerAttempt.fullTranscript && !dialerAttempt.aiTranscript) {
     try {
-      const { submitTranscription } = await import('../services/assemblyai-transcription');
+      const { submitTranscription } = await import('../services/google-transcription');
       const transcript = await submitTranscription(freshUrl);
       if (transcript) {
         // Store transcript in dialer record

@@ -8,6 +8,7 @@ import { Search, FileText, CheckCircle2, Eye } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TemplatePreviewModal } from "./TemplatePreviewModal";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 
 interface EmailTemplate {
   id: string;
@@ -178,7 +179,7 @@ export function TemplateSelectorModal({
                                 img { max-width: 100%; }
                               </style>
                             </head>
-                            <body>${template.htmlContent}</body>
+                            <body>${sanitizeHtmlForIframePreview(template.htmlContent)}</body>
                           </html>
                         `}
                         style={{

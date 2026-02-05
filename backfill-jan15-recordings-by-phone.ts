@@ -71,7 +71,7 @@ async function transcribeWithWhisper(recordingUrl: string): Promise<string | nul
     console.log(`[Google STT] Transcribing: ${recordingUrl.substring(0, 80)}...`);
     
     // Dynamic import to get transcription service
-    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const { submitTranscription } = await import('./server/services/google-transcription');
     const transcript = await submitTranscription(recordingUrl);
     
     if (!transcript) {
