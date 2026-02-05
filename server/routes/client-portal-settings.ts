@@ -444,6 +444,88 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * POST /organization-intelligence
+ * Create a new organization for this client if none exists
+ */
+router.post('/organization-intelligence', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Check if client already has an organization linked
+    const [existingLink] = await db
+      .select()
+      .from(clientOrganizationLinks)
+      .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+      .limit(1);
+
+    if (existingLink) {
+      return res.status(400).json({ message: 'Organization already linked to this account' });
+    }
+
+    // Get client account name
+    const [clientAccount] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientAccountId))
+      .limit(1);
+
+    const createSchema = z.object({
+      name: z.string().min(1, 'Organization name is required'),
+      domain: z.string().optional(),
+      industry: z.string().optional(),
+    });
+
+    const validatedData = createSchema.parse(req.body);
+
+    // Create a new organization
+    const [newOrg] = await db
+      .insert(campaignOrganizations)
+      .values({
+        name: validatedData.name,
+        domain: validatedData.domain || null,
+        industry: validatedData.industry || null,
+        identity: {},
+        offerings: {},
+        icp: {},
+        positioning: {},
+        outreach: {},
+      })
+      .returning();
+
+    // Link the organization to this client account
+    await db.insert(clientOrganizationLinks).values({
+      clientAccountId,
+      campaignOrganizationId: newOrg.id,
+      isPrimary: true,
+    });
+
+    res.status(201).json({
+      message: 'Organization created and linked successfully',
+      organization: {
+        id: newOrg.id,
+        name: newOrg.name,
+        domain: newOrg.domain,
+        industry: newOrg.industry,
+        identity: newOrg.identity,
+        offerings: newOrg.offerings,
+        icp: newOrg.icp,
+        positioning: newOrg.positioning,
+        outreach: newOrg.outreach,
+      },
+    });
+  } catch (error) {
+    console.error('[CLIENT SETTINGS] Create organization error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: error.errors });
+    }
+    res.status(500).json({ message: 'Failed to create organization' });
+  }
+});
+
 // ==================== AVAILABLE VOICES ====================
 
 /**

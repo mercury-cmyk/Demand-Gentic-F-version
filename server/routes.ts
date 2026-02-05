@@ -78,6 +78,7 @@ import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
 import agentDefaultsRouter from './routes/agent-defaults';
+import unifiedPromptRouter from './routes/unified-prompt-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
@@ -4850,6 +4851,26 @@ export function registerRoutes(app: Express) {
         }
       }
 
+      // Build aiAgentSettings from selectedVoice if provided (required for AI orchestrator)
+      if (campaignData.selectedVoice && !campaignData.aiAgentSettings) {
+        campaignData.aiAgentSettings = {
+          persona: {
+            name: campaignData.name || 'AI Agent',
+            companyName: '',
+            role: 'Sales Development Representative',
+            voice: campaignData.selectedVoice,
+          },
+          scripts: {
+            opening: campaignData.openingScript || null,
+            gatekeeper: null,
+            pitch: null,
+            objections: null,
+            closing: null,
+          },
+        };
+        console.log(`[Campaign Create] Built aiAgentSettings with voice: ${campaignData.selectedVoice}`);
+      }
+
       const campaign = await storage.createCampaign(campaignData);
 
       // Auto-populate queue from audience if defined
@@ -5021,6 +5042,29 @@ export function registerRoutes(app: Express) {
           updateData.parsedQaRules = null;
           console.log('[Campaign Update] Cleared cached QA rules');
         }
+      }
+
+      // Update aiAgentSettings.persona.voice if selectedVoice is provided
+      if (updateData.selectedVoice) {
+        const existingSettings = (existingCampaign.aiAgentSettings as any) || {};
+        updateData.aiAgentSettings = {
+          ...existingSettings,
+          persona: {
+            ...(existingSettings.persona || {}),
+            name: existingSettings.persona?.name || existingCampaign.name || 'AI Agent',
+            companyName: existingSettings.persona?.companyName || '',
+            role: existingSettings.persona?.role || 'Sales Development Representative',
+            voice: updateData.selectedVoice,
+          },
+          scripts: existingSettings.scripts || {
+            opening: updateData.openingScript || null,
+            gatekeeper: null,
+            pitch: null,
+            objections: null,
+            closing: null,
+          },
+        };
+        console.log(`[Campaign Update] Updated aiAgentSettings voice to: ${updateData.selectedVoice}`);
       }
       
       const campaign = await storage.updateCampaign(req.params.id, updateData);
@@ -13080,6 +13124,10 @@ Provide JSON response with:
 
   // ==================== AGENTIC OPERATOR ====================
 
+  // Unified Prompt Management (NEW - consolidates all prompt management)
+  app.use("/api/prompts", unifiedPromptRouter);
+
+  // Legacy agent prompts routes (deprecated - use /api/prompts instead)
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);

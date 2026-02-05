@@ -3,6 +3,7 @@ import { db } from '../db';
 import { eq, and, desc, sql, between, isNull, gte, lte } from 'drizzle-orm';
 import {
   clientBillingConfig,
+  clientCampaignPricing,
   clientActivityCosts,
   clientInvoices,
   clientInvoiceItems,
@@ -470,6 +471,171 @@ router.get('/config', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT PORTAL] Get billing config error:', error);
     res.status(500).json({ message: 'Failed to get billing config' });
+  }
+});
+
+// ==================== CAMPAIGN PRICING ====================
+
+// Standard campaign types with default prices
+const DEFAULT_CAMPAIGN_PRICING: Record<string, { label: string; defaultPrice: number }> = {
+  high_quality_leads: { label: 'HQL - High Quality Leads', defaultPrice: 150 },
+  bant_leads: { label: 'BANT Qualified Leads', defaultPrice: 200 },
+  sql: { label: 'SQL Generation', defaultPrice: 250 },
+  appointment_generation: { label: 'Appointment Setting', defaultPrice: 350 },
+  lead_qualification: { label: 'Lead Qualification', defaultPrice: 100 },
+  content_syndication: { label: 'Content Syndication (CS)', defaultPrice: 75 },
+  webinar_invite: { label: 'Webinar Invitation', defaultPrice: 125 },
+  live_webinar: { label: 'Live Webinar Promotion', defaultPrice: 150 },
+  on_demand_webinar: { label: 'On-Demand Webinar', defaultPrice: 100 },
+  executive_dinner: { label: 'Executive Dinner', defaultPrice: 500 },
+  leadership_forum: { label: 'Leadership Forum', defaultPrice: 400 },
+  conference: { label: 'Conference/Event', defaultPrice: 175 },
+  email: { label: 'Email-Only Campaign', defaultPrice: 50 },
+  data_validation: { label: 'Data Validation & Enrichment', defaultPrice: 25 },
+};
+
+// Get campaign pricing for the current client (for order panel)
+router.get('/campaign-pricing', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    // Get client-specific pricing
+    const clientPricing = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(eq(clientCampaignPricing.clientAccountId, clientAccountId));
+
+    // Create a map of client-specific pricing
+    const pricingMap = new Map(clientPricing.map(p => [p.campaignType, p]));
+
+    // Build full pricing list with client overrides or defaults
+    const pricing: Record<string, {
+      pricePerLead: number;
+      minimumOrderSize: number;
+      volumeDiscounts: any[];
+      isEnabled: boolean;
+      label: string;
+    }> = {};
+
+    for (const [campaignType, defaults] of Object.entries(DEFAULT_CAMPAIGN_PRICING)) {
+      const clientConfig = pricingMap.get(campaignType);
+      pricing[campaignType] = {
+        pricePerLead: clientConfig ? parseFloat(clientConfig.pricePerLead) : defaults.defaultPrice,
+        minimumOrderSize: clientConfig?.minimumOrderSize || 100,
+        volumeDiscounts: (clientConfig?.volumeDiscounts as any[]) || [],
+        isEnabled: clientConfig?.isEnabled ?? true,
+        label: defaults.label,
+      };
+    }
+
+    res.json({
+      pricing,
+      hasCustomPricing: clientPricing.length > 0,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get campaign pricing error:', error);
+    res.status(500).json({ message: 'Failed to get campaign pricing' });
+  }
+});
+
+// Get pricing for a specific campaign type (for calculating order totals)
+router.get('/campaign-pricing/:campaignType', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const { campaignType } = req.params;
+
+    // Check for client-specific pricing
+    const [clientConfig] = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(and(
+        eq(clientCampaignPricing.clientAccountId, clientAccountId),
+        eq(clientCampaignPricing.campaignType, campaignType)
+      ))
+      .limit(1);
+
+    const defaults = DEFAULT_CAMPAIGN_PRICING[campaignType];
+
+    if (!defaults && !clientConfig) {
+      return res.status(404).json({ message: 'Unknown campaign type' });
+    }
+
+    const pricing = {
+      campaignType,
+      pricePerLead: clientConfig ? parseFloat(clientConfig.pricePerLead) : (defaults?.defaultPrice || 100),
+      minimumOrderSize: clientConfig?.minimumOrderSize || 100,
+      volumeDiscounts: (clientConfig?.volumeDiscounts as any[]) || [],
+      isEnabled: clientConfig?.isEnabled ?? true,
+      label: defaults?.label || campaignType,
+    };
+
+    res.json(pricing);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get campaign type pricing error:', error);
+    res.status(500).json({ message: 'Failed to get campaign pricing' });
+  }
+});
+
+// Calculate total price for an order (with volume discounts)
+router.post('/calculate-order-price', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const { campaignType, quantity } = req.body;
+
+    if (!campaignType || !quantity || quantity < 1) {
+      return res.status(400).json({ message: 'Campaign type and quantity are required' });
+    }
+
+    // Get client-specific pricing or defaults
+    const [clientConfig] = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(and(
+        eq(clientCampaignPricing.clientAccountId, clientAccountId),
+        eq(clientCampaignPricing.campaignType, campaignType)
+      ))
+      .limit(1);
+
+    const defaults = DEFAULT_CAMPAIGN_PRICING[campaignType];
+    const basePrice = clientConfig ? parseFloat(clientConfig.pricePerLead) : (defaults?.defaultPrice || 100);
+    const minimumOrderSize = clientConfig?.minimumOrderSize || 100;
+    const volumeDiscounts = (clientConfig?.volumeDiscounts as { minQuantity: number; discountPercent: number }[]) || [];
+
+    // Check minimum order size
+    if (quantity < minimumOrderSize) {
+      return res.status(400).json({
+        message: `Minimum order size is ${minimumOrderSize}`,
+        minimumOrderSize,
+      });
+    }
+
+    // Calculate discount based on volume
+    let discountPercent = 0;
+    for (const tier of volumeDiscounts.sort((a, b) => b.minQuantity - a.minQuantity)) {
+      if (quantity >= tier.minQuantity) {
+        discountPercent = tier.discountPercent;
+        break;
+      }
+    }
+
+    const subtotal = basePrice * quantity;
+    const discount = subtotal * (discountPercent / 100);
+    const total = subtotal - discount;
+
+    res.json({
+      campaignType,
+      quantity,
+      pricePerLead: basePrice,
+      subtotal,
+      discountPercent,
+      discountAmount: discount,
+      total,
+      minimumOrderSize,
+      volumeDiscounts,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Calculate order price error:', error);
+    res.status(500).json({ message: 'Failed to calculate order price' });
   }
 });
 

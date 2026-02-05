@@ -217,7 +217,7 @@ export default function ClientPortalVoiceSimulationPage() {
   // Chat mutation
   const chatMutation = useMutation({
     mutationFn: async (userMessage: string) => {
-      const res = await fetch('/api/client-portal/simulation/message', {
+      const res = await fetch('/api/client-portal/simulation/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -225,7 +225,8 @@ export default function ClientPortalVoiceSimulationPage() {
         },
         body: JSON.stringify({
           sessionId,
-          humanMessage: userMessage,
+          campaignId: selectedCampaign,
+          userMessage,
         }),
       });
       if (!res.ok) {
@@ -237,12 +238,12 @@ export default function ClientPortalVoiceSimulationPage() {
     onSuccess: (data) => {
       const assistantMessage: Message = {
         role: 'assistant',
-        content: data.agentResponse,
+        content: data.reply,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
       if (voiceOutputEnabled) {
-        speak(data.agentResponse);
+        speak(data.reply);
       }
     },
     onError: (error: Error) => {

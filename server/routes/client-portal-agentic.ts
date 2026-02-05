@@ -24,6 +24,7 @@ import {
   virtualAgents,
   clientInvoices,
   clientBillingConfig,
+  clientCampaignPricing,
   clientReports,
   leads,
   verificationCampaigns,
@@ -1453,42 +1454,104 @@ Return JSON:
   }
 });
 
+// Default campaign pricing (used when no client-specific pricing is set)
+const DEFAULT_CAMPAIGN_PRICING: Record<string, number> = {
+  high_quality_leads: 150,
+  bant_leads: 200,
+  sql: 250,
+  appointment_generation: 350,
+  lead_qualification: 100,
+  content_syndication: 75,
+  webinar_invite: 125,
+  live_webinar: 150,
+  on_demand_webinar: 100,
+  executive_dinner: 500,
+  leadership_forum: 400,
+  conference: 175,
+  email: 50,
+  data_validation: 25,
+};
+
 /**
- * Estimate cost for order
+ * Estimate cost for order - Uses client-specific pricing when available
  */
 router.post("/billing/estimate", async (req: Request, res: Response) => {
   try {
     const context = getClientContext(req);
     const { volumeRequested, campaignType, deliveryTimeline, channels } = req.body;
 
-    // Get billing config for pricing
-    const billingConfig = await db.query.clientBillingConfig.findFirst({
-      where: eq(clientBillingConfig.clientAccountId, context.clientAccountId),
-    });
+    // First, check for client-specific pricing for this campaign type
+    const [clientPricing] = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(and(
+        eq(clientCampaignPricing.clientAccountId, context.clientAccountId),
+        eq(clientCampaignPricing.campaignType, campaignType)
+      ))
+      .limit(1);
 
-    const baseRate = Number(billingConfig?.cplRate) || 50; // Default $50 CPL
-    let multiplier = 1;
+    // Get base rate from client-specific pricing or defaults
+    let baseRate: number;
+    let minimumOrderSize = 100;
+    let volumeDiscounts: { minQuantity: number; discountPercent: number }[] = [];
+    let hasCustomPricing = false;
 
-    // Apply multipliers
-    if (deliveryTimeline === "immediate") multiplier *= 1.5; // Rush fee
-    if (channels?.includes("voice") && channels?.includes("email")) multiplier *= 1.1; // Multi-channel premium
+    if (clientPricing) {
+      baseRate = parseFloat(clientPricing.pricePerLead);
+      minimumOrderSize = clientPricing.minimumOrderSize || 100;
+      volumeDiscounts = (clientPricing.volumeDiscounts as any[]) || [];
+      hasCustomPricing = true;
+    } else {
+      // Use default pricing for campaign type, or fallback to general default
+      baseRate = DEFAULT_CAMPAIGN_PRICING[campaignType] || 100;
+    }
 
-    const estimatedCost = volumeRequested * baseRate * multiplier;
+    // Calculate volume discount
+    let discountPercent = 0;
+    for (const tier of volumeDiscounts.sort((a, b) => b.minQuantity - a.minQuantity)) {
+      if (volumeRequested >= tier.minQuantity) {
+        discountPercent = tier.discountPercent;
+        break;
+      }
+    }
+
+    // Apply delivery timeline multipliers
+    let timelineMultiplier = 1;
+    let rushFeePercent = 0;
+    if (deliveryTimeline === "immediate") {
+      timelineMultiplier = 1.5;
+      rushFeePercent = 50;
+    } else if (deliveryTimeline === "1_week") {
+      timelineMultiplier = 1.25;
+      rushFeePercent = 25;
+    }
+
+    // Calculate costs
+    const basePrice = volumeRequested * baseRate;
+    const volumeDiscount = basePrice * (discountPercent / 100);
+    const afterDiscount = basePrice - volumeDiscount;
+    const rushFee = afterDiscount * (rushFeePercent / 100);
+    const estimatedCost = afterDiscount + rushFee;
 
     res.json({
       success: true,
       data: {
         volumeRequested,
+        campaignType,
         baseRate,
-        multiplier,
+        minimumOrderSize,
+        hasCustomPricing,
         estimatedCost,
         breakdown: {
-          basePrice: volumeRequested * baseRate,
-          rushFee: deliveryTimeline === "immediate" ? volumeRequested * baseRate * 0.5 : 0,
-          multiChannelPremium:
-            channels?.includes("voice") && channels?.includes("email") ? volumeRequested * baseRate * 0.1 : 0,
+          basePrice,
+          volumeDiscountPercent: discountPercent,
+          volumeDiscount,
+          afterDiscount,
+          rushFeePercent,
+          rushFee,
           total: estimatedCost,
         },
+        volumeDiscountTiers: volumeDiscounts,
       },
     });
   } catch (error: any) {

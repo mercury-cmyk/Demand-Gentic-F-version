@@ -602,8 +602,32 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         return [];
       }
       const data = await res.json();
-      console.log('[CampaignWizard] Loaded Telnyx numbers:', data.data?.length || 0);
-      return data.data || [];
+      let numbers = data.data || [];
+      console.log('[CampaignWizard] Loaded Telnyx numbers:', numbers.length);
+
+      // If no numbers found, trigger a sync from Telnyx and retry
+      if (numbers.length === 0) {
+        console.log('[CampaignWizard] No numbers found, triggering Telnyx sync...');
+        try {
+          const syncRes = await fetch('/api/number-pool/sync', { method: 'POST' });
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            console.log('[CampaignWizard] Telnyx sync result:', syncData.data);
+
+            // Retry fetching numbers after sync
+            const retryRes = await fetch('/api/number-pool/numbers?status=active');
+            if (retryRes.ok) {
+              const retryData = await retryRes.json();
+              numbers = retryData.data || [];
+              console.log('[CampaignWizard] Numbers after sync:', numbers.length);
+            }
+          }
+        } catch (syncError) {
+          console.error('[CampaignWizard] Telnyx sync failed:', syncError);
+        }
+      }
+
+      return numbers;
     },
     enabled: open && (formData.channel === 'voice' || formData.channel === 'combo'),
     staleTime: 30000, // Cache for 30 seconds
@@ -884,6 +908,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         return formData.audienceSource === 'request_handling' ||
                formData.selectedAccounts.length > 0 ||
                formData.selectedContacts.length > 0 ||
+               formData.selectedLists.length > 0 ||
+               formData.selectedSegments.length > 0 ||
                formData.targetIndustries.length > 0;
       case 7:
         return true;
@@ -916,6 +942,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         if (formData.audienceSource !== 'request_handling' &&
             formData.selectedAccounts.length === 0 &&
             formData.selectedContacts.length === 0 &&
+            formData.selectedLists.length === 0 &&
+            formData.selectedSegments.length === 0 &&
             formData.targetIndustries.length === 0) {
           missing.push('Target Audience');
         }

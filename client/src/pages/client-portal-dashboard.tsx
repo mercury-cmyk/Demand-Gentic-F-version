@@ -330,6 +330,10 @@ export default function ClientPortalDashboard() {
   // Organization Intelligence state
   const [orgIntelligence, setOrgIntelligence] = useState<any>(null);
   const [orgIntelligenceExpanded, setOrgIntelligenceExpanded] = useState<string | null>(null);
+  const [showCreateOrgDialog, setShowCreateOrgDialog] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [newOrgDomain, setNewOrgDomain] = useState('');
+  const [newOrgIndustry, setNewOrgIndustry] = useState('');
 
   // CRM state
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false);
@@ -719,6 +723,46 @@ export default function ClientPortalDashboard() {
       icp: orgIntelligence.icp,
       positioning: orgIntelligence.positioning,
       outreach: orgIntelligence.outreach,
+    });
+  };
+
+  // Create organization mutation
+  const createOrgMutation = useMutation({
+    mutationFn: async (data: { name: string; domain?: string; industry?: string }) => {
+      const res = await fetch('/api/client-portal/settings/organization-intelligence', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create organization');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-org-intelligence'] });
+      setShowCreateOrgDialog(false);
+      setNewOrgName('');
+      setNewOrgDomain('');
+      setNewOrgIndustry('');
+      toast({ title: 'Organization created successfully', description: 'You can now fill in your organization intelligence.' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to create organization', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  // Handler for creating organization
+  const handleCreateOrganization = () => {
+    if (!newOrgName.trim()) return;
+    createOrgMutation.mutate({
+      name: newOrgName.trim(),
+      domain: newOrgDomain.trim() || undefined,
+      industry: newOrgIndustry.trim() || undefined,
     });
   };
 
@@ -2771,7 +2815,11 @@ export default function ClientPortalDashboard() {
                         <div className="text-center py-8 text-muted-foreground">
                           <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
                           <p>No organization linked to your account.</p>
-                          <p className="text-sm mt-1">Contact your account manager to set up organization intelligence.</p>
+                          <p className="text-sm mt-1 mb-4">Create your organization to power AI agents with your business context.</p>
+                          <Button onClick={() => setShowCreateOrgDialog(true)}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create Organization
+                          </Button>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -4044,6 +4092,60 @@ export default function ClientPortalDashboard() {
 
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
+
+      {/* Create Organization Dialog */}
+      <Dialog open={showCreateOrgDialog} onOpenChange={setShowCreateOrgDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Brain className="h-5 w-5" />
+              Create Organization
+            </DialogTitle>
+            <DialogDescription>
+              Set up your organization to power AI agents with your business context.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="org-name">Organization Name *</Label>
+              <Input
+                id="org-name"
+                placeholder="Your Company Name"
+                value={newOrgName}
+                onChange={(e) => setNewOrgName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="org-domain">Website Domain</Label>
+              <Input
+                id="org-domain"
+                placeholder="yourcompany.com"
+                value={newOrgDomain}
+                onChange={(e) => setNewOrgDomain(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="org-industry">Industry</Label>
+              <Input
+                id="org-industry"
+                placeholder="e.g., Technology, Healthcare, Finance"
+                value={newOrgIndustry}
+                onChange={(e) => setNewOrgIndustry(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateOrgDialog(false)}>Cancel</Button>
+            <Button
+              onClick={handleCreateOrganization}
+              disabled={createOrgMutation.isPending || !newOrgName.trim()}
+            >
+              {createOrgMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Create Organization
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

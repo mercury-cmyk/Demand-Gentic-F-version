@@ -4,6 +4,7 @@ import { eq, and, desc, sql, isNull, gte, lte, inArray } from 'drizzle-orm';
 import {
   clientAccounts,
   clientBillingConfig,
+  clientCampaignPricing,
   clientActivityCosts,
   clientInvoices,
   clientInvoiceItems,
@@ -641,6 +642,237 @@ router.get('/clients/:clientId/uninvoiced-costs', async (req: Request, res: Resp
   } catch (error) {
     console.error('[ADMIN] Get uninvoiced costs error:', error);
     res.status(500).json({ message: 'Failed to get uninvoiced costs' });
+  }
+});
+
+// ==================== CLIENT CAMPAIGN PRICING ====================
+
+// Standard campaign types for reference
+const CAMPAIGN_TYPES = [
+  { value: 'high_quality_leads', label: 'HQL - High Quality Leads', defaultPrice: 150 },
+  { value: 'bant_leads', label: 'BANT Qualified Leads', defaultPrice: 200 },
+  { value: 'sql', label: 'SQL Generation', defaultPrice: 250 },
+  { value: 'appointment_generation', label: 'Appointment Setting', defaultPrice: 350 },
+  { value: 'lead_qualification', label: 'Lead Qualification', defaultPrice: 100 },
+  { value: 'content_syndication', label: 'Content Syndication (CS)', defaultPrice: 75 },
+  { value: 'webinar_invite', label: 'Webinar Invitation', defaultPrice: 125 },
+  { value: 'live_webinar', label: 'Live Webinar Promotion', defaultPrice: 150 },
+  { value: 'on_demand_webinar', label: 'On-Demand Webinar', defaultPrice: 100 },
+  { value: 'executive_dinner', label: 'Executive Dinner', defaultPrice: 500 },
+  { value: 'leadership_forum', label: 'Leadership Forum', defaultPrice: 400 },
+  { value: 'conference', label: 'Conference/Event', defaultPrice: 175 },
+  { value: 'email', label: 'Email-Only Campaign', defaultPrice: 50 },
+  { value: 'data_validation', label: 'Data Validation & Enrichment', defaultPrice: 25 },
+];
+
+// Get all campaign pricing for a client
+router.get('/clients/:clientId/campaign-pricing', async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params;
+
+    // Get existing pricing configurations for this client
+    const existingPricing = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(eq(clientCampaignPricing.clientAccountId, clientId))
+      .orderBy(clientCampaignPricing.campaignType);
+
+    // Create a map of existing pricing
+    const pricingMap = new Map(existingPricing.map(p => [p.campaignType, p]));
+
+    // Merge with all campaign types to show complete list
+    const fullPricingList = CAMPAIGN_TYPES.map(type => {
+      const existing = pricingMap.get(type.value);
+      return {
+        campaignType: type.value,
+        label: type.label,
+        pricePerLead: existing?.pricePerLead || type.defaultPrice.toFixed(2),
+        minimumOrderSize: existing?.minimumOrderSize || 100,
+        volumeDiscounts: existing?.volumeDiscounts || [],
+        isEnabled: existing?.isEnabled ?? true,
+        notes: existing?.notes || null,
+        isConfigured: !!existing,
+        id: existing?.id || null,
+      };
+    });
+
+    res.json({
+      clientId,
+      pricing: fullPricingList,
+      configuredCount: existingPricing.length,
+      totalCampaignTypes: CAMPAIGN_TYPES.length,
+    });
+  } catch (error) {
+    console.error('[ADMIN] Get campaign pricing error:', error);
+    res.status(500).json({ message: 'Failed to get campaign pricing' });
+  }
+});
+
+// Update or create pricing for a specific campaign type
+router.put('/clients/:clientId/campaign-pricing/:campaignType', async (req: Request, res: Response) => {
+  try {
+    const { clientId, campaignType } = req.params;
+
+    const pricingSchema = z.object({
+      pricePerLead: z.string().or(z.number()).transform(val => String(val)),
+      minimumOrderSize: z.number().int().min(1).optional().default(100),
+      volumeDiscounts: z.array(z.object({
+        minQuantity: z.number().int().min(1),
+        discountPercent: z.number().min(0).max(100),
+      })).optional().default([]),
+      isEnabled: z.boolean().optional().default(true),
+      notes: z.string().optional().nullable(),
+    });
+
+    const validatedData = pricingSchema.parse(req.body);
+
+    // Check if pricing already exists
+    const [existing] = await db
+      .select()
+      .from(clientCampaignPricing)
+      .where(and(
+        eq(clientCampaignPricing.clientAccountId, clientId),
+        eq(clientCampaignPricing.campaignType, campaignType)
+      ))
+      .limit(1);
+
+    let result;
+    if (existing) {
+      // Update existing
+      [result] = await db
+        .update(clientCampaignPricing)
+        .set({
+          pricePerLead: validatedData.pricePerLead,
+          minimumOrderSize: validatedData.minimumOrderSize,
+          volumeDiscounts: validatedData.volumeDiscounts,
+          isEnabled: validatedData.isEnabled,
+          notes: validatedData.notes,
+          updatedAt: new Date(),
+        })
+        .where(eq(clientCampaignPricing.id, existing.id))
+        .returning();
+    } else {
+      // Create new
+      [result] = await db
+        .insert(clientCampaignPricing)
+        .values({
+          clientAccountId: clientId,
+          campaignType,
+          pricePerLead: validatedData.pricePerLead,
+          minimumOrderSize: validatedData.minimumOrderSize,
+          volumeDiscounts: validatedData.volumeDiscounts,
+          isEnabled: validatedData.isEnabled,
+          notes: validatedData.notes,
+        })
+        .returning();
+    }
+
+    res.json({
+      message: existing ? 'Pricing updated successfully' : 'Pricing created successfully',
+      pricing: result,
+    });
+  } catch (error) {
+    console.error('[ADMIN] Update campaign pricing error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: error.errors });
+    }
+    res.status(500).json({ message: 'Failed to update campaign pricing' });
+  }
+});
+
+// Bulk update pricing for multiple campaign types
+router.put('/clients/:clientId/campaign-pricing', async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params;
+
+    const bulkPricingSchema = z.object({
+      pricing: z.array(z.object({
+        campaignType: z.string(),
+        pricePerLead: z.string().or(z.number()).transform(val => String(val)),
+        minimumOrderSize: z.number().int().min(1).optional().default(100),
+        volumeDiscounts: z.array(z.object({
+          minQuantity: z.number().int().min(1),
+          discountPercent: z.number().min(0).max(100),
+        })).optional().default([]),
+        isEnabled: z.boolean().optional().default(true),
+        notes: z.string().optional().nullable(),
+      })),
+    });
+
+    const { pricing } = bulkPricingSchema.parse(req.body);
+
+    const results = [];
+    for (const item of pricing) {
+      // Check if pricing already exists
+      const [existing] = await db
+        .select()
+        .from(clientCampaignPricing)
+        .where(and(
+          eq(clientCampaignPricing.clientAccountId, clientId),
+          eq(clientCampaignPricing.campaignType, item.campaignType)
+        ))
+        .limit(1);
+
+      let result;
+      if (existing) {
+        [result] = await db
+          .update(clientCampaignPricing)
+          .set({
+            pricePerLead: item.pricePerLead,
+            minimumOrderSize: item.minimumOrderSize,
+            volumeDiscounts: item.volumeDiscounts,
+            isEnabled: item.isEnabled,
+            notes: item.notes,
+            updatedAt: new Date(),
+          })
+          .where(eq(clientCampaignPricing.id, existing.id))
+          .returning();
+      } else {
+        [result] = await db
+          .insert(clientCampaignPricing)
+          .values({
+            clientAccountId: clientId,
+            campaignType: item.campaignType,
+            pricePerLead: item.pricePerLead,
+            minimumOrderSize: item.minimumOrderSize,
+            volumeDiscounts: item.volumeDiscounts,
+            isEnabled: item.isEnabled,
+            notes: item.notes,
+          })
+          .returning();
+      }
+      results.push(result);
+    }
+
+    res.json({
+      message: 'Pricing updated successfully',
+      updated: results.length,
+    });
+  } catch (error) {
+    console.error('[ADMIN] Bulk update campaign pricing error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: error.errors });
+    }
+    res.status(500).json({ message: 'Failed to update campaign pricing' });
+  }
+});
+
+// Delete pricing for a specific campaign type (revert to defaults)
+router.delete('/clients/:clientId/campaign-pricing/:campaignType', async (req: Request, res: Response) => {
+  try {
+    const { clientId, campaignType } = req.params;
+
+    await db
+      .delete(clientCampaignPricing)
+      .where(and(
+        eq(clientCampaignPricing.clientAccountId, clientId),
+        eq(clientCampaignPricing.campaignType, campaignType)
+      ));
+
+    res.json({ message: 'Pricing removed, will use defaults' });
+  } catch (error) {
+    console.error('[ADMIN] Delete campaign pricing error:', error);
+    res.status(500).json({ message: 'Failed to delete campaign pricing' });
   }
 });
 

@@ -252,6 +252,201 @@ const ClientSettingsEditor = ({ client, onSave, isLoading }: { client: any; onSa
   );
 };
 
+// Campaign Pricing Editor Component
+const ClientCampaignPricingEditor = ({ clientId }: { clientId: string }) => {
+  const { toast } = useToast();
+  const [editingType, setEditingType] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<{
+    pricePerLead: string;
+    minimumOrderSize: number;
+    isEnabled: boolean;
+    notes: string;
+  }>({ pricePerLead: '', minimumOrderSize: 100, isEnabled: true, notes: '' });
+
+  // Fetch pricing data
+  const { data: pricingData, isLoading, refetch } = useQuery({
+    queryKey: ['client-campaign-pricing', clientId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/billing/clients/${clientId}/campaign-pricing`);
+      if (!res.ok) throw new Error('Failed to fetch pricing');
+      return res.json();
+    },
+    enabled: !!clientId,
+  });
+
+  // Update pricing mutation
+  const updatePricingMutation = useMutation({
+    mutationFn: async ({ campaignType, data }: { campaignType: string; data: any }) => {
+      const res = await fetch(`/api/admin/billing/clients/${clientId}/campaign-pricing/${campaignType}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update pricing');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Pricing updated successfully' });
+      setEditingType(null);
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to update pricing', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const handleEdit = (item: any) => {
+    setEditingType(item.campaignType);
+    setEditValues({
+      pricePerLead: item.pricePerLead,
+      minimumOrderSize: item.minimumOrderSize,
+      isEnabled: item.isEnabled,
+      notes: item.notes || '',
+    });
+  };
+
+  const handleSave = () => {
+    if (!editingType) return;
+    updatePricingMutation.mutate({
+      campaignType: editingType,
+      data: {
+        pricePerLead: editValues.pricePerLead,
+        minimumOrderSize: editValues.minimumOrderSize,
+        isEnabled: editValues.isEnabled,
+        notes: editValues.notes || null,
+      },
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <DollarSign className="h-5 w-5" />
+            Campaign Type Pricing
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Set custom pricing for each campaign type. Unconfigured types use default pricing.
+          </p>
+        </div>
+        <Badge variant="outline">
+          {pricingData?.configuredCount || 0} / {pricingData?.totalCampaignTypes || 0} configured
+        </Badge>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Campaign Type</TableHead>
+            <TableHead className="text-right">Price/Lead</TableHead>
+            <TableHead className="text-right">Min Order</TableHead>
+            <TableHead className="text-center">Enabled</TableHead>
+            <TableHead>Notes</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pricingData?.pricing?.map((item: any) => (
+            <TableRow key={item.campaignType} className={!item.isEnabled ? 'opacity-50' : ''}>
+              <TableCell>
+                <div>
+                  <div className="font-medium">{item.label}</div>
+                  <div className="text-xs text-muted-foreground">{item.campaignType}</div>
+                </div>
+              </TableCell>
+              <TableCell className="text-right">
+                {editingType === item.campaignType ? (
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="w-24 text-right"
+                    value={editValues.pricePerLead}
+                    onChange={(e) => setEditValues(prev => ({ ...prev, pricePerLead: e.target.value }))}
+                  />
+                ) : (
+                  <span className={item.isConfigured ? 'font-semibold text-primary' : ''}>
+                    ${parseFloat(item.pricePerLead).toFixed(2)}
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {editingType === item.campaignType ? (
+                  <Input
+                    type="number"
+                    className="w-20 text-right"
+                    value={editValues.minimumOrderSize}
+                    onChange={(e) => setEditValues(prev => ({ ...prev, minimumOrderSize: parseInt(e.target.value) || 100 }))}
+                  />
+                ) : (
+                  <span>{item.minimumOrderSize}</span>
+                )}
+              </TableCell>
+              <TableCell className="text-center">
+                {editingType === item.campaignType ? (
+                  <Switch
+                    checked={editValues.isEnabled}
+                    onCheckedChange={(checked) => setEditValues(prev => ({ ...prev, isEnabled: checked }))}
+                  />
+                ) : (
+                  item.isEnabled ? (
+                    <CheckCircle className="h-4 w-4 text-green-500 mx-auto" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4 text-red-500 mx-auto" />
+                  )
+                )}
+              </TableCell>
+              <TableCell>
+                {editingType === item.campaignType ? (
+                  <Input
+                    placeholder="Internal notes..."
+                    value={editValues.notes}
+                    onChange={(e) => setEditValues(prev => ({ ...prev, notes: e.target.value }))}
+                  />
+                ) : (
+                  <span className="text-sm text-muted-foreground">{item.notes || '-'}</span>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                {editingType === item.campaignType ? (
+                  <div className="flex gap-2 justify-end">
+                    <Button size="sm" variant="outline" onClick={() => setEditingType(null)}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={handleSave} disabled={updatePricingMutation.isPending}>
+                      {updatePricingMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                      Save
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => handleEdit(item)}>
+                    Edit
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      {pricingData?.configuredCount === 0 && (
+        <div className="text-center py-4 text-muted-foreground border-t">
+          <p>No custom pricing configured. Click "Edit" to set client-specific prices.</p>
+          <p className="text-sm">Current prices shown are system defaults.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface BillingConfig {
   clientAccountId: string;
   defaultBillingModel: string;
@@ -834,6 +1029,7 @@ export default function ClientPortalAdmin() {
                     <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent mb-6">
                       <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Overview</TabsTrigger>
                       <TabsTrigger value="profile" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Profile</TabsTrigger>
+                      <TabsTrigger value="pricing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Pricing</TabsTrigger>
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
                     </TabsList>
@@ -844,6 +1040,10 @@ export default function ClientPortalAdmin() {
 
                     <TabsContent value="settings">
                         <ClientSettingsEditor client={clientDetail} onSave={updateClientMutation.mutate} isLoading={updateClientMutation.isPending} />
+                    </TabsContent>
+
+                    <TabsContent value="pricing">
+                        <ClientCampaignPricingEditor clientId={selectedClient} />
                     </TabsContent>
 
                     <TabsContent value="overview">

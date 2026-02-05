@@ -6978,6 +6978,32 @@ export const clientBillingConfig = pgTable("client_billing_config", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Client Campaign Type Pricing - Per-client pricing for each campaign type
+export const clientCampaignPricing = pgTable("client_campaign_pricing", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Campaign Type (matches CAMPAIGN_TYPES values in the order panel)
+  campaignType: varchar("campaign_type", { length: 100 }).notNull(),
+
+  // Pricing Configuration
+  pricePerLead: numeric("price_per_lead", { precision: 10, scale: 2 }).notNull(),
+  minimumOrderSize: integer("minimum_order_size").default(100),
+
+  // Volume-based discounts (optional)
+  volumeDiscounts: jsonb("volume_discounts").default('[]'), // [{minQuantity: 500, discountPercent: 5}, {minQuantity: 1000, discountPercent: 10}]
+
+  // Campaign-specific settings
+  isEnabled: boolean("is_enabled").default(true), // Whether this campaign type is available for this client
+  notes: text("notes"), // Internal notes about this pricing agreement
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  // Unique constraint: one price per campaign type per client
+  uniqueClientCampaignType: unique().on(table.clientAccountId, table.campaignType),
+}));
+
 // Client Activity Costs (Real-time tracking)
 export const clientActivityCosts = pgTable("client_activity_costs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -7260,6 +7286,10 @@ export const clientBillingConfigRelations = relations(clientBillingConfig, ({ on
   clientAccount: one(clientAccounts, { fields: [clientBillingConfig.clientAccountId], references: [clientAccounts.id] }),
 }));
 
+export const clientCampaignPricingRelations = relations(clientCampaignPricing, ({ one }) => ({
+  clientAccount: one(clientAccounts, { fields: [clientCampaignPricing.clientAccountId], references: [clientAccounts.id] }),
+}));
+
 export const clientActivityCostsRelations = relations(clientActivityCosts, ({ one }) => ({
   clientAccount: one(clientAccounts, { fields: [clientActivityCosts.clientAccountId], references: [clientAccounts.id] }),
   project: one(clientProjects, { fields: [clientActivityCosts.projectId], references: [clientProjects.id] }),
@@ -7317,6 +7347,8 @@ export type ClientProject = typeof clientProjects.$inferSelect;
 export type InsertClientProject = typeof clientProjects.$inferInsert;
 export type ClientProjectCampaign = typeof clientProjectCampaigns.$inferSelect;
 export type ClientBillingConfig = typeof clientBillingConfig.$inferSelect;
+export type ClientCampaignPricing = typeof clientCampaignPricing.$inferSelect;
+export type InsertClientCampaignPricing = typeof clientCampaignPricing.$inferInsert;
 export type ClientActivityCost = typeof clientActivityCosts.$inferSelect;
 export type ClientInvoice = typeof clientInvoices.$inferSelect;
 export type InsertClientInvoice = typeof clientInvoices.$inferInsert;
@@ -12123,6 +12155,7 @@ export const clientFeatureFlagEnum = pgEnum('client_feature_flag', [
   'analytics_dashboard',    // Can access analytics
   'reports_export',         // Can export reports
   'api_access',             // Has API access
+  'organization_intelligence', // Can view/edit organization intelligence for campaigns
 ]);
 
 /**

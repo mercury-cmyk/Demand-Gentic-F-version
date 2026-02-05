@@ -218,6 +218,28 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
              mappedType = 'lead_qualification'; // Fallback
         }
 
+        // Extract voice from intake request if available
+        const selectedVoice = intakeRequestData?.extractedContext?.selectedVoice || 
+                             intakeRequestData?.rawInput?.selectedVoice || 
+                             'Puck'; // Default Gemini voice
+
+        // Build aiAgentSettings with voice configuration for AI orchestrator
+        const aiAgentSettings = (mappedType !== 'email' && project.projectType !== 'email_campaign') ? {
+          persona: {
+            name: project.name,
+            companyName: '',
+            role: 'Sales Development Representative',
+            voice: selectedVoice,
+          },
+          scripts: {
+            opening: null,
+            gatekeeper: null,
+            pitch: null,
+            objections: null,
+            closing: null,
+          },
+        } : null;
+
         // Create the campaign with project attachments
         [createdCampaign] = await db
           .insert(campaigns)
@@ -234,6 +256,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
             talkingPoints: campaignConfig.talkingPoints || null,
             successCriteria: campaignConfig.successCriteria || null,
             dialMode: (mappedType === 'email' || project.projectType === 'email_campaign') ? undefined : 'ai_agent',
+            aiAgentSettings: aiAgentSettings, // Required for AI orchestrator to initiate calls
             ownerId: userId,
             createdBy: userId,
             approvalStatus: 'draft',

@@ -77,8 +77,6 @@ const CAMPAIGN_TYPES = [
   { value: 'conference', label: 'Conference/Event', description: 'Trade show & conference attendee acquisition' },
 
   // Channel-Specific Campaigns
-  { value: 'combo', label: 'Multi-Channel (Voice + Email)', description: 'Coordinated voice and email sequences for maximum reach' },
-  { value: 'call', label: 'Voice-Only Campaign', description: 'Dedicated telemarketing with live agent conversations' },
   { value: 'email', label: 'Email-Only Campaign', description: 'Targeted email sequences with engagement tracking' },
 
   // Data Services
@@ -145,8 +143,31 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   const [channels, setChannels] = useState<string[]>(['voice', 'email']);
   const [specialRequirements, setSpecialRequirements] = useState('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
+  const [pricingBreakdown, setPricingBreakdown] = useState<{
+    baseRate: number;
+    basePrice: number;
+    volumeDiscountPercent: number;
+    volumeDiscount: number;
+    rushFeePercent: number;
+    rushFee: number;
+    hasCustomPricing: boolean;
+    minimumOrderSize: number;
+  } | null>(null);
 
   const getToken = () => localStorage.getItem('clientPortalToken');
+
+  // Fetch client-specific pricing
+  const { data: clientPricingData } = useQuery({
+    queryKey: ['client-campaign-pricing'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/campaign-pricing', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: open,
+  });
 
   const handleUrlAdd = () => {
     if (newUrl && !contextUrls.includes(newUrl)) {
@@ -333,6 +354,16 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     onSuccess: (data) => {
       if (data.success) {
         setEstimatedCost(data.data.estimatedCost);
+        setPricingBreakdown({
+          baseRate: data.data.baseRate,
+          basePrice: data.data.breakdown.basePrice,
+          volumeDiscountPercent: data.data.breakdown.volumeDiscountPercent || 0,
+          volumeDiscount: data.data.breakdown.volumeDiscount || 0,
+          rushFeePercent: data.data.breakdown.rushFeePercent || 0,
+          rushFee: data.data.breakdown.rushFee || 0,
+          hasCustomPricing: data.data.hasCustomPricing,
+          minimumOrderSize: data.data.minimumOrderSize,
+        });
       }
     },
   });
@@ -1161,14 +1192,29 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl">
-                          {CAMPAIGN_TYPES.map(type => (
-                            <SelectItem key={type.value} value={type.value} className="py-3">
-                              <div className="flex flex-col">
-                                <span className="font-medium">{type.label}</span>
-                                <span className="text-xs text-slate-500">{type.description}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
+                          {CAMPAIGN_TYPES
+                            .filter(type => {
+                              // Filter out disabled campaign types based on client pricing
+                              const clientTypeConfig = clientPricingData?.pricing?.[type.value];
+                              return clientTypeConfig?.isEnabled !== false;
+                            })
+                            .map(type => {
+                              const clientTypeConfig = clientPricingData?.pricing?.[type.value];
+                              const hasCustomPrice = clientTypeConfig && clientPricingData?.hasCustomPricing;
+                              return (
+                                <SelectItem key={type.value} value={type.value} className="py-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium flex items-center gap-2">
+                                      {type.label}
+                                      {hasCustomPrice && (
+                                        <span className="text-xs text-emerald-600">${clientTypeConfig.pricePerLead}/lead</span>
+                                      )}
+                                    </span>
+                                    <span className="text-xs text-slate-500">{type.description}</span>
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1388,7 +1434,10 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                         <div>
                           <span className="font-semibold text-slate-300 text-lg">Estimated Cost</span>
                           <p className="text-sm text-slate-500 mt-0.5">
-                            {formatCurrency(estimatedCost / volume)} per lead
+                            {formatCurrency(pricingBreakdown?.baseRate || estimatedCost / volume)} per lead
+                            {pricingBreakdown?.hasCustomPricing && (
+                              <Badge variant="outline" className="ml-2 text-xs text-emerald-400 border-emerald-400/50">Custom Pricing</Badge>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -1396,8 +1445,37 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                         {formatCurrency(estimatedCost)}
                       </span>
                     </div>
+
+                    {/* Pricing Breakdown */}
+                    {pricingBreakdown && (
+                      <div className="mt-4 pt-4 border-t border-slate-700 space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-400">Base Price ({volume} x {formatCurrency(pricingBreakdown.baseRate)})</span>
+                          <span className="text-slate-300">{formatCurrency(pricingBreakdown.basePrice)}</span>
+                        </div>
+                        {pricingBreakdown.volumeDiscountPercent > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-emerald-400">Volume Discount ({pricingBreakdown.volumeDiscountPercent}%)</span>
+                            <span className="text-emerald-400">-{formatCurrency(pricingBreakdown.volumeDiscount)}</span>
+                          </div>
+                        )}
+                        {pricingBreakdown.rushFeePercent > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-amber-400">Rush Fee ({pricingBreakdown.rushFeePercent}%)</span>
+                            <span className="text-amber-400">+{formatCurrency(pricingBreakdown.rushFee)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-base font-semibold pt-2 border-t border-slate-600">
+                          <span className="text-slate-300">Total</span>
+                          <span className="text-emerald-400">{formatCurrency(estimatedCost)}</span>
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-sm text-slate-500 mt-4 pt-4 border-t border-slate-700">
-                      Final cost may vary based on delivery timeline and lead quality requirements.
+                      {pricingBreakdown?.hasCustomPricing
+                        ? 'Pricing based on your negotiated rates.'
+                        : 'Standard pricing applied. Contact us for custom rates.'}
                     </p>
                   </CardContent>
                 </Card>
