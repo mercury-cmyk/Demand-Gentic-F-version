@@ -92,7 +92,8 @@ export function ChatInterface() {
     {
       id: "1",
       role: "assistant",
-      content: "Hello! I'm your **Agentic CRM Operator**. I work autonomously to complete your tasks - I'll keep querying data, analyzing, and taking action until I've fully answered your question.\n\nTry asking me:\n• \"Give me a full CRM overview\"\n• \"Find all accounts in healthcare and analyze them\"\n• \"What's our lead conversion rate?\"\n• \"Show me recent campaign performance\"\n\n🎤 **Voice Mode**: Click the microphone button to speak your commands!",
+      content:
+        "Hello! I'm your **Agentic CRM Operator**. I work autonomously to complete your tasks — I'll keep querying data, analyzing, and taking action until I've fully answered your question.\n\nTry asking me:\n- \"Give me a full CRM overview\"\n- \"Find all accounts in healthcare and analyze them\"\n- \"What's our lead conversion rate?\"\n- \"Show me recent campaign performance\"",
       timestamp: new Date(),
     },
   ]);
@@ -176,8 +177,8 @@ export function ChatInterface() {
           setIsListening(true);
           setInterimTranscript("");
           toast({
-            title: "🎤 Voice Mode Active",
-            description: "Listening... Speak your command now.",
+            title: "Listening",
+            description: "Speak your command now.",
           });
         };
 
@@ -251,8 +252,6 @@ export function ChatInterface() {
         setTimeout(() => handleSend(), 100);
       }
     } else {
-      // Enable voice mode - agent will speak responses
-      setVoiceMode(true);
       try {
         recognitionRef.current.start();
       } catch (err) {
@@ -598,8 +597,8 @@ export function ChatInterface() {
                   }
                   setVoiceMode(v => !v);
                   toast({
-                    title: voiceMode ? "🔇 Voice Mode Off" : "🔊 Voice Mode On",
-                    description: voiceMode ? "Agent will no longer speak responses" : "Agent will now speak responses aloud",
+                    title: voiceMode ? "Voice responses disabled" : "Voice responses enabled",
+                    description: voiceMode ? "Agent will not speak responses." : "Agent will speak responses aloud.",
                   });
                 }}
                 className={cn(
@@ -643,9 +642,9 @@ export function ChatInterface() {
             </div>
           </div>
           <div className="flex items-center justify-center gap-3 text-[10px] text-muted-foreground mt-3">
-            <span className="flex items-center gap-1"><Mic className="h-3 w-3" /> Speak commands</span>
+            <span className="flex items-center gap-1"><Mic className="h-3 w-3" /> Dictate (optional)</span>
             <span className="text-muted-foreground/30">•</span>
-            <span className="flex items-center gap-1"><Volume2 className="h-3 w-3" /> Agent speaks back</span>
+            <span className="flex items-center gap-1"><Volume2 className="h-3 w-3" /> Voice responses (optional)</span>
             <span className="text-muted-foreground/30">•</span>
             <span>Press Enter to send</span>
           </div>

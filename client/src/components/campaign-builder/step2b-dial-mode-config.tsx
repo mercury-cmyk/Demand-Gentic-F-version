@@ -21,21 +21,29 @@ interface Step2bDialModeConfigProps {
 
 type DialMode = 'ai_agent';
 // Gemini Live Native Voices
-type AiVoice = 'Puck' | 'Charon' | 'Fenrir' | 'Orus' | 'Kore' | 'Aoede' | 'Leda' | 'Zephyr' | string;
+type AiVoice = 'Puck' | 'Charon' | 'Fenrir' | 'Orus' | 'Kore' | 'Aoede' | 'Leda' | 'Zephyr' | 'verse' | 'ash' | 'ballad' | 'echo' | 'coral' | 'sage' | 'shimmer' | 'marin' | string;
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
 
-const AI_VOICES: { value: AiVoice; label: string; description: string; gender: 'male' | 'female' }[] = [
-  // Male Voices
-  { value: 'Puck', label: 'Puck', description: 'Upbeat, energetic, youthful (Male)', gender: 'male' },
-  { value: 'Charon', label: 'Charon', description: 'Deep, mature, bass-heavy (Male)', gender: 'male' },
-  { value: 'Fenrir', label: 'Fenrir', description: 'Bold, confident, assertive (Male)', gender: 'male' },
-  { value: 'Orus', label: 'Orus', description: 'Warm, conversational, friendly (Male)', gender: 'male' },
-  
-  // Female Voices
-  { value: 'Kore', label: 'Kore', description: 'Calm, soothing, reassuring (Female)', gender: 'female' },
-  { value: 'Aoede', label: 'Aoede', description: 'Bright, friendly, cheerful (Female)', gender: 'female' },
-  { value: 'Leda', label: 'Leda', description: 'Professional, articulate, polished (Female)', gender: 'female' },
-  { value: 'Zephyr', label: 'Zephyr', description: 'Light, modern, contemporary (Female)', gender: 'female' },
+const AI_VOICES: { value: AiVoice; label: string; description: string; gender: 'male' | 'female'; provider?: 'gemini' | 'openai' }[] = [
+  // ============ GEMINI VOICES (Google) ============
+  { value: 'Puck', label: 'Puck', description: 'Upbeat, energetic, youthful (Male)', gender: 'male', provider: 'gemini' },
+  { value: 'Charon', label: 'Charon', description: 'Deep, mature, bass-heavy (Male)', gender: 'male', provider: 'gemini' },
+  { value: 'Fenrir', label: 'Fenrir', description: 'Bold, confident, assertive (Male)', gender: 'male', provider: 'gemini' },
+  { value: 'Orus', label: 'Orus', description: 'Warm, conversational, friendly (Male)', gender: 'male', provider: 'gemini' },
+  { value: 'Kore', label: 'Kore', description: 'Calm, soothing, reassuring (Female)', gender: 'female', provider: 'gemini' },
+  { value: 'Aoede', label: 'Aoede', description: 'Bright, friendly, cheerful (Female)', gender: 'female', provider: 'gemini' },
+  { value: 'Leda', label: 'Leda', description: 'Professional, articulate, polished (Female)', gender: 'female', provider: 'gemini' },
+  { value: 'Zephyr', label: 'Zephyr', description: 'Light, modern, contemporary (Female)', gender: 'female', provider: 'gemini' },
+
+  // ============ OPENAI REALTIME VOICES ============
+  { value: 'verse', label: 'Verse (OpenAI)', description: 'Poetic, dynamic, expressive (Male)', gender: 'male', provider: 'openai' },
+  { value: 'ash', label: 'Ash (OpenAI)', description: 'Clear, professional, balanced (Male)', gender: 'male', provider: 'openai' },
+  { value: 'ballad', label: 'Ballad (OpenAI)', description: 'Warm, storytelling, narrative (Male)', gender: 'male', provider: 'openai' },
+  { value: 'echo', label: 'Echo (OpenAI)', description: 'Deep, resonant, authoritative (Male)', gender: 'male', provider: 'openai' },
+  { value: 'coral', label: 'Coral (OpenAI)', description: 'Warm, friendly, approachable (Female)', gender: 'female', provider: 'openai' },
+  { value: 'sage', label: 'Sage (OpenAI)', description: 'Calm, wise, knowledgeable (Female)', gender: 'female', provider: 'openai' },
+  { value: 'shimmer', label: 'Shimmer (OpenAI)', description: 'Light, expressive, clear (Female)', gender: 'female', provider: 'openai' },
+  { value: 'marin', label: 'Marin (OpenAI)', description: 'Calm, professional, soothing (Female)', gender: 'female', provider: 'openai' },
 ];
 
 const HANDOFF_TRIGGERS: { value: HandoffTrigger; label: string }[] = [

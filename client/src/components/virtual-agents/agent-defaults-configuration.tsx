@@ -330,18 +330,28 @@ export function AgentDefaultsConfiguration() {
                 <SelectContent>
                   {voiceProvider === 'google' ? (
                     <>
+                      <SelectItem value="Puck">Puck - Upbeat & energetic</SelectItem>
                       <SelectItem value="Kore">Kore - Soft & friendly (Recommended)</SelectItem>
-                      <SelectItem value="Pegasus">Pegasus - Calm & professional</SelectItem>
-                      <SelectItem value="Aoede">Aoede - Bright & energetic</SelectItem>
                       <SelectItem value="Charon">Charon - Deep & authoritative</SelectItem>
                       <SelectItem value="Fenrir">Fenrir - Calm & measured</SelectItem>
+                      <SelectItem value="Aoede">Aoede - Bright & energetic</SelectItem>
+                      <SelectItem value="Leda">Leda - Professional & articulate</SelectItem>
+                      <SelectItem value="Orus">Orus - Warm & conversational</SelectItem>
+                      <SelectItem value="Zephyr">Zephyr - Light & modern</SelectItem>
+                      <SelectItem value="Pegasus">Pegasus - Calm & professional</SelectItem>
                     </>
                   ) : (
                     <>
-                      <SelectItem value="nova">Nova - Friendly & upbeat</SelectItem>
+                      <SelectItem value="ash">Ash - Clear & professional</SelectItem>
+                      <SelectItem value="verse">Verse - Poetic & dynamic</SelectItem>
+                      <SelectItem value="ballad">Ballad - Warm & storytelling</SelectItem>
+                      <SelectItem value="echo">Echo - Deep & resonant</SelectItem>
+                      <SelectItem value="coral">Coral - Warm & friendly</SelectItem>
+                      <SelectItem value="sage">Sage - Calm & wise</SelectItem>
+                      <SelectItem value="shimmer">Shimmer - Expressive & clear</SelectItem>
                       <SelectItem value="marin">Marin - Calm & professional</SelectItem>
                       <SelectItem value="alloy">Alloy - Neutral & balanced</SelectItem>
-                      <SelectItem value="echo">Echo - Deep & resonant</SelectItem>
+                      <SelectItem value="nova">Nova - Friendly & upbeat</SelectItem>
                     </>
                   )}
                 </SelectContent>

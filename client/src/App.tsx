@@ -33,7 +33,6 @@ import DomainSetsPage from "@/pages/domain-sets";
 import AccountsListDetail from "@/pages/accounts-list-detail";
 import CampaignsPage from "@/pages/campaigns";
 import CampaignCreatePage from "@/pages/campaign-create";
-import CampaignCreateAgenticPage from "@/pages/campaign-create-agentic";
 import EmailCampaignsPage from "@/pages/email-campaigns";
 import EmailCampaignCreatePage from "@/pages/email-campaign-create";
 import SimpleEmailCampaignCreatePage from "@/pages/simple-email-campaign-create";
@@ -294,7 +293,6 @@ function AuthenticatedApp() {
               {/* Campaigns - Unified Hub */}
               <Route path="/campaigns" component={CampaignsPage} />
               <Route path="/campaigns/create" component={CampaignCreatePage} />
-              <Route path="/campaigns/create-agentic" component={CampaignCreateAgenticPage} />
               <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />

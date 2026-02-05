@@ -117,67 +117,156 @@ const PROMOTION_CHANNELS = [
 // Actual Gemini Live Native Voices - Each has a unique sound signature
 const AI_VOICES = [
   // ============ MALE VOICES ============
+// AI Voices available for preview - Gemini Live & OpenAI Realtime
+// Each has a unique sound signature and personality
+const AI_VOICES = [
+  // ============ GEMINI VOICES (Google) ============
   {
     id: 'Puck',
     name: 'Puck',
     gender: 'male',
     accent: 'American',
-    tone: 'Upbeat & Energetic',
+    tone: 'Natural, Soft, Storytelling',
     description: 'A youthful, enthusiastic voice with high energy. Perfect for exciting product launches and engaging cold calls.',
     bestFor: ['Product Launches', 'Cold Calling', 'Tech Startups'],
-    color: 'from-orange-500 to-amber-500'
+    color: 'from-orange-500 to-amber-500',
+    provider: 'gemini'
   },
   {
     id: 'Charon',
     name: 'Charon',
     gender: 'male',
     accent: 'American',
-    tone: 'Deep & Mature',
+    tone: 'Deep, Resonant, Authoritative',
     description: 'A rich, bass-heavy voice that conveys wisdom and experience. Ideal for enterprise deals and senior executives.',
     bestFor: ['Enterprise Sales', 'Executive Outreach', 'Financial Services'],
-    color: 'from-slate-600 to-slate-800'
+    color: 'from-slate-600 to-slate-800',
+    provider: 'gemini'
   },
   {
     id: 'Fenrir',
     name: 'Fenrir',
     gender: 'male',
     accent: 'American',
-    tone: 'Bold & Confident',
+    tone: 'Deep, Intense, Cinematic',
     description: 'A strong, assertive voice that commands attention. Great for persuasive sales and overcoming objections.',
     bestFor: ['Sales Calls', 'Lead Qualification', 'B2B Outreach'],
-    color: 'from-blue-500 to-indigo-600'
-  },
-  {
-    id: 'Orus',
-    name: 'Orus',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Warm & Conversational',
-    description: 'A friendly, approachable voice that feels like talking to a trusted colleague. Perfect for relationship building.',
-    bestFor: ['Customer Success', 'Account Management', 'Renewals'],
-    color: 'from-teal-500 to-cyan-500'
+    color: 'from-blue-500 to-indigo-600',
+    provider: 'gemini'
   },
 
+  // ============ OPENAI REALTIME VOICES ============
+  {
+    id: 'verse',
+    name: 'Verse',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Poetic, Dynamic',
+    description: 'A highly expressive voice capable of subtle emotional nuance. Great for personalized outreach.',
+    bestFor: ['Relationship Management', 'Luxury Brands', 'Arts'],
+    color: 'from-purple-600 to-indigo-600',
+    provider: 'openai'
+  },
+  {
+    id: 'ash',
+    name: 'Ash',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Clear, Professional',
+    description: 'A balanced, professional voice suitable for a wide range of business contexts.',
+    bestFor: ['General Business', 'Consulting', 'Support'],
+    color: 'from-gray-500 to-gray-700',
+    provider: 'openai'
+  },
+  {
+    id: 'ballad',
+    name: 'Ballad',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Warm, Storytelling',
+    description: 'A narrative-focused voice that excels at explaining complex concepts in a relatable way.',
+    bestFor: ['Education', 'Explainer Calls', 'Nurture'],
+    color: 'from-amber-600 to-orange-700',
+    provider: 'openai'
+  },
+  {
+    id: 'echo',
+    name: 'Echo',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Deep, Resonant',
+    description: 'A very deep, soothing voice that builds trust and authority.',
+    bestFor: ['High-Trust Sales', 'Security', 'Legal'],
+    color: 'from-indigo-800 to-blue-900',
+    provider: 'openai'
+  },
+  
   // ============ FEMALE VOICES ============
   {
     id: 'Kore',
     name: 'Kore',
     gender: 'female',
     accent: 'American',
-    tone: 'Calm & Soothing',
+    tone: 'Balanced, Clear, Professional',
     description: 'A gentle, reassuring voice that puts people at ease. Excellent for healthcare, insurance, and sensitive topics.',
     bestFor: ['Healthcare', 'Insurance', 'Financial Services'],
-    color: 'from-green-400 to-emerald-500'
+    color: 'from-green-400 to-emerald-500',
+    provider: 'gemini'
   },
   {
     id: 'Aoede',
     name: 'Aoede',
     gender: 'female',
     accent: 'American',
-    tone: 'Bright & Friendly',
+    tone: 'Bright, Expressive, Engaging',
     description: 'A cheerful, welcoming voice that creates instant rapport. Ideal for customer outreach and appointment setting.',
     bestFor: ['Appointment Setting', 'Customer Outreach', 'Surveys'],
-    color: 'from-rose-400 to-pink-500'
+    color: 'from-rose-400 to-pink-500',
+    provider: 'gemini'
+  },
+  {
+    id: 'coral',
+    name: 'Coral',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Warm, Friendly',
+    description: 'A very approachable and kind voice, perfect for welcoming new customers.',
+    bestFor: ['Onboarding', 'Welcome Calls', 'Retail'],
+    color: 'from-pink-400 to-rose-400',
+    provider: 'openai'
+  },
+  {
+    id: 'sage',
+    name: 'Sage',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Calm, Wise',
+    description: 'A knowledgeable and steady voice that conveys expertise and reliability.',
+    bestFor: ['Advisory', 'Technical Support', 'B2B Sales'],
+    color: 'from-emerald-600 to-teal-700',
+    provider: 'openai'
+  },
+  {
+    id: 'shimmer',
+    name: 'Shimmer',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Light, Expressive',
+    description: 'A high-pitched, clear voice that cuts through noise and sounds very modern.',
+    bestFor: ['Tech Sales', 'Marketing', 'Youth-Oriented Brands'],
+    color: 'from-cyan-400 to-blue-400',
+    provider: 'openai'
+  },
+  {
+    id: 'marin',
+    name: 'Marin',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Calm, Professional, Soothing',
+    description: 'A smooth, highly professional voice ideal for corporate environments.',
+    bestFor: ['Corporate Communications', 'Executive Assistants', 'Reception'],
+    color: 'from-blue-600 to-slate-600',
+    provider: 'openai'
   },
   {
     id: 'Leda',
@@ -187,18 +276,9 @@ const AI_VOICES = [
     tone: 'Professional & Articulate',
     description: 'A clear, polished voice with executive presence. Perfect for C-suite conversations and professional services.',
     bestFor: ['Executive Outreach', 'Professional Services', 'Consulting'],
-    color: 'from-violet-500 to-purple-600'
-  },
-  {
-    id: 'Zephyr',
-    name: 'Zephyr',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Light & Modern',
-    description: 'A fresh, contemporary voice that resonates with younger audiences. Great for tech and modern brands.',
-    bestFor: ['SaaS Sales', 'Tech Industry', 'Modern Brands'],
-    color: 'from-cyan-500 to-blue-500'
-  },
+    color: 'from-violet-500 to-purple-600',
+    provider: 'gemini'
+  }
 ];
 
 // Wizard steps

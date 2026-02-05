@@ -284,15 +284,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Unified campaign management for email and phone',
       },
       {
-        id: 'create-campaign-agentic',
-        title: 'Create Campaign',
-        url: '/campaigns/create-agentic',
-        icon: 'Sparkles',
-        roles: MANAGEMENT_ROLES,
-        badge: { text: 'AI', variant: 'new' },
-        description: 'AI-powered campaign creation wizard',
-      },
-      {
         id: 'agent-console',
         title: 'Agent Console',
         url: '/agent-console',

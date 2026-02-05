@@ -82,11 +82,11 @@ interface Campaign {
 
 // Voice options with personalities
 const GEMINI_VOICES: VoiceOption[] = [
-  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Natural & Soft', provider: 'gemini' },
-  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Deep & Resonant', provider: 'gemini' },
-  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Balanced & Clear', provider: 'gemini' },
-  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Authoritative', provider: 'gemini' },
-  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Bright & Expressive', provider: 'gemini' },
+  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', personality: 'Natural, Soft, Storytelling', provider: 'gemini' },
+  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', personality: 'Deep, Resonant, Authoritative', provider: 'gemini' },
+  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', personality: 'Balanced, Clear, Professional', provider: 'gemini' },
+  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', personality: 'Deep, Intense, Cinematic', provider: 'gemini' },
+  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', personality: 'Bright, Expressive, Engaging', provider: 'gemini' },
 ];
 
 const VOICE_TONES = [
@@ -528,69 +528,129 @@ function VoicePreviewSection({
         </h3>
 
         {/* Gender Selection with Voice Cards */}
-        <div className="space-y-4 mb-6">
-          <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Male Voices</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {maleVoices.map(voice => (
-              <button
-                key={voice.id}
-                onClick={() => setSelectedVoice(voice.id)}
-                className={cn(
-                  "relative p-3 rounded-xl border text-left transition-all duration-200",
-                  selectedVoice === voice.id
-                    ? "bg-purple-500/20 border-purple-500/50 shadow-lg shadow-purple-500/10"
-                    : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
-                )}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={cn(
-                    "h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold",
-                    selectedVoice === voice.id ? "bg-purple-500 text-white" : "bg-white/10 text-white/60"
-                  )}>
-                    M
+        <div className="space-y-6 mb-6">
+          {/* MALE VOICES */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-white/50 uppercase tracking-wider flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+              Male Voices
+            </Label>
+            <div className="grid grid-cols-1 gap-2">
+              {maleVoices.map(voice => (
+                <button
+                  key={voice.id}
+                  onClick={() => setSelectedVoice(voice.id)}
+                  className={cn(
+                    "group relative p-3 rounded-xl border text-left transition-all duration-300",
+                    selectedVoice === voice.id
+                      ? "bg-gradient-to-r from-blue-500/20 to-cyan-500/10 border-blue-500/50 shadow-lg shadow-blue-500/10 transform scale-[1.02]"
+                      : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-md"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                     <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "h-8 w-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner",
+                          selectedVoice === voice.id 
+                            ? "bg-gradient-to-br from-blue-500 to-cyan-600 text-white" 
+                            : "bg-white/10 text-white/40 group-hover:bg-white/20 group-hover:text-white/70"
+                        )}>
+                          {voice.displayName.charAt(0)}
+                        </div>
+                        <div>
+                           <span className={cn(
+                             "text-sm font-semibold block transition-colors",
+                             selectedVoice === voice.id ? "text-white" : "text-white/80 group-hover:text-white"
+                           )}>{voice.displayName}</span>
+                           <span className={cn(
+                             "text-xs block capitalize",
+                             selectedVoice === voice.id ? "text-blue-300" : "text-white/30"
+                           )}>{voice.gender}</span>
+                        </div>
+                     </div>
+                     {selectedVoice === voice.id && (
+                        <div className="h-6 w-6 rounded-full bg-blue-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-blue-400" />
+                        </div>
+                     )}
                   </div>
-                  <span className="text-sm font-medium text-white">{voice.displayName}</span>
-                </div>
-                <p className="text-xs text-white/40 truncate">{voice.personality}</p>
-                {selectedVoice === voice.id && (
-                  <div className="absolute top-2 right-2">
-                    <CheckCircle2 className="h-4 w-4 text-purple-400" />
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {voice.personality.split(',').map((tag, i) => (
+                      <span key={i} className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded-md border",
+                         selectedVoice === voice.id
+                           ? "bg-blue-500/10 border-blue-500/20 text-blue-200"
+                           : "bg-white/5 border-white/5 text-white/40"
+                      )}>
+                        {tag.trim()}
+                      </span>
+                    ))}
                   </div>
-                )}
-              </button>
-            ))}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <Label className="text-xs font-medium text-white/50 uppercase tracking-wider">Female Voices</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {femaleVoices.map(voice => (
-              <button
-                key={voice.id}
-                onClick={() => setSelectedVoice(voice.id)}
-                className={cn(
-                  "relative p-3 rounded-xl border text-left transition-all duration-200",
-                  selectedVoice === voice.id
-                    ? "bg-pink-500/20 border-pink-500/50 shadow-lg shadow-pink-500/10"
-                    : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
-                )}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={cn(
-                    "h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold",
-                    selectedVoice === voice.id ? "bg-pink-500 text-white" : "bg-white/10 text-white/60"
-                  )}>
-                    F
+          {/* FEMALE VOICES */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-white/50 uppercase tracking-wider flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-pink-500"></span>
+              Female Voices
+            </Label>
+            <div className="grid grid-cols-1 gap-2">
+              {femaleVoices.map(voice => (
+                <button
+                  key={voice.id}
+                  onClick={() => setSelectedVoice(voice.id)}
+                  className={cn(
+                    "group relative p-3 rounded-xl border text-left transition-all duration-300",
+                    selectedVoice === voice.id
+                      ? "bg-gradient-to-r from-pink-500/20 to-purple-500/10 border-pink-500/50 shadow-lg shadow-pink-500/10 transform scale-[1.02]"
+                      : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 hover:shadow-md"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                     <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "h-8 w-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner",
+                          selectedVoice === voice.id 
+                            ? "bg-gradient-to-br from-pink-500 to-purple-600 text-white" 
+                            : "bg-white/10 text-white/40 group-hover:bg-white/20 group-hover:text-white/70"
+                        )}>
+                          {voice.displayName.charAt(0)}
+                        </div>
+                        <div>
+                           <span className={cn(
+                             "text-sm font-semibold block transition-colors",
+                             selectedVoice === voice.id ? "text-white" : "text-white/80 group-hover:text-white"
+                           )}>{voice.displayName}</span>
+                           <span className={cn(
+                             "text-xs block capitalize",
+                             selectedVoice === voice.id ? "text-pink-300" : "text-white/30"
+                           )}>{voice.gender}</span>
+                        </div>
+                     </div>
+                     {selectedVoice === voice.id && (
+                        <div className="h-6 w-6 rounded-full bg-pink-500/20 flex items-center justify-center animate-in fade-in zoom-in duration-300">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-pink-400" />
+                        </div>
+                     )}
                   </div>
-                  <span className="text-sm font-medium text-white">{voice.displayName}</span>
-                </div>
-                <p className="text-xs text-white/40 truncate">{voice.personality}</p>
-                {selectedVoice === voice.id && (
-                  <div className="absolute top-2 right-2">
-                    <CheckCircle2 className="h-4 w-4 text-pink-400" />
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {voice.personality.split(',').map((tag, i) => (
+                      <span key={i} className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded-md border",
+                         selectedVoice === voice.id
+                           ? "bg-pink-500/10 border-pink-500/20 text-pink-200"
+                           : "bg-white/5 border-white/5 text-white/40"
+                      )}>
+                        {tag.trim()}
+                      </span>
+                    ))}
                   </div>
-                )}
-              </button>
-            ))}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

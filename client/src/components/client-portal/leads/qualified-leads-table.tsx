@@ -321,13 +321,13 @@ export function QualifiedLeadsTable({ onViewDetails, onExport }: QualifiedLeadsT
                       <TableCell className="py-4">
                         <div className="flex gap-2">
                           {lead.hasRecording && (
-                            <div className="flex items-center gap-1 text-xs">
-                              <Headphones className="h-4 w-4 text-blue-600" title="Has Recording" />
+                            <div className="flex items-center gap-1 text-xs" title="Has Recording">
+                              <Headphones className="h-4 w-4 text-blue-600" aria-hidden="true" />
                             </div>
                           )}
                           {lead.hasTranscript && (
-                            <div className="flex items-center gap-1 text-xs">
-                              <FileText className="h-4 w-4 text-green-600" title="Has Transcript" />
+                            <div className="flex items-center gap-1 text-xs" title="Has Transcript">
+                              <FileText className="h-4 w-4 text-green-600" aria-hidden="true" />
                             </div>
                           )}
                           {(lead.commentCount || 0) > 0 && (
