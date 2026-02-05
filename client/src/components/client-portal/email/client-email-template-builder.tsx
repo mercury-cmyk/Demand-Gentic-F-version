@@ -32,12 +32,13 @@ import { RichTextEditor } from '@/components/rich-text-editor';
 import {
   Mail, Send, Save, Eye, Code2, Type, Sparkles, Copy, Check,
   AlertTriangle, CheckCircle2, Info, ChevronDown, ChevronRight,
-  Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle,
+  Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle, Maximize2, Minimize2,
   User, Building2, AtSign, MousePointer, LayoutTemplate, Loader2,
   Plus, X, Box
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useState, useCallback, useMemo, useEffect } from 'react';
+
+const isFullHtmlDocument = (html: string) => /<!doctype html|<html[\s>]/i.test(html);
 
 // Types
 interface Campaign {
@@ -402,8 +403,9 @@ export function ClientEmailTemplateBuilder({
   const [subject, setSubject] = useState('');
   const [preheader, setPreheader] = useState('');
   const [bodyContent, setBodyContent] = useState('');
-  const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual');
+  const [editorMode, setEditorMode] = useState<'preview' | 'html'>('preview');
   const [templateName, setTemplateName] = useState('');
+  const [isCanvasExpanded, setIsCanvasExpanded] = useState(true);
 
   // AI Generation state
   const [emailType, setEmailType] = useState('cold_outreach');
@@ -789,14 +791,34 @@ export function ClientEmailTemplateBuilder({
                             HTML
                           </Button>
                         </div>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setIsCanvasExpanded(prev => !prev)}
+                          className="text-xs"
+                        >
+                          {isCanvasExpanded ? (
+                            <Minimize2 className="w-3.5 h-3.5 mr-1" />
+                          ) : (
+                            <Maximize2 className="w-3.5 h-3.5 mr-1" />
+                          )}
+                          {isCanvasExpanded ? 'Compact' : 'Full width'}
+                        </Button>
                       </div>
 
                       {/* Email Canvas - Same width as main campaigns (600px) */}
                       <div className="flex-1 flex justify-center overflow-auto pb-4">
-                        <div className="w-full max-w-[600px]">
+                        <div
+                          className={cn(
+                            'w-full transition-all duration-200',
+                            isCanvasExpanded ? 'max-w-[1000px]' : 'max-w-[600px]'
+                          )}
+                        >
                           <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
                             {editorMode === 'visual' ? (
-                              <div className="min-h-[400px] bg-white">
+                              <div className="min-h-[500px] bg-white">
                                 <RichTextEditor
                                   content={bodyContent}
                                   onChange={setBodyContent}
@@ -809,12 +831,12 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                 />
                               </div>
                             ) : (
-                              <div className="min-h-[400px]">
+                              <div className="min-h-[500px]">
                                 <Textarea
                                   value={bodyContent}
                                   onChange={(e) => setBodyContent(e.target.value)}
                                   placeholder="Enter HTML content..."
-                                  className="w-full min-h-[400px] p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400"
+                                  className="w-full min-h-[500px] p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400"
                                 />
                               </div>
                             )}
@@ -981,7 +1003,7 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
             </div>
         {/* AI Generate Sheet */}
         <Sheet open={showAiGenerate} onOpenChange={setShowAiGenerate}>
-            <SheetContent side="right" className="w-[100vw] sm:max-w-none p-0 border-l shadow-2xl">
+            <SheetContent side="right" className="w-[100vw] sm:w-[520px] md:w-[640px] lg:w-[720px] p-0 border-l shadow-2xl">
                 <div className="h-full flex flex-col">
                     <div className="p-6 border-b bg-slate-50">
                         <SheetHeader>

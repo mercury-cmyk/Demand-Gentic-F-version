@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PageNav } from "@/components/layout/page-nav";
 import {
   Dialog,
   DialogContent,
@@ -312,10 +313,20 @@ export default function EmailTemplatesPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Navigation */}
+        <PageNav 
+          breadcrumbs={[
+            { label: "Campaigns", href: "/campaigns" },
+            ...(campaign ? [{ label: campaign.name, href: `/campaigns/${campaignId}` }] : []),
+            { label: "Email Templates" }
+          ]}
+          showBack={true}
+        />
+
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Email Templates</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-2xl font-bold">Email Templates</h1>
+            <p className="text-muted-foreground text-sm mt-1">
               Create reusable email templates with personalization tokens
             </p>
           </div>
