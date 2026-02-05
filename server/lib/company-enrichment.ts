@@ -7,14 +7,25 @@ import { formatPhoneWithCountryCode } from "./phone-formatter";
 // Referenced from blueprint:javascript_gemini_ai_integrations
 // This is using Replit's AI Integrations service, which provides Gemini-compatible API access without requiring your own API key.
 // Using gemini-2.5-flash for fast, high-volume data extraction tasks
-const geminiBaseUrl = resolveGeminiBaseUrl();
-const ai = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY!,
-  httpOptions: {
-    apiVersion: "",
-    ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
-  },
-});
+// Lazy initialization to allow server startup without API key
+let _ai: GoogleGenAI | null = null;
+function getAI(): GoogleGenAI {
+  if (!_ai) {
+    const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("No Gemini API key configured. Set AI_INTEGRATIONS_GEMINI_API_KEY, GOOGLE_AI_API_KEY, or GEMINI_API_KEY.");
+    }
+    const geminiBaseUrl = resolveGeminiBaseUrl();
+    _ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        apiVersion: "",
+        ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
+      },
+    });
+  }
+  return _ai;
+}
 
 interface EnrichmentResult {
   success: boolean;
@@ -468,7 +479,7 @@ CRITICAL REQUIREMENTS:
 
 Output valid JSON only.`;
 
-      const response = await ai.models.generateContent({
+      const response = await getAI().models.generateContent({
         model: "gemini-2.5-flash",
         contents: `${systemPrompt}\n\n${prompt}`,
         config: {
@@ -791,7 +802,7 @@ CRITICAL REQUIREMENTS:
 
 Output valid JSON only.`;
 
-      const response = await ai.models.generateContent({
+      const response = await getAI().models.generateContent({
         model: "gemini-2.5-flash",
         contents: `${systemPrompt}\n\n${prompt}`,
         config: {

@@ -52,10 +52,18 @@ import {
 
 const router = Router();
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-});
+// Initialize OpenAI client lazily to allow server startup without API key
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OpenAI API key is not configured");
+    }
+    _openai = new OpenAI({ apiKey });
+  }
+  return _openai;
+}
 
 const insertVirtualAgentSchema = createInsertSchema(virtualAgents).omit({
   id: true,
@@ -184,14 +192,25 @@ const refineSystemPromptSchema = z.object({
 import { GoogleGenAI } from '@google/genai';
 import { resolveGeminiBaseUrl } from "../lib/ai-provider-utils";
 
-const geminiBaseUrl = resolveGeminiBaseUrl();
-const genai = new GoogleGenAI({
-  apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY || '',
-  httpOptions: {
-    apiVersion: "", // use default
-    ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
-  },
-});
+// Initialize Gemini client lazily to allow server startup without API key
+let _genai: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI {
+  if (!_genai) {
+    const apiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("No Gemini API key configured. Set AI_INTEGRATIONS_GEMINI_API_KEY, GOOGLE_AI_API_KEY, or GEMINI_API_KEY.");
+    }
+    const geminiBaseUrl = resolveGeminiBaseUrl();
+    _genai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        apiVersion: "", // use default
+        ...(geminiBaseUrl ? { baseUrl: geminiBaseUrl } : {}),
+      },
+    });
+  }
+  return _genai;
+}
 
 const previewConversationSchema = z.object({
   sessionId: z.string().optional(),    // Session ID for persisting conversation state (prevents resets)
@@ -679,7 +698,7 @@ router.post("/preview-conversation", requireAuth, async (req, res) => {
          throw new Error(`Gemini Preview Error: ${geminierr instanceof Error ? geminierr.message : geminierr}`);
       }
     } else {
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAI().chat.completions.create({
         model: process.env.OPENAI_VIRTUAL_AGENT_PREVIEW_MODEL || "gpt-4o-mini",
         temperature: safeTemperature,
         max_tokens: safeMaxTokens,

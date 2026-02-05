@@ -17,10 +17,19 @@ import { z } from 'zod';
 
 const router = Router();
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Initialize OpenAI client lazily to allow server startup without API key
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY is not configured");
+    }
+    _openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return _openai;
+}
 
 // Voice command intent types
 type VoiceIntent = 'navigation' | 'query' | 'action' | 'report' | 'unknown';
@@ -76,7 +85,7 @@ Examples:
 // Parse voice command using GPT-4
 async function parseVoiceCommand(transcript: string): Promise<ParsedCommand> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: INTENT_PARSER_PROMPT },
@@ -435,7 +444,7 @@ async function executeReport(
 // Generate TTS response
 async function generateAudioResponse(text: string, voice: string = 'nova'): Promise<string | null> {
   try {
-    const mp3Response = await openai.audio.speech.create({
+    const mp3Response = await getOpenAI().audio.speech.create({
       model: 'tts-1',
       voice: voice as 'nova' | 'alloy' | 'echo' | 'fable' | 'onyx' | 'shimmer',
       input: text,
@@ -691,7 +700,7 @@ router.post('/transcribe', async (req: Request, res: Response) => {
       type: mimeType || 'audio/webm',
     });
 
-    const transcription = await openai.audio.transcriptions.create({
+    const transcription = await getOpenAI().audio.transcriptions.create({
       file: audioFile,
       model: 'whisper-1',
       language: 'en',
