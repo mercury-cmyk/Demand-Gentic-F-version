@@ -343,12 +343,41 @@ router.post("/orders/create", async (req: Request, res: Response) => {
     const mapToProjectType = (type: string | undefined): 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom' => {
       if (!type) return 'custom';
       const mapping: Record<string, 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom'> = {
+        // Lead Generation Services
+        'high_quality_leads': 'verification',
+        'bant_leads': 'verification',
+        'sql': 'verification',
+
+        // Appointment & Meeting Services
+        'appointment_generation': 'call_campaign',
+        'appointment_setting': 'call_campaign',
+        'lead_qualification': 'call_campaign',
+
+        // Content Syndication
+        'content_syndication': 'email_campaign',
+
+        // Event & Webinar Services
+        'webinar_invite': 'combo',
+        'live_webinar': 'combo',
+        'on_demand_webinar': 'combo',
+        'executive_dinner': 'call_campaign',
+        'leadership_forum': 'call_campaign',
+        'conference': 'combo',
+
+        // Channel-Specific Campaigns
+        'email': 'email_campaign',
+        'call': 'call_campaign',
+        'combo': 'combo',
+
+        // Data Services
+        'data_validation': 'data_enrichment',
+        'data_enrichment': 'data_enrichment',
+
+        // Legacy mappings
         'call_campaign': 'call_campaign',
         'email_campaign': 'email_campaign',
         'combo_campaign': 'combo',
         'lead_generation': 'verification',
-        'appointment_setting': 'call_campaign',
-        'data_enrichment': 'data_enrichment',
         'market_research': 'custom',
         'custom': 'custom',
       };
@@ -915,9 +944,9 @@ router.post("/reports/generate", async (req: Request, res: Response) => {
         projectId: projectId || null,
         reportName: result.data.title || `Campaign Report (${reportRequest.reportType})`,
         reportType: reportRequest.reportType || "campaign_performance",
-        reportPeriodStart: reportRequest.dateRange?.start || null,
-        reportPeriodEnd: reportRequest.dateRange?.end || null,
-        reportData: result.data,
+        reportPeriodStart: reportRequest.dateRange?.start ? reportRequest.dateRange.start.toISOString().split('T')[0] : null,
+        reportPeriodEnd: reportRequest.dateRange?.end ? reportRequest.dateRange.end.toISOString().split('T')[0] : null,
+        reportData: result.data as unknown as Record<string, unknown>,
         reportSummary: result.data.summary || null,
         generatedBy: context.clientUserId,
       })
@@ -1288,8 +1317,8 @@ router.get("/stats/overview", async (req: Request, res: Response) => {
         name: campaign.name,
         status: campaign.status,
         type: 'verification',
-        totalContacts: campaign.totalContacts || 0,
-        verifiedContacts: campaign.verifiedContacts || 0,
+        totalContacts: 0, // Computed separately if needed
+        verifiedContacts: 0, // Computed separately if needed
       }));
     }
 
@@ -1544,7 +1573,7 @@ router.get("/billing/summary", async (req: Request, res: Response) => {
       .limit(20);
 
     const summary = {
-      billingModel: billingConfig?.billingModel || "cpl",
+      billingModel: billingConfig?.defaultBillingModel || "cpl",
       totalSpent,
       outstanding,
       invoiceCount: invoices.length,

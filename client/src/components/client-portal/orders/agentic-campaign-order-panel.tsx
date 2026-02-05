@@ -30,7 +30,7 @@ import {
 import {
   Package, Send, Loader2, Sparkles, Target, Building2, Users,
   DollarSign, Calendar, Zap, ChevronRight, Check, AlertCircle,
-  MessageSquare, Bot, Lightbulb, ArrowRight, Globe, Phone, Mail,
+  MessageSquare, Bot, ArrowRight, Globe, Phone, Mail,
   FileText, Link as LinkIcon, Upload, Plus, X, Trash2, Brain
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -102,12 +102,6 @@ const DELIVERY_METHODS = [
   { value: 'email', label: 'Email Delivery', description: 'Leads delivered via secure email', icon: 'Mail' },
 ];
 
-const INDUSTRIES = [
-  'Technology', 'Healthcare', 'Financial Services', 'Manufacturing',
-  'Retail', 'Professional Services', 'Education', 'Government',
-  'Real Estate', 'Energy', 'Telecommunications', 'Other'
-];
-
 export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }: AgenticCampaignOrderPanelProps) {
   const { toast } = useToast();
   const [step, setStep] = useState<'goal' | 'configure' | 'review'>('goal');
@@ -147,7 +141,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   // Order configuration
   const [campaignType, setCampaignType] = useState('high_quality_leads');
   const [volume, setVolume] = useState(100);
-  const [industries, setIndustries] = useState<string[]>([]);
+  const [industries, setIndustries] = useState('');
   const [jobTitles, setJobTitles] = useState('');
   const [companySizeMin, setCompanySizeMin] = useState<number | undefined>();
   const [companySizeMax, setCompanySizeMax] = useState<number | undefined>();
@@ -327,14 +321,9 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
         });
 
         // Pre-fill form with recommendations (but DO NOT advance - wait for user confirmation)
+        // NOTE: Industries and Job Titles are NOT pre-filled - client must explicitly enter these for accuracy
         setCampaignType(rec.campaignType || 'high_quality_leads');
         setVolume(rec.suggestedVolume || 100);
-        if (rec.targetAudience?.industries) {
-          setIndustries(rec.targetAudience.industries);
-        }
-        if (rec.targetAudience?.titles) {
-          setJobTitles(rec.targetAudience.titles.join(', '));
-        }
         if (rec.channels) {
           setChannels(rec.channels);
         }
@@ -414,7 +403,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
         },
         body: JSON.stringify({
           campaignType,
-          industries,
+          industries: industries.split(',').map(i => i.trim()).filter(Boolean),
           jobTitles: jobTitles.split(',').map(t => t.trim()).filter(Boolean),
           companySizeMin,
           companySizeMax,
@@ -480,7 +469,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     setRecommendation(null);
     setCampaignType('lead_generation');
     setVolume(100);
-    setIndustries([]);
+    setIndustries('');
     setJobTitles('');
     setCompanySizeMin(undefined);
     setCompanySizeMax(undefined);
@@ -501,14 +490,6 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   const handleGoalSubmit = () => {
     if (!goalDescription.trim()) return;
     recommendMutation.mutate(goalDescription);
-  };
-
-  const handleIndustryToggle = (industry: string) => {
-    setIndustries(prev =>
-      prev.includes(industry)
-        ? prev.filter(i => i !== industry)
-        : [...prev, industry]
-    );
   };
 
   const handleChannelToggle = (channel: string) => {
@@ -774,120 +755,6 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                     placeholder="Example: I want to generate 200 qualified leads from IT directors at mid-size healthcare companies in the US who might be interested in our cybersecurity solution..."
                     className="min-h-[160px] text-base border-2 border-slate-200 focus:border-emerald-400 rounded-xl p-4 resize-none transition-all duration-200 placeholder:text-slate-400"
                   />
-
-                  {/* Quick Examples - Showcasing Capabilities */}
-                  <div className="mt-6 pt-6 border-t border-slate-100">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Lightbulb className="h-5 w-5 text-amber-500" />
-                      <span className="text-sm font-semibold text-slate-700">Quick Examples — Click to populate:</span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {/* ABM + Technographic Targeting */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("I need 100 qualified leads from Manager-level and above IT professionals at technology companies with 500+ employees and $500M+ in revenue, using AWS or Azure cloud infrastructure, within SIC codes 7370-7379 (Computer Programming & Data Processing), located in North America, focusing on the San Francisco Bay Area and Seattle metro regions.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
-                            <Building2 className="h-4 w-4 text-blue-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">ABM + Technographic Targeting</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Account-aware outreach with firmographic filters (revenue, employees), technology stack targeting (AWS/Azure), SIC/NAICS codes, and geo-targeting by metro area.
-                        </p>
-                      </button>
-
-                      {/* Content Syndication Campaign */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-purple-400 hover:bg-purple-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("Run a content syndication campaign to generate 200 MQLs from C-suite and VP-level executives in Financial Services and Insurance sectors (NAICS 52), targeting companies with $1B+ revenue that use Salesforce CRM. Distribute our whitepaper on 'AI in Risk Management' with double opt-in consent, focusing on East Coast US and UK markets.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-purple-100 rounded-lg group-hover:bg-purple-200 transition-colors">
-                            <FileText className="h-4 w-4 text-purple-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">Content Syndication (CS)</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Whitepaper/asset distribution with MQL generation, seniority targeting, industry NAICS codes, CRM tech stack filtering, and multi-region reach.
-                        </p>
-                      </button>
-
-                      {/* Contact-Aware Outreach */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-teal-400 hover:bg-teal-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("Execute contact-aware multi-touch outreach to 150 pre-qualified contacts from our uploaded TAL (Target Account List). Focus on Directors and above in IT Security, DevOps, and Cloud Architecture roles at Healthcare and Pharma companies (NAICS 621-623) with 1000-5000 employees. Use BANT qualification criteria and coordinate voice + email sequences.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-teal-100 rounded-lg group-hover:bg-teal-200 transition-colors">
-                            <Users className="h-4 w-4 text-teal-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">Contact-Aware Multi-Touch</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Personalized outreach using your TAL, job function targeting, BANT qualification, employee count ranges, and coordinated voice + email cadence.
-                        </p>
-                      </button>
-
-                      {/* Event/Webinar Registration */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-amber-400 hover:bg-amber-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("Drive 75 qualified webinar registrations for our upcoming 'Cloud Security Best Practices' event. Target Security Engineers, IT Managers, and CISOs at mid-market companies (200-2000 employees, $50M-$500M revenue) in Manufacturing and Retail sectors using any major cloud provider (AWS, GCP, Azure). Include suppression against our existing customer database and past event attendees.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-amber-100 rounded-lg group-hover:bg-amber-200 transition-colors">
-                            <Calendar className="h-4 w-4 text-amber-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">Event Registration + Suppression</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Webinar/event signups with multi-title targeting, revenue ranges, technology install base filtering, and suppression list integration.
-                        </p>
-                      </button>
-
-                      {/* Demo Booking Campaign */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-rose-400 hover:bg-rose-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("Book 50 product demo meetings with VP of Engineering, CTO, and Technical Architects at SaaS companies with $10M-$100M ARR, 50-500 employees, currently using legacy on-premise infrastructure looking to modernize. Target postal codes within 50 miles of Austin, Denver, and Portland tech hubs. Qualify for budget authority and 6-month purchase timeline.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-rose-100 rounded-lg group-hover:bg-rose-200 transition-colors">
-                            <Target className="h-4 w-4 text-rose-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">Demo Booking + Postal Targeting</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Meeting scheduling with ARR-based targeting, employee ranges, postal radius targeting, intent signals, and timeline qualification.
-                        </p>
-                      </button>
-
-                      {/* Full ABM Program */}
-                      <button
-                        type="button"
-                        className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all duration-200 group"
-                        onClick={() => setGoalDescription("Launch a full ABM program targeting our uploaded list of 500 named accounts in the Fortune 1000. Need contact-level intelligence for Procurement, IT, and Finance buying committee members (Director+). Prioritize accounts showing intent signals for 'enterprise software', 'digital transformation', and 'cloud migration'. Deliver account-aware personalized outreach with company-specific pain points and use case mapping.")}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="p-1.5 bg-indigo-100 rounded-lg group-hover:bg-indigo-200 transition-colors">
-                            <Sparkles className="h-4 w-4 text-indigo-600" />
-                          </div>
-                          <span className="font-semibold text-slate-800">Full ABM Program</span>
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Named account targeting, buying committee mapping, intent data integration, account-aware personalization, and multi-stakeholder engagement.
-                        </p>
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-4 text-center">
-                      These examples showcase our targeting capabilities. Combine any filters: firmographics, technographics, intent data, geography, and more.
-                    </p>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -1309,29 +1176,17 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                   <Separator />
 
                   {/* Target Industries */}
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     <Label className="text-base font-medium text-slate-700 flex items-center gap-2">
                       <Building2 className="h-5 w-5 text-emerald-600" />
                       Target Industries
                     </Label>
-                    <div className="flex flex-wrap gap-3">
-                      {INDUSTRIES.map(industry => (
-                        <Badge
-                          key={industry}
-                          variant={industries.includes(industry) ? "default" : "outline"}
-                          className={cn(
-                            "cursor-pointer text-sm py-2 px-4 rounded-full transition-all duration-200 border-2",
-                            industries.includes(industry)
-                              ? "bg-emerald-600 hover:bg-emerald-700 border-emerald-600 shadow-md"
-                              : "border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 text-slate-600"
-                          )}
-                          onClick={() => handleIndustryToggle(industry)}
-                        >
-                          {industries.includes(industry) && <Check className="h-3.5 w-3.5 mr-1.5" />}
-                          {industry}
-                        </Badge>
-                      ))}
-                    </div>
+                    <Input
+                      value={industries}
+                      onChange={(e) => setIndustries(e.target.value)}
+                      placeholder="Technology, Healthcare, Financial Services (comma separated)"
+                      className="h-12 text-base border-2 border-slate-200 rounded-xl focus:border-emerald-400 transition-colors"
+                    />
                   </div>
 
                   <Separator />
@@ -1616,7 +1471,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                         <Building2 className="h-4 w-4" />
                         Target Industries
                       </p>
-                      <p className="font-semibold text-slate-800">{industries.length > 0 ? industries.join(', ') : 'All industries'}</p>
+                      <p className="font-semibold text-slate-800">{industries || 'All industries'}</p>
                     </div>
 
                     {/* Job Titles */}
