@@ -253,7 +253,9 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
       contactId: contact.id,
       customVariables: {
         first_name: contact.firstName || '',
+        firstName: contact.firstName || '',
         last_name: contact.lastName || '',
+        lastName: contact.lastName || '',
         company: contact.company || '',
       },
     }));

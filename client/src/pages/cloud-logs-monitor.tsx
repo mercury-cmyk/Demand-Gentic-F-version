@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   AlertCircle,
   Activity,
@@ -20,7 +22,10 @@ import {
   Download,
   Filter,
   Play,
-  Pause
+  Pause,
+  Terminal,
+  Wifi,
+  WifiOff
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { formatDistanceToNow, format } from "date-fns";
@@ -59,17 +64,115 @@ export default function CloudLogsMonitor() {
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [realTimeLogs, setRealTimeLogs] = useState<LogEntry[]>([]);
+  const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
+  const [terminalMode, setTerminalMode] = useState(true);
+  
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Fetch recent logs
-  const { data: recentLogs, refetch: refetchRecent } = useQuery<{ logs: LogEntry[]; count: number }>({
+  // WebSocket Connection
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/log-stream`;
+
+    const connectWebSocket = () => {
+      // Close existing connection if any
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+
+      console.log('Connecting to Log Stream WebSocket:', wsUrl);
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('Connected to Log Stream');
+        setIsWebSocketConnected(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const newLog = JSON.parse(event.data) as LogEntry;
+          setRealTimeLogs(prevLogs => {
+            // Keep last 1000 logs to prevent memory issues
+            const updatedLogs = [...prevLogs, newLog];
+            if (updatedLogs.length > 1000) {
+              return updatedLogs.slice(updatedLogs.length - 1000);
+            }
+            return updatedLogs;
+          });
+        } catch (error) {
+          console.error('Error parsing log message:', error);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('Log Stream disconnected');
+        setIsWebSocketConnected(false);
+        // Attempt reconnect after 5 seconds if autoRefresh is on
+        if (autoRefresh) {
+          setTimeout(connectWebSocket, 5000);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('Log Stream WebSocket error:', error);
+        setIsWebSocketConnected(false);
+      };
+    };
+
+    if (autoRefresh) {
+      connectWebSocket();
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [autoRefresh]);
+
+  // Fetch recent logs (Historical)
+  const { data: recentLogsData, refetch: refetchRecent } = useQuery<{ logs: LogEntry[]; count: number }>({
     queryKey: ['/api/cloud-logs/recent', { minutes: 5 }],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/cloud-logs/recent?minutes=5&limit=100');
       return await (response as any).json();
     },
-    refetchInterval: autoRefresh ? 10000 : false, // 10 seconds for faster updates
+    // Disable polling if WebSocket is connected to avoid duplication/overhead
+    // But keep it initially or if WS fails
+    refetchInterval: !isWebSocketConnected && autoRefresh ? 10000 : false, 
   });
+
+  // Merge recent logs (historical) with real-time logs
+  // We use a Map to deduplicate based on timestamp + message (primitive key)
+  // Note: Google Cloud Logs have an insertId, but our interface might not expose it.
+  const allLogs = useMemo(() => {
+    const historical = recentLogsData?.logs || [];
+    // If we have real-time logs, prefer them, but filling initial state with historical is good.
+    // However, simply concatenating might duplicate.
+    // Let's just show real-time logs if we have them, otherwise show historical.
+    // OR: Prepend historical to real-time.
+    
+    // Simple strategy: Start with historical, append real-time.
+    // To avoid dupes from the overlap period:
+    // Filter real-time logs that are ALREADY in historical (unlikely if historical is old)
+    // Filter historical logs that are older than the first real-time log?
+    
+    if (realTimeLogs.length === 0) return historical;
+    
+    const firstRealTime = new Date(realTimeLogs[0].timestamp).getTime();
+    const filteredHistorical = historical.filter(l => new Date(l.timestamp).getTime() < firstRealTime);
+    
+    // Sort combined by timestamp asc
+    return [...filteredHistorical, ...realTimeLogs].sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [recentLogsData, realTimeLogs]);
+
+  // Fetch metrics
 
   // Fetch metrics
   const { data: metrics, refetch: refetchMetrics } = useQuery<LogMetrics>({
@@ -106,7 +209,7 @@ export default function CloudLogsMonitor() {
     if (autoScroll && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [recentLogs, autoScroll]);
+  }, [allLogs, autoScroll]); // Changed dependency from recentLogs to allLogs
 
   const handleRefreshAll = () => {
     refetchRecent();
@@ -131,6 +234,22 @@ export default function CloudLogsMonitor() {
     }
   };
 
+  const getSeverityTextColor = (severity: string) => {
+     switch (severity?.toUpperCase()) {
+      case 'ERROR':
+      case 'CRITICAL':
+        return 'text-red-500';
+      case 'WARNING':
+        return 'text-yellow-500';
+      case 'INFO':
+        return 'text-blue-500';
+      case 'DEBUG':
+        return 'text-gray-500';
+      default:
+        return 'text-gray-500';
+    } 
+  }
+
   const getSeverityIcon = (severity: string) => {
     switch (severity?.toUpperCase()) {
       case 'ERROR':
@@ -146,6 +265,8 @@ export default function CloudLogsMonitor() {
   };
 
   const getSeverityBgColor = (severity: string) => {
+    if (terminalMode) return 'border-b border-gray-800 hover:bg-white/5';
+
     switch (severity?.toUpperCase()) {
       case 'ERROR':
       case 'CRITICAL':
@@ -167,9 +288,9 @@ export default function CloudLogsMonitor() {
     }
   };
 
-  const filteredLogs = recentLogs?.logs?.filter(log =>
+  const filteredLogs = allLogs.filter(log =>
     selectedSeverity.includes(log.severity?.toUpperCase())
-  ) || [];
+  );
 
   const exportLogs = () => {
     const logs = searchQuery.length > 2 ? searchResults?.logs : filteredLogs;
@@ -196,11 +317,44 @@ export default function CloudLogsMonitor() {
   const renderLogDetail = (log: LogEntry, index: number) => {
     const isExpanded = expandedLog === index;
 
+    if (terminalMode) {
+      return (
+        <div 
+          key={index} 
+          className="font-mono text-xs py-1 border-gray-800/50 hover:bg-white/5 cursor-pointer flex gap-4"
+          onClick={() => setExpandedLog(isExpanded ? null : index)}
+        >
+          <span className="text-gray-500 shrink-0 select-none">
+             {format(new Date(log.timestamp), 'HH:mm:ss.SSS')}
+          </span>
+          <span className={`shrink-0 w-16 font-bold ${getSeverityTextColor(log.severity)}`}>
+            {log.severity}
+          </span>
+          <span className="text-gray-300 break-all whitespace-pre-wrap flex-1">
+            {log.message}
+            {isExpanded && log.jsonPayload && (
+               <pre className="mt-2 text-[10px] text-gray-400 bg-black/50 p-2 rounded overflow-x-auto">
+                 {JSON.stringify(log.jsonPayload, null, 2)}
+               </pre>
+            )}
+            {isExpanded && log.labels && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                 {Object.entries(log.labels).map(([k,v]) => (
+                   <span key={k} className="bg-gray-800 px-1 rounded text-gray-400 text-[10px]">{k}={v}</span>
+                 ))}
+              </div>
+            )}
+          </span>
+        </div>
+      );
+    }
+
     return (
       <div
         key={index}
         className={`border rounded-lg transition-all ${getSeverityBgColor(log.severity)}`}
       >
+
         {/* Log Header - Always Visible */}
         <div
           className="flex items-start gap-3 p-4 cursor-pointer"
@@ -315,15 +469,38 @@ export default function CloudLogsMonitor() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Cloud Run Logs</h1>
-          <p className="text-muted-foreground">Monitor Google Cloud Run application logs in real-time</p>
+          <div className="flex items-center gap-2 mt-1">
+             <p className="text-muted-foreground">Monitor Google Cloud Run application logs in real-time</p>
+             {isWebSocketConnected ? (
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 flex items-center gap-1">
+                  <Wifi className="h-3 w-3" /> Connected
+                </Badge>
+             ) : (
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 flex items-center gap-1">
+                   <WifiOff className="h-3 w-3" /> Disconnected
+                </Badge>
+             )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
+           <div className="flex items-center space-x-2 mr-4 bg-muted/50 p-1.5 rounded-lg border">
+              <Switch 
+                id="terminal-mode" 
+                checked={terminalMode}
+                onCheckedChange={setTerminalMode}
+              />
+              <Label htmlFor="terminal-mode" className="flex items-center gap-2 cursor-pointer font-medium text-sm">
+                <Terminal className="h-4 w-4" />
+                Terminal View
+              </Label>
+           </div>
+
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium">Time Window:</label>
             <select
               value={timeWindow}
               onChange={(e) => setTimeWindow(parseInt(e.target.value) as any)}
-              className="border rounded px-3 py-1 text-sm"
+              className="border rounded px-3 py-1 text-sm bg-background"
             >
               <option value={24}>Last 24 hours</option>
               <option value={48}>Last 48 hours</option>
@@ -493,28 +670,29 @@ export default function CloudLogsMonitor() {
 
         {/* Recent Logs Tab */}
         <TabsContent value="recent" className="space-y-4">
-          <Card>
-            <CardHeader>
+          <Card className={terminalMode ? "bg-[#0c0c0c] border-gray-800 text-gray-300" : ""}>
+            <CardHeader className={terminalMode ? "border-b border-gray-800" : ""}>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Live Log Stream</CardTitle>
-                  <CardDescription>
-                    Real-time logs (last 5 minutes) • {filteredLogs.length} logs shown
+                  <CardTitle className={terminalMode ? "text-gray-100" : ""}>Live Log Stream</CardTitle>
+                  <CardDescription className={terminalMode ? "text-gray-500" : ""}>
+                    Real-time logs • {filteredLogs.length} logs shown • {isWebSocketConnected ? 'Streaming' : 'Polling'}
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
-                    variant="outline"
+                    variant={terminalMode ? "secondary" : "outline"}
                     size="sm"
                     onClick={() => setAutoScroll(!autoScroll)}
+                    className={terminalMode ? "bg-gray-800 text-gray-300 hover:bg-gray-700" : ""}
                   >
                     Auto-scroll: {autoScroll ? 'ON' : 'OFF'}
                   </Button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-[700px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+            <CardContent className="p-0">
+              <div className={`space-y-0 max-h-[700px] overflow-y-auto ${terminalMode ? 'p-4 font-mono text-sm' : 'p-4 space-y-2'}`}>
                 {filteredLogs.length > 0 ? (
                   <>
                     {filteredLogs.map((log, idx) => renderLogDetail(log, idx))}
@@ -525,6 +703,9 @@ export default function CloudLogsMonitor() {
                     <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
                     <p>No logs matching current filters</p>
                     <p className="text-sm mt-1">Try adjusting the severity filters</p>
+                    {!isWebSocketConnected && (
+                         <p className="text-xs mt-4 text-orange-500">WebSocket disconnected. Waiting for connection...</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -604,20 +785,27 @@ export default function CloudLogsMonitor() {
       </Tabs>
 
       {/* Status Bar */}
-      <div className="fixed bottom-4 right-4 bg-background border rounded-lg shadow-lg p-3 text-xs flex items-center gap-3">
+      <div className="fixed bottom-4 right-4 bg-background border rounded-lg shadow-lg p-3 text-xs flex items-center gap-3 z-50">
         <div className="flex items-center gap-2">
-          {autoRefresh ? (
-            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+          {isWebSocketConnected ? (
+            <>
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+              <span className="text-muted-foreground font-medium">Stream Active</span>
+            </>
           ) : (
-            <div className="h-2 w-2 rounded-full bg-gray-400"></div>
+            <>
+              <div className="h-2 w-2 rounded-full bg-red-400"></div>
+              <span className="text-muted-foreground font-medium">Stream Disconnected</span>
+            </>
           )}
-          <span className="text-muted-foreground">
-            {autoRefresh ? 'Live' : 'Paused'}
-          </span>
         </div>
         <div className="h-4 w-px bg-border"></div>
         <span className="text-muted-foreground">
-          Last updated: {recentLogs ? formatDistanceToNow(new Date(), { addSuffix: true }) : 'Never'}
+          {realTimeLogs.length > 0 ? `${realTimeLogs.length} new events` : 'Waiting for events...'}
+        </span>
+        <div className="h-4 w-px bg-border"></div>
+        <span className="text-muted-foreground">
+           Last fetch: {recentLogsData ? formatDistanceToNow(new Date(), { addSuffix: true }) : 'Never'}
         </span>
       </div>
     </div>

@@ -3,9 +3,10 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, Download, BarChart3, Link as LinkIcon, Loader2, Filter, X } from "lucide-react";
+import { Plus, Search, Download, BarChart3, Link as LinkIcon, Loader2, Filter, X, Wand2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CampaignCreationWizard } from "@/components/client-portal/campaigns/campaign-creation-wizard";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,6 +65,8 @@ type OrderFormData = z.infer<typeof orderFormSchema>;
 export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [selectedOrderForWizard, setSelectedOrderForWizard] = useState<CampaignOrder | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [selectedOrderForLink, setSelectedOrderForLink] = useState<CampaignOrder | null>(null);
   const [filterGroup, setFilterGroup] = useState<FilterGroup | undefined>(undefined);
@@ -198,10 +201,19 @@ export default function OrdersPage() {
                 Manage your campaign orders and track lead delivery
               </p>
             </div>
-            <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-create-order">
-              <Plus className="mr-2 h-4 w-4" />
-              New Order
-            </Button>
+            <div className="flex gap-2">
+              <Button onClick={() => {
+                  setSelectedOrderForWizard(null);
+                  setWizardOpen(true);
+              }} variant="outline">
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  Wizard
+              </Button>
+              <Button onClick={() => setCreateDialogOpen(true)} data-testid="button-create-order">
+                <Plus className="mr-2 h-4 w-4" />
+                New Order
+              </Button>
+            </div>
           </div>
 
           {/* Active Filters Badge */}
@@ -294,6 +306,17 @@ export default function OrdersPage() {
                         Link Campaigns
                       </Button>
                     )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedOrderForWizard(order);
+                        setWizardOpen(true);
+                      }}
+                    >
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      Create Campaign
+                    </Button>
                     <Button variant="outline" size="sm" data-testid={`button-view-${order.id}`}>
                       <BarChart3 className="mr-2 h-4 w-4" />
                       View Details
@@ -448,6 +471,24 @@ export default function OrdersPage() {
           orderNumber={selectedOrderForLink.orderNumber}
         />
       )}
+
+      <CampaignCreationWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        mode="admin"
+        clientAccountId={selectedOrderForWizard?.clientAccountId}
+        initialData={selectedOrderForWizard ? {
+            name: selectedOrderForWizard.title || `Campaign from Order ${selectedOrderForWizard.orderNumber}`,
+            description: selectedOrderForWizard.description || '',
+            targetLeadCount: selectedOrderForWizard.targetLeadCount || undefined,
+            budget: selectedOrderForWizard.estimatedBudget ? parseFloat(selectedOrderForWizard.estimatedBudget) : undefined,
+            // Map validation logic or pre-fill other fields if order has config
+            ...((selectedOrderForWizard.campaignConfig as any) || {}),
+            targetIndustries: selectedOrderForWizard.targetIndustries || [],
+            targetTitles: selectedOrderForWizard.targetTitles || [],
+            targetRegions: selectedOrderForWizard.targetRegions || [],
+        } : undefined}
+      />
         </div>
       </div>
     </div>

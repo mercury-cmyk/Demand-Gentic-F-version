@@ -79,6 +79,7 @@ import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
+import campaignWizardRouter from './routes/campaign-wizard';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -4714,6 +4715,54 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  const buildCampaignCallScript = (data: any): string | null => {
+    const parts: string[] = [];
+
+    if (data?.campaignObjective || data?.productServiceInfo || data?.targetAudienceDescription || data?.successCriteria) {
+      parts.push([
+        "# Campaign Context",
+        data?.campaignObjective ? `Objective: ${data.campaignObjective}` : null,
+        data?.productServiceInfo ? `Product/Service: ${data.productServiceInfo}` : null,
+        data?.targetAudienceDescription ? `Target Audience: ${data.targetAudienceDescription}` : null,
+        data?.successCriteria ? `Success Criteria: ${data.successCriteria}` : null,
+      ].filter(Boolean).join("\n"));
+    }
+
+    if (Array.isArray(data?.talkingPoints) && data.talkingPoints.length > 0) {
+      parts.push([
+        "# Talking Points",
+        ...data.talkingPoints.map((point: string, index: number) => `${index + 1}. ${point}`),
+      ].join("\n"));
+    }
+
+    if (Array.isArray(data?.campaignObjections) && data.campaignObjections.length > 0) {
+      parts.push([
+        "# Objections",
+        ...data.campaignObjections.map((item: any, index: number) => {
+          if (item?.objection || item?.response) {
+            return `${index + 1}. ${item?.objection || "Objection"}: ${item?.response || ""}`.trim();
+          }
+          return `${index + 1}. ${String(item)}`;
+        }),
+      ].join("\n"));
+    }
+
+    const scripts = data?.aiAgentSettings?.scripts;
+    if (scripts) {
+      parts.push([
+        "# Call Script",
+        scripts.opening ? `Opening: ${scripts.opening}` : null,
+        scripts.gatekeeper ? `Gatekeeper: ${scripts.gatekeeper}` : null,
+        scripts.pitch ? `Pitch: ${scripts.pitch}` : null,
+        scripts.objections ? `Objections: ${scripts.objections}` : null,
+        scripts.closing ? `Closing: ${scripts.closing}` : null,
+      ].filter(Boolean).join("\n"));
+    }
+
+    const result = parts.filter(Boolean).join("\n\n").trim();
+    return result.length > 0 ? result : null;
+  };
+
   app.post("/api/campaigns", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
       const { assignedAgents, ...campaignData } = req.body;
@@ -4785,6 +4834,13 @@ export function registerRoutes(app: Express) {
         campaignData.parsedQaRules = null;
       }
       
+      if (campaignData.type === 'call' && !campaignData.callScript) {
+        const generatedCallScript = buildCampaignCallScript(campaignData);
+        if (generatedCallScript) {
+          campaignData.callScript = generatedCallScript;
+        }
+      }
+
       const campaign = await storage.createCampaign(campaignData);
 
       // Auto-populate queue from audience if defined
@@ -13322,6 +13378,9 @@ Provide JSON response with:
   });
 
   // ==================== CLIENT PORTAL (Must be before catch-all /api routes) ====================
+  // ==================== CAMPAIGN WIZARD (ADMIN) ====================
+  app.use('/api/campaign-wizard', campaignWizardRouter);
+
   app.use('/api/client-portal', clientPortalRouter);
 
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================

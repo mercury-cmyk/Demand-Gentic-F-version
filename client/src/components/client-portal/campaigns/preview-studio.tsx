@@ -509,7 +509,7 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col">
+      <SheetContent side="right" className="w-full sm:max-w-[100vw] p-0 flex flex-col">
         {/* Header */}
         <div className="p-6 border-b bg-gradient-to-br from-violet-500/10 via-purple-500/5 to-fuchsia-500/10">
           <SheetHeader>
@@ -543,7 +543,7 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
         {!simulationStarted ? (
           /* Setup Screen */
           <div className="flex-1 p-6 overflow-y-auto">
-            <div className="space-y-6 max-w-lg mx-auto">
+            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* Campaign Selection */}
               <div className="space-y-3">
                 <Label className="text-sm font-medium flex items-center gap-2">
@@ -653,7 +653,7 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
               <Button
                 onClick={handleStartSimulation}
                 disabled={!selectedCampaignId || startSimulationMutation.isPending}
-                className="w-full h-14 text-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+                className="col-span-1 md:col-span-2 mt-4 w-full h-14 text-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-xl shadow-violet-500/20"
                 size="lg"
               >
                 {startSimulationMutation.isPending ? (

@@ -56,21 +56,54 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getCampaignTypesForChannel, type CampaignType } from '@/lib/campaign-types';
 
 interface CampaignCreationWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: (campaign: any) => void;
+  mode?: 'client' | 'admin';
+  clientAccountId?: string;
+  initialData?: Partial<FormData>;
 }
 
-// Campaign Types
-const CAMPAIGN_TYPES = [
-  { value: 'lead_generation', label: 'Lead Generation', icon: Target, description: 'Generate qualified leads for your sales team' },
-  { value: 'appointment_setting', label: 'Appointment Setting', icon: Calendar, description: 'Book meetings with qualified prospects' },
-  { value: 'market_research', label: 'Market Research', icon: Brain, description: 'Gather market intelligence through conversations' },
-  { value: 'event_promotion', label: 'Event Promotion', icon: Users, description: 'Promote webinars, conferences, or events' },
-  { value: 'product_launch', label: 'Product Launch', icon: Sparkles, description: 'Introduce new products or services' },
-  { value: 'customer_feedback', label: 'Customer Feedback', icon: MessageSquare, description: 'Collect feedback from existing customers' },
+// Campaign Type Categories with icons
+const CAMPAIGN_TYPE_CATEGORIES = [
+  {
+    id: 'events',
+    label: 'Events & Webinars',
+    icon: Calendar,
+    color: 'from-violet-500 to-purple-600',
+    types: ['webinar_invite', 'executive_dinner', 'leadership_forum', 'conference'],
+  },
+  {
+    id: 'lead_gen',
+    label: 'Lead Generation',
+    icon: Target,
+    color: 'from-blue-500 to-cyan-500',
+    types: ['content_syndication', 'high_quality_leads'],
+  },
+  {
+    id: 'qualification',
+    label: 'Sales Qualification',
+    icon: Brain,
+    color: 'from-amber-500 to-orange-500',
+    types: ['sql', 'bant_qualification', 'lead_qualification'],
+  },
+  {
+    id: 'appointments',
+    label: 'Appointments & Demos',
+    icon: Calendar,
+    color: 'from-green-500 to-emerald-500',
+    types: ['appointment_setting', 'demo_request'],
+  },
+  {
+    id: 'engagement',
+    label: 'Follow-up & Engagement',
+    icon: MessageSquare,
+    color: 'from-rose-500 to-pink-500',
+    types: ['follow_up', 'nurture', 're_engagement', 'data_validation'],
+  },
 ];
 
 // Promotion Channels
@@ -80,16 +113,92 @@ const PROMOTION_CHANNELS = [
   { value: 'combo', label: 'Multi-Channel', icon: Sparkles, description: 'Combined voice + email outreach', color: 'bg-purple-500' },
 ];
 
-// AI Voices available for preview
+// AI Voices available for preview - Gemini Live native audio voices
+// Actual Gemini Live Native Voices - Each has a unique sound signature
 const AI_VOICES = [
-  { id: 'Fenrir', name: 'Fenrir', gender: 'male', description: 'Professional, confident tone', accent: 'American' },
-  { id: 'Aoede', name: 'Aoede', gender: 'female', description: 'Warm, friendly personality', accent: 'American' },
-  { id: 'Puck', name: 'Puck', gender: 'male', description: 'Energetic, engaging style', accent: 'American' },
-  { id: 'Kore', name: 'Kore', gender: 'female', description: 'Calm, reassuring voice', accent: 'American' },
-  { id: 'Charon', name: 'Charon', gender: 'male', description: 'Deep, authoritative tone', accent: 'American' },
-  { id: 'Orion', name: 'Orion', gender: 'male', description: 'Clear, articulate speaker', accent: 'British' },
-  { id: 'Vega', name: 'Vega', gender: 'female', description: 'Sophisticated, professional', accent: 'British' },
-  { id: 'Pegasus', name: 'Pegasus', gender: 'male', description: 'Dynamic, persuasive style', accent: 'American' },
+  // ============ MALE VOICES ============
+  {
+    id: 'Puck',
+    name: 'Puck',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Upbeat & Energetic',
+    description: 'A youthful, enthusiastic voice with high energy. Perfect for exciting product launches and engaging cold calls.',
+    bestFor: ['Product Launches', 'Cold Calling', 'Tech Startups'],
+    color: 'from-orange-500 to-amber-500'
+  },
+  {
+    id: 'Charon',
+    name: 'Charon',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Deep & Mature',
+    description: 'A rich, bass-heavy voice that conveys wisdom and experience. Ideal for enterprise deals and senior executives.',
+    bestFor: ['Enterprise Sales', 'Executive Outreach', 'Financial Services'],
+    color: 'from-slate-600 to-slate-800'
+  },
+  {
+    id: 'Fenrir',
+    name: 'Fenrir',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Bold & Confident',
+    description: 'A strong, assertive voice that commands attention. Great for persuasive sales and overcoming objections.',
+    bestFor: ['Sales Calls', 'Lead Qualification', 'B2B Outreach'],
+    color: 'from-blue-500 to-indigo-600'
+  },
+  {
+    id: 'Orus',
+    name: 'Orus',
+    gender: 'male',
+    accent: 'American',
+    tone: 'Warm & Conversational',
+    description: 'A friendly, approachable voice that feels like talking to a trusted colleague. Perfect for relationship building.',
+    bestFor: ['Customer Success', 'Account Management', 'Renewals'],
+    color: 'from-teal-500 to-cyan-500'
+  },
+
+  // ============ FEMALE VOICES ============
+  {
+    id: 'Kore',
+    name: 'Kore',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Calm & Soothing',
+    description: 'A gentle, reassuring voice that puts people at ease. Excellent for healthcare, insurance, and sensitive topics.',
+    bestFor: ['Healthcare', 'Insurance', 'Financial Services'],
+    color: 'from-green-400 to-emerald-500'
+  },
+  {
+    id: 'Aoede',
+    name: 'Aoede',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Bright & Friendly',
+    description: 'A cheerful, welcoming voice that creates instant rapport. Ideal for customer outreach and appointment setting.',
+    bestFor: ['Appointment Setting', 'Customer Outreach', 'Surveys'],
+    color: 'from-rose-400 to-pink-500'
+  },
+  {
+    id: 'Leda',
+    name: 'Leda',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Professional & Articulate',
+    description: 'A clear, polished voice with executive presence. Perfect for C-suite conversations and professional services.',
+    bestFor: ['Executive Outreach', 'Professional Services', 'Consulting'],
+    color: 'from-violet-500 to-purple-600'
+  },
+  {
+    id: 'Zephyr',
+    name: 'Zephyr',
+    gender: 'female',
+    accent: 'American',
+    tone: 'Light & Modern',
+    description: 'A fresh, contemporary voice that resonates with younger audiences. Great for tech and modern brands.',
+    bestFor: ['SaaS Sales', 'Tech Industry', 'Modern Brands'],
+    color: 'from-cyan-500 to-blue-500'
+  },
 ];
 
 // Wizard steps
@@ -144,7 +253,7 @@ interface FormData {
   budget: number | undefined;
 }
 
-export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: CampaignCreationWizardProps) {
+export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = 'client', clientAccountId, initialData }: CampaignCreationWizardProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
@@ -152,14 +261,15 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [voiceFilter, setVoiceFilter] = useState<'all' | 'male' | 'female'>('all');
 
-  const [formData, setFormData] = useState<FormData>({
+  const defaultFormData: FormData = {
     name: '',
     description: '',
     channel: 'voice',
-    campaignType: 'lead_generation',
+    campaignType: 'content_syndication',
     objective: '',
-    talkingPoints: [''],
+    talkingPoints: [],
     successCriteria: '',
     targetAudience: '',
     objections: [{ objection: '', response: '' }],
@@ -179,12 +289,22 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
     startDate: '',
     endDate: '',
     budget: undefined,
-  });
+  };
+
+  const [formData, setFormData] = useState<FormData>({ ...defaultFormData, ...initialData });
+
+  // Update form data when initialData changes
+  useEffect(() => {
+    if (open && initialData) {
+      setFormData(prev => ({ ...prev, ...initialData }));
+    }
+  }, [open, initialData]);
 
   // Input states for array fields
   const [industryInput, setIndustryInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
   const [regionInput, setRegionInput] = useState('');
+  const [talkingPointInput, setTalkingPointInput] = useState('');
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -198,7 +318,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: open && formData.audienceSource === 'own_data',
+    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
   });
 
   // Fetch client's contacts for audience selection
@@ -211,20 +331,37 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: open && formData.audienceSource === 'own_data',
+    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
   });
 
   // Create campaign mutation
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/client-portal/campaigns/create', {
+      const endpoint = mode === 'admin' 
+        ? '/api/campaign-wizard/create' 
+        : '/api/client-portal/campaigns/create';
+
+      const bodyData = mode === 'admin' 
+        ? { ...formData, clientAccountId } 
+        : formData;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (mode === 'client') {
+        const token = getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify(formData),
+        headers,
+        body: JSON.stringify(bodyData),
       });
+
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.message || 'Failed to create campaign');
@@ -234,9 +371,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/orders'] });
+
       toast({
         title: 'Campaign Created!',
-        description: 'Your campaign has been submitted for review.',
+        description: 'Your campaign has been submitted successfully.',
       });
       onSuccess?.(data);
       onOpenChange(false);
@@ -256,9 +395,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
       name: '',
       description: '',
       channel: 'voice',
-      campaignType: 'lead_generation',
+      campaignType: 'content_syndication',
       objective: '',
-      talkingPoints: [''],
+      talkingPoints: [],
       successCriteria: '',
       targetAudience: '',
       objections: [{ objection: '', response: '' }],
@@ -361,27 +500,6 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
   const progressPercentage = ((step - 1) / (STEPS.length - 1)) * 100;
 
   // Add array item helpers
-  const addTalkingPoint = () => {
-    setFormData(prev => ({
-      ...prev,
-      talkingPoints: [...prev.talkingPoints, ''],
-    }));
-  };
-
-  const removeTalkingPoint = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      talkingPoints: prev.talkingPoints.filter((_, i) => i !== index),
-    }));
-  };
-
-  const updateTalkingPoint = (index: number, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      talkingPoints: prev.talkingPoints.map((p, i) => i === index ? value : p),
-    }));
-  };
-
   const addObjection = () => {
     setFormData(prev => ({
       ...prev,
@@ -422,7 +540,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
   };
 
   const selectedChannel = PROMOTION_CHANNELS.find(c => c.value === formData.channel);
-  const selectedType = CAMPAIGN_TYPES.find(t => t.value === formData.campaignType);
+  // Get campaign types filtered by selected channel
+  const availableCampaignTypes = getCampaignTypesForChannel(
+    formData.channel === 'combo' ? 'voice' : formData.channel
+  );
+  const selectedType = availableCampaignTypes.find(t => t.value === formData.campaignType);
   const selectedVoiceInfo = AI_VOICES.find(v => v.id === formData.selectedVoice);
 
   return (
@@ -583,38 +705,90 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
                   exit={{ opacity: 0, x: -20 }}
                   className="space-y-6"
                 >
-                  <div className="text-center mb-8">
+                  <div className="text-center mb-6">
                     <h3 className="text-lg font-semibold mb-2">What type of campaign is this?</h3>
-                    <p className="text-muted-foreground">Select the primary goal for your campaign</p>
+                    <p className="text-muted-foreground">
+                      Choose your campaign objective for {formData.channel === 'voice' ? 'AI Voice Calls' : formData.channel === 'email' ? 'Email Campaigns' : 'Multi-Channel'}
+                    </p>
+                    {selectedChannel && (
+                      <Badge className={cn('mt-2', selectedChannel.color, 'text-white')}>
+                        <selectedChannel.icon className="h-3 w-3 mr-1" />
+                        {selectedChannel.label}
+                      </Badge>
+                    )}
                   </div>
 
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto">
-                    {CAMPAIGN_TYPES.map((type) => (
-                      <button
-                        key={type.value}
-                        onClick={() => setFormData(prev => ({ ...prev, campaignType: type.value }))}
-                        className={cn(
-                          'flex items-start gap-4 p-4 rounded-lg border-2 text-left transition-all',
-                          formData.campaignType === type.value
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        )}
-                      >
-                        <div className={cn(
-                          'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
-                          formData.campaignType === type.value
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted'
-                        )}>
-                          <type.icon className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h4 className="font-medium">{type.label}</h4>
-                          <p className="text-sm text-muted-foreground mt-1">{type.description}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  <ScrollArea className="h-[450px] pr-4">
+                    <div className="space-y-6 max-w-4xl mx-auto">
+                      {CAMPAIGN_TYPE_CATEGORIES.map((category) => {
+                        // Filter types that are available for the selected channel
+                        const categoryTypes = availableCampaignTypes.filter(
+                          (t: CampaignType) => category.types.includes(t.value)
+                        );
+
+                        if (categoryTypes.length === 0) return null;
+
+                        return (
+                          <div key={category.id} className="space-y-3">
+                            {/* Category Header */}
+                            <div className="flex items-center gap-2 px-1">
+                              <div className={cn(
+                                'w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br',
+                                category.color
+                              )}>
+                                <category.icon className="h-4 w-4 text-white" />
+                              </div>
+                              <h4 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                                {category.label}
+                              </h4>
+                              <Separator className="flex-1" />
+                            </div>
+
+                            {/* Category Types */}
+                            <div className="grid md:grid-cols-2 gap-3 pl-10">
+                              {categoryTypes.map((type: CampaignType) => (
+                                <button
+                                  key={type.value}
+                                  onClick={() => setFormData(prev => ({ ...prev, campaignType: type.value }))}
+                                  className={cn(
+                                    'flex flex-col p-4 rounded-xl border-2 text-left transition-all hover:shadow-md',
+                                    formData.campaignType === type.value
+                                      ? 'border-primary bg-primary/5 shadow-sm'
+                                      : 'border-border hover:border-primary/50 hover:bg-muted/30'
+                                  )}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1">
+                                      <h5 className="font-medium text-base">{type.label}</h5>
+                                      <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                        {type.description}
+                                      </p>
+                                    </div>
+                                    {formData.campaignType === type.value && (
+                                      <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                                        <Check className="h-4 w-4 text-primary-foreground" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  {/* Goal Badge */}
+                                  <div className="mt-3 flex items-center gap-2">
+                                    <Badge variant="outline" className="text-xs capitalize">
+                                      {type.primaryGoal}
+                                    </Badge>
+                                    {type.supportsVoice && type.supportsEmail && (
+                                      <Badge variant="secondary" className="text-xs">
+                                        Multi-Channel
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
                 </motion.div>
               )}
 
@@ -648,42 +822,94 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
                     </div>
 
                     {/* Key Talking Points */}
-                    <div className="space-y-3">
-                      <Label className="text-base flex items-center gap-2">
-                        <MessageSquare className="h-4 w-4 text-primary" />
-                        Key Talking Points
-                      </Label>
-                      <p className="text-sm text-muted-foreground">What should the AI agent highlight?</p>
-                      {formData.talkingPoints.map((point, index) => (
-                        <div key={index} className="flex gap-2">
-                          <Input
-                            placeholder={`Talking point ${index + 1}`}
-                            value={point}
-                            onChange={(e) => updateTalkingPoint(index, e.target.value)}
-                          />
-                          {formData.talkingPoints.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeTalkingPoint(index)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                    <Card className="border-dashed">
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-base flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4 text-primary" />
+                            Key Talking Points
+                          </Label>
+                          {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                            <Badge variant="outline" className="text-xs">
+                              {formData.talkingPoints.filter(p => p.trim()).length} added
+                            </Badge>
                           )}
                         </div>
-                      ))}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={addTalkingPoint}
-                        className="w-full"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Talking Point
-                      </Button>
-                    </div>
+                        <p className="text-sm text-muted-foreground">
+                          What should the AI agent highlight? Type and press <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">Enter</kbd> to add.
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="e.g., Industry-leading customer support"
+                            value={talkingPointInput}
+                            onChange={(e) => setTalkingPointInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (talkingPointInput.trim()) {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                  }));
+                                  setTalkingPointInput('');
+                                }
+                              }
+                            }}
+                            className="flex-1"
+                          />
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              if (talkingPointInput.trim()) {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                }));
+                                setTalkingPointInput('');
+                              }
+                            }}
+                            disabled={!talkingPointInput.trim()}
+                            size="sm"
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add
+                          </Button>
+                        </div>
+                        {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                          <ScrollArea className="max-h-32">
+                            <div className="flex flex-wrap gap-2 p-1">
+                              {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                                <Badge
+                                  key={idx}
+                                  variant="secondary"
+                                  className="gap-1.5 py-1.5 px-3 text-sm bg-primary/10 hover:bg-primary/15 transition-colors"
+                                >
+                                  <span className="text-primary/70 font-medium">{idx + 1}.</span>
+                                  {point}
+                                  <button
+                                    onClick={() => {
+                                      setFormData(prev => ({
+                                        ...prev,
+                                        talkingPoints: prev.talkingPoints.filter((_, i) => i !== idx),
+                                      }));
+                                    }}
+                                    className="ml-1 hover:text-destructive rounded-full hover:bg-destructive/10 p-0.5 transition-colors"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </Badge>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        )}
+                        {formData.talkingPoints.filter(p => p.trim()).length === 0 && (
+                          <div className="text-center py-4 text-muted-foreground text-sm border border-dashed rounded-lg">
+                            <Lightbulb className="h-5 w-5 mx-auto mb-1 opacity-50" />
+                            No talking points yet. Add key messages for your AI agent.
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
 
                     {/* Success Criteria */}
                     <div className="space-y-2">
@@ -786,67 +1012,126 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess }: Campai
                   {formData.channel !== 'email' && (
                     <>
                       {/* Voice Selection Grid */}
-                      <div className="max-w-4xl mx-auto">
-                        <Label className="text-base mb-4 block">Select AI Voice</Label>
-                        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-                          {AI_VOICES.map((voice) => (
-                            <Card
-                              key={voice.id}
-                              className={cn(
-                                'cursor-pointer transition-all hover:shadow-md relative overflow-hidden',
-                                formData.selectedVoice === voice.id
-                                  ? 'ring-2 ring-primary'
-                                  : 'hover:ring-1 hover:ring-primary/50'
-                              )}
-                              onClick={() => setFormData(prev => ({ ...prev, selectedVoice: voice.id }))}
+                      <div className="max-w-5xl mx-auto">
+                        <div className="flex items-center justify-between mb-6">
+                          <Label className="text-base">Select AI Voice</Label>
+                          <div className="flex gap-2">
+                            <Badge
+                              variant={voiceFilter === 'all' ? 'default' : 'outline'}
+                              className="cursor-pointer"
+                              onClick={() => setVoiceFilter('all')}
                             >
-                              {formData.selectedVoice === voice.id && (
-                                <div className="absolute top-2 right-2">
-                                  <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                                    <Check className="h-3 w-3 text-primary-foreground" />
-                                  </div>
-                                </div>
-                              )}
-                              <CardContent className="p-4">
-                                <div className="flex items-center gap-3 mb-3">
-                                  <div className={cn(
-                                    'w-10 h-10 rounded-full flex items-center justify-center',
-                                    voice.gender === 'male' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'
-                                  )}>
-                                    <Mic className="h-5 w-5" />
-                                  </div>
-                                  <div>
-                                    <h4 className="font-semibold">{voice.name}</h4>
-                                    <p className="text-xs text-muted-foreground">{voice.accent}</p>
-                                  </div>
-                                </div>
-                                <p className="text-sm text-muted-foreground mb-3">{voice.description}</p>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="w-full"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    playVoicePreview(voice.id);
-                                  }}
-                                >
-                                  {isPlaying && playingVoice === voice.id ? (
-                                    <>
-                                      <Square className="h-3 w-3 mr-2" />
-                                      Stop
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="h-3 w-3 mr-2" />
-                                      Preview
-                                    </>
-                                  )}
-                                </Button>
-                              </CardContent>
-                            </Card>
-                          ))}
+                              All ({AI_VOICES.length})
+                            </Badge>
+                            <Badge
+                              variant={voiceFilter === 'male' ? 'default' : 'outline'}
+                              className="cursor-pointer"
+                              onClick={() => setVoiceFilter('male')}
+                            >
+                              Male ({AI_VOICES.filter(v => v.gender === 'male').length})
+                            </Badge>
+                            <Badge
+                              variant={voiceFilter === 'female' ? 'default' : 'outline'}
+                              className="cursor-pointer"
+                              onClick={() => setVoiceFilter('female')}
+                            >
+                              Female ({AI_VOICES.filter(v => v.gender === 'female').length})
+                            </Badge>
+                          </div>
                         </div>
+                        <ScrollArea className="h-[500px] pr-4">
+                          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {AI_VOICES.filter(v => voiceFilter === 'all' || v.gender === voiceFilter).map((voice) => (
+                              <Card
+                                key={voice.id}
+                                className={cn(
+                                  'cursor-pointer transition-all hover:shadow-lg relative overflow-hidden group',
+                                  formData.selectedVoice === voice.id
+                                    ? 'ring-2 ring-primary shadow-md'
+                                    : 'hover:ring-1 hover:ring-primary/50'
+                                )}
+                                onClick={() => setFormData(prev => ({ ...prev, selectedVoice: voice.id }))}
+                              >
+                                {/* Gradient Header */}
+                                <div className={cn('h-2 bg-gradient-to-r', voice.color)} />
+
+                                {formData.selectedVoice === voice.id && (
+                                  <div className="absolute top-4 right-3 z-10">
+                                    <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shadow-md">
+                                      <Check className="h-4 w-4 text-primary-foreground" />
+                                    </div>
+                                  </div>
+                                )}
+
+                                <CardContent className="p-4">
+                                  {/* Voice Avatar & Name */}
+                                  <div className="flex items-start gap-3 mb-3">
+                                    <div className={cn(
+                                      'w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-br shadow-inner',
+                                      voice.color
+                                    )}>
+                                      <UserCircle className="h-7 w-7 text-white" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="font-bold text-lg">{voice.name}</h4>
+                                        <Badge variant="outline" className="text-xs capitalize">
+                                          {voice.gender}
+                                        </Badge>
+                                      </div>
+                                      <p className="text-sm text-muted-foreground">{voice.accent} English</p>
+                                    </div>
+                                  </div>
+
+                                  {/* Tone Badge */}
+                                  <div className="mb-3">
+                                    <Badge className={cn('bg-gradient-to-r text-white border-0', voice.color)}>
+                                      {voice.tone}
+                                    </Badge>
+                                  </div>
+
+                                  {/* Description */}
+                                  <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                                    {voice.description}
+                                  </p>
+
+                                  {/* Best For Tags */}
+                                  <div className="flex flex-wrap gap-1 mb-4">
+                                    {voice.bestFor.map((tag, i) => (
+                                      <Badge key={i} variant="secondary" className="text-xs">
+                                        {tag}
+                                      </Badge>
+                                    ))}
+                                  </div>
+
+                                  {/* Preview Button */}
+                                  <Button
+                                    type="button"
+                                    variant={isPlaying && playingVoice === voice.id ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      playVoicePreview(voice.id);
+                                    }}
+                                  >
+                                    {isPlaying && playingVoice === voice.id ? (
+                                      <>
+                                        <Square className="h-3 w-3 mr-2" />
+                                        Stop Preview
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Play className="h-3 w-3 mr-2" />
+                                        Preview Voice
+                                      </>
+                                    )}
+                                  </Button>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </ScrollArea>
                       </div>
 
                       <Separator />

@@ -33,6 +33,7 @@ import DomainSetsPage from "@/pages/domain-sets";
 import AccountsListDetail from "@/pages/accounts-list-detail";
 import CampaignsPage from "@/pages/campaigns";
 import CampaignCreatePage from "@/pages/campaign-create";
+import CampaignCreateAgenticPage from "@/pages/campaign-create-agentic";
 import EmailCampaignsPage from "@/pages/email-campaigns";
 import EmailCampaignCreatePage from "@/pages/email-campaign-create";
 import SimpleEmailCampaignCreatePage from "@/pages/simple-email-campaign-create";
@@ -101,7 +102,6 @@ import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
-import CampaignRequestsPage from "@/pages/campaign-requests";
 import OrganizationIntelligencePage from "@/pages/ai-studio/intelligence";
 import AIAgentsPage from "@/pages/ai-studio/agents";
 import AgenticCRMOperatorPage from "@/pages/ai-studio/operator";
@@ -244,7 +244,7 @@ function AuthenticatedApp() {
   // Custom sidebar width for enterprise CRM
   const style = {
     "--sidebar-width": "18rem",       // 288px standard sidebar
-    "--sidebar-width-icon": "3rem",   // default icon width
+    "--sidebar-width-icon": "4.5rem", // larger icon width for better visibility
   };
 
   // Get user roles array (support both legacy single role and new multi-role system)
@@ -293,6 +293,7 @@ function AuthenticatedApp() {
               {/* Campaigns - Unified Hub */}
               <Route path="/campaigns" component={CampaignsPage} />
               <Route path="/campaigns/create" component={CampaignCreatePage} />
+              <Route path="/campaigns/create-agentic" component={CampaignCreateAgenticPage} />
               <Route path="/campaigns/:campaignId/test" component={CampaignTestPage} />
               <Route path="/campaigns/:id/config" component={CampaignConfigPage} />
               <Route path="/campaigns/:id/suppressions" component={CampaignSuppressionsPage} />
@@ -469,7 +470,6 @@ function AuthenticatedApp() {
               <Route path="/client-portal/orders/:id" component={ClientPortalOrderDetail} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />
-              <Route path="/campaign-requests" component={CampaignRequestsPage} />
               
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />

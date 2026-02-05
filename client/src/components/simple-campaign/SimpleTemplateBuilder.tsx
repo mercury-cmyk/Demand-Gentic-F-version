@@ -15,10 +15,12 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger, SheetFooter } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Textarea } from "@/components/ui/textarea";  // ...existing code...
+
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -379,11 +381,11 @@ const blocksToHtml = (blocks: ContentBlock[]): string => {
 
 // Personalization tokens
 const PERSONALIZATION_TOKENS = [
-  { token: "{{first_name}}", label: "First Name", icon: User },
-  { token: "{{last_name}}", label: "Last Name", icon: User },
+  { token: "{{firstName}}", label: "First Name", icon: User },
+  { token: "{{lastName}}", label: "Last Name", icon: User },
   { token: "{{company}}", label: "Company", icon: Building2 },
   { token: "{{email}}", label: "Email", icon: AtSign },
-  { token: "{{job_title}}", label: "Job Title", icon: User },
+  { token: "{{title}}", label: "Job Title", icon: User },
 ];
 
 // Outreach types for AI
@@ -489,6 +491,10 @@ export function SimpleTemplateBuilder({
 }: SimpleTemplateBuilderProps) {
   const { toast } = useToast();
   
+  // Organization state overrides
+  const [orgName, setOrgName] = useState(organizationName);
+  const [orgAddress, setOrgAddress] = useState(organizationAddress);
+
   // Core state - use htmlContent if bodyContent is empty (for edit mode compatibility)
   const initialBodyContent = initialTemplate?.bodyContent || initialTemplate?.htmlContent || "";
   const initialIsBrandedTemplate = Boolean(
@@ -700,8 +706,8 @@ export function SimpleTemplateBuilder({
     if (useBrandedTemplate) {
       return bodyContent;
     }
-    return generateCleanHtml(bodyContent, organizationName, organizationAddress);
-  }, [bodyContent, organizationName, organizationAddress, useBrandedTemplate]);
+    return generateCleanHtml(bodyContent, orgName, orgAddress);
+  }, [bodyContent, orgName, orgAddress, useBrandedTemplate]);
 
   const brandedPreviewHtml = useMemo(() => {
     if (!useBrandedTemplate) return bodyContent;
@@ -726,10 +732,10 @@ export function SimpleTemplateBuilder({
       .trim();
     
     if (!useBrandedTemplate) {
-      text += `\n\n---\n${organizationName}\n${organizationAddress}\n\nUnsubscribe: {{unsubscribe_url}}`;
+      text += `\n\n---\n${orgName}\n${orgAddress}\n\nUnsubscribe: {{unsubscribe_url}}`;
     }
     return text;
-  }, [bodyContent, organizationName, organizationAddress, useBrandedTemplate]);
+  }, [bodyContent, orgName, orgAddress, useBrandedTemplate]);
   
   // Block manipulation functions for visual editor
   const addBlock = useCallback((type: BlockType, afterId?: string) => {
@@ -942,8 +948,8 @@ export function SimpleTemplateBuilder({
         copy,
         brandPalette,
         paletteOverrides,
-        companyName: organizationName,
-        companyAddress: organizationAddress,
+        companyName: orgName,
+        companyAddress: orgAddress,
         includeFooter: true
       });
       setBodyContent(html);
@@ -964,7 +970,7 @@ export function SimpleTemplateBuilder({
         tone,
         context: aiContext,
         senderName: campaignIntent.senderName,
-        companyName: organizationName,
+        companyName: orgName,
         ctaUrl: ctaUrl?.trim() ? ctaUrl.trim() : undefined,
         brandPalette
       });
@@ -1066,7 +1072,7 @@ export function SimpleTemplateBuilder({
     <TooltipProvider>
       <div className="h-screen flex flex-col bg-slate-50">
         {/* Top Bar - Sticky */}
-        <div className="border-b bg-white px-4 py-3 flex items-center justify-between shadow-sm flex-shrink-0">
+        <div className="border-b bg-white px-4 py-3 flex items-center justify-between shadow-sm flex-shrink-0 z-20">
           <div className="flex items-center gap-3">
             {/* Back Button */}
             <Button variant="ghost" size="sm" onClick={onBack} className="text-slate-600">
@@ -1080,6 +1086,223 @@ export function SimpleTemplateBuilder({
             <Badge variant="secondary" className="text-xs font-medium">
               {campaignIntent.campaignName}
             </Badge>
+          </div>
+          
+          {/* Center Toolbar */}
+          <div className="flex items-center gap-2">
+            {/* AI Assistant Sheet */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2 border-purple-200 hover:bg-purple-50 hover:text-purple-700">
+                  <Sparkles className="w-4 h-4 text-purple-500" />
+                  AI Assistant
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="w-[90vw] sm:w-[500px] overflow-y-auto">
+                <SheetHeader>
+                  <SheetTitle>AI Assistant</SheetTitle>
+                  <SheetDescription>Generate content and get deliverability insights.</SheetDescription>
+                </SheetHeader>
+                <div className="mt-6 space-y-6">
+                  {/* AI Form */}
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">Outreach Type</Label>
+                      <Select value={outreachType} onValueChange={setOutreachType}>
+                        <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{OUTREACH_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">Tone</Label>
+                      <Select value={tone} onValueChange={setTone}>
+                        <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{TONE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">Context</Label>
+                      <Textarea 
+                        value={aiContext} 
+                        onChange={e => setAiContext(e.target.value)} 
+                        placeholder="Add specific details..." 
+                        className="text-xs h-24" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">CTA URL</Label>
+                      <Input value={ctaUrl} onChange={e => setCtaUrl(e.target.value)} className="text-xs" />
+                    </div>
+                    
+                    {/* Brand Palette */}
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500 block">Brand Palette</Label>
+                      <Select value={brandPalette} onValueChange={(value) => setBrandPalette(value as BrandPaletteKey)}>
+                        <SelectTrigger className="h-9 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BRAND_PALETTE_OPTIONS.map((option) => (
+                            <SelectItem key={option} value={option} className="text-xs">
+                              {option.charAt(0).toUpperCase() + option.slice(1)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant={useCustomBrandColors ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setUseCustomBrandColors(prev => !prev)}
+                        className="w-full text-xs"
+                      >
+                        <Palette className="w-3.5 h-3.5 mr-2" />
+                        {useCustomBrandColors ? "Using custom colors" : "Customize brand colors"}
+                      </Button>
+                      {useCustomBrandColors && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                            { key: "primary", label: "Primary" },
+                            { key: "secondary", label: "Secondary" },
+                            { key: "accent", label: "Accent" },
+                            { key: "surface", label: "Surface" },
+                            { key: "button", label: "Button" }
+                          ] as const).map(({ key, label }) => (
+                            <div key={key} className="space-y-1">
+                              <Label className="text-[10px] text-slate-500">{label}</Label>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="color"
+                                  value={brandColors[key]}
+                                  onChange={(e) => updateBrandColor(key, e.target.value)}
+                                  className="h-8 w-10 p-1"
+                                />
+                                <Input
+                                  value={brandColors[key]}
+                                  onChange={(e) => updateBrandColor(key, e.target.value)}
+                                  className="text-[10px] h-8"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <Button onClick={handleAiGenerate} disabled={aiGenerating} className="w-full bg-purple-600 text-white">
+                      {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                      Generate Email
+                    </Button>
+                  </div>
+                  
+                  <Separator />
+                  
+                  {/* Smart Insights */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Lightbulb className="w-4 h-4 text-amber-500" />
+                      <h3 className="text-sm font-semibold">Smart Insights</h3>
+                    </div>
+                    {nudges.length === 0 ? (
+                      <div className="text-xs text-slate-500 p-3 bg-slate-50 rounded">Start writing to see insights</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {nudges.map(n => (
+                          <div key={n.id} className={`text-xs p-2 rounded border flex gap-2 ${
+                            n.type === "error" ? "bg-red-50 text-red-700 border-red-200" :
+                            n.type === "warning" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                            n.type === "success" ? "bg-green-50 text-green-700 border-green-200" :
+                            "bg-blue-50 text-blue-700 border-blue-200"
+                          }`}>
+                            <Info className="w-3 h-3 mt-0.5" />
+                            <span>{n.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+
+            {/* Components Sheet */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                   <Plus className="w-4 h-4 text-blue-500" />
+                   Tools
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="w-[400px] overflow-y-auto">
+                 <SheetHeader>
+                   <SheetTitle>Builder Tools</SheetTitle>
+                   <SheetDescription>Add blocks and variables.</SheetDescription>
+                 </SheetHeader>
+                 <div className="mt-6 space-y-6">
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3">Components</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button variant="outline" size="sm" onClick={() => insertToken(" ")} className="justify-start"><Type className="w-4 h-4 mr-2"/> Text</Button>
+                        <Button variant="outline" size="sm" onClick={insertCtaButton} className="justify-start"><MousePointer className="w-4 h-4 mr-2"/> Button</Button>
+                        <Button variant="outline" size="sm" onClick={insertDivider} className="justify-start"><Minus className="w-4 h-4 mr-2"/> Divider</Button>
+                        <Button variant="outline" size="sm" onClick={insertSpacer} className="justify-start"><MoveVertical className="w-4 h-4 mr-2"/> Spacer</Button>
+                        <Button variant="outline" size="sm" onClick={insertSignature} className="col-span-2 justify-start"><PenLine className="w-4 h-4 mr-2"/> Signature</Button>
+                      </div>
+                    </div>
+                    <Separator />
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3">Variables</h3>
+                      <Select value={selectedMergeToken} onValueChange={(val) => { setSelectedMergeToken(undefined); insertToken(val); }}>
+                        <SelectTrigger><SelectValue placeholder="Insert variable..." /></SelectTrigger>
+                        <SelectContent>
+                          {PERSONALIZATION_TOKENS.map(t => (
+                            <SelectItem key={t.token} value={t.token}>{t.label} {t.token}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-slate-400 mt-1">Click in editor to place cursor first.</p>
+                    </div>
+                 </div>
+              </SheetContent>
+            </Sheet>
+
+            {/* Settings Sheet */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                   <Settings2 className="w-4 h-4 text-slate-500" />
+                   Settings
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="w-[400px] overflow-y-auto">
+                 <SheetHeader>
+                   <SheetTitle>Settings</SheetTitle>
+                 </SheetHeader>
+                 <div className="mt-6 space-y-6">
+                    <div className="space-y-4">
+                        <h3 className="text-sm font-semibold">Footer Configuration</h3>
+                        <div className="space-y-2">
+                           <Label>Organization Name</Label>
+                           <Input value={orgName} onChange={e => setOrgName(e.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                           <Label>Address</Label>
+                           <Input value={orgAddress} onChange={e => setOrgAddress(e.target.value)} />
+                        </div>
+                    </div>
+                    <Separator />
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold">Send Test Email</h3>
+                      <div className="flex gap-2">
+                        <Input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="email@example.com" />
+                        <Button size="icon" onClick={handleSendTest} disabled={sendingTest}>
+                          {sendingTest ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                 </div>
+              </SheetContent>
+            </Sheet>
           </div>
           
           <div className="flex items-center gap-2">
@@ -1137,87 +1360,54 @@ export function SimpleTemplateBuilder({
 
         {/* Main Content Area */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Main Canvas (70% width) */}
-          <div className="flex-1 flex flex-col min-h-0 p-6">
+          {/* Main Canvas (Full width now) */}
+          <div className="flex-1 flex flex-col min-h-0 p-6 bg-slate-50/50">
             {/* Editor Mode Toggle */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 max-w-5xl mx-auto w-full">
               <div className="flex items-center gap-2 bg-white rounded-lg p-1 shadow-sm border">
-                <Button
-                  variant={editorMode === "visual" ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setEditorMode("visual")}
-                  className="text-xs"
-                >
-                  <Type className="w-3.5 h-3.5 mr-1" />
-                  Visual
+                <Button variant={editorMode === "visual" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("visual")} className="text-xs">
+                  <Type className="w-3.5 h-3.5 mr-1" /> Visual
                 </Button>
-                <Button
-                  variant={editorMode === "code" ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setEditorMode("code")}
-                  className="text-xs"
-                >
-                  <Code2 className="w-3.5 h-3.5 mr-1" />
-                  HTML
+                <Button variant={editorMode === "code" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("code")} className="text-xs">
+                  <Code2 className="w-3.5 h-3.5 mr-1" /> HTML
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsCanvasExpanded(prev => !prev)}
-                  className="text-xs"
-                >
-                  {isCanvasExpanded ? (
-                    <>
-                      <Minimize2 className="w-3.5 h-3.5 mr-1" />
-                      Compact
-                    </>
-                  ) : (
-                    <>
-                      <Maximize2 className="w-3.5 h-3.5 mr-1" />
-                      Full width
-                    </>
-                  )}
+                <Button variant="ghost" size="sm" onClick={() => setIsCanvasExpanded(prev => !prev)} className="text-xs">
+                  {isCanvasExpanded ? <Minimize2 className="w-3.5 h-3.5 mr-1" /> : <Maximize2 className="w-3.5 h-3.5 mr-1" />}
+                  {isCanvasExpanded ? "Compact" : "Full width"}
                 </Button>
               </div>
             </div>
 
             {/* Email Canvas Container */}
             <div className="flex-1 flex justify-center overflow-auto pb-4">
-              <div className={`w-full ${isCanvasExpanded ? "max-w-[1100px]" : "max-w-[600px]"}`}>
+              <div className={`w-full transition-all duration-300 ${isCanvasExpanded ? "max-w-[1000px]" : "max-w-[600px]"}`}>
                 {/* Email Container */}
-                <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
+                <div className="bg-white rounded-lg shadow-lg border overflow-hidden min-h-[600px] flex flex-col">
                   {editorMode === "visual" ? (
                     useBrandedTemplate ? (
                       /* Full HTML Preview for AI-generated branded templates */
-                      <div className="min-h-[500px] relative">
+                      <div className="relative flex-1">
                         <div className="absolute top-2 left-2 right-2 z-10 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 flex items-center justify-between gap-2 shadow-sm">
                           <div className="flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-purple-500" />
                             <span className="font-medium">AI-generated branded template</span>
-                            <span className="text-[11px] text-blue-700">Click a section to edit in Visual mode</span>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditorMode("html")}
-                            className="text-xs bg-white hover:bg-blue-50"
-                          >
-                            <Code2 className="w-3 h-3 mr-1" />
-                            Edit HTML Code
+                          <Button size="sm" variant="outline" onClick={() => setEditorMode("html")} className="text-xs bg-white hover:bg-blue-50">
+                            <Code2 className="w-3 h-3 mr-1" /> Edit HTML
                           </Button>
                         </div>
                         <iframe
                           srcDoc={brandedPreviewHtml}
-                          className={`w-full border-0 pt-12 ${isCanvasExpanded ? "min-h-[720px]" : "min-h-[600px]"}`}
+                          className="w-full h-full border-0 pt-12"
                           style={{ background: '#f3f4f6' }}
                           title="Email Preview"
                           sandbox="allow-same-origin"
                         />
                       </div>
                     ) : (
-                    <div className="min-h-[500px] p-6" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+                    <div className="p-8 flex-1" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
                       {/* Visual Block Editor */}
-                      <div className="space-y-2">
+                      <div className="space-y-4">
                         {blocks.map((block, index) => (
                           <div
                             key={block.id}
@@ -1249,16 +1439,16 @@ export function SimpleTemplateBuilder({
                                 setEditingBlockId(block.id);
                               }
                             }}
-                            className={`group relative rounded-lg transition-all cursor-move ${
-                              selectedBlockId === block.id ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:ring-2 hover:ring-slate-200'
-                            } ${dragOverBlockId === block.id ? 'border-t-4 border-blue-500' : ''} ${
+                            className={`group relative rounded-lg transition-all cursor-move border border-transparent hover:border-slate-200 ${
+                              selectedBlockId === block.id ? 'ring-2 ring-blue-500 ring-offset-2 border-blue-100 z-10' : ''
+                            } ${dragOverBlockId === block.id ? 'border-t-4 border-t-blue-500' : ''} ${
                               draggedBlockId === block.id ? 'opacity-50' : ''
                             }`}
                           >
                             {/* Drag Handle & Actions */}
-                            <div className={`absolute -left-8 top-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${selectedBlockId === block.id ? 'opacity-100' : ''}`}>
-                              <div className="p-1 bg-white border rounded shadow-sm cursor-grab active:cursor-grabbing">
-                                <GripVertical className="w-3 h-3 text-slate-400" />
+                            <div className={`absolute -left-10 top-1/2 -translate-y-1/2 flex flex-col gap-1 transition-opacity ${selectedBlockId === block.id || 'group-hover:opacity-100 opacity-0'}`}>
+                              <div className="p-1.5 bg-white border rounded shadow-sm cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600">
+                                <GripVertical className="w-4 h-4" />
                               </div>
                             </div>
                             
@@ -1268,7 +1458,7 @@ export function SimpleTemplateBuilder({
                                 e.stopPropagation();
                                 deleteBlock(block.id);
                               }}
-                              className={`absolute -right-2 -top-2 p-1 bg-red-500 text-white rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 ${selectedBlockId === block.id ? 'opacity-100' : ''}`}
+                              className={`absolute -right-3 -top-3 p-1 bg-red-500 text-white rounded-full shadow-sm transition-opacity hover:bg-red-600 z-20 ${selectedBlockId === block.id || 'group-hover:opacity-100 opacity-0'}`}
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -1283,10 +1473,10 @@ export function SimpleTemplateBuilder({
                                     value={block.content}
                                     onChange={(e) => updateBlock(block.id, { content: e.target.value })}
                                     onBlur={() => setEditingBlockId(null)}
+                                    // Capture events for variable insertion
                                     onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                    onSelect={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     placeholder="Type your text here..."
                                     className="w-full min-h-[60px] text-base leading-relaxed border-0 resize-none focus-visible:ring-0 p-0 bg-transparent"
                                   />
@@ -1309,7 +1499,6 @@ export function SimpleTemplateBuilder({
                                     onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                    onSelect={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     onKeyDown={(e) => e.key === 'Enter' && setEditingBlockId(null)}
                                     placeholder="Enter heading..."
                                     className={`w-full border-0 p-0 bg-transparent focus-visible:ring-0 font-semibold ${
@@ -1339,7 +1528,6 @@ export function SimpleTemplateBuilder({
                                         onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                         onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                         onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                        onSelect={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                         placeholder="Button text..."
                                         className="text-sm"
                                       />
@@ -1349,7 +1537,6 @@ export function SimpleTemplateBuilder({
                                         onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
                                         onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
                                         onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
-                                        onSelect={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "buttonUrl" }, e.currentTarget)}
                                         onBlur={() => setEditingBlockId(null)}
                                         placeholder="https://..."
                                         className="text-sm"
@@ -1412,10 +1599,6 @@ export function SimpleTemplateBuilder({
                                     value={block.content}
                                     onChange={(e) => updateBlock(block.id, { content: e.target.value })}
                                     onBlur={() => setEditingBlockId(null)}
-                                    onFocus={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                    onClick={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                    onKeyUp={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
-                                    onSelect={(e) => captureEditorSelection({ type: "block", blockId: block.id, field: "content" }, e.currentTarget)}
                                     placeholder="Enter items, one per line..."
                                     className="w-full min-h-[80px] text-base leading-relaxed border-0 resize-none focus-visible:ring-0 p-0 bg-transparent"
                                   />
@@ -1439,94 +1622,25 @@ export function SimpleTemplateBuilder({
                           </div>
                         ))}
                         
-                        {/* Add Block Button */}
-                        <div className="pt-4 flex justify-center">
-                          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('text')}
-                                  className="h-8 px-2"
-                                >
-                                  <Type className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add Text</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('heading')}
-                                  className="h-8 px-2"
-                                >
-                                  <Bold className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add Heading</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('button')}
-                                  className="h-8 px-2"
-                                >
-                                  <MousePointer className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add Button</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('image')}
-                                  className="h-8 px-2"
-                                >
-                                  <Image className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add Image</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('list')}
-                                  className="h-8 px-2"
-                                >
-                                  <List className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add List</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => addBlock('divider')}
-                                  className="h-8 px-2"
-                                >
-                                  <Minus className="w-4 h-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Add Divider</TooltipContent>
-                            </Tooltip>
+                        {/* Empty State / Add Hint */}
+                        {blocks.length === 0 && (
+                          <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-200 rounded-lg">
+                            <MousePointer className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>Click "Tools" to add content blocks</p>
                           </div>
+                        )}
+                        
+                        {/* Bottom Add Buttons */}
+                        <div className="pt-8 flex justify-center opacity-50 hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" onClick={() => addBlock('text')} className="text-slate-400 hover:text-blue-500">
+                            <Plus className="w-4 h-4 mr-1" /> Add Text
+                          </Button>
                         </div>
                       </div>
                     </div>
                     )
                   ) : (
-                    <div className="min-h-[500px] relative">
+                    <div className="relative flex-1">
                       {/* Show back to preview button for branded templates */}
                       {useBrandedTemplate && (
                         <div className="absolute top-2 left-2 right-2 z-10 bg-gradient-to-r from-slate-800 to-slate-700 border border-slate-600 rounded-lg p-3 text-sm text-slate-200 flex items-center justify-between gap-2 shadow-lg">
@@ -1554,16 +1668,16 @@ export function SimpleTemplateBuilder({
                         onKeyUp={(e) => captureEditorSelection({ type: "body" }, e.currentTarget)}
                         onSelect={(e) => captureEditorSelection({ type: "body" }, e.currentTarget)}
                         placeholder="Enter HTML content..."
-                        className={`w-full min-h-[500px] p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400 ${useBrandedTemplate ? 'pt-16' : ''}`}
+                        className={`w-full h-full min-h-[500px] p-4 font-mono text-sm border-0 resize-none focus-visible:ring-0 bg-slate-900 text-green-400 ${useBrandedTemplate ? 'pt-16' : ''}`}
                       />
                     </div>
                   )}
                   
-                  {/* Auto-injected Footer Preview - Only show for non-branded templates */}
+                  {/* Auto-injected Footer Preview */}
                   {!useBrandedTemplate && (
-                    <div className="border-t bg-slate-50 p-4 text-center text-xs text-slate-500">
-                      <div className="font-semibold text-slate-600 mb-1">{organizationName}</div>
-                      <div className="mb-2">{organizationAddress}</div>
+                    <div className="border-t bg-slate-50 p-6 text-center text-xs text-slate-500 mt-auto">
+                      <div className="font-semibold text-slate-600 mb-1">{orgName}</div>
+                      <div className="mb-2">{orgAddress}</div>
                       <div className="text-slate-400">
                         <span className="underline cursor-default">Unsubscribe</span>
                         <span className="mx-2">|</span>
@@ -1578,320 +1692,6 @@ export function SimpleTemplateBuilder({
               </div>
             </div>
           </div>
-
-          {/* Right Sidebar - Components & AI */}
-          <div className="w-80 border-l bg-white flex flex-col overflow-hidden">
-            <ScrollArea className="flex-1">
-              <div className="p-4 space-y-6">
-                {/* A. Components (Drag & Drop) */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <MousePointer className="w-4 h-4 text-blue-500" />
-                    <h3 className="text-sm font-semibold text-slate-700">Components</h3>
-                  </div>
-                  <p className="text-xs text-slate-500 mb-3">Click to insert ESP-safe elements</p>
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => insertToken(" ")}
-                      className="h-10 justify-start text-xs"
-                    >
-                      <Type className="w-3.5 h-3.5 mr-2" />
-                      Text
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={insertCtaButton}
-                      className="h-10 justify-start text-xs"
-                    >
-                      <MousePointer className="w-3.5 h-3.5 mr-2" />
-                      Button
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={insertDivider}
-                      className="h-10 justify-start text-xs"
-                    >
-                      <Minus className="w-3.5 h-3.5 mr-2" />
-                      Divider
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={insertSpacer}
-                      className="h-10 justify-start text-xs"
-                    >
-                      <MoveVertical className="w-3.5 h-3.5 mr-2" />
-                      Spacer
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={insertSignature}
-                      className="h-10 justify-start text-xs col-span-2"
-                    >
-                      <PenLine className="w-3.5 h-3.5 mr-2" />
-                      Signature Block
-                    </Button>
-                  </div>
-                  
-                  <p className="text-[10px] text-slate-400 mt-2 italic">
-                    No fancy blocks. No heavy layouts. Everything ESP-safe.
-                  </p>
-                </div>
-
-                <Separator />
-
-                {/* B. AI Assistant (Always Visible) */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="w-4 h-4 text-purple-500" />
-                    <h3 className="text-sm font-semibold text-slate-700">AI Assistant</h3>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    {/* Outreach Type */}
-                    <div>
-                      <Label className="text-xs text-slate-500 mb-1.5 block">Outreach Type</Label>
-                      <Select value={outreachType} onValueChange={setOutreachType}>
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {OUTREACH_TYPES.map(type => (
-                            <SelectItem key={type.value} value={type.value} className="text-xs">
-                              {type.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    {/* Tone */}
-                    <div>
-                      <Label className="text-xs text-slate-500 mb-1.5 block">Tone</Label>
-                      <Select value={tone} onValueChange={setTone}>
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {TONE_OPTIONS.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    {/* Context */}
-                    <div>
-                      <Label className="text-xs text-slate-500 mb-1.5 block">Context (optional)</Label>
-                      <Textarea
-                        value={aiContext}
-                        onChange={(e) => setAiContext(e.target.value)}
-                        placeholder="Add details about the audience, pain points, proof, and desired CTA..."
-                        className="text-xs min-h-[140px] resize-none"
-                        rows={6}
-                      />
-                    </div>
-
-                    {/* CTA URL */}
-                    <div>
-                      <Label className="text-xs text-slate-500 mb-1.5 block">CTA URL</Label>
-                      <Input
-                        value={ctaUrl}
-                        onChange={(e) => setCtaUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="text-xs h-9"
-                      />
-                    </div>
-
-                    {/* Brand Palette */}
-                    <div className="space-y-2">
-                      <Label className="text-xs text-slate-500 block">Brand Palette</Label>
-                      <Select value={brandPalette} onValueChange={(value) => setBrandPalette(value as BrandPaletteKey)}>
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BRAND_PALETTE_OPTIONS.map((option) => (
-                            <SelectItem key={option} value={option} className="text-xs">
-                              {option.charAt(0).toUpperCase() + option.slice(1)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        type="button"
-                        variant={useCustomBrandColors ? "secondary" : "outline"}
-                        size="sm"
-                        onClick={() => setUseCustomBrandColors(prev => !prev)}
-                        className="w-full text-xs"
-                      >
-                        <Palette className="w-3.5 h-3.5 mr-2" />
-                        {useCustomBrandColors ? "Using custom colors" : "Customize brand colors"}
-                      </Button>
-                      {useCustomBrandColors && (
-                        <div className="grid grid-cols-2 gap-2">
-                          {([
-                            { key: "primary", label: "Primary" },
-                            { key: "secondary", label: "Secondary" },
-                            { key: "accent", label: "Accent" },
-                            { key: "surface", label: "Surface" },
-                            { key: "button", label: "Button" }
-                          ] as const).map(({ key, label }) => (
-                            <div key={key} className="space-y-1">
-                              <Label className="text-[10px] text-slate-500">{label}</Label>
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="color"
-                                  value={brandColors[key]}
-                                  onChange={(e) => updateBrandColor(key, e.target.value)}
-                                  className="h-8 w-10 p-1"
-                                />
-                                <Input
-                                  value={brandColors[key]}
-                                  onChange={(e) => updateBrandColor(key, e.target.value)}
-                                  className="text-[10px] h-8"
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Generate Button */}
-                    <Button
-                      onClick={handleAiGenerate}
-                      disabled={aiGenerating}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white"
-                    >
-                      {aiGenerating ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Generate Email
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Smart Insights */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Lightbulb className="w-4 h-4 text-amber-500" />
-                    <h3 className="text-sm font-semibold text-slate-700">Smart Insights</h3>
-                  </div>
-                  
-                  {nudges.length === 0 ? (
-                    <div className="text-xs text-slate-500 p-3 bg-slate-50 rounded-lg">
-                      Start writing to see deliverability insights
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {nudges.map((nudge) => (
-                        <div
-                          key={nudge.id}
-                          className={`text-xs p-2.5 rounded-lg flex items-start gap-2 ${
-                            nudge.type === "error" ? "bg-red-50 text-red-700 border border-red-200" :
-                            nudge.type === "warning" ? "bg-amber-50 text-amber-700 border border-amber-200" :
-                            nudge.type === "success" ? "bg-green-50 text-green-700 border border-green-200" :
-                            "bg-blue-50 text-blue-700 border border-blue-200"
-                          }`}
-                        >
-                          {nudge.type === "error" && <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
-                          {nudge.type === "warning" && <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
-                          {nudge.type === "success" && <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
-                          {nudge.type === "info" && <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
-                          <span>{nudge.message}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <Separator />
-
-                {/* Variables */}
-                <Collapsible defaultOpen>
-                  <CollapsibleTrigger className="flex items-center gap-2 w-full">
-                    <ChevronDown className="w-4 h-4 text-slate-400 transition-transform [[data-state=closed]_&]:-rotate-90" />
-                    <AtSign className="w-4 h-4 text-blue-500" />
-                    <h3 className="text-sm font-semibold text-slate-700">Variables</h3>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-3">
-                    <div className="space-y-2">
-                      <Select
-                        value={selectedMergeToken}
-                        onValueChange={(value) => {
-                          setSelectedMergeToken(undefined);
-                          insertToken(value);
-                        }}
-                      >
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue placeholder="Insert merge field at cursor..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PERSONALIZATION_TOKENS.map((item) => (
-                            <SelectItem key={item.token} value={item.token} className="text-xs">
-                              {item.label} {item.token}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-[10px] text-slate-400">
-                        Click inside the editor first to insert at the cursor.
-                      </p>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <Separator />
-
-                {/* Test Email */}
-                <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Send className="w-4 h-4 text-blue-500" />
-                    <h3 className="text-sm font-semibold text-slate-700">Send Test</h3>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={testEmail}
-                      onChange={(e) => setTestEmail(e.target.value)}
-                      placeholder="test@example.com"
-                      className="text-xs h-8"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleSendTest}
-                      disabled={!testEmail.trim() || sendingTest}
-                      className="h-8 px-3"
-                    >
-                      {sendingTest ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Send className="w-3 h-3" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </ScrollArea>
-          </div>
         </div>
 
         {/* Preview Modal */}
@@ -1901,41 +1701,17 @@ export function SimpleTemplateBuilder({
               <div className="flex items-center justify-between">
                 <DialogTitle>Email Preview</DialogTitle>
                 <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                  <Button
-                    variant={previewMode === "gmail-desktop" ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setPreviewMode("gmail-desktop")}
-                    className="text-xs"
-                  >
-                    <Monitor className="w-3.5 h-3.5 mr-1" />
-                    Gmail
+                  <Button variant={previewMode === "gmail-desktop" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("gmail-desktop")} className="text-xs">
+                    <Monitor className="w-3.5 h-3.5 mr-1" /> Gmail
                   </Button>
-                  <Button
-                    variant={previewMode === "gmail-mobile" ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setPreviewMode("gmail-mobile")}
-                    className="text-xs"
-                  >
-                    <Smartphone className="w-3.5 h-3.5 mr-1" />
-                    Mobile
+                  <Button variant={previewMode === "gmail-mobile" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("gmail-mobile")} className="text-xs">
+                    <Smartphone className="w-3.5 h-3.5 mr-1" /> Mobile
                   </Button>
-                  <Button
-                    variant={previewMode === "outlook" ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setPreviewMode("outlook")}
-                    className="text-xs"
-                  >
-                    <Mail className="w-3.5 h-3.5 mr-1" />
-                    Outlook
+                  <Button variant={previewMode === "outlook" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("outlook")} className="text-xs">
+                    <Mail className="w-3.5 h-3.5 mr-1" /> Outlook
                   </Button>
-                  <Button
-                    variant={previewMode === "plaintext" ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setPreviewMode("plaintext")}
-                    className="text-xs"
-                  >
-                    <FileText className="w-3.5 h-3.5 mr-1" />
-                    Plain Text
+                  <Button variant={previewMode === "plaintext" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("plaintext")} className="text-xs">
+                    <FileText className="w-3.5 h-3.5 mr-1" /> Plain Text
                   </Button>
                 </div>
               </div>
@@ -1976,15 +1752,11 @@ export function SimpleTemplateBuilder({
                     previewMode === "gmail-mobile" ? "w-[375px]" : "w-full max-w-[700px]"
                   }`}
                 >
-                  {/* Simulated Email Client Header */}
-                  <div className={`border-b px-4 py-3 ${
-                    previewMode === "outlook" ? "bg-[#0078d4]" : "bg-white"
-                  }`}>
+                  <div className={`border-b px-4 py-3 ${previewMode === "outlook" ? "bg-[#0078d4]" : "bg-white"}`}>
                     <div className={`text-xs ${previewMode === "outlook" ? "text-white" : "text-slate-500"}`}>
                       {previewMode === "outlook" ? "Microsoft Outlook" : "Gmail"}
                     </div>
                   </div>
-                  
                   <div className="h-[calc(100%-52px)] overflow-y-auto">
                     <iframe
                       title="Email Preview"

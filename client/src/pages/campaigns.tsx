@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Mail, Phone, Plus, BarChart, Settings, Play, Pause, Edit, Trash2,
   MoreVertical, Zap, Search, ArrowUpRight, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, Bot, Users
+  ChevronDown, ChevronUp, Bot, Users, Mic
 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,6 +38,7 @@ import { CampaignPerformanceSnapshot, type CampaignPerformanceSnapshotData } fro
 import { PhoneCampaignPanel, type QueueStats } from "@/components/campaigns/phone-campaign-panel";
 import { EmailCampaignPanel, type EmailStats } from "@/components/campaigns/email-campaign-panel";
 import { AgentAssignmentDialog } from "@/components/campaigns/agent-assignment-dialog";
+import { VoiceSelectionDialog } from "@/components/campaigns/voice-selection-dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type EmailStatsResponse = {
@@ -77,6 +78,8 @@ export default function CampaignsPage() {
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string | number>>(new Set());
   const [assignAgentsDialogOpen, setAssignAgentsDialogOpen] = useState(false);
   const [selectedCampaignForAgents, setSelectedCampaignForAgents] = useState<any>(null);
+  const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
+  const [selectedCampaignForVoice, setSelectedCampaignForVoice] = useState<any>(null);
 
   // Sync tab with URL parameter
   useEffect(() => {
@@ -285,6 +288,11 @@ export default function CampaignsPage() {
   const handleAssignAgentsClick = (campaign: any) => {
     setSelectedCampaignForAgents(campaign);
     setAssignAgentsDialogOpen(true);
+  };
+
+  const handleSelectVoiceClick = (campaign: any) => {
+    setSelectedCampaignForVoice(campaign);
+    setVoiceDialogOpen(true);
   };
 
   const isPhoneCampaign = (campaign: any) =>
@@ -603,10 +611,16 @@ export default function CampaignsPage() {
                                   Edit
                                 </DropdownMenuItem>
                                 {isPhone && (
-                                  <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
-                                    <Users className="mr-2 h-4 w-4" />
-                                    Assign Agents
-                                  </DropdownMenuItem>
+                                  <>
+                                    <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
+                                      <Mic className="mr-2 h-4 w-4" />
+                                      Select AI Voice
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
+                                      <Users className="mr-2 h-4 w-4" />
+                                      Assign Agents
+                                    </DropdownMenuItem>
+                                  </>
                                 )}
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(campaign)}>
@@ -698,6 +712,16 @@ export default function CampaignsPage() {
         campaign={selectedCampaignForAgents}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/campaigns/queue-stats"] });
+        }}
+      />
+
+      {/* Voice Selection Dialog */}
+      <VoiceSelectionDialog
+        open={voiceDialogOpen}
+        onOpenChange={setVoiceDialogOpen}
+        campaign={selectedCampaignForVoice}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
         }}
       />
         </div>

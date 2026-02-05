@@ -1,9 +1,3 @@
-/**
- * Client Portal Campaigns Routes
- *
- * Handles campaign creation from the wizard, AI agent configuration,
- * and audience management for client portal users.
- */
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
@@ -14,8 +8,10 @@ import {
   clientUsers,
   campaigns,
   virtualAgents,
+  users
 } from '@shared/schema';
 import { z } from 'zod';
+import { requireAuth, requireRole } from '../auth';
 
 const router = Router();
 
@@ -74,18 +70,14 @@ function mapChannelToOrderType(channel: string, campaignType: string): WorkOrder
 // ==================== CAMPAIGN ROUTES ====================
 
 /**
- * POST /create - Create a new campaign from the wizard
+ * POST /create - Create a new campaign from the wizard (ADMIN)
  */
-router.post('/create', async (req: Request, res: Response) => {
+router.post('/create', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
   try {
-    const clientAccountId = req.clientUser?.clientAccountId;
-    const clientUserId = req.clientUser?.clientUserId;
-
-    if (!clientAccountId) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
-
     const campaignSchema = z.object({
+      // Admin specific
+      clientAccountId: z.string().min(1, 'Client Account ID is required'),
+      
       // Step 1: Basics
       name: z.string().min(1, 'Campaign name is required'),
       description: z.string().optional(),
@@ -132,6 +124,15 @@ router.post('/create', async (req: Request, res: Response) => {
     const data = campaignSchema.parse(req.body);
     const orderNumber = await generateOrderNumber();
 
+    // Verify client account exists
+    const clientAccount = await db.query.clientAccounts.findFirst({
+        where: eq(clientAccounts.id, data.clientAccountId)
+    });
+
+    if (!clientAccount) {
+        return res.status(404).json({ message: 'Client account not found' });
+    }
+
     // Build campaign configuration
     const campaignConfig: any = {
       channel: data.channel,
@@ -161,8 +162,8 @@ router.post('/create', async (req: Request, res: Response) => {
       .insert(workOrders)
       .values({
         orderNumber,
-        clientAccountId,
-        clientUserId,
+        clientAccountId: data.clientAccountId,
+        // No clientUserId because created by Admin
         title: data.name,
         description: data.description || data.objective,
         orderType: mapChannelToOrderType(data.channel, data.campaignType),
@@ -197,42 +198,41 @@ router.post('/create', async (req: Request, res: Response) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ message: 'Validation failed', errors: error.errors });
     }
-    console.error('[CLIENT CAMPAIGNS] Create campaign error:', error);
+    console.error('[ADMIN CAMPAIGNS] Create campaign error:', error);
     res.status(500).json({ message: 'Failed to create campaign' });
   }
 });
 
+// Re-use voices/agents endpoints for Admin if needed, or point frontend to client-portal ones (if they are public? no they are auth protected)
+
 /**
  * GET /voices - Get available AI voices for preview
  */
-router.get('/voices', async (req: Request, res: Response) => {
-  try {
-    const voices = [
-      { id: 'Fenrir', name: 'Fenrir', gender: 'male', description: 'Professional, confident tone', accent: 'American', provider: 'google' },
-      { id: 'Aoede', name: 'Aoede', gender: 'female', description: 'Warm, friendly personality', accent: 'American', provider: 'google' },
-      { id: 'Puck', name: 'Puck', gender: 'male', description: 'Energetic, engaging style', accent: 'American', provider: 'google' },
-      { id: 'Kore', name: 'Kore', gender: 'female', description: 'Calm, reassuring voice', accent: 'American', provider: 'google' },
-      { id: 'Charon', name: 'Charon', gender: 'male', description: 'Deep, authoritative tone', accent: 'American', provider: 'google' },
-      { id: 'Orion', name: 'Orion', gender: 'male', description: 'Clear, articulate speaker', accent: 'British', provider: 'google' },
-      { id: 'Vega', name: 'Vega', gender: 'female', description: 'Sophisticated, professional', accent: 'British', provider: 'google' },
-      { id: 'Pegasus', name: 'Pegasus', gender: 'male', description: 'Dynamic, persuasive style', accent: 'American', provider: 'google' },
-      { id: 'Ursa', name: 'Ursa', gender: 'female', description: 'Strong, confident delivery', accent: 'American', provider: 'google' },
-      { id: 'Dipper', name: 'Dipper', gender: 'male', description: 'Friendly, approachable manner', accent: 'American', provider: 'google' },
-      { id: 'Capella', name: 'Capella', gender: 'female', description: 'Bright, enthusiastic tone', accent: 'American', provider: 'google' },
-      { id: 'Lyra', name: 'Lyra', gender: 'female', description: 'Melodic, pleasant voice', accent: 'American', provider: 'google' },
-    ];
+router.get('/voices', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const voices = [
+        { id: 'Fenrir', name: 'Fenrir', gender: 'male', description: 'Professional, confident tone', accent: 'American', provider: 'google' },
+        { id: 'Aoede', name: 'Aoede', gender: 'female', description: 'Warm, friendly personality', accent: 'American', provider: 'google' },
+        { id: 'Puck', name: 'Puck', gender: 'male', description: 'Energetic, engaging style', accent: 'American', provider: 'google' },
+        { id: 'Kore', name: 'Kore', gender: 'female', description: 'Calm, reassuring voice', accent: 'American', provider: 'google' },
+        { id: 'Charon', name: 'Charon', gender: 'male', description: 'Deep, authoritative tone', accent: 'American', provider: 'google' },
+        { id: 'Orion', name: 'Orion', gender: 'male', description: 'Clear, articulate speaker', accent: 'British', provider: 'google' },
+        { id: 'Vega', name: 'Vega', gender: 'female', description: 'Sophisticated, professional', accent: 'British', provider: 'google' },
+        { id: 'Pegasus', name: 'Pegasus', gender: 'male', description: 'Dynamic, persuasive style', accent: 'American', provider: 'google' },
+        { id: 'Ursa', name: 'Ursa', gender: 'female', description: 'Strong, confident delivery', accent: 'American', provider: 'google' },
+        { id: 'Dipper', name: 'Dipper', gender: 'male', description: 'Friendly, approachable manner', accent: 'American', provider: 'google' },
+        { id: 'Capella', name: 'Capella', gender: 'female', description: 'Bright, enthusiastic tone', accent: 'American', provider: 'google' },
+        { id: 'Lyra', name: 'Lyra', gender: 'female', description: 'Melodic, pleasant voice', accent: 'American', provider: 'google' },
+      ];
+  
+      res.json({ voices });
+    } catch (error) {
+      console.error('[ADMIN CAMPAIGNS] Get voices error:', error);
+      res.status(500).json({ message: 'Failed to fetch voices' });
+    }
+  });
 
-    res.json({ voices });
-  } catch (error) {
-    console.error('[CLIENT CAMPAIGNS] Get voices error:', error);
-    res.status(500).json({ message: 'Failed to fetch voices' });
-  }
-});
-
-/**
- * GET /agents - Get available foundation AI agents
- */
-router.get('/agents', async (req: Request, res: Response) => {
+router.get('/agents', requireAuth, async (req: Request, res: Response) => {
   try {
     const agents = await db
       .select({
@@ -253,74 +253,29 @@ router.get('/agents', async (req: Request, res: Response) => {
 
     res.json({ agents });
   } catch (error) {
-    console.error('[CLIENT CAMPAIGNS] Get agents error:', error);
+    console.error('[ADMIN CAMPAIGNS] Get agents error:', error);
     res.status(500).json({ message: 'Failed to fetch agents' });
   }
 });
 
-/**
- * GET /my-campaigns - Get campaigns for the client
- */
-router.get('/my-campaigns', async (req: Request, res: Response) => {
-  try {
-    const clientAccountId = req.clientUser?.clientAccountId;
-
-    if (!clientAccountId) {
-      return res.status(401).json({ message: 'Unauthorized' });
+router.post('/voice-preview', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { voiceId, text } = req.body;
+  
+      if (!voiceId || !text) {
+        return res.status(400).json({ message: 'Voice ID and text are required' });
+      }
+  
+      res.json({
+        success: true,
+        message: 'Voice preview generated',
+        voiceId,
+      });
+    } catch (error) {
+      console.error('[ADMIN CAMPAIGNS] Voice preview error:', error);
+      res.status(500).json({ message: 'Failed to generate voice preview' });
     }
+  });
 
-    // Get work orders (campaign requests)
-    const orders = await db
-      .select({
-        id: workOrders.id,
-        orderNumber: workOrders.orderNumber,
-        title: workOrders.title,
-        description: workOrders.description,
-        orderType: workOrders.orderType,
-        priority: workOrders.priority,
-        status: workOrders.status,
-        targetLeadCount: workOrders.targetLeadCount,
-        leadsGenerated: workOrders.leadsGenerated,
-        leadsDelivered: workOrders.leadsDelivered,
-        progressPercent: workOrders.progressPercent,
-        campaignConfig: workOrders.campaignConfig,
-        submittedAt: workOrders.submittedAt,
-        createdAt: workOrders.createdAt,
-      })
-      .from(workOrders)
-      .where(eq(workOrders.clientAccountId, clientAccountId))
-      .orderBy(desc(workOrders.createdAt));
-
-    res.json({ campaigns: orders });
-  } catch (error) {
-    console.error('[CLIENT CAMPAIGNS] Get my campaigns error:', error);
-    res.status(500).json({ message: 'Failed to fetch campaigns' });
-  }
-});
-
-/**
- * POST /voice-preview - Generate voice preview audio
- */
-router.post('/voice-preview', async (req: Request, res: Response) => {
-  try {
-    const { voiceId, text } = req.body;
-
-    if (!voiceId || !text) {
-      return res.status(400).json({ message: 'Voice ID and text are required' });
-    }
-
-    // For now, return a placeholder response
-    // In production, this would integrate with Google TTS or similar
-    res.json({
-      success: true,
-      message: 'Voice preview generated',
-      voiceId,
-      // audioUrl would be returned here in production
-    });
-  } catch (error) {
-    console.error('[CLIENT CAMPAIGNS] Voice preview error:', error);
-    res.status(500).json({ message: 'Failed to generate voice preview' });
-  }
-});
 
 export default router;

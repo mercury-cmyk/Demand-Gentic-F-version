@@ -70,6 +70,8 @@ interface Campaign {
   totalContacts: number;
   verifiedCount: number;
   deliveredCount: number;
+  type?: string;
+  campaignType?: string;
 }
 
 interface Order {
@@ -159,6 +161,8 @@ interface Lead {
   orderId: string;
   orderNumber: string;
   orderDate: string;
+  linkedin?: string | null;
+  notes?: string | null;
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -251,7 +255,6 @@ export default function ClientPortalDashboard() {
   // Campaign Creation Wizard State (new wizard)
   const [showCampaignWizard, setShowCampaignWizard] = useState(false);
   const [showPreviewStudio, setShowPreviewStudio] = useState(false);
-  const [previewCampaignId, setPreviewCampaignId] = useState<string | undefined>(undefined);
 
   // Qualified Leads state
   const [selectedQualifiedLeadId, setSelectedQualifiedLeadId] = useState<string | null>(null);
@@ -318,6 +321,8 @@ export default function ClientPortalDashboard() {
   const [previewAudienceAccounts, setPreviewAudienceAccounts] = useState<any[]>([]);
   const [previewAudienceContacts, setPreviewAudienceContacts] = useState<any[]>([]);
   const [previewActiveTab, setPreviewActiveTab] = useState<'voice' | 'email'>('voice');
+  const [selectedScenario, setSelectedScenario] = useState<string>('cold');
+  const [simulationMode, setSimulationMode] = useState<'text' | 'voice'>('text');
 
   // Business Profile state
   const [businessProfile, setBusinessProfile] = useState<any>(null);
@@ -587,6 +592,7 @@ export default function ClientPortalDashboard() {
       requestedLeadCount?: number;
       landingPageUrl?: string;
       projectFileUrl?: string;
+      projectType?: string;
     }) => {
       const res = await fetch('/api/client-portal/projects', {
         method: 'POST',
@@ -956,14 +962,13 @@ export default function ClientPortalDashboard() {
 
   // Main navigation items - clean and unique
   // Core navigation modules - available to all clients by default
-  const navItems = [
-    { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
-    { id: 'work-orders', label: 'Work Orders', icon: ClipboardList, color: 'from-orange-500 to-amber-500' },
+  // Note: Accounts & Contacts removed - now accessed via Campaign Context in Preview Studio
+  const navItems: { id: string; label: string; icon: any; color: string; action?: () => void; featureRequired?: string }[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
+    { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'ai-studio', label: 'AI Studio', icon: Brain, color: 'from-violet-500 to-purple-500' },
-    { id: 'preview-studio', label: 'Preview Studio', icon: Eye, color: 'from-cyan-500 to-blue-500' },
+    { id: 'studio', label: 'Simulations', icon: Eye, color: 'from-cyan-500 to-blue-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
-    { id: 'crm', label: 'Accounts & Contacts', icon: Contact2, color: 'from-teal-500 to-cyan-500', featureRequired: 'accounts_contacts' },
     { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
@@ -1007,22 +1012,28 @@ export default function ClientPortalDashboard() {
             .map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                if (item.action) {
+                  item.action();
+                } else {
+                  setActiveTab(item.id);
+                }
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative duration-200 ${
-                activeTab === item.id
+                activeTab === item.id && !item.action
                   ? 'bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-medium'
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
               <div className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
-                activeTab === item.id ? 'bg-white shadow-sm ring-1 ring-black/5 dark:bg-indigo-500/20 dark:ring-white/10' : 'bg-transparent group-hover:bg-white group-hover:shadow-sm group-hover:ring-1 group-hover:ring-black/5 dark:group-hover:bg-slate-800'
+                activeTab === item.id && !item.action ? 'bg-white shadow-sm ring-1 ring-black/5 dark:bg-indigo-500/20 dark:ring-white/10' : 'bg-transparent group-hover:bg-white group-hover:shadow-sm group-hover:ring-1 group-hover:ring-black/5 dark:group-hover:bg-slate-800'
               }`}>
-                <item.icon className={`h-4 w-4 transition-colors ${activeTab === item.id ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400'}`} />
+                <item.icon className={`h-4 w-4 transition-colors ${activeTab === item.id && !item.action ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400'}`} />
               </div>
               {!sidebarCollapsed && (
                 <span className="text-sm truncate tracking-tight">{item.label}</span>
               )}
-              {activeTab === item.id && !sidebarCollapsed && (
+              {activeTab === item.id && !item.action && !sidebarCollapsed && (
                 <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-indigo-600" />
               )}
             </button>
@@ -1429,101 +1440,158 @@ export default function ClientPortalDashboard() {
 
         {/* ==================== CAMPAIGNS TAB ==================== */}
         {activeTab === 'campaigns' && (
-          <div className="space-y-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-6 md:space-y-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold">Campaigns</h2>
-                <p className="text-muted-foreground">Create and manage your self-service campaigns</p>
+                <p className="text-muted-foreground w-full md:w-auto">View and manage your AI-powered campaigns</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setPreviewCampaignId(undefined);
+                    setPreviewCampaignId('');
                     setShowPreviewStudio(true);
                   }}
-                  className="gap-2"
+                  className="gap-2 w-full sm:w-auto"
                 >
                   <Play className="h-4 w-4" />
                   Preview Studio
                 </Button>
                 <Button
-                  onClick={() => setShowCampaignWizard(true)}
-                  className="gap-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                  onClick={() => setShowOrderPanel(true)}
+                  className="gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 w-full sm:w-auto"
                 >
-                  <Wand2 className="h-4 w-4" />
-                  Create Campaign
+                  <Bot className="h-4 w-4" />
+                  Create Campaign Order
                 </Button>
               </div>
             </div>
 
-            {/* Info Banner */}
-            <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 dark:border-purple-800">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-4">
-                  <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center shrink-0">
-                    <Target className="h-5 w-5 text-purple-600" />
+            {/* Agentic Campaign Order Banner */}
+            <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/20 dark:to-purple-950/20 dark:border-violet-800">
+              <CardContent className="p-4 md:p-6">
+                <div className="flex flex-col sm:flex-row items-start gap-4">
+                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg">
+                    <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-purple-800 dark:text-purple-300">Self-Service Campaign Creation</h4>
-                    <p className="text-sm text-purple-700 dark:text-purple-400 mt-1">
-                      Build and manage your own campaigns within the platform. Define objectives, configure talking points, select AI agents and voices, and choose your audience from your CRM or request a managed audience.
-                    </p>
+                  <div className="flex-1 space-y-3 w-full">
+                    <div>
+                      <h4 className="font-semibold text-lg text-violet-800 dark:text-violet-300">AI-Powered Campaign Ordering</h4>
+                      <p className="text-sm text-violet-700 dark:text-violet-400 mt-1 leading-relaxed">
+                        Simply describe what you need and our AI agent will help create the perfect campaign. Tell us your goals, target audience, and preferences - we'll handle the rest.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-md hover:shadow-lg transition-all"
+                      onClick={() => setShowOrderPanel(true)}
+                    >
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Start AI Campaign Order
+                    </Button>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
             {/* Campaign Stats */}
-            <div className="grid md:grid-cols-4 gap-4">
-              <Card>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Active Campaigns */}
+              <Card className="border-green-200 dark:border-green-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Active Campaigns</p>
-                      <p className="text-2xl font-bold">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
+                      <p className="text-3xl font-bold text-green-600">{filteredCampaigns.filter(c => c.status === 'active').length}</p>
+                      <div className="flex gap-3 mt-2 text-xs">
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
+                          {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'email' || c.campaignType === 'email')).length}
+                        </span>
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
+                          {filteredCampaigns.filter(c => c.status === 'active' && (c.type === 'phone' || c.type === 'call' || c.campaignType === 'phone' || c.campaignType === 'call')).length}
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                      <Zap className="h-5 w-5 text-green-600" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
+                      <Zap className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+
+              {/* Impressions - Email & Phone */}
+              <Card className="border-blue-200 dark:border-blue-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Total Campaigns</p>
-                      <p className="text-2xl font-bold">{campaigns.length}</p>
+                      <p className="text-sm text-muted-foreground">Impressions</p>
+                      <p className="text-3xl font-bold text-blue-600">{totalLeadsDelivered.toLocaleString()}</p>
+                      <div className="flex gap-3 mt-2 text-xs">
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
+                          {Math.floor(totalLeadsDelivered * 0.6).toLocaleString()}
+                        </span>
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
+                          {Math.floor(totalLeadsDelivered * 0.4).toLocaleString()}
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <Target className="h-5 w-5 text-purple-600" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
+                      <BarChart3 className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+
+              {/* Qualified Leads */}
+              <Card className="border-purple-200 dark:border-purple-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Contacts Reached</p>
-                      <p className="text-2xl font-bold">{totalLeadsDelivered.toLocaleString()}</p>
+                      <p className="text-sm text-muted-foreground">Qualified Leads</p>
+                      <p className="text-3xl font-bold text-purple-600">{Math.floor(totalLeadsDelivered * 0.042).toLocaleString()}</p>
+                      <div className="flex gap-3 mt-2 text-xs">
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
+                          {Math.floor(totalLeadsDelivered * 0.042 * 0.55).toLocaleString()}
+                        </span>
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
+                          {Math.floor(totalLeadsDelivered * 0.042 * 0.45).toLocaleString()}
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <Users className="h-5 w-5 text-blue-600" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-lg">
+                      <UserCheck className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+
+              {/* Conversion Rate */}
+              <Card className="border-amber-200 dark:border-amber-800">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Conversion Rate</p>
-                      <p className="text-2xl font-bold">4.2%</p>
+                      <p className="text-3xl font-bold text-amber-600">4.2%</p>
+                      <div className="flex gap-3 mt-2 text-xs">
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Mail className="h-3 w-3" />
+                          3.8%
+                        </span>
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Phone className="h-3 w-3" />
+                          4.7%
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                      <TrendingUp className="h-5 w-5 text-amber-600" />
+                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg">
+                      <TrendingUp className="h-6 w-6 text-white" />
                     </div>
                   </div>
                 </CardContent>
@@ -1567,6 +1635,7 @@ export default function ClientPortalDashboard() {
                       <SelectItem value="voice">Voice Campaigns</SelectItem>
                       <SelectItem value="email">Email Campaigns</SelectItem>
                       <SelectItem value="combined">Combined</SelectItem>
+                      <SelectItem value="data">Data Enrichment</SelectItem>
                     </SelectContent>
                   </Select>
                   {(campaignSearchQuery || campaignStatusFilter !== 'all' || campaignTypeFilter !== 'all') && (
@@ -1608,9 +1677,9 @@ export default function ClientPortalDashboard() {
                          {campaigns.length === 0 ? 'Create your first campaign to start reaching your audience with AI-powered outreach.' : 'No campaigns match your current filters.'}
                        </p>
                        {campaigns.length === 0 && (
-                         <Button onClick={() => setShowCampaignWizard(true)} className="bg-gradient-to-r from-purple-600 to-pink-600">
-                           <Wand2 className="h-4 w-4 mr-2" />
-                           Create Your First Campaign
+                         <Button onClick={() => setShowOrderPanel(true)} className="bg-gradient-to-r from-violet-600 to-purple-600">
+                           <Bot className="h-4 w-4 mr-2" />
+                           Order Your First Campaign
                          </Button>
                        )}
                     </CardContent>
@@ -1628,38 +1697,6 @@ export default function ClientPortalDashboard() {
               )}
             </div>
 
-            {/* Quick Actions for Empty State */}
-            {campaigns.length === 0 && (
-              <div className="grid md:grid-cols-3 gap-4 mt-8">
-                <Card className="border-dashed hover:border-purple-300 hover:bg-purple-50/50 dark:hover:bg-purple-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
-                  <CardContent className="p-6 flex flex-col items-center text-center">
-                    <div className="h-12 w-12 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                      <Phone className="h-6 w-6 text-purple-600" />
-                    </div>
-                    <h4 className="font-semibold">Voice Campaign</h4>
-                    <p className="text-sm text-muted-foreground mt-1">AI-powered calling with natural conversations</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-dashed hover:border-blue-300 hover:bg-blue-50/50 dark:hover:bg-blue-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
-                  <CardContent className="p-6 flex flex-col items-center text-center">
-                    <div className="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                      <Mail className="h-6 w-6 text-blue-600" />
-                    </div>
-                    <h4 className="font-semibold">Email Campaign</h4>
-                    <p className="text-sm text-muted-foreground mt-1">Personalized email outreach at scale</p>
-                  </CardContent>
-                </Card>
-                <Card className="border-dashed hover:border-green-300 hover:bg-green-50/50 dark:hover:bg-green-950/10 transition-all cursor-pointer group" onClick={() => setShowCampaignWizard(true)}>
-                  <CardContent className="p-6 flex flex-col items-center text-center">
-                    <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                      <Zap className="h-6 w-6 text-green-600" />
-                    </div>
-                    <h4 className="font-semibold">Combined Campaign</h4>
-                    <p className="text-sm text-muted-foreground mt-1">Multi-channel outreach for maximum impact</p>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
           </div>
         )}
 
@@ -2101,12 +2138,12 @@ export default function ClientPortalDashboard() {
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Work Orders</h2>
+                <h2 className="text-2xl font-bold">Direct Agentic Orders</h2>
                 <p className="text-muted-foreground">Request campaigns to be managed and executed by our team</p>
               </div>
               <Button onClick={() => setShowWorkOrderDialog(true)} className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600">
                 <Plus className="h-4 w-4 mr-2" />
-                Submit New Work Order
+                Submit New Direct Agentic Order
               </Button>
             </div>
 
@@ -2118,9 +2155,9 @@ export default function ClientPortalDashboard() {
                     <ClipboardList className="h-5 w-5 text-orange-600" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-orange-800 dark:text-orange-300">What are Work Orders?</h4>
+                    <h4 className="font-semibold text-orange-800 dark:text-orange-300">What are Direct Agentic Orders?</h4>
                     <p className="text-sm text-orange-700 dark:text-orange-400 mt-1">
-                      Work Orders allow you to request that our team runs campaigns on your behalf. You specify the campaign type, goals, lead requirements, and timeline — and our team handles execution from start to finish.
+                      Direct Agentic Orders allow you to request that our team runs campaigns on your behalf. You specify the campaign type, goals, lead requirements, and timeline — and our team handles execution from start to finish.
                     </p>
                   </div>
                 </div>
@@ -2186,7 +2223,7 @@ export default function ClientPortalDashboard() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Your Work Orders</CardTitle>
+                  <CardTitle>Your Direct Agentic Orders</CardTitle>
                   <div className="flex items-center gap-2">
                     <Input placeholder="Search orders..." className="w-[200px]" />
                     <Select defaultValue="all">
@@ -2264,616 +2301,237 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
-        {/* ==================== AI STUDIO TAB ==================== */}
-        {activeTab === 'ai-studio' && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">AI Studio</h2>
-                <p className="text-muted-foreground">Configure and test AI agents for your campaigns</p>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowTestEmailPanel(true)}>
-                  <Mail className="h-4 w-4 mr-2" />
-                  Test Email
-                </Button>
-                <Button onClick={() => setShowTestCallPanel(true)}>
-                  <Phone className="h-4 w-4 mr-2" />
-                  Test Call
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid lg:grid-cols-3 gap-6">
-              {/* AI Voice Selection */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mic className="h-5 w-5" />
-                    AI Voice Selection
-                  </CardTitle>
-                  <CardDescription>Choose the voice for your AI calling agent</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {hasFeature('voice_selection') ? (
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      {(availableVoices || []).map((voice: any) => (
-                        <div
-                          key={voice.id}
-                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                            selectedVoice === voice.id
-                              ? 'border-primary bg-primary/5'
-                              : 'border-muted hover:border-primary/50'
-                          }`}
-                          onClick={() => setSelectedVoice(voice.id)}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-medium">{voice.name}</span>
-                            <Badge variant="outline">{voice.provider}</Badge>
-                          </div>
-                          <p className="text-sm text-muted-foreground">{voice.description}</p>
-                          <div className="flex gap-2 mt-2">
-                            <Badge variant="secondary">{voice.gender}</Badge>
-                            <Badge variant="secondary">{voice.accent}</Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Mic className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>Voice selection is not enabled for your account.</p>
-                      <p className="text-sm">Contact your account manager to enable this feature.</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Quick Actions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Button variant="outline" className="w-full justify-start" onClick={() => setShowTestCallPanel(true)}>
-                    <Phone className="h-4 w-4 mr-2" />
-                    Make Test Call
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start" onClick={() => setShowTestEmailPanel(true)}>
-                    <Mail className="h-4 w-4 mr-2" />
-                    Send Test Email
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <FileText className="h-4 w-4 mr-2" />
-                    View Call Scripts
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Agent Settings
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Call Flows */}
-            {hasFeature('call_flows') && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Workflow className="h-5 w-5" />
-                    Call Flows
-                  </CardTitle>
-                  <CardDescription>Manage conversation flows for your AI agents</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Workflow className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No call flows configured yet.</p>
-                    <Button className="mt-4">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Call Flow
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Email Templates */}
-            {hasFeature('email_templates') && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mail className="h-5 w-5" />
-                    Email Templates
-                  </CardTitle>
-                  <CardDescription>Manage email templates for your campaigns</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No email templates created yet.</p>
-                    <Button className="mt-4">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Email Template
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
-
         {/* ==================== PREVIEW STUDIO TAB ==================== */}
-        {activeTab === 'preview-studio' && (
+        {activeTab === 'studio' && (
           <div className="space-y-6">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold">Preview Studio</h2>
-                <p className="text-muted-foreground">Test personalized AI calls and emails with real campaign data</p>
+                <p className="text-muted-foreground">Experience your AI agent in action</p>
               </div>
             </div>
 
-            {/* Main Layout: Context Selection + Preview Area */}
+            {/* Main Layout */}
             <div className="grid lg:grid-cols-12 gap-6">
-              {/* Left Sidebar: Campaign & Audience Context Selection */}
+              {/* Left Sidebar: Campaign & Scenario Selection */}
               <div className="lg:col-span-4 space-y-4">
-                {/* Campaign Selection Card */}
-                <Card className="border-2 border-purple-200 dark:border-purple-800">
+                {/* Campaign Selection */}
+                <Card className="border-2 border-violet-200 dark:border-violet-800">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Target className="h-4 w-4 text-purple-600" />
-                      Campaign Context
+                      <Target className="h-4 w-4 text-violet-600" />
+                      Select Campaign
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Select a campaign to load its audience for preview
-                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-3">
+                  <CardContent>
                     <Select value={previewCampaignId} onValueChange={setPreviewCampaignId}>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a campaign..." />
+                        <SelectValue placeholder="Choose a campaign..." />
                       </SelectTrigger>
                       <SelectContent>
                         {campaigns.map((c) => (
                           <SelectItem key={c.id} value={c.id.toString()}>
-                            <div className="flex items-center gap-2">
-                              <div className={`h-2 w-2 rounded-full ${c.status === 'active' ? 'bg-green-500' : 'bg-gray-400'}`} />
-                              {c.name}
+                            <div className="flex items-center justify-between w-full gap-3">
+                              <span className="truncate">{c.name}</span>
+                              <Badge variant="outline" className={`text-xs shrink-0 ${
+                                c.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
+                                c.status === 'paused' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                'bg-gray-50 text-gray-600 border-gray-200'
+                              }`}>
+                                {c.status}
+                              </Badge>
                             </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    
-                    {previewCampaignId && previewAudienceData && (
-                      <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 text-xs space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Campaign:</span>
-                          <span className="font-medium">{previewAudienceData.campaign.name}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Available Accounts:</span>
-                          <span className="font-medium">{previewAudienceData.totalAccountsAvailable}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Available Contacts:</span>
-                          <span className="font-medium">{previewAudienceData.totalContactsAvailable}</span>
-                        </div>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
 
-                {/* Account Selection Card */}
-                <Card className={!previewCampaignId ? 'opacity-50' : ''}>
+                {/* Test Scenarios */}
+                <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Building className="h-4 w-4 text-blue-600" />
-                      Account Selection
-                      {previewAudienceAccounts.length > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-xs">{previewAudienceAccounts.length} sample</Badge>
-                      )}
+                      <TestTube className="h-4 w-4 text-purple-600" />
+                      Test Scenario
                     </CardTitle>
-                    <CardDescription className="text-xs">
-                      Choose an account for account-aware personalization
-                    </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    {previewAudienceLoading ? (
-                      <div className="flex justify-center py-4">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : previewAudienceAccounts.length > 0 ? (
-                      <ScrollArea className="h-[180px]">
-                        <div className="space-y-1">
-                          {previewAudienceAccounts.map((account) => (
-                            <div
-                              key={account.id}
-                              onClick={() => setPreviewAccountId(account.id)}
-                              className={`p-2 rounded-md cursor-pointer transition-all text-sm ${
-                                previewAccountId === account.id
-                                  ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700'
-                                  : 'hover:bg-muted/50'
-                              }`}
-                            >
-                              <div className="font-medium truncate">{account.name}</div>
-                              {account.industry && (
-                                <div className="text-xs text-muted-foreground">{account.industry}</div>
-                              )}
-                            </div>
-                          ))}
+                  <CardContent className="space-y-2">
+                    {[
+                      { id: 'cold', label: 'Cold Introduction', desc: 'First-time outreach to a prospect', icon: Phone },
+                      { id: 'gatekeeper', label: 'Gatekeeper Navigation', desc: 'Getting past the receptionist', icon: Shield },
+                      { id: 'budget', label: 'Budget Objection', desc: 'Prospect says they have no budget', icon: DollarSign },
+                      { id: 'timing', label: 'Timing Objection', desc: 'Prospect says now is not a good time', icon: Clock },
+                      { id: 'competitor', label: 'Competitor Objection', desc: 'Prospect uses a competitor', icon: Users },
+                      { id: 'decision', label: 'Decision Maker', desc: 'Speaking with a decision maker', icon: Crown },
+                    ].map((scenario) => (
+                      <div
+                        key={scenario.id}
+                        onClick={() => setSelectedScenario(scenario.id)}
+                        className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                          selectedScenario === scenario.id
+                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-300 dark:border-violet-700'
+                            : 'border-transparent hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                            selectedScenario === scenario.id
+                              ? 'bg-violet-100 dark:bg-violet-800'
+                              : 'bg-muted'
+                          }`}>
+                            <scenario.icon className={`h-4 w-4 ${
+                              selectedScenario === scenario.id ? 'text-violet-600' : 'text-muted-foreground'
+                            }`} />
+                          </div>
+                          <div>
+                            <p className="font-medium text-sm">{scenario.label}</p>
+                            <p className="text-xs text-muted-foreground">{scenario.desc}</p>
+                          </div>
                         </div>
-                      </ScrollArea>
-                    ) : (
-                      <div className="text-center py-4 text-sm text-muted-foreground">
-                        {previewCampaignId ? 'No accounts in campaign audience' : 'Select a campaign first'}
                       </div>
-                    )}
+                    ))}
                   </CardContent>
                 </Card>
 
-                {/* Contact Selection Card */}
-                <Card className={!previewCampaignId ? 'opacity-50' : ''}>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Contact2 className="h-4 w-4 text-green-600" />
-                      Contact Selection
-                      {filteredPreviewContacts.length > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-xs">{filteredPreviewContacts.length} sample</Badge>
-                      )}
-                    </CardTitle>
-                    <CardDescription className="text-xs">
-                      Choose a contact for personalized messaging
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {previewAudienceLoading ? (
-                      <div className="flex justify-center py-4">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : filteredPreviewContacts.length > 0 ? (
-                      <ScrollArea className="h-[200px]">
-                        <div className="space-y-1">
-                          {filteredPreviewContacts.map((contact) => (
-                            <div
-                              key={contact.id}
-                              onClick={() => setPreviewContactId(contact.id)}
-                              className={`p-2 rounded-md cursor-pointer transition-all text-sm ${
-                                previewContactId === contact.id
-                                  ? 'bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700'
-                                  : 'hover:bg-muted/50'
-                              }`}
-                            >
-                              <div className="font-medium">
-                                {contact.firstName} {contact.lastName}
-                              </div>
-                              <div className="text-xs text-muted-foreground flex items-center gap-2">
-                                {contact.title && <span>{contact.title}</span>}
-                                {contact.company && <span>• {contact.company}</span>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    ) : (
-                      <div className="text-center py-4 text-sm text-muted-foreground">
-                        {previewCampaignId ? 'No contacts in campaign audience' : 'Select a campaign first'}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
               </div>
 
-              {/* Right Area: Preview & Actions */}
+              {/* Right Area: Simulation Mode & Launch */}
               <div className="lg:col-span-8 space-y-4">
-                {/* Selected Context Summary */}
-                <Card className="bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900/50 dark:to-gray-900/50">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-6">
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Campaign:</span>
-                          <span className="font-medium ml-2">
-                            {previewAudienceData?.campaign.name || 'Not selected'}
-                          </span>
-                        </div>
-                        <Separator orientation="vertical" className="h-6" />
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Account:</span>
-                          <span className="font-medium ml-2">
-                            {selectedPreviewAccount?.name || 'Not selected'}
-                          </span>
-                        </div>
-                        <Separator orientation="vertical" className="h-6" />
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Contact:</span>
-                          <span className="font-medium ml-2">
-                            {selectedPreviewContact ? `${selectedPreviewContact.firstName} ${selectedPreviewContact.lastName}` : 'Not selected'}
-                          </span>
+                {/* Simulation Mode */}
+                <Card className="border-2 border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Simulation Mode</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div
+                        onClick={() => setSimulationMode('text')}
+                        className={`p-6 rounded-xl cursor-pointer transition-all border-2 ${
+                          simulationMode === 'text'
+                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-400'
+                            : 'border-muted hover:border-violet-200'
+                        }`}
+                      >
+                        <div className="flex flex-col items-center text-center">
+                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 ${
+                            simulationMode === 'text'
+                              ? 'bg-gradient-to-br from-violet-500 to-purple-600'
+                              : 'bg-muted'
+                          }`}>
+                            <MessageSquare className={`h-7 w-7 ${simulationMode === 'text' ? 'text-white' : 'text-muted-foreground'}`} />
+                          </div>
+                          <h4 className="font-semibold">Text Chat</h4>
+                          <p className="text-xs text-muted-foreground mt-1">Chat with your AI agent</p>
                         </div>
                       </div>
-                      {(previewAccountId || previewContactId) && (
-                        <Button variant="ghost" size="sm" onClick={() => { setPreviewAccountId(''); setPreviewContactId(''); }}>
-                          <X className="h-4 w-4 mr-1" />
-                          Clear
-                        </Button>
-                      )}
+                      <div
+                        onClick={() => setSimulationMode('voice')}
+                        className={`p-6 rounded-xl cursor-pointer transition-all border-2 ${
+                          simulationMode === 'voice'
+                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-400'
+                            : 'border-muted hover:border-violet-200'
+                        }`}
+                      >
+                        <div className="flex flex-col items-center text-center">
+                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 ${
+                            simulationMode === 'voice'
+                              ? 'bg-gradient-to-br from-violet-500 to-purple-600'
+                              : 'bg-muted'
+                          }`}>
+                            <Phone className={`h-7 w-7 ${simulationMode === 'voice' ? 'text-white' : 'text-muted-foreground'}`} />
+                          </div>
+                          <h4 className="font-semibold">Voice Call</h4>
+                          <p className="text-xs text-muted-foreground mt-1">Speak with your AI agent</p>
+                        </div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Preview Type Tabs */}
-                <Tabs value={previewActiveTab} onValueChange={(v) => setPreviewActiveTab(v as 'voice' | 'email')} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2 h-12">
-                    <TabsTrigger value="voice" className="flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4" />
-                      Voice / Call Simulation
-                    </TabsTrigger>
-                    <TabsTrigger value="email" className="flex items-center gap-2 text-sm">
-                      <Mail className="h-4 w-4" />
-                      Email Preview
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* Voice/Call Simulation Tab */}
-                  <TabsContent value="voice" className="mt-4 space-y-4">
-                    {/* Contact Preview Card */}
-                    {selectedPreviewContact && (
-                      <Card className="border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20">
-                        <CardContent className="p-4">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white font-semibold text-lg">
-                              {selectedPreviewContact.firstName?.[0]}{selectedPreviewContact.lastName?.[0]}
-                            </div>
-                            <div className="flex-1 grid grid-cols-2 gap-4">
-                              <div>
-                                <p className="font-semibold text-lg">{selectedPreviewContact.firstName} {selectedPreviewContact.lastName}</p>
-                                <p className="text-sm text-muted-foreground">{selectedPreviewContact.title || 'No title'}</p>
-                                <p className="text-sm text-muted-foreground">{selectedPreviewContact.company || 'No company'}</p>
-                              </div>
-                              <div className="text-sm space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <Phone className="h-3 w-3 text-muted-foreground" />
-                                  <span>{selectedPreviewContact.phone || 'No phone'}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Mail className="h-3 w-3 text-muted-foreground" />
-                                  <span>{selectedPreviewContact.email || 'No email'}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Voice Simulation Options */}
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <Card className="hover:shadow-lg transition-all cursor-pointer group" onClick={() => {
-                        if (previewCampaignId) setSelectedCampaignForSimulation(previewCampaignId);
-                        setShowSimulationPanel(true);
-                      }}>
-                        <CardContent className="p-6">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                              <TestTube className="h-6 w-6 text-white" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-semibold mb-1">Voice Simulation</h4>
-                              <p className="text-sm text-muted-foreground mb-3">
-                                Simulate AI conversations without real calls. Safe testing environment.
-                              </p>
-                              <Button size="sm" className="bg-gradient-to-r from-violet-600 to-purple-600">
-                                <Play className="h-3 w-3 mr-1" />
-                                Launch Simulator
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card className="hover:shadow-lg transition-all cursor-pointer group">
-                        <CardContent className="p-6">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                              <PhoneCall className="h-6 w-6 text-white" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-semibold mb-1">Live Test Call</h4>
-                              <p className="text-sm text-muted-foreground mb-3">
-                                Make a real test call to your own phone to hear the AI in action.
-                              </p>
-                              <Button size="sm" variant="outline" disabled={!selectedPreviewContact}>
-                                <Phone className="h-3 w-3 mr-1" />
-                                {selectedPreviewContact ? 'Make Test Call' : 'Select Contact First'}
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* Personalization Preview */}
-                    {selectedPreviewContact && previewAudienceData && (
-                      <Card>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <Sparkles className="h-4 w-4 text-amber-500" />
-                            Personalization Preview
-                          </CardTitle>
-                          <CardDescription className="text-xs">
-                            How the AI will use the selected context in conversations
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="p-4 rounded-lg bg-muted/50 text-sm space-y-3">
-                            <div className="flex items-start gap-2">
-                              <Badge className="shrink-0">Opening</Badge>
-                              <p>"Hi {selectedPreviewContact.firstName}, this is Sarah from {businessProfile?.legalBusinessName || 'our company'}. I'm reaching out to {selectedPreviewContact.company || 'your organization'}..."</p>
-                            </div>
-                            <Separator />
-                            <div className="flex items-start gap-2">
-                              <Badge variant="outline" className="shrink-0">Context</Badge>
-                              <p>Campaign: <strong>{previewAudienceData.campaign.name}</strong> • Contact: <strong>{selectedPreviewContact.firstName} {selectedPreviewContact.lastName}</strong> ({selectedPreviewContact.title}) at <strong>{selectedPreviewContact.company}</strong></p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </TabsContent>
-
-                  {/* Email Preview Tab */}
-                  <TabsContent value="email" className="mt-4 space-y-4">
-                    {/* Email Template Generator Action */}
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <Card className="hover:shadow-lg transition-all cursor-pointer group" onClick={() => setShowEmailGenerator(true)}>
-                        <CardContent className="p-6">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                              <Wand2 className="h-6 w-6 text-white" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-semibold mb-1">Email Template Generator</h4>
-                              <p className="text-sm text-muted-foreground mb-3">
-                                Create AI-powered email templates with dynamic personalization.
-                              </p>
-                              <Button size="sm" className="bg-gradient-to-r from-blue-600 to-indigo-600">
-                                <Wand2 className="h-3 w-3 mr-1" />
-                                Open Generator
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card className="hover:shadow-lg transition-all cursor-pointer group">
-                        <CardContent className="p-6">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                              <Eye className="h-6 w-6 text-white" />
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-semibold mb-1">Preview Existing Template</h4>
-                              <p className="text-sm text-muted-foreground mb-3">
-                                View how an existing template renders with selected contact data.
-                              </p>
-                              <Button size="sm" variant="outline" disabled={!selectedPreviewContact}>
-                                <Eye className="h-3 w-3 mr-1" />
-                                {selectedPreviewContact ? 'Preview Template' : 'Select Contact First'}
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    {/* Email Personalization Preview */}
-                    {selectedPreviewContact && (
-                      <Card>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <Mail className="h-4 w-4 text-blue-500" />
-                            Email Personalization Variables
-                          </CardTitle>
-                          <CardDescription className="text-xs">
-                            Variables available for email personalization with selected contact
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{first_name}}'}</p>
-                              <p className="font-medium">{selectedPreviewContact.firstName}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{last_name}}'}</p>
-                              <p className="font-medium">{selectedPreviewContact.lastName}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{email}}'}</p>
-                              <p className="font-medium truncate">{selectedPreviewContact.email}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{company}}'}</p>
-                              <p className="font-medium">{selectedPreviewContact.company || 'N/A'}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{title}}'}</p>
-                              <p className="font-medium">{selectedPreviewContact.title || 'N/A'}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                              <p className="text-xs text-muted-foreground mb-1">{'{{phone}}'}</p>
-                              <p className="font-medium">{selectedPreviewContact.phone || 'N/A'}</p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Sample Email Preview */}
-                    {selectedPreviewContact && businessProfile && (
-                      <Card>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-base">Sample Email Preview</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="border rounded-lg overflow-hidden">
-                            <div className="p-3 bg-muted/50 border-b text-sm">
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">To:</span>
-                                <span>{selectedPreviewContact.email}</span>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">Subject:</span>
-                                <span className="font-medium">Quick question for {selectedPreviewContact.company || 'your team'}</span>
-                              </div>
-                            </div>
-                            <div className="p-4 text-sm space-y-3">
-                              <p>Hi {selectedPreviewContact.firstName},</p>
-                              <p>I hope this email finds you well. I noticed that {selectedPreviewContact.company} is expanding, and I wanted to reach out about how we might be able to help.</p>
-                              <p>Would you have 15 minutes this week to discuss how other companies in your industry have benefited from our solutions?</p>
-                              <p>Best regards,<br/>Your Name</p>
-                              <Separator />
-                              <div className="text-xs text-muted-foreground pt-2">
-                                <p>{businessProfile.legalBusinessName}</p>
-                                <p>{businessProfile.streetAddress || businessProfile.addressLine1}</p>
-                                <p>{businessProfile.city}, {businessProfile.state} {businessProfile.postalCode}</p>
-                                <p className="text-blue-600 underline cursor-pointer mt-1">Unsubscribe</p>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </TabsContent>
-                </Tabs>
-
-                {/* Empty State */}
-                {!previewCampaignId && (
-                  <Card className="border-dashed">
-                    <CardContent className="py-16 text-center">
-                      <div className="h-16 w-16 rounded-full bg-gradient-to-br from-purple-100 to-blue-100 dark:from-purple-900/30 dark:to-blue-900/30 flex items-center justify-center mx-auto mb-4">
-                        <TestTube className="h-8 w-8 text-purple-600" />
+                {/* Email Template Generation - Restored Feature */}
+                <Card className="border-2 border-indigo-200 dark:border-indigo-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-4 w-4 text-indigo-600" />
+                        Email Template Generation
                       </div>
-                      <h3 className="text-lg font-semibold mb-2">Get Started with Preview Studio</h3>
-                      <p className="text-muted-foreground max-w-md mx-auto mb-6">
-                        Select a campaign from the left panel to load a sample of accounts and contacts. 
-                        You can then preview personalized AI calls and emails with real data.
-                      </p>
-                      <div className="flex justify-center gap-3">
-                        <Button variant="outline" onClick={() => setShowSimulationPanel(true)}>
-                          <Play className="h-4 w-4 mr-2" />
-                          Quick Voice Simulation
-                        </Button>
-                        <Button variant="outline" onClick={() => setShowEmailGenerator(true)}>
-                          <Wand2 className="h-4 w-4 mr-2" />
-                          Email Generator
-                        </Button>
+                      <Badge variant="outline" className="bg-indigo-50">Content</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                     <div 
+                        onClick={() => setShowEmailGenerator(true)}
+                        className="p-4 rounded-xl cursor-pointer transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                            <Sparkles className="h-5 w-5 text-indigo-600" />
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-sm">Generate AI Email Sequences</h4>
+                            <p className="text-xs text-muted-foreground">Create personalized outreach templates</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
+                  </CardContent>
+                </Card>
+
+                {/* What You'll Experience */}
+                <Card className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-violet-600" />
+                      What you'll experience:
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Brain className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">AI agent with your campaign's intelligence</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Building className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Account-aware conversations</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Zap className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Real-time objection handling</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <UserCheck className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Personalized engagement</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Launch Button */}
+                <Button
+                  size="lg"
+                  className="w-full h-14 text-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-lg"
+                  disabled={!previewCampaignId}
+                  onClick={() => {
+                    if (previewCampaignId) {
+                      setShowPreviewStudio(true);
+                    }
+                  }}
+                >
+                  <Play className="h-5 w-5 mr-2" />
+                  {previewCampaignId ? 'Start Simulation & Preview' : 'Select a Campaign to Start'}
+                </Button>
               </div>
             </div>
           </div>

@@ -138,10 +138,10 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     onSuccess: (data, submitNow) => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       toast({
-        title: submitNow ? 'Work Order Submitted!' : 'Draft Saved',
+        title: submitNow ? 'Direct Agentic Order Submitted!' : 'Draft Saved',
         description: submitNow
           ? `Order ${data.workOrder.orderNumber} has been submitted for review`
-          : 'Your work order has been saved as a draft',
+          : 'Your Direct Agentic Order has been saved as a draft',
       });
       onSuccess?.(data.workOrder);
       onOpenChange(false);
@@ -217,10 +217,10 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            Create Work Order
+            Create Direct Agentic Order
           </DialogTitle>
           <DialogDescription>
-            Submit a new work order to request campaigns, lead generation, or other services
+            Submit a new Direct Agentic Order to request campaigns, lead generation, or other services
           </DialogDescription>
         </DialogHeader>
 
@@ -700,9 +700,9 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
       <Dialog open={showConfirmSubmit} onOpenChange={setShowConfirmSubmit}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Submit Work Order?</DialogTitle>
+            <DialogTitle>Submit Direct Agentic Order?</DialogTitle>
             <DialogDescription>
-              Once submitted, your work order will be reviewed by our team. You'll receive updates on its progress.
+              Once submitted, your Direct Agentic Order will be reviewed by our team. You'll receive updates on its progress.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

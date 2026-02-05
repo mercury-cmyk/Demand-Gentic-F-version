@@ -75,7 +75,7 @@ router.post("/orders/create", async (req: Request, res: Response) => {
     const hub = createClientAgenticHub(context);
 
     const orderRequest: CampaignOrderRequest = {
-      campaignType: req.body.campaignType || "lead_generation",
+      campaignType: req.body.campaignType || "high_quality_leads",
       targetAudience: {
         industries: req.body.industries,
         jobTitles: req.body.jobTitles,
@@ -91,6 +91,10 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       budget: req.body.budget ? parseInt(req.body.budget) : undefined,
       specialRequirements: req.body.specialRequirements,
       channels: req.body.channels || ["both"],
+      contextUrls: req.body.contextUrls, // Pass context URLs
+      contextFiles: req.body.contextFiles, // Pass context Files
+      targetAccountFiles: req.body.targetAccountFiles, // Pass target account files
+      suppressionFiles: req.body.suppressionFiles, // Pass suppression files
     };
 
     const result = await hub.createCampaignOrder(orderRequest);
@@ -106,16 +110,37 @@ router.post("/orders/create", async (req: Request, res: Response) => {
  */
 router.post("/orders/recommend", async (req: Request, res: Response) => {
   try {
-    const { goal, budget, timeline } = req.body;
+    const { goal, budget, timeline, contextUrls, contextFiles } = req.body;
+
+    let contextSection = "";
+    if (contextUrls && contextUrls.length > 0) {
+      contextSection += `\nCONTEXT URLS:\n${contextUrls.join('\n')}`;
+    }
+    if (contextFiles && contextFiles.length > 0) {
+      contextSection += `\nCONTEXT FILES:\n${contextFiles.map((f: any) => f.name).join('\n')}`;
+    }
 
     const recommendationPrompt = `You are a B2B demand generation consultant. Based on the client's goal, recommend the optimal campaign order configuration.
 
 CLIENT GOAL: ${goal}
 BUDGET: ${budget ? `$${budget}` : "Flexible"}
-TIMELINE: ${timeline || "Standard"}
+TIMELINE: ${timeline || "Standard"}${contextSection}
+
+AVAILABLE CAMPAIGN TYPES:
+- high_quality_leads (Lead Generation)
+- appointment_generation (Demo Booking)
+- lead_qualification
+- webinar_invite (Event Registration)
+- data_validation (Market Research)
+- content_syndication
+- combo (Integrated Voice + Email)
+- live_webinar
+- executive_dinner
+- bant_leads
+- sql
 
 Provide recommendations for:
-1. Campaign type
+1. Campaign type (Must be one of the above)
 2. Target audience
 3. Volume to order
 4. Channel mix

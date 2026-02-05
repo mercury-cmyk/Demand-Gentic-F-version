@@ -55,14 +55,15 @@ interface SimulationContext {
 interface CampaignSimulationPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  campaignId?: string;
 }
 
-export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulationPanelProps) {
+export function CampaignSimulationPanel({ open, onOpenChange, campaignId }: CampaignSimulationPanelProps) {
   const [mode, setMode] = useState<'text' | 'voice'>('text');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaignId || '');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
@@ -80,6 +81,13 @@ export function CampaignSimulationPanel({ open, onOpenChange }: CampaignSimulati
   const isWaitingForResponseRef = useRef<boolean>(false);
 
   const getToken = () => localStorage.getItem('clientPortalToken');
+
+  // Sync campaignId prop with local state when it changes
+  useEffect(() => {
+    if (campaignId) {
+      setSelectedCampaignId(campaignId);
+    }
+  }, [campaignId]);
 
   // Fetch client's campaigns
   const { data: campaigns = [], isLoading: campaignsLoading } = useQuery<Campaign[]>({

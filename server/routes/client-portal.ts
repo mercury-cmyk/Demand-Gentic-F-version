@@ -175,9 +175,6 @@ router.use('/work-orders', requireClientAuth, workOrdersRouter);
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);
 
-// Campaign Requests (Admin view of work orders) - admin endpoints are under /admin in the router
-router.use('/admin/campaign-requests', workOrdersRouter);
-
 // ==================== CLIENT INVITE / SELF-SERVE SIGNUP ====================
 
 router.get('/invite/:slug', async (req, res) => {

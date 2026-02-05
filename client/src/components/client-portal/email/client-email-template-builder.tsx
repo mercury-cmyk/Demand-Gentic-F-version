@@ -27,14 +27,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useToast } from '@/hooks/use-toast';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { RichTextEditor } from '@/components/rich-text-editor';
 import {
   Mail, Send, Save, Eye, Code2, Type, Sparkles, Copy, Check,
   AlertTriangle, CheckCircle2, Info, ChevronDown, ChevronRight,
   Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle,
   User, Building2, AtSign, MousePointer, LayoutTemplate, Loader2,
-  Plus, X
+  Plus, X, Box
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 
 // Types
 interface Campaign {
@@ -121,11 +124,11 @@ const TONES = [
 ];
 
 const PERSONALIZATION_TOKENS = [
-  { token: '{{first_name}}', label: 'First Name', icon: User },
-  { token: '{{last_name}}', label: 'Last Name', icon: User },
+  { token: '{{firstName}}', label: 'First Name', icon: User },
+  { token: '{{lastName}}', label: 'Last Name', icon: User },
   { token: '{{company}}', label: 'Company', icon: Building2 },
   { token: '{{email}}', label: 'Email', icon: AtSign },
-  { token: '{{job_title}}', label: 'Job Title', icon: User },
+  { token: '{{jobTitle}}', label: 'Job Title', icon: User },
 ];
 
 // Sample email templates for client reference
@@ -135,42 +138,42 @@ const SAMPLE_TEMPLATES: EmailTemplate[] = [
     name: 'Cold Outreach - Professional',
     subject: 'Quick question about {{company}}',
     preheader: "I noticed something interesting about your team's approach...",
-    htmlContent: `<p>Hi {{first_name}},</p>
+    htmlContent: `<p>Hi {{firstName}},</p>
 
 <p>I came across {{company}} and was impressed by your growth in the market.</p>
 
 <p>We've helped similar companies in your space achieve significant results. Would you be open to a brief conversation to explore if we might be able to help?</p>
 
 <p>Best regards</p>`,
-    body: 'Hi {{first_name}},\n\nI came across {{company}} and was impressed by your growth...',
+    body: 'Hi {{firstName}},\n\nI came across {{company}} and was impressed by your growth...',
   },
   {
     id: 'sample-follow-up',
     name: 'Follow Up - Friendly',
     subject: 'Following up on my earlier note',
     preheader: 'Just wanted to make sure this landed in your inbox...',
-    htmlContent: `<p>Hi {{first_name}},</p>
+    htmlContent: `<p>Hi {{firstName}},</p>
 
 <p>I wanted to follow up on my earlier message. I know things get busy, so I thought I'd reach out once more.</p>
 
 <p>Is there a better time for us to connect? Even 15 minutes would be great to explore if there's a fit.</p>
 
 <p>Thanks!</p>`,
-    body: 'Hi {{first_name}},\n\nI wanted to follow up on my earlier message...',
+    body: 'Hi {{firstName}},\n\nI wanted to follow up on my earlier message...',
   },
   {
     id: 'sample-meeting-request',
     name: 'Meeting Request - Direct',
     subject: 'Can we schedule 15 minutes?',
     preheader: 'I have an idea that might help {{company}}...',
-    htmlContent: `<p>Hi {{first_name}},</p>
+    htmlContent: `<p>Hi {{firstName}},</p>
 
 <p>I'll be direct – I think we can help {{company}} improve your results significantly.</p>
 
 <p>Can we schedule a quick 15-minute call this week? I'll share some specific ideas tailored to your situation.</p>
 
 <p>What works best for you?</p>`,
-    body: 'Hi {{first_name}},\n\nI\'ll be direct – I think we can help {{company}}...',
+    body: 'Hi {{firstName}},\n\nI\'ll be direct – I think we can help {{company}}...',
   },
 ];
 
@@ -306,10 +309,11 @@ const analyzeEmail = (subject: string, body: string): SmartNudge[] => {
 const generateCleanHtml = (
   bodyContent: string,
   organizationName: string = 'Your Company',
-  profile?: BusinessProfile | null
+  profile?: BusinessProfile | null,
+  forceOrgName?: string
 ): string => {
   // Build business address from profile (CAN-SPAM compliance requires physical address)
-  const companyName = profile?.dbaName || profile?.legalBusinessName || organizationName;
+  const companyName = forceOrgName || profile?.dbaName || profile?.legalBusinessName || organizationName;
   const addressParts = profile ? [
     profile.addressLine1,
     profile.addressLine2,
@@ -385,10 +389,14 @@ export function ClientEmailTemplateBuilder({
   campaignName: initialCampaignName
 }: ClientEmailTemplateBuilderProps) {
   const { toast } = useToast();
-  const [activeMainTab, setActiveMainTab] = useState<'builder' | 'generate' | 'templates'>('builder');
+  const [showAiGenerate, setShowAiGenerate] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   // Campaign selection
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(initialCampaignId || '');
+
+  // Organization settings
+  const [overrideOrgName, setOverrideOrgName] = useState<string>('');
 
   // Email builder state - Same structure as EmailBuilderPro
   const [subject, setSubject] = useState('');
@@ -465,8 +473,8 @@ export function ClientEmailTemplateBuilder({
 
   // Generate full HTML with business profile footer
   const fullHtml = useMemo(
-    () => generateCleanHtml(bodyContent, activeCampaignName || 'Your Campaign', businessProfile),
-    [bodyContent, activeCampaignName, businessProfile]
+    () => generateCleanHtml(bodyContent, activeCampaignName || 'Your Campaign', businessProfile, overrideOrgName),
+    [bodyContent, activeCampaignName, businessProfile, overrideOrgName]
   );
 
   // Plain text version with business profile footer
@@ -487,7 +495,7 @@ export function ClientEmailTemplateBuilder({
       .trim();
 
     // Build footer with business profile (CAN-SPAM compliance)
-    const companyName = businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign';
+    const companyName = overrideOrgName || businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign';
     const addressLine = businessProfile
       ? `${businessProfile.addressLine1}${businessProfile.addressLine2 ? ', ' + businessProfile.addressLine2 : ''}\n${businessProfile.city}, ${businessProfile.state} ${businessProfile.postalCode}${businessProfile.country !== 'United States' ? '\n' + businessProfile.country : ''}`
       : '';
@@ -594,7 +602,7 @@ export function ClientEmailTemplateBuilder({
     setSubject(email.subject);
     setPreheader(email.preheader || '');
     setBodyContent(email.html || email.body || email.intro || '');
-    setActiveMainTab('builder');
+    setShowAiGenerate(false);
     toast({
       title: 'Email Loaded',
       description: 'Generated email loaded into builder',
@@ -607,7 +615,7 @@ export function ClientEmailTemplateBuilder({
     setPreheader(template.preheader || '');
     setBodyContent(template.htmlContent);
     setTemplateName(template.name);
-    setActiveMainTab('builder');
+    setShowTemplates(false);
     toast({
       title: 'Template Loaded',
       description: `"${template.name}" loaded into builder`,
@@ -622,9 +630,9 @@ export function ClientEmailTemplateBuilder({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[95vh] p-0 overflow-hidden">
+      <DialogContent className="max-w-[100vw] h-[100vh] p-0 overflow-hidden flex flex-col rounded-none border-none">
         {/* Header - Same gradient style as main campaigns */}
-        <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+        <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-white/20 rounded-lg">
               <Mail className="h-6 w-6" />
@@ -640,58 +648,70 @@ export function ClientEmailTemplateBuilder({
         </DialogHeader>
 
         <div className="flex flex-col flex-1 min-h-0">
-          {/* Campaign Selection */}
-          <div className="px-6 py-3 border-b bg-slate-50">
-            <div className="flex items-center gap-4">
-              <div className="flex-1 max-w-xs">
-                <Label className="text-xs font-medium text-slate-500 mb-1">Campaign</Label>
-                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder={campaignsLoading ? 'Loading...' : 'Select a campaign'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {campaigns.map((campaign) => (
-                      <SelectItem key={campaign.id} value={campaign.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{campaign.name}</span>
-                          {campaign.status && (
-                            <Badge variant="outline" className="text-xs">
-                              {campaign.status}
-                            </Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+          {/* Toolbar */}
+          <div className="px-6 py-3 border-b bg-slate-50 flex-shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 flex-1">
+                {/* Campaign Select */}
+                <div className="flex-1 max-w-xs">
+                    <Label className="text-xs font-medium text-slate-500 mb-1">Campaign</Label>
+                    <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                      <SelectTrigger className="h-9 bg-white">
+                        <SelectValue placeholder={campaignsLoading ? 'Loading...' : 'Select a campaign'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {campaigns.map((campaign) => (
+                          <SelectItem key={campaign.id} value={campaign.id}>
+                            <div className="flex items-center gap-2">
+                              <span>{campaign.name}</span>
+                              {campaign.status && (
+                                <Badge variant="outline" className="text-xs">
+                                  {campaign.status}
+                                </Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                </div>
+
+                {/* Organization Override */}
+                <div className="flex-1 max-w-xs">
+                    <Label className="text-xs font-medium text-slate-500 mb-1">Organization Name</Label>
+                     <div className="relative">
+                        <Input 
+                            value={overrideOrgName} 
+                            onChange={(e) => setOverrideOrgName(e.target.value)}
+                            placeholder={businessProfile?.dbaName || "Your Company"}
+                            className="h-9 bg-white pr-8"
+                        />
+                        <Building2 className="absolute right-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                     </div>
+                </div>
               </div>
 
-              {/* Main Tab Navigation */}
-              <Tabs value={activeMainTab} onValueChange={(v) => setActiveMainTab(v as any)} className="flex-1">
-                <TabsList className="grid grid-cols-3 w-fit">
-                  <TabsTrigger value="builder" className="gap-2">
-                    <Type className="h-4 w-4" />
-                    Builder
-                  </TabsTrigger>
-                  <TabsTrigger value="generate" className="gap-2">
-                    <Sparkles className="h-4 w-4" />
-                    AI Generate
-                  </TabsTrigger>
-                  <TabsTrigger value="templates" className="gap-2">
-                    <LayoutTemplate className="h-4 w-4" />
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 mt-auto">
+                 <Button variant="outline" onClick={() => setShowTemplates(true)} className="h-9">
+                    <LayoutTemplate className="h-4 w-4 mr-2" />
                     Templates
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+                 </Button>
+                 <Button 
+                    onClick={() => setShowAiGenerate(true)} 
+                    className="h-9 bg-gradient-to-r from-indigo-600 to-purple-600 border-0 text-white hover:from-indigo-700 hover:to-purple-700 shadow-sm"
+                 >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    AI Generate
+                 </Button>
+              </div>
             </div>
           </div>
 
           {/* Main Content Area */}
           <div className="flex-1 overflow-hidden">
-            <Tabs value={activeMainTab} className="h-full">
-              {/* ==================== BUILDER TAB ==================== */}
-              <TabsContent value="builder" className="h-full m-0">
-                <div className="h-full flex flex-col">
+            {/* Builder Content */}
+            <div className="h-full flex flex-col">
                   {/* Slim Top Bar - Same as EmailBuilderPro */}
                   <div className="border-b bg-white px-6 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-4 flex-1">
@@ -776,18 +796,16 @@ export function ClientEmailTemplateBuilder({
                         <div className="w-full max-w-[600px]">
                           <div className="bg-white rounded-lg shadow-lg border overflow-hidden">
                             {editorMode === 'visual' ? (
-                              <div className="min-h-[400px]">
-                                <Textarea
-                                  value={bodyContent}
-                                  onChange={(e) => setBodyContent(e.target.value)}
-                                  placeholder={`Hi {{first_name}},
+                              <div className="min-h-[400px] bg-white">
+                                <RichTextEditor
+                                  content={bodyContent}
+                                  onChange={setBodyContent}
+                                  placeholder={`Hi {{firstName}},
 
 Write your email content here. Keep it concise and focused.
 
 Best regards,
-Your Name`}
-                                  className="w-full min-h-[400px] p-6 text-base leading-relaxed border-0 resize-none focus-visible:ring-0"
-                                  style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
+${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                 />
                               </div>
                             ) : (
@@ -804,7 +822,7 @@ Your Name`}
                             {/* Auto-injected Footer Preview with Business Profile */}
                             <div className="border-t bg-slate-50 p-4 text-center text-xs text-slate-500">
                               <div className="font-semibold text-slate-600 mb-1">
-                                {businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign'}
+                                {overrideOrgName || businessProfile?.dbaName || businessProfile?.legalBusinessName || activeCampaignName || 'Your Campaign'}
                               </div>
                               {businessProfile && (
                                 <div className="text-slate-400 mb-2 text-[11px] leading-relaxed">
@@ -959,259 +977,255 @@ Your Name`}
                     </div>
                   </div>
                 </div>
-              </TabsContent>
-
-              {/* ==================== AI GENERATE TAB ==================== */}
-              <TabsContent value="generate" className="h-full m-0 flex">
-                {/* Form Panel */}
-                <div className="w-1/2 p-6 border-r overflow-auto">
-                  <div className="space-y-6">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-1">AI Email Generation</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Generate professional emails using AI, then customize in the builder
-                      </p>
+              </div>
+            </div>
+        {/* AI Generate Sheet */}
+        <Sheet open={showAiGenerate} onOpenChange={setShowAiGenerate}>
+            <SheetContent side="right" className="w-[100vw] sm:max-w-none p-0 border-l shadow-2xl">
+                <div className="h-full flex flex-col">
+                    <div className="p-6 border-b bg-slate-50">
+                        <SheetHeader>
+                            <SheetTitle className="flex items-center gap-2">
+                                <Sparkles className="h-5 w-5 text-indigo-600" />
+                                AI Email Generation
+                            </SheetTitle>
+                            <SheetDescription>
+                                Generate professional emails using AI, then customize in the builder
+                            </SheetDescription>
+                        </SheetHeader>
                     </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                        {/* Generation Form */}
+                        <div className="space-y-6 bg-white p-4 rounded-lg border shadow-sm">
+                            <h3 className="text-sm font-medium text-slate-500 uppercase tracking-wide">Configuration</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Email Type</Label>
+                                    <Select value={emailType} onValueChange={setEmailType}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {EMAIL_TYPES.map(type => (
+                                        <SelectItem key={type.value} value={type.value}>
+                                            {type.label}
+                                        </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                    </Select>
+                                </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Email Type</Label>
-                        <Select value={emailType} onValueChange={setEmailType}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {EMAIL_TYPES.map(type => (
-                              <SelectItem key={type.value} value={type.value}>
-                                {type.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                                <div className="space-y-2">
+                                    <Label>Tone</Label>
+                                    <Select value={tone} onValueChange={setTone}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {TONES.map(t => (
+                                        <SelectItem key={t.value} value={t.value}>
+                                            {t.label}
+                                        </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
 
-                      <div className="space-y-2">
-                        <Label>Tone</Label>
-                        <Select value={tone} onValueChange={setTone}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TONES.map(t => (
-                              <SelectItem key={t.value} value={t.value}>
-                                {t.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Variants</Label>
+                                    <Select value={variants.toString()} onValueChange={(v) => setVariants(parseInt(v))}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="1">1 version</SelectItem>
+                                        <SelectItem value="2">2 versions</SelectItem>
+                                        <SelectItem value="3">3 versions</SelectItem>
+                                    </SelectContent>
+                                    </Select>
+                                </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Variants</Label>
-                        <Select value={variants.toString()} onValueChange={(v) => setVariants(parseInt(v))}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="1">1 version</SelectItem>
-                            <SelectItem value="2">2 versions</SelectItem>
-                            <SelectItem value="3">3 versions</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                                <div className="space-y-2">
+                                    <Label>Brand Style</Label>
+                                    <Select value={brandPalette} onValueChange={(v) => setBrandPalette(v as any)}>
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="indigo">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full bg-indigo-500" />
+                                            Indigo (Professional)
+                                        </div>
+                                        </SelectItem>
+                                        <SelectItem value="emerald">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                                            Emerald (Growth)
+                                        </div>
+                                        </SelectItem>
+                                        <SelectItem value="slate">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full bg-slate-700" />
+                                            Slate (Modern)
+                                        </div>
+                                        </SelectItem>
+                                    </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
 
-                      <div className="space-y-2">
-                        <Label>Brand Style</Label>
-                        <Select value={brandPalette} onValueChange={(v) => setBrandPalette(v as any)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="indigo">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full bg-indigo-500" />
-                                Indigo (Professional)
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="emerald">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full bg-emerald-500" />
-                                Emerald (Growth)
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="slate">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full bg-slate-700" />
-                                Slate (Modern)
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                            <Button
+                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+                            onClick={() => generateMutation.mutate()}
+                            disabled={generateMutation.isPending || !hasCampaign}
+                            >
+                            {generateMutation.isPending ? (
+                                <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Generating...
+                                </>
+                            ) : (
+                                <>
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                Generate Email
+                                </>
+                            )}
+                            </Button>
+                            
+                            {!hasCampaign && (
+                            <p className="text-xs text-amber-600">
+                                Please select a campaign above to generate emails.
+                            </p>
+                            )}
+                        </div>
 
-                    <Button
-                      className="w-full"
-                      onClick={() => generateMutation.mutate()}
-                      disabled={generateMutation.isPending || !hasCampaign}
-                    >
-                      {generateMutation.isPending ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4 mr-2" />
-                          Generate Email
-                        </>
-                      )}
-                    </Button>
-
-                    {!hasCampaign && (
-                      <p className="text-xs text-amber-600">
-                        Please select a campaign to generate emails
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Results Panel */}
-                <ScrollArea className="w-1/2 bg-slate-50">
-                  <div className="p-6">
-                    <h3 className="font-semibold mb-4">Generated Emails</h3>
-                    {generatedEmails.length > 0 ? (
-                      <div className="space-y-4">
-                        {generatedEmails.map((email, index) => (
-                          <Card key={index}>
-                            <CardHeader className="pb-2">
-                              <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm">Version {index + 1}</CardTitle>
-                                <div className="flex items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => useGeneratedEmail(email)}
-                                    title="Use in builder"
-                                  >
-                                    <Plus className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleCopy(`Subject: ${email.subject}\n\n${email.body || email.intro}`, index)}
-                                  >
-                                    {copiedIndex === index ? (
-                                      <Check className="h-4 w-4 text-green-600" />
-                                    ) : (
-                                      <Copy className="h-4 w-4" />
+                        {/* Results */}
+                        <div>
+                            <h3 className="text-sm font-medium text-slate-500 uppercase tracking-wide mb-4">Results</h3>
+                            {generatedEmails.length > 0 ? (
+                            <div className="space-y-4">
+                                {generatedEmails.map((email, index) => (
+                                <Card key={index} className="overflow-hidden border-indigo-100 shadow-md">
+                                    <CardHeader className="pb-2 bg-indigo-50/50 border-b border-indigo-100">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-semibold text-indigo-900">Version {index + 1}</CardTitle>
+                                        <div className="flex items-center gap-1">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleCopy(`Subject: ${email.subject}\n\n${email.body || email.intro}`, index)}
+                                                className="h-7 px-2"
+                                            >
+                                                {copiedIndex === index ? (
+                                                <Check className="h-3.5 w-3.5 text-green-600" />
+                                                ) : (
+                                                <Copy className="h-3.5 w-3.5" />
+                                                )}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    </CardHeader>
+                                    <CardContent className="p-4 space-y-3">
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase tracking-wider">Subject Line</Label>
+                                        <p className="font-medium text-sm mt-1">{email.subject}</p>
+                                    </div>
+                                    {email.preheader && (
+                                        <div>
+                                        <Label className="text-xs text-muted-foreground uppercase tracking-wider">Preheader</Label>
+                                        <p className="text-sm text-slate-600 mt-1">{email.preheader}</p>
+                                        </div>
                                     )}
-                                  </Button>
+                                    <div>
+                                        <Label className="text-xs text-muted-foreground uppercase tracking-wider">Body Preview</Label>
+                                        <div className="text-sm whitespace-pre-wrap bg-slate-50 p-3 rounded border text-slate-700 mt-1 max-h-40 overflow-auto">
+                                        {email.body || email.intro}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        className="w-full mt-2"
+                                        onClick={() => useGeneratedEmail(email)}
+                                    >
+                                        <Plus className="h-4 w-4 mr-2" />
+                                        Use This Template
+                                    </Button>
+                                    </CardContent>
+                                </Card>
+                                ))}
+                            </div>
+                            ) : (
+                            <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-50 rounded-lg border border-dashed">
+                                <div className="p-3 bg-white rounded-full shadow-sm mb-3">
+                                    <Sparkles className="h-6 w-6 text-indigo-300" />
                                 </div>
-                              </div>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="space-y-3">
+                                <p className="text-sm text-muted-foreground">
+                                {hasCampaign
+                                    ? 'Configure options above and click Generate'
+                                    : 'Select a campaign to start'}
+                                </p>
+                            </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </SheetContent>
+        </Sheet>
+
+        {/* Templates Sheet */}
+        <Sheet open={showTemplates} onOpenChange={setShowTemplates}>
+             <SheetContent side="right" className="w-[100vw] sm:w-[900px] overflow-y-auto p-0 border-l shadow-2xl">
+                <div className="h-full flex flex-col">
+                    <div className="p-6 border-b bg-slate-50">
+                        <SheetHeader>
+                            <SheetTitle className="flex items-center gap-2">
+                                <LayoutTemplate className="h-5 w-5 text-indigo-600" />
+                                Template Library
+                            </SheetTitle>
+                            <SheetDescription>
+                                Start from a proven template and customize for your campaign
+                            </SheetDescription>
+                        </SheetHeader>
+                    </div>
+                
+                    <div className="p-6 overflow-y-auto">
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {SAMPLE_TEMPLATES.map((template) => (
+                            <Card key={template.id} className="hover:shadow-lg transition-shadow border-slate-200 cursor-pointer group" onClick={() => loadSampleTemplate(template)}>
+                                <CardHeader className="pb-3 border-b bg-slate-50/50 group-hover:bg-indigo-50/30 transition-colors">
+                                <CardTitle className="text-sm font-semibold">{template.name}</CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-4 space-y-3">
                                 <div>
-                                  <Label className="text-xs text-muted-foreground">Subject Line</Label>
-                                  <p className="font-medium">{email.subject}</p>
+                                    <Label className="text-xs text-muted-foreground">Subject</Label>
+                                    <p className="text-sm font-medium truncate mt-0.5">{template.subject}</p>
                                 </div>
-                                {email.preheader && (
-                                  <div>
-                                    <Label className="text-xs text-muted-foreground">Preheader</Label>
-                                    <p className="text-sm text-muted-foreground">{email.preheader}</p>
-                                  </div>
-                                )}
                                 <div>
-                                  <Label className="text-xs text-muted-foreground">Body Preview</Label>
-                                  <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border max-h-32 overflow-auto">
-                                    {email.body || email.intro}
-                                  </div>
+                                    <Label className="text-xs text-muted-foreground">Preview</Label>
+                                    <div className="text-xs text-muted-foreground bg-slate-50 p-2 rounded max-h-20 overflow-hidden mt-1 border">
+                                    {template.body?.substring(0, 100)}...
+                                    </div>
                                 </div>
                                 <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="w-full"
-                                  onClick={() => useGeneratedEmail(email)}
+                                    size="sm"
+                                    variant="outline"
+                                    className="w-full text-xs group-hover:border-indigo-300 group-hover:text-indigo-600"
                                 >
-                                  <Plus className="h-4 w-4 mr-2" />
-                                  Use This Template
+                                    <Plus className="h-3 w-3 mr-2" />
+                                    Use Template
                                 </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-64 text-center">
-                        <Sparkles className="h-12 w-12 text-muted-foreground mb-4" />
-                        <p className="text-muted-foreground">
-                          {hasCampaign
-                            ? 'Configure options and click Generate'
-                            : 'Select a campaign to generate emails'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </ScrollArea>
-              </TabsContent>
-
-              {/* ==================== TEMPLATES TAB ==================== */}
-              <TabsContent value="templates" className="h-full m-0 overflow-auto">
-                <div className="p-6">
-                  <div className="mb-6">
-                    <h3 className="text-lg font-semibold mb-1">Sample Email Templates</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Start from a proven template and customize for your campaign
-                    </p>
-                  </div>
-
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {SAMPLE_TEMPLATES.map((template) => (
-                      <Card key={template.id} className="hover:shadow-md transition-shadow">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">{template.name}</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3">
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Subject</Label>
-                              <p className="text-sm font-medium truncate">{template.subject}</p>
-                            </div>
-                            {template.preheader && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Preheader</Label>
-                                <p className="text-xs text-muted-foreground truncate">{template.preheader}</p>
-                              </div>
-                            )}
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Preview</Label>
-                              <div className="text-xs text-muted-foreground bg-slate-50 p-2 rounded max-h-20 overflow-hidden">
-                                {template.body?.substring(0, 100)}...
-                              </div>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="w-full"
-                              onClick={() => loadSampleTemplate(template)}
-                            >
-                              <Plus className="h-4 w-4 mr-2" />
-                              Use Template
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                                </CardContent>
+                            </Card>
+                            ))}
+                        </div>
+                    </div>
                 </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-        </div>
-
+             </SheetContent>
+        </Sheet>
         {/* Preview Modal - Same design as EmailBuilderPro */}
         <Dialog open={showPreview} onOpenChange={setShowPreview}>
           <DialogContent className="max-w-5xl h-[90vh] flex flex-col">

@@ -449,36 +449,103 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
 /**
  * GET /available-voices
  * Get list of available AI voices for campaign configuration
+ * Uses Gemini Live native audio voices for real-time conversations
  */
 router.get('/available-voices', async (req: Request, res: Response) => {
   try {
-    // Gemini/Google TTS voices available for campaigns
+    // Actual Gemini Live native voices - each has a unique sound signature
     const voices = [
-      // Standard voices
-      { id: 'en-US-Standard-A', name: 'Standard Female (A)', gender: 'female', language: 'en-US', provider: 'google' },
-      { id: 'en-US-Standard-B', name: 'Standard Male (B)', gender: 'male', language: 'en-US', provider: 'google' },
-      { id: 'en-US-Standard-C', name: 'Standard Female (C)', gender: 'female', language: 'en-US', provider: 'google' },
-      { id: 'en-US-Standard-D', name: 'Standard Male (D)', gender: 'male', language: 'en-US', provider: 'google' },
-      
-      // Neural/Wavenet voices (higher quality)
-      { id: 'en-US-Wavenet-A', name: 'Wavenet Female (A)', gender: 'female', language: 'en-US', provider: 'google', premium: true },
-      { id: 'en-US-Wavenet-B', name: 'Wavenet Male (B)', gender: 'male', language: 'en-US', provider: 'google', premium: true },
-      { id: 'en-US-Wavenet-C', name: 'Wavenet Female (C)', gender: 'female', language: 'en-US', provider: 'google', premium: true },
-      { id: 'en-US-Wavenet-D', name: 'Wavenet Male (D)', gender: 'male', language: 'en-US', provider: 'google', premium: true },
-      
-      // Studio voices (highest quality)
-      { id: 'en-US-Studio-O', name: 'Studio Female (O)', gender: 'female', language: 'en-US', provider: 'google', premium: true },
-      { id: 'en-US-Studio-M', name: 'Studio Male (M)', gender: 'male', language: 'en-US', provider: 'google', premium: true },
-      
-      // Journey voices (conversational)
-      { id: 'en-US-Journey-D', name: 'Journey Male (D)', gender: 'male', language: 'en-US', provider: 'google', premium: true },
-      { id: 'en-US-Journey-F', name: 'Journey Female (F)', gender: 'female', language: 'en-US', provider: 'google', premium: true },
-      
-      // UK English
-      { id: 'en-GB-Standard-A', name: 'UK Standard Female', gender: 'female', language: 'en-GB', provider: 'google' },
-      { id: 'en-GB-Standard-B', name: 'UK Standard Male', gender: 'male', language: 'en-GB', provider: 'google' },
-      { id: 'en-GB-Wavenet-A', name: 'UK Wavenet Female', gender: 'female', language: 'en-GB', provider: 'google', premium: true },
-      { id: 'en-GB-Wavenet-B', name: 'UK Wavenet Male', gender: 'male', language: 'en-GB', provider: 'google', premium: true },
+      // ============ MALE VOICES ============
+      {
+        id: 'Puck',
+        name: 'Puck',
+        gender: 'male',
+        accent: 'American',
+        tone: 'Upbeat & Energetic',
+        description: 'A youthful, enthusiastic voice with high energy. Perfect for exciting product launches and engaging cold calls.',
+        bestFor: ['Product Launches', 'Cold Calling', 'Tech Startups'],
+        provider: 'gemini',
+        color: 'from-orange-500 to-amber-500'
+      },
+      {
+        id: 'Charon',
+        name: 'Charon',
+        gender: 'male',
+        accent: 'American',
+        tone: 'Deep & Mature',
+        description: 'A rich, bass-heavy voice that conveys wisdom and experience. Ideal for enterprise deals and senior executives.',
+        bestFor: ['Enterprise Sales', 'Executive Outreach', 'Financial Services'],
+        provider: 'gemini',
+        color: 'from-slate-600 to-slate-800'
+      },
+      {
+        id: 'Fenrir',
+        name: 'Fenrir',
+        gender: 'male',
+        accent: 'American',
+        tone: 'Bold & Confident',
+        description: 'A strong, assertive voice that commands attention. Great for persuasive sales and overcoming objections.',
+        bestFor: ['Sales Calls', 'Lead Qualification', 'B2B Outreach'],
+        provider: 'gemini',
+        color: 'from-blue-500 to-indigo-600'
+      },
+      {
+        id: 'Orus',
+        name: 'Orus',
+        gender: 'male',
+        accent: 'American',
+        tone: 'Warm & Conversational',
+        description: 'A friendly, approachable voice that feels like talking to a trusted colleague. Perfect for relationship building.',
+        bestFor: ['Customer Success', 'Account Management', 'Renewals'],
+        provider: 'gemini',
+        color: 'from-teal-500 to-cyan-500'
+      },
+
+      // ============ FEMALE VOICES ============
+      {
+        id: 'Kore',
+        name: 'Kore',
+        gender: 'female',
+        accent: 'American',
+        tone: 'Calm & Soothing',
+        description: 'A gentle, reassuring voice that puts people at ease. Excellent for healthcare, insurance, and sensitive topics.',
+        bestFor: ['Healthcare', 'Insurance', 'Financial Services'],
+        provider: 'gemini',
+        color: 'from-green-400 to-emerald-500'
+      },
+      {
+        id: 'Aoede',
+        name: 'Aoede',
+        gender: 'female',
+        accent: 'American',
+        tone: 'Bright & Friendly',
+        description: 'A cheerful, welcoming voice that creates instant rapport. Ideal for customer outreach and appointment setting.',
+        bestFor: ['Appointment Setting', 'Customer Outreach', 'Surveys'],
+        provider: 'gemini',
+        color: 'from-rose-400 to-pink-500'
+      },
+      {
+        id: 'Leda',
+        name: 'Leda',
+        gender: 'female',
+        accent: 'American',
+        tone: 'Professional & Articulate',
+        description: 'A clear, polished voice with executive presence. Perfect for C-suite conversations and professional services.',
+        bestFor: ['Executive Outreach', 'Professional Services', 'Consulting'],
+        provider: 'gemini',
+        color: 'from-violet-500 to-purple-600'
+      },
+      {
+        id: 'Zephyr',
+        name: 'Zephyr',
+        gender: 'female',
+        accent: 'American',
+        tone: 'Light & Modern',
+        description: 'A fresh, contemporary voice that resonates with younger audiences. Great for tech and modern brands.',
+        bestFor: ['SaaS Sales', 'Tech Industry', 'Modern Brands'],
+        provider: 'gemini',
+        color: 'from-cyan-500 to-blue-500'
+      },
     ];
 
     res.json({ voices });

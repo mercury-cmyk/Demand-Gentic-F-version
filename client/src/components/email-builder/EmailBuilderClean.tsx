@@ -131,8 +131,8 @@ export function EmailBuilderClean({
           className="flex flex-col h-full"
         >
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="visual">Visual Builder</TabsTrigger>
-            <TabsTrigger value="code">HTML Code</TabsTrigger>
+            <TabsTrigger value="visual">Preview</TabsTrigger>
+            <TabsTrigger value="code">HTML</TabsTrigger>
           </TabsList>
 
           <TabsContent value="visual" className="flex-1 min-h-0 mt-4">

@@ -121,7 +121,7 @@ export function WorkOrdersList() {
       <Card>
         <CardContent className="flex flex-col items-center justify-center py-12">
           <AlertCircle className="h-12 w-12 text-destructive mb-4" />
-          <p className="text-lg font-medium">Failed to load work orders</p>
+          <p className="text-lg font-medium">Failed to load Direct Agentic Orders</p>
           <p className="text-sm text-muted-foreground">Please try again later</p>
         </CardContent>
       </Card>
@@ -133,12 +133,12 @@ export function WorkOrdersList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Work Orders</h2>
+          <h2 className="text-2xl font-bold">Direct Agentic Orders</h2>
           <p className="text-muted-foreground">Track your campaign requests and their progress</p>
         </div>
         <Button onClick={() => setShowCreateForm(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          New Work Order
+          New Direct Agentic Order
         </Button>
       </div>
 
@@ -147,7 +147,7 @@ export function WorkOrdersList() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search work orders..."
+            placeholder="Search Direct Agentic Orders..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"

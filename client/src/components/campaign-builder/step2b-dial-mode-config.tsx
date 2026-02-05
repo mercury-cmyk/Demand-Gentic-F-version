@@ -20,24 +20,22 @@ interface Step2bDialModeConfigProps {
 }
 
 type DialMode = 'ai_agent';
-// marin & cedar are highest quality, most natural voices
-type AiVoice = 'marin' | 'cedar' | 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'ash' | 'ballad' | 'coral' | 'sage' | 'verse';
+// Gemini Live Native Voices
+type AiVoice = 'Puck' | 'Charon' | 'Fenrir' | 'Orus' | 'Kore' | 'Aoede' | 'Leda' | 'Zephyr' | string;
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
 
-const AI_VOICES: { value: AiVoice; label: string; description: string }[] = [
-  { value: 'marin', label: 'Marin', description: 'Calm, professional, natural (Recommended)' },
-  { value: 'cedar', label: 'Cedar', description: 'Warm, confident, engaging (Recommended)' },
-  { value: 'alloy', label: 'Alloy', description: 'Balanced and versatile' },
-  { value: 'echo', label: 'Echo', description: 'Warm and engaging' },
-  { value: 'fable', label: 'Fable', description: 'Expressive and dynamic' },
-  { value: 'onyx', label: 'Onyx', description: 'Deep and authoritative' },
-  { value: 'nova', label: 'Nova', description: 'Friendly and upbeat' },
-  { value: 'shimmer', label: 'Shimmer', description: 'Clear and professional' },
-  { value: 'ash', label: 'Ash', description: 'Natural conversational' },
-  { value: 'coral', label: 'Coral', description: 'Bright and clear' },
-  { value: 'sage', label: 'Sage', description: 'Thoughtful and calm' },
-  { value: 'verse', label: 'Verse', description: 'Articulate and precise' },
-  { value: 'ballad', label: 'Ballad', description: 'Smooth and melodic' },
+const AI_VOICES: { value: AiVoice; label: string; description: string; gender: 'male' | 'female' }[] = [
+  // Male Voices
+  { value: 'Puck', label: 'Puck', description: 'Upbeat, energetic, youthful (Male)', gender: 'male' },
+  { value: 'Charon', label: 'Charon', description: 'Deep, mature, bass-heavy (Male)', gender: 'male' },
+  { value: 'Fenrir', label: 'Fenrir', description: 'Bold, confident, assertive (Male)', gender: 'male' },
+  { value: 'Orus', label: 'Orus', description: 'Warm, conversational, friendly (Male)', gender: 'male' },
+  
+  // Female Voices
+  { value: 'Kore', label: 'Kore', description: 'Calm, soothing, reassuring (Female)', gender: 'female' },
+  { value: 'Aoede', label: 'Aoede', description: 'Bright, friendly, cheerful (Female)', gender: 'female' },
+  { value: 'Leda', label: 'Leda', description: 'Professional, articulate, polished (Female)', gender: 'female' },
+  { value: 'Zephyr', label: 'Zephyr', description: 'Light, modern, contemporary (Female)', gender: 'female' },
 ];
 
 const HANDOFF_TRIGGERS: { value: HandoffTrigger; label: string }[] = [
@@ -59,7 +57,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
   const [aiPersonaName, setAiPersonaName] = useState(data.aiAgentSettings?.persona?.name || '');
   const [aiCompanyName, setAiCompanyName] = useState(data.aiAgentSettings?.persona?.companyName || '');
   const [aiRole, setAiRole] = useState(data.aiAgentSettings?.persona?.role || 'Sales Representative');
-  const [aiVoice, setAiVoice] = useState<AiVoice>(data.aiAgentSettings?.persona?.voice || 'nova');
+  const [aiVoice, setAiVoice] = useState<AiVoice>(data.aiAgentSettings?.persona?.voice || 'Fenrir');
   
   // AI Scripts
   const [aiOpeningScript, setAiOpeningScript] = useState(data.aiAgentSettings?.scripts?.opening || '');

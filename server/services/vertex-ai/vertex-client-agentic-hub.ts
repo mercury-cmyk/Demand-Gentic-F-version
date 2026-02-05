@@ -34,6 +34,8 @@ import {
   clientPortalOrders,
   clientCampaignAccess,
   virtualAgents,
+  clientProjects,
+  verificationCampaigns,
 } from "@shared/schema";
 import { eq, and, or, desc, sql, gte, lte, count, sum } from "drizzle-orm";
 
@@ -65,6 +67,10 @@ export interface CampaignOrderRequest {
   budget?: number;
   specialRequirements?: string;
   channels: ("voice" | "email" | "both")[];
+  contextUrls?: string[];
+  contextFiles?: { name: string; key: string; url?: string }[];
+  targetAccountFiles?: { name: string; key: string; url?: string }[];
+  suppressionFiles?: { name: string; key: string; url?: string }[];
 }
 
 export interface TargetAudienceCriteria {
@@ -343,22 +349,76 @@ Return JSON:
       const estimatedDeliveryDate = new Date();
       estimatedDeliveryDate.setDate(estimatedDeliveryDate.getDate() + analysis.estimatedDeliveryDays);
 
+      // Map campaign type to schema enum
+      let mappedCampaignType = request.campaignType; 
+      switch (request.campaignType) {
+        case 'lead_generation': mappedCampaignType = 'high_quality_leads'; break;
+        case 'event_registration': mappedCampaignType = 'webinar_invite'; break;
+        case 'demo_booking': mappedCampaignType = 'appointment_generation'; break;
+        case 'market_research': mappedCampaignType = 'data_validation'; break;
+      }
+
+      // Determine Project Type
+      let projectType = 'custom';
+      if (request.channels.includes('voice') && request.channels.includes('email')) projectType = 'combo';
+      else if (request.channels.includes('voice')) projectType = 'call_campaign';
+      else if (request.channels.includes('email')) projectType = 'email_campaign';
+
+      // 1. Create Client Project
+      const [project] = await db.insert(clientProjects).values({
+        clientAccountId: this.context.clientAccountId,
+        name: `Agentic Request: ${request.campaignType} - ${orderNumber}`,
+        description: `PENDING APPROVAL - Auto-generated from Order #${orderNumber}. 
+        Target Audience: ${request.targetAudience.industries?.join(', ') || 'N/A'} - ${request.targetAudience.jobTitles?.join(', ') || 'N/A'}
+        Budget: ${request.budget || 'N/A'}, Volume: ${request.volumeRequested}`,
+        status: 'pending',
+        requestedLeadCount: request.volumeRequested,
+        budgetAmount: request.budget ? request.budget.toString() : null,
+        startDate: new Date(),
+        endDate: estimatedDeliveryDate,
+        projectType: projectType as any,
+        createdBy: this.context.clientUserId
+      }).returning();
+
+      // 2. Create Agentic Campaign
+      const [campaign] = await db.insert(campaigns).values({
+        type: mappedCampaignType as any,
+        name: `Campaign - ${orderNumber}`,
+        clientAccountId: this.context.clientAccountId,
+        projectId: project.id,
+        status: 'draft',
+        targetQualifiedLeads: request.volumeRequested,
+        dialMode: 'ai_agent',
+        startDate: new Date(),
+      }).returning();
+
+      // 3. Create Verification Campaign (to satisfy default schema FK)
+      const [verifCampaign] = await db.insert(verificationCampaigns).values({
+        name: `Order ${orderNumber} - Verification`,
+        status: 'active',
+        monthlyTarget: request.volumeRequested,
+        createdBy: this.context.clientUserId
+      }).returning();
+
       const [order] = await db
         .insert(clientPortalOrders)
         .values({
           clientAccountId: this.context.clientAccountId,
           orderNumber,
+          campaignId: verifCampaign.id,
           requestedQuantity: request.volumeRequested,
           deliveredQuantity: 0,
           status: "submitted",
           orderMonth: new Date().getMonth() + 1,
           orderYear: new Date().getFullYear(),
+          clientUserId: this.context.clientUserId,
           clientNotes: JSON.stringify({
             request,
             analysis: analysis.recommendations,
             estimatedCost: analysis.estimatedCost,
+            projectId: project.id,
+            agenticCampaignId: campaign.id
           }),
-          createdBy: this.context.clientUserId,
         })
         .returning();
 

@@ -9,6 +9,10 @@ vite.config.ts.*
 .env.development.local
 .env.test.local
 .env.production.local
+.env
+env.yaml
+env_vars.yaml
+.env*
 
 # Logs
 logs/

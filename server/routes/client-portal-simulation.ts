@@ -28,6 +28,14 @@ interface MockContact {
   accountName: string;
 }
 
+// Agent persona for display
+interface AgentInfo {
+  name: string;
+  companyName: string;
+  role: string;
+  voice: string;
+}
+
 // In-memory session store
 interface SimulationSession {
   id: string;
@@ -37,6 +45,7 @@ interface SimulationSession {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   createdAt: Date;
   mockContact?: MockContact;
+  agentInfo?: AgentInfo;
 }
 
 const simulationSessions = new Map<string, SimulationSession>();
@@ -96,7 +105,7 @@ setInterval(() => {
 router.post('/start', async (req: Request, res: Response) => {
   try {
     const clientUser = (req as any).clientUser;
-    const { campaignId } = req.body;
+    const { campaignId, contactData } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ error: 'Campaign ID is required' });
@@ -134,39 +143,76 @@ router.post('/start', async (req: Request, res: Response) => {
 
     // REMOVED: Strict check for 'published' status and clientAccountId ownership.
     // Access is already verified via clientCampaignAccess above.
-    
+
     // Try to get virtual agent if assigned
     let agentPersona = '';
+    let agentInfo: AgentInfo = {
+      name: 'AI Sales Agent',
+      companyName: 'Your Company',
+      role: 'Sales Development Representative',
+      voice: 'Fenrir',
+    };
+
+    // First try to get agent info from campaign's aiAgentSettings
+    if (campaign.aiAgentSettings?.persona) {
+      const persona = campaign.aiAgentSettings.persona;
+      agentInfo.name = persona.name || agentInfo.name;
+      agentInfo.companyName = persona.companyName || agentInfo.companyName;
+      agentInfo.role = persona.role || agentInfo.role;
+      agentInfo.voice = persona.voice || campaign.aiAgentSettings.voice || agentInfo.voice;
+    }
+
+    // Try to get virtual agent if assigned (overrides campaign settings)
     try {
       const [assignment] = await db
         .select()
         .from(campaignAgentAssignments)
         .where(eq(campaignAgentAssignments.campaignId, campaignId))
         .limit(1);
-      
+
       if (assignment?.virtualAgentId) {
         const [agent] = await db
           .select()
           .from(virtualAgents)
           .where(eq(virtualAgents.id, assignment.virtualAgentId))
           .limit(1);
-        
-        if (agent?.systemPrompt) {
-          agentPersona = agent.systemPrompt;
+
+        if (agent) {
+          if (agent.systemPrompt) {
+            agentPersona = agent.systemPrompt;
+          }
+          // Update agent info from virtual agent
+          agentInfo.name = agent.name || agentInfo.name;
+          agentInfo.voice = agent.voice || agentInfo.voice;
         }
       }
     } catch (e) {
       console.log('[Simulation] No virtual agent assignment found');
     }
 
-    // Generate mock contact for this simulation
-    const mockContact = generateMockContact(campaign.name);
-    
-    // Build simulation system prompt with mock contact context
-    const systemPrompt = buildSimulationPrompt(campaign, agentPersona, mockContact);
-    
-    // Generate first message based on campaign with mock contact data
-    const firstMessage = generateFirstMessage(campaign, mockContact);
+    // Use provided contact data or generate mock contact
+    let simulationContact: MockContact;
+    if (contactData && (contactData.contactName || contactData.accountName)) {
+      // Use the selected contact from campaign audience
+      const firstName = contactData.contactFirstName || contactData.contactName?.split(' ')[0] || 'Contact';
+      const lastName = contactData.contactLastName || contactData.contactName?.split(' ').slice(1).join(' ') || '';
+      simulationContact = {
+        fullName: contactData.contactName || `${firstName} ${lastName}`.trim() || 'Contact',
+        firstName,
+        lastName,
+        jobTitle: contactData.contactTitle || 'Decision Maker',
+        accountName: contactData.accountName || 'Company',
+      };
+    } else {
+      // Generate mock contact for this simulation
+      simulationContact = generateMockContact(campaign.name);
+    }
+
+    // Build simulation system prompt with contact context
+    const systemPrompt = buildSimulationPrompt(campaign, agentPersona, simulationContact);
+
+    // Generate first message based on campaign with contact data
+    const firstMessage = generateFirstMessage(campaign, simulationContact);
 
     // Create session
     const sessionId = uuidv4();
@@ -177,7 +223,8 @@ router.post('/start', async (req: Request, res: Response) => {
       systemPrompt,
       messages: [{ role: 'assistant', content: firstMessage }],
       createdAt: new Date(),
-      mockContact,
+      mockContact: simulationContact,
+      agentInfo,
     };
 
     simulationSessions.set(sessionId, session);
@@ -188,10 +235,17 @@ router.post('/start', async (req: Request, res: Response) => {
       context: {
         campaignId: campaign.id,
         campaignName: campaign.name,
-        // Include mock contact data for display
-        accountName: mockContact.accountName,
-        contactName: mockContact.fullName,
-        contactTitle: mockContact.jobTitle,
+        // Include contact data for display (prospect being called)
+        accountName: simulationContact.accountName,
+        contactName: simulationContact.fullName,
+        contactFirstName: simulationContact.firstName,
+        contactLastName: simulationContact.lastName,
+        contactTitle: simulationContact.jobTitle,
+        // Include agent info for display (AI agent making the call)
+        agentName: agentInfo.name,
+        agentCompany: agentInfo.companyName,
+        agentRole: agentInfo.role,
+        agentVoice: agentInfo.voice,
       },
     });
   } catch (error) {
@@ -248,6 +302,22 @@ router.post('/chat', async (req: Request, res: Response) => {
       // Generate mock contact for on-the-fly session
       const mockContact = generateMockContact(campaign.name);
 
+      // Extract agent info from campaign settings
+      let agentInfo: AgentInfo = {
+        name: 'AI Sales Agent',
+        companyName: 'Your Company',
+        role: 'Sales Development Representative',
+        voice: 'Fenrir',
+      };
+
+      if (campaign.aiAgentSettings?.persona) {
+        const persona = campaign.aiAgentSettings.persona;
+        agentInfo.name = persona.name || agentInfo.name;
+        agentInfo.companyName = persona.companyName || agentInfo.companyName;
+        agentInfo.role = persona.role || agentInfo.role;
+        agentInfo.voice = persona.voice || campaign.aiAgentSettings.voice || agentInfo.voice;
+      }
+
       const newSessionId = uuidv4();
       session = {
         id: newSessionId,
@@ -257,6 +327,7 @@ router.post('/chat', async (req: Request, res: Response) => {
         messages: [],
         createdAt: new Date(),
         mockContact,
+        agentInfo,
       };
       simulationSessions.set(newSessionId, session);
     }
@@ -286,6 +357,17 @@ router.post('/chat', async (req: Request, res: Response) => {
       context: {
         campaignId: session.campaignId,
         campaignName: session.campaignName,
+        // Include mock contact data for display (prospect being called)
+        accountName: session.mockContact?.accountName,
+        contactName: session.mockContact?.fullName,
+        contactFirstName: session.mockContact?.firstName,
+        contactLastName: session.mockContact?.lastName,
+        contactTitle: session.mockContact?.jobTitle,
+        // Include agent info for display (AI agent making the call)
+        agentName: session.agentInfo?.name,
+        agentCompany: session.agentInfo?.companyName,
+        agentRole: session.agentInfo?.role,
+        agentVoice: session.agentInfo?.voice,
       },
     });
   } catch (error) {
