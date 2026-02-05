@@ -42,7 +42,6 @@ import clientPortalSimulationRouter from './client-portal-simulation';
 import clientPortalSettingsRouter from './client-portal-settings';
 import clientPortalCrmRouter from './client-portal-crm';
 import clientPortalCampaignsRouter from './client-portal-campaigns';
-import workOrdersRouter from './work-orders';
 
 const router = Router();
 
@@ -184,9 +183,6 @@ router.use('/crm', requireClientAuth, clientPortalCrmRouter);
 
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);
-
-// Work Orders (Client view) - clients submit and track requests
-router.use('/work-orders', requireClientAuth, workOrdersRouter);
 
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);

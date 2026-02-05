@@ -1890,6 +1890,11 @@ export const campaigns = pgTable("campaigns", {
   // Generation status per channel: { email: 'generated', voice: 'approved' }
   channelGenerationStatus: jsonb("channel_generation_status"),
 
+  // ==================== TELNYX PHONE NUMBER ASSIGNMENT ====================
+  // Links campaign to a specific Telnyx phone number from the number pool
+  callerPhoneNumberId: varchar("caller_phone_number_id"), // References telnyx_numbers.id (not a FK to avoid circular deps)
+  callerPhoneNumber: text("caller_phone_number"), // Denormalized E.164 phone number for quick access
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   launchedAt: timestamp("launched_at"),
@@ -7482,6 +7487,9 @@ export const workOrders = pgTable("work_orders", {
     bookingEnabled?: boolean;
     bookingUrl?: string;
   }>(),
+
+  // Organization intelligence context (snapshot at submission time)
+  organizationContext: text("organization_context"),
 
   // Links to other entities (populated after approval)
   projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),

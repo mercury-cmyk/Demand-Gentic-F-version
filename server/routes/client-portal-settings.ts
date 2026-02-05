@@ -7,7 +7,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ilike, or } from 'drizzle-orm';
 import {
   clientBusinessProfiles,
   clientFeatureAccess,
@@ -16,8 +16,18 @@ import {
   clientOrganizationLinks,
   campaignOrganizations,
   campaigns,
+  accounts,
 } from '@shared/schema';
 import { z } from 'zod';
+import { collectWebsiteContent, type WebsitePageSummary } from '../lib/website-research';
+import {
+  researchCompanyCore,
+  researchMarketPosition,
+  researchCustomerIntelligence,
+  researchNewsAndTrends,
+  consolidateResearch,
+  SPECIALIZED_PROMPTS,
+} from '../lib/org-intelligence-helper';
 
 const router = Router();
 
@@ -523,6 +533,541 @@ router.post('/organization-intelligence', async (req: Request, res: Response) =>
       return res.status(400).json({ message: 'Invalid data', errors: error.errors });
     }
     res.status(500).json({ message: 'Failed to create organization' });
+  }
+});
+
+// ==================== ORGANIZATION INTELLIGENCE DEEP ANALYSIS ====================
+
+// Helper functions for deep analysis
+function resolveNumberFromEnv(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function extractJson(text: string): any | null {
+  if (!text) return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function buildSynthesisSchemaPrompt(): string {
+  return `Return JSON in the following format ONLY (no markdown, no explanation):
+{
+  "identity": {
+    "legalName": "Company legal name (e.g., Acme Corporation)",
+    "description": "2-3 sentence company description",
+    "industry": "Primary industry (e.g., Technology, Healthcare, Finance)",
+    "employees": "Employee range estimate (e.g., 100-500, 1000-5000)",
+    "regions": "Operating regions (e.g., North America, Global, EMEA)"
+  },
+  "offerings": {
+    "coreProducts": "Main products or services (comma-separated)",
+    "useCases": "Key use cases their solution addresses",
+    "problemsSolved": "The concrete business problems they solve for customers",
+    "differentiators": "What makes them unique vs competitors"
+  },
+  "icp": {
+    "industries": "Target industries they serve",
+    "personas": "Key buyer personas they target (titles)",
+    "objections": "Common objections their prospects might have"
+  },
+  "positioning": {
+    "oneLiner": "A compelling one-liner pitch for this company",
+    "competitors": "Likely competitors in their space",
+    "whyUs": "Why customers choose them over alternatives"
+  },
+  "outreach": {
+    "emailAngles": "Best email approach angles for their outreach",
+    "callOpeners": "Effective cold call openers for their sales team"
+  }
+}`;
+}
+
+/**
+ * POST /organization-intelligence/analyze-deep
+ * Deep multi-model analysis with SSE progress streaming for client organizations
+ */
+router.post('/organization-intelligence/analyze-deep', async (req: Request, res: Response) => {
+  const clientAccountId = req.clientUser?.clientAccountId;
+  if (!clientAccountId) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendProgress = (phase: string, message: string, progress: number) => {
+    res.write(`data: ${JSON.stringify({ type: 'progress', phase, message, progress })}\n\n`);
+  };
+
+  const sendError = (error: string) => {
+    res.write(`data: ${JSON.stringify({ type: 'error', error })}\n\n`);
+    res.end();
+  };
+
+  const sendComplete = (data: any) => {
+    res.write(`data: ${JSON.stringify({ type: 'complete', data })}\n\n`);
+    res.end();
+  };
+
+  try {
+    const { domain, context } = req.body;
+
+    if (!domain) {
+      return sendError("Domain is required");
+    }
+
+    const cleanDomain = domain.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0].toLowerCase();
+    sendProgress("init", `Starting deep analysis for ${cleanDomain}...`, 0);
+
+    // Check for required API keys
+    const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const anthropicKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const deepseekKey = process.env.DEEPSEEK_API_KEY;
+
+    const availableModels = [
+      openaiKey ? 'OpenAI' : null,
+      geminiKey ? 'Gemini' : null,
+      anthropicKey ? 'Claude' : null,
+      deepseekKey ? 'DeepSeek' : null,
+    ].filter(Boolean);
+
+    if (availableModels.length === 0) {
+      return sendError("No AI API keys configured for organization intelligence analysis.");
+    }
+
+    sendProgress("init", `${availableModels.length} AI models available: ${availableModels.join(', ')}`, 2);
+
+    // Phase 1: Deep Web Research (Parallel Streams)
+    sendProgress("research", "Starting deep web research (4 parallel streams)...", 5);
+
+    const [coreResearch, marketResearch, customerResearch, newsResearch, websiteContent] = await Promise.all([
+      researchCompanyCore(cleanDomain),
+      researchMarketPosition(cleanDomain),
+      researchCustomerIntelligence(cleanDomain),
+      researchNewsAndTrends(cleanDomain),
+      collectWebsiteContent(cleanDomain, {
+        maxPages: Number(process.env.ORG_INTELLIGENCE_WEB_PAGES || 20),
+        maxCharsPerPage: Number(process.env.ORG_INTELLIGENCE_WEB_PAGE_CHARS || 4000),
+        timeoutMs: Number(process.env.ORG_INTELLIGENCE_WEB_TIMEOUT_MS || 15000),
+      }),
+    ]);
+
+    const researchData = consolidateResearch([coreResearch, marketResearch, customerResearch, newsResearch]);
+
+    sendProgress("research", `Research complete: ${researchData.totalQueries} queries, ${researchData.allSources.length} sources`, 25);
+
+    // Get any existing CRM context
+    const existingAccounts = await db.select({
+      id: accounts.id,
+      name: accounts.name,
+      domain: accounts.domain,
+      description: accounts.description,
+      industryStandardized: accounts.industryStandardized,
+      employeesSizeRange: accounts.employeesSizeRange,
+    })
+    .from(accounts)
+    .where(
+      or(
+        ilike(accounts.domain, `%${cleanDomain}%`),
+        ilike(accounts.name, `%${cleanDomain.split('.')[0]}%`)
+      )
+    )
+    .limit(5);
+
+    const crmContext = existingAccounts.length > 0 ? existingAccounts : null;
+
+    // Phase 2: Multi-Model Analysis
+    sendProgress("analysis", "Starting multi-model AI analysis...", 30);
+
+    const contextPayload = JSON.stringify({
+      domain: cleanDomain,
+      research: researchData.allFindings,
+      sources: researchData.allSources.slice(0, 30),
+      crm: crmContext,
+      website: {
+        totalPages: websiteContent?.pages?.length || 0,
+        pages: websiteContent?.pages?.map((page: WebsitePageSummary) => ({
+          url: page.url,
+          title: page.title,
+          description: page.description,
+          headings: page.headings,
+          content: page.excerpt,
+        })) || [],
+      },
+    }, null, 2);
+
+    const outputSchema = buildSynthesisSchemaPrompt();
+    const modelOutputs: Array<{ model: string; perspective: string; data: any; confidence: number }> = [];
+    const timeoutMs = resolveNumberFromEnv("ORG_INTELLIGENCE_MODEL_TIMEOUT_MS", 120000, 10000, 300000);
+
+    // Run available models in parallel
+    const modelPromises: Promise<void>[] = [];
+
+    // OpenAI - Strategic Analyst
+    if (openaiKey) {
+      modelPromises.push((async () => {
+        try {
+          sendProgress("analysis", "OpenAI analyzing as Strategic Analyst...", 35);
+          const OpenAI = (await import("openai")).default;
+          const openai = new OpenAI({ apiKey: openaiKey });
+          const model = process.env.ORG_INTELLIGENCE_OPENAI_MODEL || "gpt-4o";
+
+          const completion = await openai.chat.completions.create({
+            model,
+            max_tokens: 4096,
+            messages: [
+              {
+                role: "user",
+                content: `${SPECIALIZED_PROMPTS.strategic}\n\n## Organization: ${cleanDomain}\n\n## Research Data:\n${contextPayload}\n\n${outputSchema}\n\nReturn your strategic analysis in valid JSON format only.`,
+              },
+            ],
+          });
+
+          const parsed = extractJson(completion.choices[0]?.message?.content || "");
+          if (parsed) {
+            modelOutputs.push({ model, perspective: 'strategic', data: parsed, confidence: 0.94 });
+          }
+        } catch (error: any) {
+          console.error('[Client Org-Intel] OpenAI error:', error.message);
+        }
+      })());
+    }
+
+    // Gemini - Customer Success Expert
+    if (geminiKey) {
+      modelPromises.push((async () => {
+        try {
+          sendProgress("analysis", "Gemini analyzing as Customer Success Expert...", 40);
+          const { GoogleGenAI } = await import("@google/genai");
+          const genai = new GoogleGenAI({
+            apiKey: geminiKey,
+            httpOptions: { apiVersion: "" },
+          });
+          const model = process.env.ORG_INTELLIGENCE_GEMINI_MODEL || "gemini-1.5-pro";
+
+          const result = await genai.models.generateContent({
+            model: `models/${model}`,
+            contents: `${SPECIALIZED_PROMPTS.customerSuccess}\n\n## Organization: ${cleanDomain}\n\n## Research Data:\n${contextPayload}\n\n${outputSchema}\n\nReturn your customer-focused analysis in valid JSON format only.`,
+            config: { maxOutputTokens: 4096, temperature: 0.3 },
+          });
+
+          const parsed = extractJson(result.text || "");
+          if (parsed) {
+            modelOutputs.push({ model, perspective: 'customerSuccess', data: parsed, confidence: 0.92 });
+          }
+        } catch (error: any) {
+          console.error('[Client Org-Intel] Gemini error:', error.message);
+        }
+      })());
+    }
+
+    // Claude - Brand Strategist
+    if (anthropicKey) {
+      modelPromises.push((async () => {
+        try {
+          sendProgress("analysis", "Claude analyzing as Brand Strategist...", 45);
+          const model = process.env.ORG_INTELLIGENCE_CLAUDE_MODEL || "claude-3-sonnet-20240229";
+          const baseUrl = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL || "https://api.anthropic.com";
+          const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+          const url = normalizedBaseUrl.endsWith("/v1")
+            ? `${normalizedBaseUrl}/messages`
+            : `${normalizedBaseUrl}/v1/messages`;
+
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-api-key": anthropicKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 4096,
+              messages: [
+                {
+                  role: "user",
+                  content: `${SPECIALIZED_PROMPTS.brandStrategy}\n\n## Organization: ${cleanDomain}\n\n## Research Data:\n${contextPayload}\n\n${outputSchema}\n\nReturn your brand strategy analysis in valid JSON format only.`,
+                },
+              ],
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeout);
+
+          if (response.ok) {
+            const data = await response.json();
+            const responseText = Array.isArray(data.content)
+              ? data.content.filter((item: any) => item?.type === "text").map((item: any) => item?.text || "").join("")
+              : "";
+
+            const parsed = extractJson(responseText);
+            if (parsed) {
+              modelOutputs.push({ model, perspective: 'brandStrategy', data: parsed, confidence: 0.93 });
+            }
+          }
+        } catch (error: any) {
+          console.error('[Client Org-Intel] Claude error:', error.message);
+        }
+      })());
+    }
+
+    await Promise.all(modelPromises);
+    sendProgress("analysis", `${modelOutputs.length} model analyses completed`, 60);
+
+    if (modelOutputs.length === 0) {
+      return sendError("All AI model analyses failed. Please try again.");
+    }
+
+    // Phase 3: Synthesize Results
+    sendProgress("synthesis", "Synthesizing intelligence from all models...", 70);
+
+    // Merge model outputs with weighted confidence
+    const synthesized: any = {
+      identity: {},
+      offerings: {},
+      icp: {},
+      positioning: {},
+      outreach: {},
+    };
+
+    const mergeField = (category: string, field: string) => {
+      const values: Array<{ value: string; confidence: number; model: string }> = [];
+      for (const output of modelOutputs) {
+        const val = output.data[category]?.[field];
+        if (val) {
+          values.push({ value: val, confidence: output.confidence, model: output.model });
+        }
+      }
+      if (values.length === 0) return null;
+
+      // Pick highest confidence value
+      values.sort((a, b) => b.confidence - a.confidence);
+      return {
+        value: values[0].value,
+        confidence: values[0].confidence,
+        sources: values.map(v => v.model),
+      };
+    };
+
+    // Synthesize each field
+    ['legalName', 'description', 'industry', 'employees', 'regions'].forEach(f => {
+      synthesized.identity[f] = mergeField('identity', f);
+    });
+    ['coreProducts', 'useCases', 'problemsSolved', 'differentiators'].forEach(f => {
+      synthesized.offerings[f] = mergeField('offerings', f);
+    });
+    ['industries', 'personas', 'objections'].forEach(f => {
+      synthesized.icp[f] = mergeField('icp', f);
+    });
+    ['oneLiner', 'competitors', 'whyUs'].forEach(f => {
+      synthesized.positioning[f] = mergeField('positioning', f);
+    });
+    ['emailAngles', 'callOpeners'].forEach(f => {
+      synthesized.outreach[f] = mergeField('outreach', f);
+    });
+
+    sendProgress("synthesis", "Intelligence synthesis complete", 85);
+
+    // Phase 4: Save to organization if client has one linked
+    sendProgress("save", "Preparing to save organization intelligence...", 90);
+
+    // Get client's linked organization
+    const [orgLink] = await db
+      .select({ organizationId: clientOrganizationLinks.campaignOrganizationId })
+      .from(clientOrganizationLinks)
+      .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+      .limit(1);
+
+    if (orgLink) {
+      // Update the organization with new intelligence
+      await db
+        .update(campaignOrganizations)
+        .set({
+          domain: cleanDomain,
+          identity: {
+            legalName: synthesized.identity.legalName?.value,
+            description: synthesized.identity.description?.value,
+            industry: synthesized.identity.industry?.value,
+            employees: synthesized.identity.employees?.value,
+            regions: synthesized.identity.regions?.value ? [synthesized.identity.regions.value] : undefined,
+          },
+          offerings: {
+            coreProducts: synthesized.offerings.coreProducts?.value ? [synthesized.offerings.coreProducts.value] : undefined,
+            useCases: synthesized.offerings.useCases?.value ? [synthesized.offerings.useCases.value] : undefined,
+            problemsSolved: synthesized.offerings.problemsSolved?.value ? [synthesized.offerings.problemsSolved.value] : undefined,
+            differentiators: synthesized.offerings.differentiators?.value ? [synthesized.offerings.differentiators.value] : undefined,
+          },
+          icp: {
+            industries: synthesized.icp.industries?.value ? [synthesized.icp.industries.value] : undefined,
+            personas: synthesized.icp.personas?.value ? [{ title: synthesized.icp.personas.value }] : undefined,
+            objections: synthesized.icp.objections?.value ? [synthesized.icp.objections.value] : undefined,
+          },
+          positioning: {
+            oneLiner: synthesized.positioning.oneLiner?.value,
+            valueProposition: synthesized.positioning.whyUs?.value,
+            competitors: synthesized.positioning.competitors?.value ? [synthesized.positioning.competitors.value] : undefined,
+            whyUs: synthesized.positioning.whyUs?.value ? [synthesized.positioning.whyUs.value] : undefined,
+          },
+          outreach: {
+            emailAngles: synthesized.outreach.emailAngles?.value ? [synthesized.outreach.emailAngles.value] : undefined,
+            callOpeners: synthesized.outreach.callOpeners?.value ? [synthesized.outreach.callOpeners.value] : undefined,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(campaignOrganizations.id, orgLink.organizationId));
+
+      sendProgress("save", "Organization intelligence saved successfully", 95);
+    }
+
+    sendProgress("complete", "Deep analysis complete!", 100);
+
+    sendComplete({
+      success: true,
+      domain: cleanDomain,
+      synthesized,
+      organizationUpdated: !!orgLink,
+      meta: {
+        models: modelOutputs.map(m => `${m.model} (${m.perspective})`),
+        modelCount: modelOutputs.length,
+        researchSources: researchData.allSources.length,
+        researchQueries: researchData.totalQueries,
+        analysisDepth: 'deep',
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+  } catch (error: any) {
+    console.error('[Client Org-Intel] Deep analysis error:', error);
+    sendError(error.message || "Failed to analyze organization");
+  }
+});
+
+/**
+ * POST /organization-intelligence/analyze
+ * Quick single-model analysis for client organizations
+ */
+router.post('/organization-intelligence/analyze', async (req: Request, res: Response) => {
+  const clientAccountId = req.clientUser?.clientAccountId;
+  if (!clientAccountId) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  try {
+    const { domain } = req.body;
+
+    if (!domain) {
+      return res.status(400).json({ message: 'Domain is required' });
+    }
+
+    const cleanDomain = domain.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0].toLowerCase();
+
+    // Check for API keys
+    const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+    if (!geminiKey && !openaiKey) {
+      return res.status(500).json({ message: 'No AI API keys configured' });
+    }
+
+    // Quick web research
+    const websiteContent = await collectWebsiteContent(cleanDomain, {
+      maxPages: 10,
+      maxCharsPerPage: 3000,
+      timeoutMs: 10000,
+    });
+
+    const contextPayload = JSON.stringify({
+      domain: cleanDomain,
+      website: {
+        totalPages: websiteContent?.pages?.length || 0,
+        pages: websiteContent?.pages?.slice(0, 5).map((page: WebsitePageSummary) => ({
+          url: page.url,
+          title: page.title,
+          description: page.description,
+          content: page.excerpt?.slice(0, 2000),
+        })) || [],
+      },
+    }, null, 2);
+
+    const outputSchema = buildSynthesisSchemaPrompt();
+    let analysisResult: any = null;
+
+    // Try Gemini first
+    if (geminiKey) {
+      try {
+        const { GoogleGenAI } = await import("@google/genai");
+        const genai = new GoogleGenAI({
+          apiKey: geminiKey,
+          httpOptions: { apiVersion: "" },
+        });
+
+        const result = await genai.models.generateContent({
+          model: "models/gemini-1.5-flash",
+          contents: `Analyze this organization and provide comprehensive intelligence.\n\n## Organization: ${cleanDomain}\n\n## Website Data:\n${contextPayload}\n\n${outputSchema}`,
+          config: { maxOutputTokens: 2048, temperature: 0.3 },
+        });
+
+        analysisResult = extractJson(result.text || "");
+      } catch (error: any) {
+        console.error('[Client Org-Intel Quick] Gemini error:', error.message);
+      }
+    }
+
+    // Fallback to OpenAI
+    if (!analysisResult && openaiKey) {
+      try {
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({ apiKey: openaiKey });
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          max_tokens: 2048,
+          messages: [
+            {
+              role: "user",
+              content: `Analyze this organization and provide comprehensive intelligence.\n\n## Organization: ${cleanDomain}\n\n## Website Data:\n${contextPayload}\n\n${outputSchema}`,
+            },
+          ],
+        });
+
+        analysisResult = extractJson(completion.choices[0]?.message?.content || "");
+      } catch (error: any) {
+        console.error('[Client Org-Intel Quick] OpenAI error:', error.message);
+      }
+    }
+
+    if (!analysisResult) {
+      return res.status(500).json({ message: 'Failed to analyze organization' });
+    }
+
+    res.json({
+      success: true,
+      domain: cleanDomain,
+      analysis: analysisResult,
+      pagesAnalyzed: websiteContent?.pages?.length || 0,
+    });
+
+  } catch (error: any) {
+    console.error('[Client Org-Intel Quick] Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to analyze organization' });
   }
 });
 

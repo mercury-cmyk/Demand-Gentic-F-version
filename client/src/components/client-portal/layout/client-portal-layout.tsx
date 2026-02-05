@@ -49,6 +49,7 @@ import {
   PhoneCall,
   Mail,
   ClipboardList,
+  Brain,
 } from 'lucide-react';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
@@ -88,6 +89,7 @@ const navigation = [
   { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
   { name: 'Order Requests', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList, description: 'AI-powered campaign ordering' },
   { name: 'Projects', href: '/client-portal/projects', icon: FolderKanban },
+  { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain, description: 'AI research & analysis' },
   { name: 'Preview Studio', href: '/preview-studio', icon: Sparkles },
   { name: 'Voice Simulation', href: '/client-portal/voice-simulation', icon: PhoneCall },
   { name: 'Email Simulation', href: '/client-portal/email-simulation', icon: Mail },

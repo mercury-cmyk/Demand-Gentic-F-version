@@ -2,6 +2,9 @@
  * Agentic Campaign Order Panel
  * AI-powered campaign ordering interface for client portal
  * Allows natural language campaign requests and AI-optimized order creation
+ * 
+ * ENHANCED: Uses organization intelligence to generate smarter recommendations
+ * based on client's ICP, business profile, and previous campaign patterns.
  */
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -28,10 +31,11 @@ import {
   Package, Send, Loader2, Sparkles, Target, Building2, Users,
   DollarSign, Calendar, Zap, ChevronRight, Check, AlertCircle,
   MessageSquare, Bot, Lightbulb, ArrowRight, Globe, Phone, Mail,
-  FileText, Link as LinkIcon, Upload, Plus, X, Trash2
+  FileText, Link as LinkIcon, Upload, Plus, X, Trash2, Brain
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useClientOrgIntelligence } from '@/hooks/use-client-org-intelligence';
 
 interface OrderRecommendation {
   campaignType: string;
@@ -110,6 +114,15 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   const [goalDescription, setGoalDescription] = useState('');
   const [recommendation, setRecommendation] = useState<any>(null);
   const [showAiReview, setShowAiReview] = useState(false);
+
+  // Organization Intelligence - provides client context for smarter recommendations
+  const { 
+    data: orgIntelData, 
+    isLoading: orgIntelLoading, 
+    buildContextSummary, 
+    getTargetingSuggestions,
+    getValueProposition 
+  } = useClientOrgIntelligence();
 
   // Context management
   const [contextUrls, setContextUrls] = useState<string[]>([]);
@@ -266,9 +279,13 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     }
   };
 
-  // Get AI recommendation based on goal
+  // Get AI recommendation based on goal - ENHANCED with organization intelligence
   const recommendMutation = useMutation({
     mutationFn: async (goal: string) => {
+      // Build organization context from intelligence
+      const organizationContext = buildContextSummary();
+      const targetingSuggestions = getTargetingSuggestions();
+      
       const res = await fetch('/api/client-portal/agentic/orders/recommend', {
         method: 'POST',
         headers: {
@@ -278,7 +295,23 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
         body: JSON.stringify({
           goal,
           contextUrls,
-          contextFiles: uploadedFiles
+          contextFiles: uploadedFiles,
+          // NEW: Include organization intelligence context
+          organizationContext,
+          organizationIntelligence: orgIntelData?.organization ? {
+            identity: orgIntelData.organization.identity,
+            offerings: orgIntelData.organization.offerings,
+            icp: orgIntelData.organization.icp,
+            positioning: orgIntelData.organization.positioning,
+          } : null,
+          // NEW: Include ICP-based targeting suggestions
+          targetingSuggestions,
+          // NEW: Include business profile info
+          businessProfile: orgIntelData?.businessProfile ? {
+            name: orgIntelData.businessProfile.legalBusinessName,
+            dbaName: orgIntelData.businessProfile.dbaName,
+            website: orgIntelData.businessProfile.website,
+          } : null,
         }),
       });
       if (!res.ok) throw new Error('Failed to get recommendations');
@@ -689,6 +722,37 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                </div>
               ) : (
                 <>
+              {/* Organization Intelligence Banner - Shows when org context is available */}
+              {orgIntelData?.hasIntelligence && (
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-4 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Brain className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-blue-800">Organization Intelligence Active</p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        AI recommendations will be personalized based on your ICP, value proposition, and previous campaign patterns.
+                      </p>
+                      {orgIntelData.organization?.icp?.industries?.length ? (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {orgIntelData.organization.icp.industries.slice(0, 4).map((ind: string) => (
+                            <Badge key={ind} variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                              {ind}
+                            </Badge>
+                          ))}
+                          {orgIntelData.organization.icp.industries.length > 4 && (
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                              +{orgIntelData.organization.icp.industries.length - 4} more
+                            </Badge>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Hero Section */}
               <div className="text-center mb-8">
                 <div className="inline-flex p-4 bg-gradient-to-br from-emerald-100 to-green-100 rounded-2xl mb-5 shadow-lg shadow-emerald-100/50">
@@ -696,7 +760,8 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                 </div>
                 <h3 className="text-2xl font-bold text-slate-800 mb-3">What would you like to achieve?</h3>
                 <p className="text-slate-500 max-w-xl mx-auto text-base leading-relaxed">
-                  Describe your campaign goal in natural language and our AI will recommend the best approach.
+                  Describe your campaign goal in natural language and our AI will recommend the best approach
+                  {orgIntelData?.hasIntelligence ? ' — powered by your organization intelligence.' : '.'}
                 </p>
               </div>
 

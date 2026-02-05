@@ -28,6 +28,7 @@ import {
   clientReports,
   leads,
   verificationCampaigns,
+  clientProjects,
 } from "@shared/schema";
 import { eq, and, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import {
@@ -133,11 +134,22 @@ function getClientContext(req: Request): ClientAgenticContext {
 
 /**
  * Get AI recommendation for campaign order based on goal
+ * ENHANCED: Uses organization intelligence to generate personalized recommendations
+ * based on client's ICP, business profile, and value proposition
  */
 router.post("/orders/recommend", async (req: Request, res: Response) => {
   try {
     const context = getClientContext(req);
-    const { goal, contextUrls, contextFiles } = req.body;
+    const { 
+      goal, 
+      contextUrls, 
+      contextFiles,
+      // NEW: Organization intelligence context
+      organizationContext,
+      organizationIntelligence,
+      targetingSuggestions,
+      businessProfile 
+    } = req.body;
 
     if (!goal) {
       return res.status(400).json({ success: false, message: "Goal is required" });
@@ -145,30 +157,102 @@ router.post("/orders/recommend", async (req: Request, res: Response) => {
 
     console.log(`[Client Agentic] Generating order recommendation for client ${context.clientAccountId}`);
     console.log(`[Client Agentic] Goal: ${goal.substring(0, 100)}...`);
+    console.log(`[Client Agentic] Has org intelligence: ${!!organizationIntelligence}`);
 
-    // Build context for AI
+    // Build context for AI - ENHANCED with organization intelligence
     let additionalContext = "";
+    
+    // Add organization intelligence context (priority context)
+    if (organizationContext) {
+      additionalContext += `\n\n=== CLIENT ORGANIZATION CONTEXT ===\n${organizationContext}`;
+    }
+    
+    // Add detailed ICP information if available
+    if (organizationIntelligence?.icp) {
+      const icp = organizationIntelligence.icp;
+      additionalContext += `\n\n=== IDEAL CUSTOMER PROFILE (ICP) ===`;
+      if (icp.industries?.length) {
+        additionalContext += `\nTarget Industries: ${icp.industries.join(", ")}`;
+      }
+      if (icp.personas?.length) {
+        additionalContext += `\nTarget Personas:`;
+        icp.personas.forEach((p: any) => {
+          additionalContext += `\n  - ${p.title}`;
+          if (p.painPoints?.length) additionalContext += ` (Pain Points: ${p.painPoints.join(", ")})`;
+          if (p.goals?.length) additionalContext += ` (Goals: ${p.goals.join(", ")})`;
+        });
+      }
+      if (icp.objections?.length) {
+        additionalContext += `\nCommon Objections: ${icp.objections.join(", ")}`;
+      }
+      if (icp.companySize) {
+        additionalContext += `\nTarget Company Size: ${icp.companySize}`;
+      }
+    }
+    
+    // Add value proposition context
+    if (organizationIntelligence?.positioning) {
+      const pos = organizationIntelligence.positioning;
+      additionalContext += `\n\n=== VALUE PROPOSITION ===`;
+      if (pos.oneLiner) additionalContext += `\nValue Prop: ${pos.oneLiner}`;
+      if (pos.valueProposition) additionalContext += `\nFull Value Prop: ${pos.valueProposition}`;
+      if (pos.differentiators?.length) additionalContext += `\nDifferentiators: ${pos.differentiators.join(", ")}`;
+      if (pos.competitors?.length) additionalContext += `\nMain Competitors: ${pos.competitors.join(", ")}`;
+    }
+    
+    // Add offerings context
+    if (organizationIntelligence?.offerings) {
+      const off = organizationIntelligence.offerings;
+      additionalContext += `\n\n=== OFFERINGS ===`;
+      if (off.coreProducts?.length) additionalContext += `\nProducts/Services: ${off.coreProducts.join(", ")}`;
+      if (off.problemsSolved?.length) additionalContext += `\nProblems Solved: ${off.problemsSolved.join(", ")}`;
+      if (off.useCases?.length) additionalContext += `\nUse Cases: ${off.useCases.join(", ")}`;
+    }
+    
+    // Add business profile
+    if (businessProfile) {
+      additionalContext += `\n\n=== BUSINESS PROFILE ===`;
+      if (businessProfile.name) additionalContext += `\nCompany Name: ${businessProfile.name}`;
+      if (businessProfile.dbaName) additionalContext += `\nDBA: ${businessProfile.dbaName}`;
+      if (businessProfile.website) additionalContext += `\nWebsite: ${businessProfile.website}`;
+    }
+    
+    // Add URL context
     if (contextUrls && contextUrls.length > 0) {
-      additionalContext += `\nRelevant URLs provided: ${contextUrls.join(", ")}`;
+      additionalContext += `\n\n=== ADDITIONAL CONTEXT ===\nRelevant URLs provided: ${contextUrls.join(", ")}`;
     }
     if (contextFiles && contextFiles.length > 0) {
       additionalContext += `\nFiles uploaded: ${contextFiles.map((f: any) => f.name).join(", ")}`;
     }
 
-    const prompt = `You are a B2B campaign strategist. Analyze this campaign goal and recommend the best approach.
+    // Build ICP-aware prompt
+    const icpGuidance = targetingSuggestions ? `
+IMPORTANT - USE THE CLIENT'S ICP TO GUIDE YOUR RECOMMENDATIONS:
+${targetingSuggestions.industries?.length ? `- Prefer these industries (from client ICP): ${targetingSuggestions.industries.join(", ")}` : ""}
+${targetingSuggestions.titles?.length ? `- Prefer these job titles (from client ICP): ${targetingSuggestions.titles.join(", ")}` : ""}
+${targetingSuggestions.companySize ? `- Target company size (from client ICP): ${targetingSuggestions.companySize}` : ""}
+` : "";
 
-GOAL: ${goal}
+    const prompt = `You are a B2B campaign strategist working for DemandGentic, a demand generation agency. 
+You are helping a client create a campaign order. You have access to the client's organization intelligence 
+including their business profile, ideal customer profile (ICP), value proposition, and offerings.
+
+CRITICAL: Use the client's ICP and organization context to generate PERSONALIZED recommendations.
+Do NOT suggest generic targeting - use the specific industries, personas, and company sizes from their ICP.
+
+CAMPAIGN GOAL: ${goal}
 ${additionalContext}
+${icpGuidance}
 
-Based on this goal, provide a recommendation in the following JSON format:
+Based on this goal AND THE CLIENT'S ORGANIZATION INTELLIGENCE, provide a recommendation in the following JSON format:
 {
   "recommendation": {
     "campaignType": "high_quality_leads|bant_leads|sql|appointment_generation|lead_qualification|content_syndication|webinar_invite|live_webinar|on_demand_webinar|executive_dinner|leadership_forum|conference|combo|call|email|data_validation",
     "suggestedVolume": number (realistic lead count based on goal),
     "targetAudience": {
-      "industries": ["industry1", "industry2"],
-      "titles": ["title1", "title2"],
-      "companySize": "description of company size range"
+      "industries": ["industry1", "industry2"] (USE ICP INDUSTRIES IF AVAILABLE),
+      "titles": ["title1", "title2"] (USE ICP PERSONAS IF AVAILABLE),
+      "companySize": "description of company size range (USE ICP COMPANY SIZE IF AVAILABLE)"
     },
     "channels": ["voice", "email"] or ["voice"] or ["email"],
     "estimatedCost": number (estimated total cost in USD),
@@ -177,7 +261,7 @@ Based on this goal, provide a recommendation in the following JSON format:
       "qualifiedLeads": "estimated qualified leads"
     }
   },
-  "rationale": "2-3 sentences explaining why this approach is recommended for the stated goal"
+  "rationale": "2-3 sentences explaining why this approach is recommended, referencing specific aspects of the client's ICP and value proposition"
 }
 
 Choose the most appropriate campaign type based on:
@@ -195,7 +279,7 @@ Return ONLY valid JSON, no markdown or explanation outside the JSON.`;
 
     const result = await generateJSON(prompt, { temperature: 0.4 });
 
-    console.log(`[Client Agentic] Recommendation generated successfully`);
+    console.log(`[Client Agentic] Recommendation generated successfully (ICP-aware: ${!!organizationIntelligence?.icp})`);
 
     res.json({
       success: true,
@@ -241,7 +325,59 @@ router.post("/orders/create", async (req: Request, res: Response) => {
     // Generate order number
     const orderNumber = `WO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
 
-    // Insert order into database
+    // Get client name for project naming
+    const [clientAccount] = await db
+      .select({ name: clientAccounts.name })
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, context.clientAccountId))
+      .limit(1);
+
+    const clientName = clientAccount?.name || 'Client';
+
+    // Create a project with pending status for admin review
+    const projectName = campaignType
+      ? `${campaignType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} - ${orderNumber}`
+      : `Order Request - ${orderNumber}`;
+
+    // Map frontend campaign types to projectTypeEnum values
+    const mapToProjectType = (type: string | undefined): 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom' => {
+      if (!type) return 'custom';
+      const mapping: Record<string, 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom'> = {
+        'call_campaign': 'call_campaign',
+        'email_campaign': 'email_campaign',
+        'combo_campaign': 'combo',
+        'lead_generation': 'verification',
+        'appointment_setting': 'call_campaign',
+        'data_enrichment': 'data_enrichment',
+        'market_research': 'custom',
+        'custom': 'custom',
+      };
+      return mapping[type] || 'custom';
+    };
+
+    const [newProject] = await db
+      .insert(clientProjects)
+      .values({
+        clientAccountId: context.clientAccountId,
+        name: projectName,
+        description: `Campaign order request from ${clientName}.
+Type: ${campaignType || 'Custom'}
+Volume: ${volumeRequested} leads
+Industries: ${industries?.join(', ') || 'Not specified'}
+Job Titles: ${jobTitles?.join(', ') || 'Not specified'}
+Geographies: ${geographies?.join(', ') || 'Not specified'}
+Timeline: ${deliveryTimeline || 'Standard'}
+Channels: ${channels?.join(', ') || 'Not specified'}
+${specialRequirements ? `\nSpecial Requirements: ${specialRequirements}` : ''}`,
+        status: 'pending',
+        requestedLeadCount: volumeRequested,
+        projectType: mapToProjectType(campaignType),
+      })
+      .returning();
+
+    console.log(`[Client Agentic] Project ${newProject.id} created for order ${orderNumber}`);
+
+    // Insert order into database (linked to project via metadata)
     const [newOrder] = await db
       .insert(clientPortalOrders)
       .values({
@@ -254,6 +390,7 @@ router.post("/orders/create", async (req: Request, res: Response) => {
         orderMonth: new Date().getMonth() + 1,
         orderYear: new Date().getFullYear(),
         metadata: {
+          projectId: newProject.id,
           campaignType,
           industries,
           jobTitles,
@@ -273,7 +410,7 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       })
       .returning();
 
-    console.log(`[Client Agentic] Order ${orderNumber} created successfully`);
+    console.log(`[Client Agentic] Order ${orderNumber} created successfully (Project: ${newProject.id})`);
 
     res.json({
       success: true,
@@ -281,6 +418,7 @@ router.post("/orders/create", async (req: Request, res: Response) => {
         orderId: newOrder.id,
         orderNumber: newOrder.orderNumber,
         status: newOrder.status,
+        projectId: newProject.id,
       },
     });
   } catch (error: any) {

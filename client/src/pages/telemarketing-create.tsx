@@ -4,6 +4,7 @@ import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audi
 import { Step2TelemarketingContent } from "@/components/campaign-builder/step2-telemarketing-content";
 import { Step0CampaignType } from "@/components/campaign-builder/step0-campaign-type";
 import { StepClientProject } from "@/components/campaign-builder/step-client-project";
+import { StepPhoneNumber } from "@/components/campaign-builder/step-phone-number";
 import { Step2bDialModeConfig } from "@/components/campaign-builder/step2b-dial-mode-config";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
 import { Step4Compliance } from "@/components/campaign-builder/step4-compliance";
@@ -29,6 +30,12 @@ export default function TelemarketingCreatePage() {
       title: "Client & Project",
       description: "Link this campaign to a client and project",
       component: StepClientProject,
+    },
+    {
+      id: "phone-number",
+      title: "Caller ID",
+      description: "Select the phone number for outbound calls",
+      component: StepPhoneNumber,
     },
     {
       id: "audience",
@@ -143,6 +150,9 @@ export default function TelemarketingCreatePage() {
         endDate: data.scheduling?.endDate || null,
         costPerLead: data.scheduling?.costPerLead ? parseFloat(data.scheduling.costPerLead) : null,
         qaParameters: data.qaParameters || null,
+        // Telnyx Phone Number Assignment
+        callerPhoneNumberId: data.callerPhoneNumberId || null,
+        callerPhoneNumber: data.callerPhoneNumber || null,
         // Campaign Context fields (AI Agent Campaign Layer)
         campaignObjective: data.campaignObjective || null,
         productServiceInfo: data.productServiceInfo || null,

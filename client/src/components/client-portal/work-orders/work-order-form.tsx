@@ -9,9 +9,11 @@
  * - Quick Start Templates
  * - Context/Resource Uploads
  * - Multi-step Wizard Flow
+ * - Organization Intelligence Context (NEW)
+ * - Client Profile Awareness (NEW)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,13 +37,16 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
-  FileText, Phone, Mail, Target, Users, Building2, MapPin,
+  FileText, Phone, Mail, Target, Users, Building2,
   Calendar, Loader2, CheckCircle2,
-  Sparkles, Upload, FileUp, X, ChevronRight, ArrowLeft,
-  Box, Lightbulb
+  Sparkles, X, ChevronRight, ArrowLeft,
+  Box, Lightbulb, Brain, AlertCircle, Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from "@/components/ui/card";
+import { useClientOrgIntelligence } from '@/hooks/use-client-org-intelligence';
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface WorkOrderFormProps {
   open: boolean;
@@ -61,7 +66,8 @@ interface WorkOrder {
   submittedAt?: string;
 }
 
-const QUICK_EXAMPLES = [
+// Default examples used when no organization intelligence is available
+const DEFAULT_QUICK_EXAMPLES = [
   {
     title: "ABM + Technographic Targeting",
     description: "Account-aware outreach with firmographic filters (revenue, employees), technology stack targeting (AWS/Azure), SIC/NAICS codes.",
@@ -73,6 +79,49 @@ const QUICK_EXAMPLES = [
     icon: FileText
   },
 ];
+
+// Generate personalized quick examples based on organization intelligence
+function generatePersonalizedExamples(orgContext: ReturnType<typeof useClientOrgIntelligence>['data']) {
+  if (!orgContext?.hasIntelligence || !orgContext.organization) {
+    return DEFAULT_QUICK_EXAMPLES;
+  }
+
+  const org = orgContext.organization;
+  const orgName = org.name || orgContext.clientName;
+  const industry = org.identity?.industry || org.industry || 'your industry';
+  const products = org.offerings?.coreProducts?.slice(0, 2).join(' and ') || 'your solutions';
+  const targetIndustries = org.icp?.industries?.slice(0, 2).join(' and ') || 'target industries';
+  const personas = org.icp?.personas?.slice(0, 2).map(p => p.title).join(' and ') || 'decision makers';
+  const problemsSolved = org.offerings?.problemsSolved?.slice(0, 2).join(', ') || 'key business challenges';
+  const differentiators = org.offerings?.differentiators?.[0] || 'unique value proposition';
+  const companySize = org.icp?.companySize || 'mid-size to enterprise';
+
+  const examples = [
+    {
+      title: `${orgName} Lead Generation`,
+      description: `Generate qualified leads from ${personas} at ${companySize} companies in ${targetIndustries} who need help with ${problemsSolved}.`,
+      icon: Target
+    },
+    {
+      title: `${industry} Decision Maker Outreach`,
+      description: `AI call campaign targeting ${personas} to introduce ${products} and highlight ${differentiators}.`,
+      icon: Phone
+    },
+    {
+      title: `ICP-Matched Appointment Setting`,
+      description: `Book meetings with ${personas} in ${targetIndustries} companies. Focus on ${problemsSolved} as conversation starters.`,
+      icon: Calendar
+    },
+    {
+      title: `Multi-Channel Campaign`,
+      description: `Combined email + call outreach to ${companySize} ${targetIndustries} companies, positioning ${products} as the solution for ${problemsSolved}.`,
+      icon: Mail
+    },
+  ];
+
+  // Return first 2 examples that are most relevant
+  return examples.slice(0, 2);
+}
 
 const ORDER_TYPES = [
   { value: 'lead_generation', label: 'Lead Generation', icon: Target },
@@ -89,6 +138,18 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
+
+  // Fetch organization intelligence context
+  const {
+    data: orgContext,
+    isLoading: isLoadingContext,
+    buildContextSummary,
+    getTargetingSuggestions,
+    getValueProposition,
+  } = useClientOrgIntelligence();
+
+  // Generate personalized quick examples based on organization intelligence
+  const quickExamples = generatePersonalizedExamples(orgContext);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -110,7 +171,25 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     // Agentic specific fields
     targetUrls: [] as string[],
     deliveryMethod: 'email',
+    // Organization context (attached automatically)
+    organizationContext: null as string | null,
+    useOrgIntelligence: true,
   });
+
+  // Auto-populate targeting suggestions from org intelligence when available
+  useEffect(() => {
+    if (orgContext?.hasIntelligence && formData.useOrgIntelligence) {
+      const suggestions = getTargetingSuggestions();
+      // Only auto-populate if fields are empty
+      setFormData(prev => ({
+        ...prev,
+        targetIndustries: prev.targetIndustries.length > 0 ? prev.targetIndustries : suggestions.industries,
+        targetTitles: prev.targetTitles.length > 0 ? prev.targetTitles : suggestions.titles,
+        targetCompanySize: prev.targetCompanySize || suggestions.companySize || '',
+        organizationContext: buildContextSummary(),
+      }));
+    }
+  }, [orgContext?.hasIntelligence]);
 
   // Temporary input states
   const [industryInput, setIndustryInput] = useState('');
@@ -185,6 +264,8 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
       specialRequirements: '',
       targetUrls: [],
       deliveryMethod: 'email',
+      organizationContext: null,
+      useOrgIntelligence: true,
     });
     setStep(1);
     setIndustryInput('');
@@ -208,15 +289,17 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     }));
   };
 
-  const handleQuickExample = (example: typeof QUICK_EXAMPLES[0]) => {
+  const handleQuickExample = (example: { title: string; description: string; icon: any }) => {
     setFormData(prev => ({
       ...prev,
       title: example.title,
       description: example.description
     }));
     toast({
-      title: "Template Applied",
-      description: "Goal description updated from example.",
+      title: orgContext?.hasIntelligence ? "Personalized Template Applied" : "Template Applied",
+      description: orgContext?.hasIntelligence
+        ? `Goal customized based on ${orgContext.organization?.name || orgContext.clientName}'s ICP.`
+        : "Goal description updated from example.",
     })
   };
 
@@ -286,6 +369,66 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
             {/* Step 1: Describe Goal */}
             {step === 1 && (
                 <div className="space-y-8 max-w-3xl mx-auto text-center">
+                    {/* Organization Context Banner */}
+                    {isLoadingContext ? (
+                      <div className="flex items-center justify-center gap-2 p-4 bg-slate-50 rounded-lg text-slate-500">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">Loading organization context...</span>
+                      </div>
+                    ) : orgContext?.hasIntelligence ? (
+                      <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 text-left">
+                        <CardContent className="p-4">
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-emerald-100 rounded-lg">
+                              <Brain className="w-5 h-5 text-emerald-600" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-semibold text-emerald-900 text-sm">
+                                  Organization Intelligence Active
+                                </h4>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                        <Info className="w-4 h-4 text-emerald-600" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <p>Your organization's profile, ICP, and offerings are being used to enhance AI suggestions.</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </div>
+                              <p className="text-sm text-emerald-700 mt-1">
+                                <span className="font-medium">{orgContext.organization?.name || orgContext.clientName}</span>
+                                {orgContext.organization?.identity?.industry && (
+                                  <span className="text-emerald-600"> • {orgContext.organization.identity.industry}</span>
+                                )}
+                              </p>
+                              {getValueProposition() && (
+                                <p className="text-xs text-emerald-600 mt-2 italic">
+                                  "{getValueProposition()}"
+                                </p>
+                              )}
+                              {orgContext.campaigns.length > 0 && (
+                                <p className="text-xs text-emerald-600 mt-2">
+                                  {orgContext.campaigns.length} previous campaign{orgContext.campaigns.length > 1 ? 's' : ''} on record
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <Alert className="text-left border-amber-200 bg-amber-50">
+                        <AlertCircle className="h-4 w-4 text-amber-600" />
+                        <AlertDescription className="text-amber-800 text-sm">
+                          <span className="font-medium">No organization intelligence found.</span> Set up your organization profile in Settings for better AI recommendations.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
                     <div className="space-y-2">
                         <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-4">
                             <Sparkles className="w-6 h-6" />
@@ -320,20 +463,39 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
                     <div className="space-y-4 pt-4 text-left">
                         <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-slate-100">
                             <Lightbulb className="w-4 h-4 text-amber-500" />
-                            Quick Examples — Click to populate:
+                            {orgContext?.hasIntelligence ? (
+                              <span>Personalized Examples for {orgContext.organization?.name || orgContext.clientName} — Click to populate:</span>
+                            ) : (
+                              <span>Quick Examples — Click to populate:</span>
+                            )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {QUICK_EXAMPLES.map((ex, i) => (
+                            {quickExamples.map((ex, i) => (
                                 <button
                                     key={i}
                                     onClick={() => handleQuickExample(ex)}
-                                    className="text-left p-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:shadow-md transition-all group bg-slate-50/50 hover:bg-white"
+                                    className={cn(
+                                      "text-left p-4 rounded-xl border hover:border-emerald-500 hover:shadow-md transition-all group hover:bg-white",
+                                      orgContext?.hasIntelligence
+                                        ? "border-emerald-200 bg-gradient-to-br from-emerald-50/50 to-teal-50/30"
+                                        : "border-slate-200 bg-slate-50/50"
+                                    )}
                                 >
                                     <div className="flex items-center gap-2 mb-2">
-                                        <div className="p-1.5 rounded bg-blue-100 text-blue-600 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
+                                        <div className={cn(
+                                          "p-1.5 rounded group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors",
+                                          orgContext?.hasIntelligence
+                                            ? "bg-emerald-100 text-emerald-600"
+                                            : "bg-blue-100 text-blue-600"
+                                        )}>
                                             <ex.icon className="w-4 h-4" />
                                         </div>
                                         <h4 className="font-semibold text-slate-900 dark:text-slate-200 text-sm">{ex.title}</h4>
+                                        {orgContext?.hasIntelligence && (
+                                          <Badge variant="secondary" className="text-[10px] h-4 bg-emerald-100 text-emerald-700 border-0">
+                                            ICP-Based
+                                          </Badge>
+                                        )}
                                     </div>
                                     <p className="text-xs text-slate-500 leading-relaxed">{ex.description}</p>
                                 </button>
@@ -347,12 +509,26 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
             {step === 2 && (
                 <div className="space-y-6 max-w-3xl mx-auto">
                     <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-lg flex gap-3">
-                        <Sparkles className="w-5 h-5 text-emerald-600 mt-0.5" />
+                        <div className="flex gap-2">
+                          <Sparkles className="w-5 h-5 text-emerald-600 mt-0.5" />
+                          {orgContext?.hasIntelligence && <Brain className="w-5 h-5 text-emerald-600 mt-0.5" />}
+                        </div>
                         <div>
-                            <h4 className="text-sm font-medium text-emerald-900">AI Analysis</h4>
+                            <h4 className="text-sm font-medium text-emerald-900">
+                              AI Analysis {orgContext?.hasIntelligence && '+ Organization Intelligence'}
+                            </h4>
                             <p className="text-sm text-emerald-700 mt-1">
-                                Based on your description, we've pre-configured the following targeting parameters. Please refine if needed.
+                                {orgContext?.hasIntelligence 
+                                  ? `Based on your description and ${orgContext.organization?.name || orgContext.clientName}'s ICP, we've pre-configured the targeting parameters below.`
+                                  : 'Based on your description, we\'ve pre-configured the following targeting parameters. Please refine if needed.'
+                                }
                             </p>
+                            {orgContext?.hasIntelligence && formData.targetIndustries.length > 0 && (
+                              <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> 
+                                ICP-based targeting suggestions applied
+                              </p>
+                            )}
                         </div>
                     </div>
 
