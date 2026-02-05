@@ -91,7 +91,6 @@ export default function AdminProjectRequests() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
-  const [campaignType, setCampaignType] = useState('lead_qualification');
   const [autoCreateCampaign, setAutoCreateCampaign] = useState(true);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -202,7 +201,8 @@ export default function AdminProjectRequests() {
       projectId: selectedProject.id,
       notes: approvalNotes,
       autoCreateCampaign,
-      campaignType,
+      // Use project's existing type set by client, fallback to lead_qualification
+      campaignType: selectedProject.projectType || 'lead_qualification',
     });
   };
 
@@ -658,49 +658,17 @@ export default function AdminProjectRequests() {
               </Label>
             </div>
 
-            {autoCreateCampaign && (
-              <div className="space-y-2">
-                <Label>Campaign Type</Label>
-                {selectedProject?.intakeRequestId ? (
-                    <div className="text-sm text-gray-700 p-2 bg-gray-50 rounded border">
-                        <strong>Auto-Detected from Request:</strong> {selectedProject.projectType || 'Custom'}
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Use "Lead Qualification" if uncertain, otherwise the system uses the connected intake request type.
-                        </p>
-                    </div>
-                ) : (
-                <Select value={campaignType} onValueChange={setCampaignType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="lead_qualification">
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-4 w-4" />
-                        Lead Qualification
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="appointment_setting">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        Appointment Setting
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="high_quality_leads">
-                      <div className="flex items-center gap-2">
-                        <Target className="h-4 w-4" />
-                        High Quality Leads
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="email">
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4" />
-                        Email Campaign
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                )}
+            {autoCreateCampaign && selectedProject?.projectType && (
+              <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <Target className="h-4 w-4 text-violet-600" />
+                  <span className="text-violet-900">
+                    <strong>Campaign Type:</strong> {selectedProject.projectType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                  </span>
+                </div>
+                <p className="text-xs text-violet-700 mt-1 ml-6">
+                  Set by client during project creation. All project materials will be applied to the campaign.
+                </p>
               </div>
             )}
 

@@ -397,28 +397,45 @@ export function CampaignAudienceSelector({ value, onChange, hideSummary = false 
               )}
 
               <div className="space-y-2">
-                {filteredLists.map((list) => (
-                  <Card 
-                    key={list.id} 
-                    className={`hover-elevate cursor-pointer transition-all ${selectedLists.includes(list.id) ? 'border-primary' : ''}`}
-                    data-testid={`list-card-${list.id}`}
-                    onClick={() => toggleSelection(selectedLists, list.id, 'selectedLists')}
-                  >
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Checkbox 
-                          checked={selectedLists.includes(list.id)}
-                          onCheckedChange={() => toggleSelection(selectedLists, list.id, 'selectedLists')}
-                        />
-                        <div>
-                          <p className="font-medium">{list.name}</p>
-                          <p className="text-sm text-muted-foreground">{list.recordIds?.length?.toLocaleString() || 0} contacts</p>
+                {listsLoading ? (
+                  <div className="text-center py-8 border rounded-lg bg-muted/30">
+                    <Loader2 className="h-8 w-8 mx-auto text-muted-foreground mb-3 animate-spin" />
+                    <p className="text-muted-foreground">Loading lists...</p>
+                  </div>
+                ) : filteredLists.length === 0 ? (
+                  <div className="text-center py-8 border rounded-lg bg-muted/30">
+                    <List className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                    <p className="text-muted-foreground font-medium">No lists found</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {searchQuery
+                        ? "Try a different search term"
+                        : "Create lists from the Lists page to use them here"}
+                    </p>
+                  </div>
+                ) : (
+                  filteredLists.map((list) => (
+                    <Card
+                      key={list.id}
+                      className={`hover-elevate cursor-pointer transition-all ${selectedLists.includes(list.id) ? 'border-primary' : ''}`}
+                      data-testid={`list-card-${list.id}`}
+                      onClick={() => toggleSelection(selectedLists, list.id, 'selectedLists')}
+                    >
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            checked={selectedLists.includes(list.id)}
+                            onCheckedChange={() => toggleSelection(selectedLists, list.id, 'selectedLists')}
+                          />
+                          <div>
+                            <p className="font-medium">{list.name}</p>
+                            <p className="text-sm text-muted-foreground">{list.recordIds?.length?.toLocaleString() || 0} contacts</p>
+                          </div>
                         </div>
-                      </div>
-                      <Badge variant="outline">Static</Badge>
-                    </CardContent>
-                  </Card>
-                ))}
+                        <Badge variant="outline">Static</Badge>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
               </div>
 
               {selectedLists.length > 0 && (
@@ -510,30 +527,47 @@ export function CampaignAudienceSelector({ value, onChange, hideSummary = false 
               )}
 
               <div className="space-y-2">
-                {filteredDomainSets.map((ds) => (
-                  <Card 
-                    key={ds.id} 
-                    className={`hover-elevate cursor-pointer transition-all ${selectedDomainSets.includes(ds.id) ? 'border-primary' : ''}`}
-                    data-testid={`domain-set-card-${ds.id}`}
-                    onClick={() => toggleSelection(selectedDomainSets, ds.id, 'selectedDomainSets')}
-                  >
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Checkbox 
-                          checked={selectedDomainSets.includes(ds.id)}
-                          onCheckedChange={() => toggleSelection(selectedDomainSets, ds.id, 'selectedDomainSets')}
-                        />
-                        <div>
-                          <p className="font-medium">{ds.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {ds.matchedAccounts ?? ds.totalUploaded ?? 0} accounts
-                          </p>
+                {domainSetsLoading ? (
+                  <div className="text-center py-8 border rounded-lg bg-muted/30">
+                    <Loader2 className="h-8 w-8 mx-auto text-muted-foreground mb-3 animate-spin" />
+                    <p className="text-muted-foreground">Loading domain sets...</p>
+                  </div>
+                ) : filteredDomainSets.length === 0 ? (
+                  <div className="text-center py-8 border rounded-lg bg-muted/30">
+                    <Globe className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                    <p className="text-muted-foreground font-medium">No domain sets found</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {searchQuery
+                        ? "Try a different search term"
+                        : "Create domain sets from the Domain Sets page to use them here"}
+                    </p>
+                  </div>
+                ) : (
+                  filteredDomainSets.map((ds) => (
+                    <Card
+                      key={ds.id}
+                      className={`hover-elevate cursor-pointer transition-all ${selectedDomainSets.includes(ds.id) ? 'border-primary' : ''}`}
+                      data-testid={`domain-set-card-${ds.id}`}
+                      onClick={() => toggleSelection(selectedDomainSets, ds.id, 'selectedDomainSets')}
+                    >
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            checked={selectedDomainSets.includes(ds.id)}
+                            onCheckedChange={() => toggleSelection(selectedDomainSets, ds.id, 'selectedDomainSets')}
+                          />
+                          <div>
+                            <p className="font-medium">{ds.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {ds.matchedAccounts ?? ds.totalUploaded ?? 0} accounts
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <Badge>ABM</Badge>
-                    </CardContent>
-                  </Card>
-                ))}
+                        <Badge>ABM</Badge>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

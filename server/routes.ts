@@ -4479,13 +4479,19 @@ export function registerRoutes(app: Express) {
       const typeFilter = req.query.type as string | undefined;
       let campaigns = await storage.getCampaigns();
 
+      console.log(`[GET /api/campaigns] Total campaigns from DB: ${campaigns.length}`);
+
       // Filter by type if specified
       if (typeFilter) {
         campaigns = campaigns.filter(c => c.type === typeFilter);
+        console.log(`[GET /api/campaigns] After type filter (${typeFilter}): ${campaigns.length}`);
       }
+
+      console.log(`[GET /api/campaigns] Returning ${campaigns.length} campaigns:`, campaigns.map(c => ({ id: c.id, name: c.name, type: c.type, status: c.status })));
 
       res.json(campaigns);
     } catch (error) {
+      console.error('[GET /api/campaigns] Error:', error);
       res.status(500).json({ message: "Failed to fetch campaigns" });
     }
   });

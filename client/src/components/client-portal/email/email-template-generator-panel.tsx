@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { sanitizeHtmlForIframePreview } from '@/lib/html-preview';
 
 interface GeneratedEmail {
   subject: string;
@@ -626,7 +627,7 @@ export function EmailTemplateGeneratorPanel({
 
               {/* Results Panel */}
               <div className="w-1/2 p-6 overflow-auto bg-slate-50">
-                <h3 className="font-semibold mb-4">Generated Emails</h3>
+                <h3 className="font-semibold mb-4">Generated Emails (Branded Design)</h3>
                 {generatedEmails.length > 0 ? (
                   <div className="space-y-4">
                     {generatedEmails.map((email, index) => (
@@ -669,54 +670,72 @@ export function EmailTemplateGeneratorPanel({
                                 <p className="text-sm text-muted-foreground">{email.preheader}</p>
                               </div>
                             )}
-                            {email.heroTitle && (
+                            {/* Show branded HTML preview if available */}
+                            {email.html ? (
                               <div>
-                                <Label className="text-xs text-muted-foreground">Hero Title</Label>
-                                <p className="font-semibold text-primary">{email.heroTitle}</p>
-                              </div>
-                            )}
-                            {email.heroSubtitle && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Hero Subtitle</Label>
-                                <p className="text-sm">{email.heroSubtitle}</p>
-                              </div>
-                            )}
-                            {email.intro && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Introduction</Label>
-                                <p className="text-sm bg-white p-2 rounded border">{email.intro}</p>
-                              </div>
-                            )}
-                            {email.valueBullets && email.valueBullets.length > 0 && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Key Value Points</Label>
-                                <ul className="text-sm list-disc list-inside space-y-1 bg-white p-2 rounded border">
-                                  {email.valueBullets.map((bullet, i) => (
-                                    <li key={i}>{bullet}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                            {email.ctaLabel && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Call to Action</Label>
-                                <Badge className="mt-1">{email.ctaLabel}</Badge>
-                              </div>
-                            )}
-                            {email.closingLine && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Closing</Label>
-                                <p className="text-sm text-muted-foreground italic">{email.closingLine}</p>
-                              </div>
-                            )}
-                            {/* Fallback to body if no structured content */}
-                            {!email.heroTitle && email.body && (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Body</Label>
-                                <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border">
-                                  {email.body}
+                                <Label className="text-xs text-muted-foreground">Email Preview (Branded Design)</Label>
+                                <div className="mt-2 rounded-lg border overflow-hidden bg-white" style={{ height: '320px' }}>
+                                  <iframe
+                                    title={`Email Preview ${index + 1}`}
+                                    srcDoc={sanitizeHtmlForIframePreview(email.html)}
+                                    className="w-full h-full border-0"
+                                    sandbox="allow-same-origin"
+                                    style={{ transform: 'scale(0.65)', transformOrigin: 'top left', width: '154%', height: '154%' }}
+                                  />
                                 </div>
                               </div>
+                            ) : (
+                              <>
+                                {/* Fallback to text display if no HTML */}
+                                {email.heroTitle && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Hero Title</Label>
+                                    <p className="font-semibold text-primary">{email.heroTitle}</p>
+                                  </div>
+                                )}
+                                {email.heroSubtitle && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Hero Subtitle</Label>
+                                    <p className="text-sm">{email.heroSubtitle}</p>
+                                  </div>
+                                )}
+                                {email.intro && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Introduction</Label>
+                                    <p className="text-sm bg-white p-2 rounded border">{email.intro}</p>
+                                  </div>
+                                )}
+                                {email.valueBullets && email.valueBullets.length > 0 && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Key Value Points</Label>
+                                    <ul className="text-sm list-disc list-inside space-y-1 bg-white p-2 rounded border">
+                                      {email.valueBullets.map((bullet, i) => (
+                                        <li key={i}>{bullet}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {email.ctaLabel && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Call to Action</Label>
+                                    <Badge className="mt-1">{email.ctaLabel}</Badge>
+                                  </div>
+                                )}
+                                {email.closingLine && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Closing</Label>
+                                    <p className="text-sm text-muted-foreground italic">{email.closingLine}</p>
+                                  </div>
+                                )}
+                                {!email.heroTitle && email.body && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Body</Label>
+                                    <div className="text-sm whitespace-pre-wrap bg-white p-3 rounded border">
+                                      {email.body}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </CardContent>

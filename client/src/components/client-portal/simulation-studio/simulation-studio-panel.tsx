@@ -559,34 +559,35 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
   };
 
   const SetupView = () => (
-    <div className="flex flex-col items-center justify-center h-full p-8 bg-gray-50 dark:bg-gray-900/50 overflow-y-auto">
-      <Card className={cn("w-full shadow-2xl transition-all duration-300", mode === 'voice' ? "max-w-4xl" : "max-w-lg")}>
-        <CardHeader className="text-center">
-          <div className="flex justify-center items-center mb-2">
-            <Sparkles className="h-8 w-8 text-amber-500" />
+    <div className="flex flex-col items-center h-full p-4 bg-gray-50 dark:bg-gray-900/50 overflow-y-auto">
+      <Card className="w-full max-w-5xl shadow-xl">
+        <CardHeader className="text-center py-3">
+          <div className="flex justify-center items-center gap-2">
+            <Sparkles className="h-6 w-6 text-amber-500" />
+            <CardTitle className="text-xl font-bold">Simulation Studio</CardTitle>
           </div>
-          <CardTitle className="text-2xl font-bold">Simulation Studio</CardTitle>
-          <CardDescription>Configure and launch your AI agent simulation.</CardDescription>
+          <CardDescription className="text-xs">Configure and launch your AI agent simulation</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label className="font-medium flex items-center gap-2"><Target className="h-4 w-4" />Campaign</Label>
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-              <SelectTrigger>
-                <SelectValue placeholder={campaignsLoading ? "Loading..." : "Choose a campaign"} />
-              </SelectTrigger>
-              <SelectContent>
-                {campaigns.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-3">
-            <Label className="font-medium">Interaction Mode</Label>
-            <div className="grid grid-cols-3 gap-2">
-              <Button variant={mode === 'voice' ? 'default' : 'outline'} onClick={() => setMode('voice')} className="flex items-center gap-2 h-12"><Phone className="h-4 w-4" /> Voice Call</Button>
-              <Button variant={mode === 'email' ? 'default' : 'outline'} onClick={() => setMode('email')} className="flex items-center gap-2 h-12"><Mail className="h-4 w-4" /> Email Sim</Button>
-              <Button variant={mode === 'text' ? 'default' : 'outline'} onClick={() => setMode('text')} className="flex items-center gap-2 h-12"><MessageSquare className="h-4 w-4" /> Text Chat</Button>
+        <CardContent className="space-y-4 pt-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium flex items-center gap-1.5"><Target className="h-3 w-3" />Campaign</Label>
+              <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder={campaignsLoading ? "Loading..." : "Choose a campaign"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {campaigns.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Interaction Mode</Label>
+              <div className="grid grid-cols-3 gap-1.5">
+                <Button variant={mode === 'voice' ? 'default' : 'outline'} onClick={() => setMode('voice')} className="flex items-center gap-1.5 h-9 text-xs"><Phone className="h-3 w-3" /> Voice</Button>
+                <Button variant={mode === 'email' ? 'default' : 'outline'} onClick={() => setMode('email')} className="flex items-center gap-1.5 h-9 text-xs"><Mail className="h-3 w-3" /> Email</Button>
+                <Button variant={mode === 'text' ? 'default' : 'outline'} onClick={() => setMode('text')} className="flex items-center gap-1.5 h-9 text-xs"><MessageSquare className="h-3 w-3" /> Text</Button>
+              </div>
             </div>
           </div>
 
@@ -594,45 +595,39 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
-              className="space-y-6"
+              className="space-y-3"
             >
-              {/* Agent Voice Selection */}
-              <div className="space-y-3">
-                <Label className="font-medium flex items-center gap-2">
-                  <Volume2 className="h-4 w-4 text-violet-600" />
+              {/* Agent Voice Selection - Compact horizontal scroll */}
+              <div className="space-y-2">
+                <Label className="text-xs font-medium flex items-center gap-1.5">
+                  <Volume2 className="h-3 w-3 text-violet-600" />
                   Agent Voice
                 </Label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
                   {AI_VOICES.map((voice) => (
                     <div
                       key={voice.id}
                       onClick={() => setSelectedVoice(voice.id)}
                       className={cn(
-                        "cursor-pointer rounded-xl border p-3 transition-all hover:shadow-md relative overflow-hidden group",
+                        "cursor-pointer rounded-lg border p-2 transition-all hover:shadow-sm flex-shrink-0 w-[120px]",
                         selectedVoice === voice.id
                           ? "border-primary bg-primary/5 ring-1 ring-primary"
                           : "border-border hover:border-primary/50"
                       )}
                     >
-                      <div className={`absolute inset-0 bg-gradient-to-br ${voice.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
-                      <div className="relative flex items-start gap-3">
+                      <div className="flex items-center gap-2">
                         <div className={cn(
-                          "flex items-center justify-center w-9 h-9 rounded-full text-white shadow-sm bg-gradient-to-br flex-shrink-0",
+                          "flex items-center justify-center w-7 h-7 rounded-full text-white text-xs bg-gradient-to-br flex-shrink-0",
                           voice.color
                         )}>
-                          {voice.gender === 'male' ? <User className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                          {voice.gender === 'male' ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <h4 className="font-semibold text-sm truncate">{voice.name}</h4>
-                            {selectedVoice === voice.id && (
-                              <Zap className="h-3 w-3 text-primary fill-primary animate-pulse" />
-                            )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium text-xs truncate">{voice.name}</span>
+                            {selectedVoice === voice.id && <Zap className="h-2.5 w-2.5 text-primary fill-primary" />}
                           </div>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
-                            <Badge variant="secondary" className="px-1 py-0 text-[9px] h-3.5">{voice.gender}</Badge>
-                            <Badge variant="outline" className="px-1 py-0 text-[9px] h-3.5">{voice.tone.split(',')[0]}</Badge>
-                          </div>
+                          <span className="text-[10px] text-muted-foreground">{voice.tone.split(',')[0]}</span>
                         </div>
                       </div>
                     </div>
@@ -640,37 +635,31 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
                 </div>
               </div>
 
-              <Separator />
+              <Separator className="my-2" />
 
-              {/* Prospect Persona Selection */}
-              <div className="space-y-3">
-                <Label className="font-medium flex items-center gap-2">
-                  <UserCircle className="h-4 w-4 text-amber-600" />
-                  Prospect Type (Who the AI simulates calling)
+              {/* Prospect Persona Selection - Compact grid */}
+              <div className="space-y-2">
+                <Label className="text-xs font-medium flex items-center gap-1.5">
+                  <UserCircle className="h-3 w-3 text-amber-600" />
+                  Prospect Type
                 </Label>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
                   {PROSPECT_PERSONAS.map((persona) => (
                     <div
                       key={persona.id}
                       onClick={() => setSelectedPersona(persona.id)}
                       className={cn(
-                        "cursor-pointer rounded-xl border p-3 transition-all hover:shadow-md relative overflow-hidden group",
+                        "cursor-pointer rounded-lg border p-2 transition-all hover:shadow-sm",
                         selectedPersona === persona.id
                           ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-500"
                           : "border-border hover:border-amber-400"
                       )}
                     >
-                      <div className={`absolute inset-0 bg-gradient-to-br ${persona.color} opacity-[0.03] group-hover:opacity-[0.08] transition-opacity`} />
-                      <div className="relative">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-semibold text-sm">{persona.name}</h4>
-                          {selectedPersona === persona.id && (
-                            <Zap className="h-3 w-3 text-amber-500 fill-amber-500 animate-pulse" />
-                          )}
-                        </div>
-                        <Badge variant="secondary" className="text-[10px] mb-2">{persona.role}</Badge>
-                        <p className="text-xs text-muted-foreground">{persona.description}</p>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="font-medium text-xs truncate">{persona.name.split(' ')[0]}</span>
+                        {selectedPersona === persona.id && <Zap className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />}
                       </div>
+                      <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">{persona.role}</Badge>
                     </div>
                   ))}
                 </div>
@@ -681,10 +670,9 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
           <Button
             onClick={handleStart}
             disabled={!selectedCampaignId || startSimulationMutation.isPending}
-            className="w-full h-12 text-lg"
-            size="lg"
+            className="w-full h-10"
           >
-            {startSimulationMutation.isPending ? <Loader2 className="animate-spin mr-2" /> : <Play className="mr-2" />}
+            {startSimulationMutation.isPending ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
             Start Simulation
           </Button>
         </CardContent>
@@ -693,67 +681,69 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
   );
 
   const SimulationView = () => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full p-4">
-      {/* Left Panel: Controls & Context */}
-      <Card className="md:col-span-1 flex flex-col">
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span><Settings className="inline-block mr-2" />Controls</span>
-            <Button variant="ghost" size="icon" onClick={handleReset}><RefreshCw className="h-4 w-4" /></Button>
+    <div className="flex gap-3 h-full p-3">
+      {/* Left Panel: Controls & Context - Fixed narrow width */}
+      <Card className="w-56 flex-shrink-0 flex flex-col">
+        <CardHeader className="py-3 px-3">
+          <CardTitle className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />Controls</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleReset}><RefreshCw className="h-3.5 w-3.5" /></Button>
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4 flex-grow">
-          <div className="space-y-2">
-            <Label>Campaign</Label>
-            <p className="font-semibold text-sm">{context?.campaignName}</p>
+        <CardContent className="space-y-3 flex-grow px-3 py-2">
+          <div>
+            <Label className="text-xs text-muted-foreground">Campaign</Label>
+            <p className="font-medium text-xs truncate">{context?.campaignName}</p>
           </div>
           <Separator />
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2"><Brain className="h-4 w-4" />AI Context</Label>
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p><Building2 className="inline-block h-3 w-3 mr-1" /> {context?.accountName || 'Generic Account'}</p>
-              <p><UserCircle className="inline-block h-3 w-3 mr-1" /> {context?.contactName || 'Generic Contact'}</p>
+          <div>
+            <Label className="text-xs flex items-center gap-1 text-muted-foreground"><Brain className="h-3 w-3" />AI Context</Label>
+            <div className="text-xs space-y-0.5 mt-1">
+              <p className="flex items-center gap-1 truncate"><Building2 className="h-3 w-3 flex-shrink-0" /> {context?.accountName || 'Generic Account'}</p>
+              <p className="flex items-center gap-1 truncate"><UserCircle className="h-3 w-3 flex-shrink-0" /> {context?.contactName || 'Generic Contact'}</p>
             </div>
           </div>
-          <Separator />
           {mode === 'voice' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="voice-output">Voice Output</Label>
-                <Switch id="voice-output" checked={voiceOutputEnabled} onCheckedChange={setVoiceOutputEnabled} />
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="voice-output" className="text-xs">Voice Output</Label>
+                  <Switch id="voice-output" checked={voiceOutputEnabled} onCheckedChange={setVoiceOutputEnabled} className="scale-90" />
+                </div>
+                <div className="text-center pt-2">
+                  <Button
+                    size="lg"
+                    className={cn("rounded-full h-14 w-14", isListening ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600')}
+                    onClick={isListening ? stopListening : startListening}
+                  >
+                    <Mic className="h-6 w-6" />
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground mt-1.5">{isListening ? "Listening..." : "Tap to speak"}</p>
+                </div>
               </div>
-              <div className="text-center">
-                <Button
-                  size="lg"
-                  className={cn("rounded-full h-20 w-20", isListening ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600')}
-                  onClick={isListening ? stopListening : startListening}
-                >
-                  <Mic className="h-8 w-8" />
-                </Button>
-                <p className="text-sm text-muted-foreground mt-2">{isListening ? "Listening..." : "Tap to speak"}</p>
-              </div>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>
 
-      {/* Right Panel: Chat/Transcript/Email */}
-      <Card className="md:col-span-2 flex flex-col h-full bg-slate-50 dark:bg-slate-900/50">
-        <CardHeader className="border-b bg-card">
-          <CardTitle className="flex items-center gap-2">
-            {mode === 'email' ? <Mail className="inline-block" /> : <History className="inline-block" />} 
-            {mode === 'email' ? "Email Thread" : "Conversation Transcript"}
+      {/* Right Panel: Chat/Transcript/Email - Takes remaining space */}
+      <Card className="flex-1 flex flex-col min-w-0 bg-slate-50 dark:bg-slate-900/50">
+        <CardHeader className="border-b bg-card py-2.5 px-4">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            {mode === 'email' ? <Mail className="h-4 w-4" /> : <History className="h-4 w-4" />} 
+            {mode === 'email' ? "Email Thread" : "Conversation"}
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex-grow overflow-hidden p-6">
-          <ScrollArea className="h-full pr-4" ref={scrollRef}>
-            <div className="space-y-4">
+        <CardContent className="flex-1 overflow-hidden p-3">
+          <ScrollArea className="h-full" ref={scrollRef}>
+            <div className="space-y-3 pr-2">
               {messages.map(renderMessage)}
               {chatMutation.isPending && renderMessage({ role: 'assistant', content: '...', timestamp: new Date() }, messages.length)}
             </div>
           </ScrollArea>
         </CardContent>
-        <div className="p-4 border-t bg-card">
+        <div className="p-3 border-t bg-card">
           <div className="relative">
             <Input
               ref={inputRef}
@@ -761,16 +751,16 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder={mode === 'voice' ? "Listening..." : mode === 'email' ? "Write a reply..." : "Type your message..."}
-              className="pr-12"
+              className="pr-10 h-9 text-sm"
               disabled={chatMutation.isPending || (mode === 'voice' && isListening)}
             />
             <Button
               size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
               onClick={() => handleSend()}
               disabled={chatMutation.isPending || !input.trim()}
             >
-              {chatMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {chatMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </div>
@@ -780,18 +770,18 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 overflow-hidden">
-        <DialogHeader className="px-6 py-4 border-b">
-          <DialogTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5 text-primary" />
+      <DialogContent className="max-w-5xl h-[85vh] max-h-[700px] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="px-4 py-2.5 border-b flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Bot className="h-4 w-4 text-primary" />
             AI Simulation Studio
           </DialogTitle>
-          <DialogDescription>
-            Test your AI agents in a realistic, interactive environment.
+          <DialogDescription className="text-xs">
+            Test your AI agents in a realistic environment
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-grow overflow-hidden bg-muted/20">
+        <div className="flex-1 overflow-hidden bg-muted/20">
           {view === 'setup' ? <SetupView /> : <SimulationView />}
         </div>
       </DialogContent>

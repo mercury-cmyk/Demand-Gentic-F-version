@@ -18,6 +18,7 @@ import {
   users,
   clientCampaignAccess,
   clientPortalActivityLogs,
+  campaignIntakeRequests,
 } from '@shared/schema';
 import { requireAuth } from '../auth';
 import { generateJSON } from '../services/vertex-ai';

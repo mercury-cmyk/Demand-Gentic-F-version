@@ -281,13 +281,7 @@ const AI_VOICES = [
   }
 ];
 
-// Mock Data for Phone Numbers & Sender Profiles
-const AVAILABLE_PHONE_NUMBERS = [
-  { id: 'pn_1', label: 'US Main', number: '+1 (555) 123-4567', region: 'US' },
-  { id: 'pn_2', label: 'UK Office', number: '+44 20 7123 4567', region: 'UK' },
-  { id: 'pn_3', label: 'Support Line', number: '+1 (800) 555-0199', region: 'Toll Free' },
-  { id: 'pn_4', label: 'California Regional', number: '+1 (415) 555-0199', region: 'US-West' },
-];
+// Phone numbers are fetched dynamically from Telnyx via /api/number-pool/numbers
 
 const AVAILABLE_SENDER_PROFILES = [
   { id: 'sp_1', name: 'Sarah Jenkins', email: 'sarah.j@demandgentic.com', role: 'Sales Director' },
@@ -557,30 +551,62 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 
-  // Fetch client's accounts for audience selection
+  // Fetch client's accounts for audience selection (client portal mode)
   const { data: clientAccounts = [], isLoading: accountsLoading } = useQuery({
-    queryKey: ['client-accounts-for-campaign'],
+    queryKey: ['client-crm-accounts-for-campaign'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/crm/accounts', {
+      const res = await fetch('/api/client-portal/crm/accounts?limit=500', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return data.accounts || [];
     },
     enabled: open && formData.audienceSource === 'lists' && mode === 'client',
   });
 
-  // Fetch client's contacts for audience selection
+  // Fetch client's contacts for audience selection (client portal mode)
   const { data: clientContacts = [], isLoading: contactsLoading } = useQuery({
-    queryKey: ['client-contacts-for-campaign'],
+    queryKey: ['client-crm-contacts-for-campaign'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/crm/contacts', {
+      const res = await fetch('/api/client-portal/crm/contacts?limit=1000', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return data.contacts || [];
     },
     enabled: open && formData.audienceSource === 'lists' && mode === 'client',
+  });
+
+  // Fetch admin lists for audience selection (admin mode only)
+  const { data: availableLists = [], isLoading: listsLoading } = useQuery<any[]>({
+    queryKey: ['/api/lists'],
+    enabled: open && formData.audienceSource === 'lists' && mode === 'admin',
+  });
+
+  // Fetch admin segments for audience selection (admin mode only)
+  const { data: availableSegments = [], isLoading: segmentsLoading } = useQuery<any[]>({
+    queryKey: ['/api/segments'],
+    enabled: open && formData.audienceSource === 'lists' && mode === 'admin',
+  });
+
+  // Fetch Telnyx phone numbers from number pool
+  const { data: telnyxPhoneNumbers = [], isLoading: phoneNumbersLoading } = useQuery({
+    queryKey: ['telnyx-phone-numbers'],
+    queryFn: async () => {
+      // Use direct fetch - number-pool API is accessible without auth
+      const res = await fetch('/api/number-pool/numbers?status=active');
+      if (!res.ok) {
+        console.error('[CampaignWizard] Failed to fetch Telnyx numbers:', res.status);
+        return [];
+      }
+      const data = await res.json();
+      console.log('[CampaignWizard] Loaded Telnyx numbers:', data.data?.length || 0);
+      return data.data || [];
+    },
+    enabled: open && (formData.channel === 'voice' || formData.channel === 'combo'),
+    staleTime: 30000, // Cache for 30 seconds
   });
 
   // Create/Update campaign mutation
@@ -620,9 +646,28 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       // Determine endpoint and method based on mode
       if (isEditMode && campaignId) {
         // PATCH for edit mode - update existing campaign
+        // Use apiRequest which handles auth automatically for admin mode
+        if (mode === 'admin') {
+          const res = await apiRequest('PATCH', `/api/campaigns/${campaignId}`, campaignPayload);
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.message || 'Failed to update campaign');
+          }
+          return res.json();
+        }
+
+        // Client portal mode - use token-based auth
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        const token = getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const res = await fetch(`/api/campaigns/${campaignId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(campaignPayload),
         });
 
@@ -633,29 +678,30 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         return res.json();
       } else {
         // POST for create mode
-        const endpoint = mode === 'admin'
-          ? '/api/campaign-wizard/create'
-          : '/api/client-portal/campaigns/create';
+        if (mode === 'admin') {
+          // Use apiRequest which handles auth automatically for admin mode
+          const bodyData = { ...formData, clientAccountId, status: launchStatus };
+          const res = await apiRequest('POST', '/api/campaign-wizard/create', bodyData);
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.message || 'Failed to create campaign');
+          }
+          return res.json();
+        }
 
-        const bodyData = mode === 'admin'
-          ? { ...formData, clientAccountId, status: launchStatus }
-          : { ...formData, status: launchStatus };
-
+        // Client portal mode - use token-based auth
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
         };
-
-        if (mode === 'client') {
-          const token = getToken();
-          if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-          }
+        const token = getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
         }
 
-        const res = await fetch(endpoint, {
+        const res = await fetch('/api/client-portal/campaigns/create', {
           method: 'POST',
           headers,
-          body: JSON.stringify(bodyData),
+          body: JSON.stringify({ ...formData, status: launchStatus }),
         });
 
         if (!res.ok) {
@@ -731,8 +777,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     setStep(1);
   };
 
-  // Voice preview functionality
-  const playVoicePreview = (voiceId: string) => {
+  // Voice preview functionality - uses client portal voice TTS API for authentic voice previews
+  const playVoicePreview = async (voiceId: string) => {
     if (isPlaying && playingVoice === voiceId) {
       stopVoicePreview();
       return;
@@ -746,29 +792,69 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     setIsPlaying(true);
     setPlayingVoice(voiceId);
 
-    // Use browser TTS for preview (in production, use actual AI voice API)
-    const sampleText = `Hello! I'm ${voice.name}. I'll be representing your company in conversations with prospects. My style is ${voice.description.toLowerCase()}. How can I help you today?`;
+    // Generate sample text for this voice
+    const sampleText = `Hello! I'm ${voice.name}. I'll be representing your company in conversations with prospects. ${voice.description} How can I help you today?`;
 
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(sampleText);
-      utterance.rate = 1.0;
-      utterance.pitch = voice.gender === 'male' ? 0.9 : 1.1;
-      utterance.onend = () => {
+    try {
+      // Use client portal voice TTS API which correctly routes to Google Cloud TTS
+      // with unique voice mappings for each voice ID
+      const token = getToken();
+      const response = await fetch('/api/client-portal/voice/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: sampleText,
+          voiceId: voiceId,
+          provider: voice.provider, // 'openai' or 'gemini'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate voice preview');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
         setIsPlaying(false);
         setPlayingVoice(null);
       };
-      utterance.onerror = () => {
+      
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
         setIsPlaying(false);
         setPlayingVoice(null);
+        toast({
+          title: 'Preview Failed',
+          description: 'Could not play voice preview',
+          variant: 'destructive',
+        });
       };
-      synthRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
+
+      audioRef.current = audio;
+      await audio.play();
+    } catch (error) {
+      console.error('Voice preview error:', error);
+      setIsPlaying(false);
+      setPlayingVoice(null);
+      toast({
+        title: 'Preview Failed',
+        description: 'Could not generate voice preview. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
   const stopVoicePreview = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
     setIsPlaying(false);
     setPlayingVoice(null);
@@ -1454,16 +1540,34 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                             onValueChange={(value) => setFormData(prev => ({ ...prev, selectedPhoneNumber: value }))}
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select a phone number" />
+                              <SelectValue placeholder={phoneNumbersLoading ? "Loading phone numbers..." : "Select a phone number"} />
                             </SelectTrigger>
                             <SelectContent>
-                              {AVAILABLE_PHONE_NUMBERS.map(phone => (
-                                <SelectItem key={phone.id} value={phone.id}>
-                                  {phone.label} ({phone.number}) - {phone.region}
+                              {phoneNumbersLoading ? (
+                                <SelectItem value="loading" disabled>
+                                  <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+                                  Loading...
                                 </SelectItem>
-                              ))}
+                              ) : telnyxPhoneNumbers.length === 0 ? (
+                                <SelectItem value="none" disabled>
+                                  No phone numbers available
+                                </SelectItem>
+                              ) : (
+                                telnyxPhoneNumbers.map((phone: any) => (
+                                  <SelectItem key={phone.id} value={phone.phoneNumberE164}>
+                                    {phone.displayName || phone.phoneNumberE164}
+                                    {phone.region && ` - ${phone.region}`}
+                                    {phone.areaCode && ` (${phone.areaCode})`}
+                                  </SelectItem>
+                                ))
+                              )}
                             </SelectContent>
                           </Select>
+                         {telnyxPhoneNumbers.length === 0 && !phoneNumbersLoading && (
+                           <p className="text-sm text-muted-foreground mt-2">
+                             No Telnyx phone numbers configured. Contact admin to add numbers.
+                           </p>
+                         )}
                       </div>
 
                       {/* Voice Selection Grid */}
@@ -1707,10 +1811,12 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       <div className="space-y-1">
                         <h4 className="text-base font-medium flex items-center gap-2">
                           <Database className="h-4 w-4 text-primary" />
-                          Select Admin Lists & Segments
+                          {mode === 'client' ? 'Select from Your CRM Data' : 'Select Admin Lists & Segments'}
                         </h4>
                         <p className="text-sm text-muted-foreground">
-                          Choose from approved contact segments and account lists
+                          {mode === 'client' 
+                            ? 'Choose accounts and contacts you\'ve uploaded to your CRM'
+                            : 'Choose from approved contact segments and account lists'}
                         </p>
                       </div>
                       <Button
@@ -1727,98 +1833,236 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                     {/* Always Show List Selection */}
                     <div className="space-y-6">
                       <div className="space-y-3">
-                        {accountsLoading ? (
+                        {(mode === 'client' ? (accountsLoading || contactsLoading) : (listsLoading || segmentsLoading)) ? (
                           <div className="flex items-center justify-center py-8">
                             <Loader2 className="h-6 w-6 animate-spin" />
                           </div>
+                        ) : mode === 'client' ? (
+                          /* Client Portal Mode - Show Client CRM Data */
+                          <ScrollArea className="h-64 border rounded-lg p-4 bg-muted/5">
+                            <div className="space-y-4">
+                              {/* Client Accounts */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">
+                                  Your Accounts ({clientAccounts.length})
+                                </h5>
+                                <div className="space-y-2">
+                                  {clientAccounts.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No accounts uploaded yet</p>
+                                      <p className="text-xs">Upload accounts from the CRM section</p>
+                                    </div>
+                                  ) : (
+                                    clientAccounts.slice(0, 50).map((account: any) => (
+                                      <div
+                                        key={account.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedAccounts.includes(account.id)
+                                            ? formData.selectedAccounts.filter(a => a !== account.id)
+                                            : [...formData.selectedAccounts, account.id];
+                                          setFormData(prev => ({ ...prev, selectedAccounts: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedAccounts.includes(account.id)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedAccounts: checked
+                                                ? [...prev.selectedAccounts, account.id]
+                                                : prev.selectedAccounts.filter(a => a !== account.id)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm truncate">{account.name}</p>
+                                          <p className="text-xs text-muted-foreground truncate">
+                                            {account.industry || 'No industry'} • {account.domain || 'No domain'}
+                                          </p>
+                                        </div>
+                                        <Badge variant="secondary" className="text-xs flex-shrink-0">Account</Badge>
+                                      </div>
+                                    ))
+                                  )}
+                                  {clientAccounts.length > 50 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">
+                                      Showing first 50 of {clientAccounts.length} accounts
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Client Contacts */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">
+                                  Your Contacts ({clientContacts.length})
+                                </h5>
+                                <div className="space-y-2">
+                                  {clientContacts.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No contacts uploaded yet</p>
+                                      <p className="text-xs">Upload contacts from the CRM section</p>
+                                    </div>
+                                  ) : (
+                                    clientContacts.slice(0, 50).map((contact: any) => (
+                                      <div
+                                        key={contact.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedContacts.includes(contact.id)
+                                            ? formData.selectedContacts.filter(c => c !== contact.id)
+                                            : [...formData.selectedContacts, contact.id];
+                                          setFormData(prev => ({ ...prev, selectedContacts: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedContacts.includes(contact.id)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedContacts: checked
+                                                ? [...prev.selectedContacts, contact.id]
+                                                : prev.selectedContacts.filter(c => c !== contact.id)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm truncate">
+                                            {contact.firstName} {contact.lastName}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground truncate">
+                                            {contact.title || 'No title'} • {contact.email || 'No email'}
+                                          </p>
+                                        </div>
+                                        <Badge variant="outline" className="text-xs flex-shrink-0">Contact</Badge>
+                                      </div>
+                                    ))
+                                  )}
+                                  {clientContacts.length > 50 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">
+                                      Showing first 50 of {clientContacts.length} contacts
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </ScrollArea>
                         ) : (
+                          /* Admin Mode - Show Lists & Segments */
                           <ScrollArea className="h-64 border rounded-lg p-4 bg-muted/5">
                             <div className="space-y-4">
                               {/* Contact Segments */}
                               <div>
                                 <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Contact Segments</h5>
                                 <div className="space-y-2">
-                                  {['Enterprise Decision Makers', 'Mid-Market IT Leaders', 'Healthcare Executives', 'Financial Services Contacts'].map((segment, idx) => (
-                                    <div 
-                                      key={`seg-${idx}`} 
-                                      className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
-                                      onClick={() => {
-                                        const id = `segment-${idx}`;
-                                        const newSelected = formData.selectedSegments.includes(id)
-                                          ? formData.selectedSegments.filter(s => s !== id)
-                                          : [...formData.selectedSegments, id];
-                                        setFormData(prev => ({ ...prev, selectedSegments: newSelected }));
-                                      }}
-                                    >
-                                      <Checkbox
-                                        checked={formData.selectedSegments.includes(`segment-${idx}`)}
-                                        onCheckedChange={(checked) => {
-                                          const id = `segment-${idx}`;
+                                  {availableSegments.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No segments available</p>
+                                      <p className="text-xs">Create segments from the Segments page</p>
+                                    </div>
+                                  ) : (
+                                    availableSegments.map((segment: any) => (
+                                      <div
+                                        key={segment.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedSegments.includes(segment.id)
+                                            ? formData.selectedSegments.filter(s => s !== segment.id)
+                                            : [...formData.selectedSegments, segment.id];
+                                          setFormData(prev => ({ ...prev, selectedSegments: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedSegments.includes(segment.id)}
+                                          onCheckedChange={(checked) => {
                                             setFormData(prev => ({
                                               ...prev,
                                               selectedSegments: checked
-                                                ? [...prev.selectedSegments, id]
-                                                : prev.selectedSegments.filter(s => s !== id)
+                                                ? [...prev.selectedSegments, segment.id]
+                                                : prev.selectedSegments.filter(s => s !== segment.id)
                                             }));
-                                        }}
-                                      />
-                                      <div className="flex-1">
-                                        <p className="font-medium text-sm">{segment}</p>
-                                        <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 5000 + 500).toLocaleString()} contacts</p>
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{segment.name}</p>
+                                          <p className="text-xs text-muted-foreground">{(segment.recordCountCache || 0).toLocaleString()} contacts</p>
+                                        </div>
+                                        <Badge variant="secondary" className="text-xs">Segment</Badge>
                                       </div>
-                                      <Badge variant="secondary" className="text-xs">Segment</Badge>
-                                    </div>
-                                  ))}
+                                    ))
+                                  )}
                                 </div>
                               </div>
 
-                              {/* Account Lists */}
+                              {/* Static Lists */}
                               <div>
-                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Account Lists</h5>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Static Lists</h5>
                                 <div className="space-y-2">
-                                  {['Target Account List Q1', 'Fortune 500 Tech', 'Named Accounts 2024', 'Expansion Targets'].map((list, idx) => (
-                                    <div 
-                                      key={`list-${idx}`} 
-                                      className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
-                                      onClick={() => {
-                                        const id = `list-${idx}`;
-                                        const newSelected = formData.selectedLists.includes(id)
-                                          ? formData.selectedLists.filter(l => l !== id)
-                                          : [...formData.selectedLists, id];
-                                        setFormData(prev => ({ ...prev, selectedLists: newSelected }));
-                                      }}
-                                    >
-                                      <Checkbox
-                                        checked={formData.selectedLists.includes(`list-${idx}`)}
-                                        onCheckedChange={(checked) => {
-                                          const id = `list-${idx}`;
+                                  {availableLists.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No lists available</p>
+                                      <p className="text-xs">Create lists from the Lists page</p>
+                                    </div>
+                                  ) : (
+                                    availableLists.map((list: any) => (
+                                      <div
+                                        key={list.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedLists.includes(list.id)
+                                            ? formData.selectedLists.filter(l => l !== list.id)
+                                            : [...formData.selectedLists, list.id];
+                                          setFormData(prev => ({ ...prev, selectedLists: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedLists.includes(list.id)}
+                                          onCheckedChange={(checked) => {
                                             setFormData(prev => ({
                                               ...prev,
                                               selectedLists: checked
-                                                ? [...prev.selectedLists, id]
-                                                : prev.selectedLists.filter(l => l !== id)
+                                                ? [...prev.selectedLists, list.id]
+                                                : prev.selectedLists.filter(l => l !== list.id)
                                             }));
-                                        }}
-                                      />
-                                      <div className="flex-1">
-                                        <p className="font-medium text-sm">{list}</p>
-                                        <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 500 + 50).toLocaleString()} accounts</p>
+                                          }}
+                                        />
+                                        <div className="flex-1">
+                                          <p className="font-medium text-sm">{list.name}</p>
+                                          <p className="text-xs text-muted-foreground">{(list.recordIds?.length || 0).toLocaleString()} contacts</p>
+                                        </div>
+                                        <Badge variant="outline" className="text-xs">List</Badge>
                                       </div>
-                                      <Badge variant="outline" className="text-xs">List</Badge>
-                                    </div>
-                                  ))}
+                                    ))
+                                  )}
                                 </div>
                               </div>
                             </div>
                           </ScrollArea>
                         )}
-                        {(formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
-                          <div className="p-3 bg-primary/5 rounded-lg flex items-center justify-between">
-                            <p className="text-sm font-medium">
-                              Selected: {formData.selectedSegments.length} segments, {formData.selectedLists.length} lists
-                            </p>
-                            <Badge variant="default">Ready to Assign</Badge>
-                          </div>
+                        {/* Selection Summary */}
+                        {mode === 'client' ? (
+                          (formData.selectedAccounts.length > 0 || formData.selectedContacts.length > 0) && (
+                            <div className="p-3 bg-primary/5 rounded-lg flex items-center justify-between">
+                              <p className="text-sm font-medium">
+                                Selected: {formData.selectedAccounts.length} accounts, {formData.selectedContacts.length} contacts
+                              </p>
+                              <Badge variant="default">Ready to Assign</Badge>
+                            </div>
+                          )
+                        ) : (
+                          (formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
+                            <div className="p-3 bg-primary/5 rounded-lg flex items-center justify-between">
+                              <p className="text-sm font-medium">
+                                Selected: {formData.selectedSegments.length} segments, {formData.selectedLists.length} lists
+                              </p>
+                              <Badge variant="default">Ready to Assign</Badge>
+                            </div>
+                          )
                         )}
                       </div>
                     </div>

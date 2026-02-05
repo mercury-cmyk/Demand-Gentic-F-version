@@ -681,15 +681,23 @@ export function ClientEmailTemplateBuilder({
     },
   });
 
-  // Use generated email in builder
+  // Use generated email in builder - load the full branded HTML design
   const useGeneratedEmail = (email: GeneratedEmail) => {
     setSubject(email.subject);
     setPreheader(email.preheader || '');
-    setBodyContent(email.bodyHtml || email.html || email.body || email.intro || '');
+    // Prefer the full branded HTML (email.html) which has the designed layout with brand styles
+    // This preserves the gradient hero, styled CTA buttons, value bullets section, etc.
+    if (email.html && looksLikeFullHtmlDocument(email.html)) {
+      // Load the complete branded HTML template directly
+      setBodyContent(email.html);
+    } else {
+      // Fallback to body fragment if no full HTML available
+      setBodyContent(email.bodyHtml || email.body || email.intro || '');
+    }
     setShowAiGenerate(false);
     toast({
       title: 'Email Loaded',
-      description: 'Generated email loaded into builder',
+      description: 'Branded email template loaded into builder',
     });
   };
 
