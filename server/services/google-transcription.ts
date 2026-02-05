@@ -10,7 +10,7 @@
  */
 
 import { db } from "../db";
-import { leads, activityLog } from "@shared/schema";
+import { leads, activityLog, callSessions } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
 
@@ -137,6 +137,9 @@ export async function submitTranscription(audioUrl: string): Promise<string | nu
       useEnhanced: true,
       // Enable profanity filter (optional, can be disabled)
       profanityFilter: false,
+      // Enable multi-channel recognition for stereo recordings (Agent vs Prospect)
+      audioChannelCount: 2,
+      enableSeparateRecognitionPerChannel: true,
     };
 
     const audio: RecognitionAudio = {
@@ -504,5 +507,60 @@ export async function submitStructuredTranscription(audioUrl: string): Promise<S
   } catch (error) {
     console.error('[Transcription] Error with structured transcription:', error);
     return null;
+  }
+}
+
+/**
+ * Transcribe call session using Google Speech-to-Text
+ */
+export async function transcribeCallSession(callSessionId: string): Promise<boolean> {
+  const startTime = Date.now();
+
+  try {
+    // Get call data
+    const [call] = await db.select().from(callSessions).where(eq(callSessions.id, callSessionId)).limit(1);
+
+    if (!call || !call.recordingUrl) {
+      console.log('[Transcription] ⚠️ No recording URL for call session:', callSessionId);
+      return false;
+    }
+
+    // Log transcription started
+    console.log(`[Transcription] 🎙️ STARTED: Call ${callSessionId} | Recording: ${call.recordingUrl.substring(0, 50)}...`);
+
+    // Submit for structured transcription using Google Speech-to-Text
+    const structuredResult = await submitStructuredTranscription(call.recordingUrl);
+    const duration = Date.now() - startTime;
+
+    if (!structuredResult) {
+      console.error(`[Transcription] ❌ FAILED: Call ${callSessionId} | Duration: ${duration}ms | No transcript returned`);
+      return false;
+    }
+
+    // Save transcript to call_sessions table
+    // Columns: aiTranscript (text), aiAnalysis (jsonb)
+    await db.update(callSessions)
+      .set({
+        aiTranscript: structuredResult.text,
+        aiAnalysis: {
+          utterances: structuredResult.utterances,
+          provider: 'google-vertex-stt',
+          transcribedAt: new Date().toISOString(),
+          durationMs: duration
+        }
+      })
+      .where(eq(callSessions.id, callSessionId));
+
+    const wordCount = structuredResult.text.split(/\s+/).length;
+    console.log(`[Transcription] ✅ COMPLETED: Call ${callSessionId} | Duration: ${duration}ms | Words: ${wordCount}`);
+
+    return true;
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    console.error(`[Transcription] ❌ ERROR: Call ${callSessionId} | Duration: ${duration}ms | Error: ${errorMessage}`);
+    return false;
   }
 }

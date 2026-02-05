@@ -38,7 +38,7 @@ async function transcribeWithGoogleCloud(recordingUrl: string): Promise<string |
     console.log(`[Google Cloud STT] Starting transcription...`);
     
     // Dynamic import to get transcription service
-    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const { submitTranscription } = await import('./server/services/google-transcription');
     const transcript = await submitTranscription(recordingUrl);
     
     if (!transcript) {
@@ -51,7 +51,6 @@ async function transcribeWithGoogleCloud(recordingUrl: string): Promise<string |
     console.error("[Google Cloud STT] Error:", error.message);
     return null;
   }
-}
 }
 
 // =============================================================================

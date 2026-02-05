@@ -105,7 +105,7 @@ export async function analyzeOpportunity(opportunityId: string) {
 
     Analyze the opportunity with ID: ${opportunityId}.
 
-    1. First, gather all necessary information about the opportunity and its communication history using the available tools. You should call both `getOpportunityDetails` and `getCommunicationHistory`.
+    1. First, gather all necessary information about the opportunity and its communication history using the available tools. You should call both 'getOpportunityDetails' and 'getCommunicationHistory'.
     2. Based on the data, assess the deal's health. Consider factors like the time since the last meaningful interaction. A deal with no reply for over 14 days is at high risk.
     3. Provide a "Next Best Action" for the sales rep. Be specific and creative. For example, instead of "follow up", suggest "Send an email referencing a recent company announcement and ask if the proposal aligns with their new goals."
     4. Provide a "Risk Assessment" (e.g., Low, Medium, High) and a brief justification.

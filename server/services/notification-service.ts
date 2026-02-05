@@ -73,12 +73,44 @@ export class NotificationService {
     await this.sendEmail({ to: this.adminEmail, subject, html });
   }
 
-  async notifyClientOfProjectApproval(project: typeof clientProjects.$inferSelect, clientEmail: string) {
+  async notifyClientOfProjectApprovalOld(project: typeof clientProjects.$inferSelect, clientEmail: string) {
     const subject = `Campaign Approved: ${project.name}`;
     const html = `
       <h2>Campaign Approved</h2>
       <p>Your campaign request "<strong>${project.name}</strong>" has been approved and is now Active.</p>
       <p>You can now view the campaign details in your dashboard.</p>
+    `;
+    await this.sendEmail({ to: clientEmail, subject, html });
+  }
+
+  async notifyClientOfProjectApproval(clientAccountId: string, projectName: string, campaignId?: string) {
+    const clientEmail = await this.getClientAccountPrimaryEmail(clientAccountId);
+    if (!clientEmail) {
+      console.log(`[NotificationService] No email found for client account ${clientAccountId}`);
+      return;
+    }
+    const subject = `Project Approved: ${projectName}`;
+    const html = `
+      <h2>Project Approved</h2>
+      <p>Your project "<strong>${projectName}</strong>" has been approved and is now active.</p>
+      ${campaignId ? '<p>A campaign has been automatically created for your project. You can view it in your dashboard.</p>' : ''}
+      <p>Login to your portal to view details and track progress.</p>
+    `;
+    await this.sendEmail({ to: clientEmail, subject, html });
+  }
+
+  async notifyClientOfProjectRejection(clientAccountId: string, projectName: string, reason: string) {
+    const clientEmail = await this.getClientAccountPrimaryEmail(clientAccountId);
+    if (!clientEmail) {
+      console.log(`[NotificationService] No email found for client account ${clientAccountId}`);
+      return;
+    }
+    const subject = `Project Request: ${projectName}`;
+    const html = `
+      <h2>Project Request Update</h2>
+      <p>Your project request "<strong>${projectName}</strong>" could not be approved at this time.</p>
+      <p><strong>Reason:</strong> ${reason}</p>
+      <p>Please contact your account manager for more details or submit a revised request.</p>
     `;
     await this.sendEmail({ to: clientEmail, subject, html });
   }

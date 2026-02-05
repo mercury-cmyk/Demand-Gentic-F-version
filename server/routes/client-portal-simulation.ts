@@ -50,35 +50,77 @@ interface SimulationSession {
 
 const simulationSessions = new Map<string, SimulationSession>();
 
+// Select only the fields needed for simulation flows.
+// Avoids hard failures if the database is missing newly-added optional columns.
+const CAMPAIGN_SIMULATION_SELECT = {
+  id: campaigns.id,
+  name: campaigns.name,
+  aiAgentSettings: campaigns.aiAgentSettings,
+  campaignObjective: campaigns.campaignObjective,
+  productServiceInfo: campaigns.productServiceInfo,
+  talkingPoints: campaigns.talkingPoints,
+  targetAudienceDescription: campaigns.targetAudienceDescription,
+  callScript: campaigns.callScript,
+  campaignObjections: campaigns.campaignObjections,
+  successCriteria: campaigns.successCriteria,
+  qualificationQuestions: campaigns.qualificationQuestions,
+};
+
 // Sample mock contact data pools for realistic simulations
 const MOCK_FIRST_NAMES = ['Alex', 'Jordan', 'Taylor', 'Morgan', 'Casey', 'Riley', 'Quinn', 'Cameron', 'Avery', 'Drew'];
 const MOCK_LAST_NAMES = ['Johnson', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson', 'Anderson', 'Thompson', 'Martinez', 'Garcia'];
-const MOCK_JOB_TITLES = [
-  'VP of Marketing',
-  'Director of Business Development',
-  'Chief Revenue Officer',
-  'Senior Director of Sales',
-  'Head of Demand Generation',
-  'VP of Sales Operations',
-  'Director of Growth',
-  'Chief Marketing Officer',
-  'VP of Partnerships',
-  'Head of Sales Enablement'
-];
 const MOCK_COMPANY_SUFFIXES = ['Technologies', 'Solutions', 'Group', 'Inc.', 'Corporation', 'Partners', 'Enterprises'];
 
+// Prospect persona configurations for different simulation scenarios
+const PROSPECT_PERSONAS: Record<string, { titles: string[]; disposition: string; description: string }> = {
+  'friendly_dm': {
+    titles: ['VP of Marketing', 'Director of Business Development', 'Head of Growth'],
+    disposition: 'friendly and open to conversation',
+    description: 'Open to learning more, actively looking for solutions'
+  },
+  'neutral_dm': {
+    titles: ['Director of Technology', 'VP of Operations', 'Senior Director of Sales'],
+    disposition: 'professional and neutral',
+    description: 'Needs to be convinced with clear value proposition'
+  },
+  'skeptical_dm': {
+    titles: ['IT Director', 'CTO', 'VP of Engineering'],
+    disposition: 'skeptical and challenging',
+    description: 'Has objections, tests your pitch, mentions competitors'
+  },
+  'busy_executive': {
+    titles: ['CEO', 'CFO', 'Chief Revenue Officer'],
+    disposition: 'time-constrained and direct',
+    description: 'Only has 30 seconds, needs quick value proposition'
+  },
+  'gatekeeper': {
+    titles: ['Executive Assistant', 'Office Manager', 'Receptionist'],
+    disposition: 'protective of the decision maker',
+    description: 'Screens calls, may require callback or email instead'
+  }
+};
+
 /**
- * Generate mock contact data for simulation
+ * Generate mock contact data for simulation based on persona
  */
-function generateMockContact(campaignName: string): MockContact {
+function generateMockContact(campaignName: string, personaPreset?: string): MockContact {
   const firstName = MOCK_FIRST_NAMES[Math.floor(Math.random() * MOCK_FIRST_NAMES.length)];
   const lastName = MOCK_LAST_NAMES[Math.floor(Math.random() * MOCK_LAST_NAMES.length)];
-  const jobTitle = MOCK_JOB_TITLES[Math.floor(Math.random() * MOCK_JOB_TITLES.length)];
-  
-  // Generate a realistic account name based on campaign or random suffix
+
+  // Select job title based on persona or random
+  let jobTitle: string;
+  if (personaPreset && PROSPECT_PERSONAS[personaPreset]) {
+    const persona = PROSPECT_PERSONAS[personaPreset];
+    jobTitle = persona.titles[Math.floor(Math.random() * persona.titles.length)];
+  } else {
+    const allTitles = Object.values(PROSPECT_PERSONAS).flatMap(p => p.titles);
+    jobTitle = allTitles[Math.floor(Math.random() * allTitles.length)];
+  }
+
+  // Generate a realistic account name
   const suffix = MOCK_COMPANY_SUFFIXES[Math.floor(Math.random() * MOCK_COMPANY_SUFFIXES.length)];
   const accountName = `Acme ${suffix}`;
-  
+
   return {
     fullName: `${firstName} ${lastName}`,
     firstName,
@@ -86,6 +128,16 @@ function generateMockContact(campaignName: string): MockContact {
     jobTitle,
     accountName,
   };
+}
+
+/**
+ * Get persona behavior description for system prompt
+ */
+function getPersonaBehavior(personaPreset?: string): string {
+  if (!personaPreset || !PROSPECT_PERSONAS[personaPreset]) {
+    return 'professional and engaged';
+  }
+  return PROSPECT_PERSONAS[personaPreset].disposition;
 }
 
 // Clean up old sessions periodically
@@ -105,7 +157,7 @@ setInterval(() => {
 router.post('/start', async (req: Request, res: Response) => {
   try {
     const clientUser = (req as any).clientUser;
-    const { campaignId, contactData } = req.body;
+    const { campaignId, contactData, voiceId, mode, personaPreset } = req.body;
 
     if (!campaignId) {
       return res.status(400).json({ error: 'Campaign ID is required' });
@@ -132,7 +184,7 @@ router.post('/start', async (req: Request, res: Response) => {
 
     // Get campaign details
     const [campaign] = await db
-      .select()
+      .select(CAMPAIGN_SIMULATION_SELECT)
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);
@@ -190,7 +242,12 @@ router.post('/start', async (req: Request, res: Response) => {
       console.log('[Simulation] No virtual agent assignment found');
     }
 
-    // Use provided contact data or generate mock contact
+    // Override voice if provided in request
+    if (voiceId) {
+      agentInfo.voice = voiceId;
+    }
+
+    // Use provided contact data or generate mock contact based on persona
     let simulationContact: MockContact;
     if (contactData && (contactData.contactName || contactData.accountName)) {
       // Use the selected contact from campaign audience
@@ -204,15 +261,18 @@ router.post('/start', async (req: Request, res: Response) => {
         accountName: contactData.accountName || 'Company',
       };
     } else {
-      // Generate mock contact for this simulation
-      simulationContact = generateMockContact(campaign.name);
+      // Generate mock contact for this simulation based on selected persona
+      simulationContact = generateMockContact(campaign.name, personaPreset);
     }
 
-    // Build simulation system prompt with contact context
-    const systemPrompt = buildSimulationPrompt(campaign, agentPersona, simulationContact);
+    // Get persona behavior for the system prompt
+    const personaBehavior = getPersonaBehavior(personaPreset);
+
+    // Build simulation system prompt with contact and persona context
+    const systemPrompt = buildSimulationPrompt(campaign, agentPersona, simulationContact, personaBehavior);
 
     // Generate first message based on campaign with contact data
-    const firstMessage = generateFirstMessage(campaign, simulationContact);
+    const firstMessage = generateFirstMessage(campaign, simulationContact, mode);
 
     // Create session
     const sessionId = uuidv4();
@@ -290,7 +350,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       }
 
       const [campaign] = await db
-        .select()
+        .select(CAMPAIGN_SIMULATION_SELECT)
         .from(campaigns)
         .where(eq(campaigns.id, campaignId))
         .limit(1);
@@ -412,7 +472,23 @@ async function generateGeminiResponse(
  * Generate first message based on campaign data and mock contact
  * Uses the standard opening format: "Hello, may I please speak with [Name], the [Title] at [Company]?"
  */
-function generateFirstMessage(campaign: any, mockContact: MockContact): string {
+function generateFirstMessage(campaign: any, mockContact: MockContact, mode?: string): string {
+  if (mode === 'email') {
+    return `Subject: Partnership with ${mockContact.accountName}
+
+Hi ${mockContact.firstName},
+
+I hope you're having a great week.
+
+I'm reaching out because I believe we can help ${mockContact.accountName} achieve its growth goals this quarter.
+
+Would you be open to a brief conversation?
+
+Best regards,
+${campaign.aiAgentSettings?.persona?.name || 'AI Assistant'}
+${campaign.aiAgentSettings?.persona?.companyName || 'DemandGentic'}`;
+  }
+
   // Check if campaign has AI agent settings with opening script
   if (campaign.aiAgentSettings?.scripts?.opening) {
     // Substitute mock contact variables in the custom opening script
@@ -436,12 +512,12 @@ function generateFirstMessage(campaign: any, mockContact: MockContact): string {
 /**
  * Build the simulation system prompt from campaign data
  */
-function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?: MockContact): string {
+function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?: MockContact, personaBehavior?: string): string {
   const parts: string[] = [];
 
   parts.push(`You are an AI sales development representative for a campaign called "${campaign.name}".`);
   parts.push(`This is a SIMULATION MODE where the user is playing the role of a prospect to test your capabilities.`);
-  
+
   // Add mock contact context so AI knows who it's speaking with
   if (mockContact) {
     parts.push(`\n## PROSPECT CONTEXT (The person you are calling)`);
@@ -449,6 +525,9 @@ function buildSimulationPrompt(campaign: any, agentPersona: string, mockContact?
     parts.push(`- First Name: ${mockContact.firstName}`);
     parts.push(`- Job Title: ${mockContact.jobTitle}`);
     parts.push(`- Company: ${mockContact.accountName}`);
+    if (personaBehavior) {
+      parts.push(`- Disposition: The prospect is ${personaBehavior}`);
+    }
     parts.push(`\nUse this context throughout the conversation. Address them by name when appropriate.`);
     parts.push(`When they confirm their identity, acknowledge it: "Great, thanks for confirming [Name]."`);
     parts.push(`Reference their role and company naturally in your pitch.`);
@@ -670,7 +749,7 @@ router.post('/generate-email-template', async (req: Request, res: Response) => {
 
     // Get campaign details
     const [campaign] = await db
-      .select()
+      .select(CAMPAIGN_SIMULATION_SELECT)
       .from(campaigns)
       .where(eq(campaigns.id, campaignId))
       .limit(1);

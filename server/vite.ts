@@ -62,11 +62,21 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
       let page = await vite.transformIndexHtml(url, template);
-      // Strip Vite HMR client script to prevent ws:// connection attempts
-      page = page.replace(
-        /<script\b[^>]*src="\/\@vite\/client"[^>]*><\/script>/g,
-        "",
-      );
+      // Strip Vite client script to prevent ws:// connection attempts (relative or absolute URLs).
+      page = page
+        .replace(
+          /<script\b[^>]*src=(["'])[^"']*\/\@vite\/client\1[^>]*>\s*<\/script>/gi,
+          "",
+        )
+        .replace(
+          /<script\b[^>]*>\s*import\s+(["'])[^"']*\/\@vite\/client\1;?\s*<\/script>/gi,
+          "",
+        )
+        .replace(
+          /<script\b[^>]*>\s*import\(\s*(["'])[^"']*\/\@vite\/client\1\s*\)\s*;?\s*<\/script>/gi,
+          "",
+        )
+        .replace(/\/\@vite\/client\b/gi, "/__vite_client_disabled__");
       res
         .status(200)
         .set({ "Content-Type": "text/html", "Cache-Control": "no-store" })

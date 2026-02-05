@@ -2307,26 +2307,26 @@ export default function ClientPortalDashboard() {
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold">Preview Studio</h2>
-                <p className="text-muted-foreground">Experience your AI agent in action</p>
+                <h2 className="text-2xl font-bold">Simulation Studio</h2>
+                <p className="text-muted-foreground">Test and experience your AI agents in action</p>
               </div>
             </div>
 
-            {/* Main Layout */}
+            {/* Main Layout - Clean Single Entry Point */}
             <div className="grid lg:grid-cols-12 gap-6">
-              {/* Left Sidebar: Campaign & Scenario Selection */}
+              {/* Left: Campaign Selection */}
               <div className="lg:col-span-4 space-y-4">
-                {/* Campaign Selection */}
                 <Card className="border-2 border-violet-200 dark:border-violet-800">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                       <Target className="h-4 w-4 text-violet-600" />
                       Select Campaign
                     </CardTitle>
+                    <CardDescription>Choose the campaign to simulate</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <Select value={previewCampaignId} onValueChange={setPreviewCampaignId}>
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className="w-full h-12">
                         <SelectValue placeholder="Choose a campaign..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -2349,120 +2349,18 @@ export default function ClientPortalDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Test Scenarios */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <TestTube className="h-4 w-4 text-purple-600" />
-                      Test Scenario
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {[
-                      { id: 'cold', label: 'Cold Introduction', desc: 'First-time outreach to a prospect', icon: Phone },
-                      { id: 'gatekeeper', label: 'Gatekeeper Navigation', desc: 'Getting past the receptionist', icon: Shield },
-                      { id: 'budget', label: 'Budget Objection', desc: 'Prospect says they have no budget', icon: DollarSign },
-                      { id: 'timing', label: 'Timing Objection', desc: 'Prospect says now is not a good time', icon: Clock },
-                      { id: 'competitor', label: 'Competitor Objection', desc: 'Prospect uses a competitor', icon: Users },
-                      { id: 'decision', label: 'Decision Maker', desc: 'Speaking with a decision maker', icon: Crown },
-                    ].map((scenario) => (
-                      <div
-                        key={scenario.id}
-                        onClick={() => setSelectedScenario(scenario.id)}
-                        className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                          selectedScenario === scenario.id
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-300 dark:border-violet-700'
-                            : 'border-transparent hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
-                            selectedScenario === scenario.id
-                              ? 'bg-violet-100 dark:bg-violet-800'
-                              : 'bg-muted'
-                          }`}>
-                            <scenario.icon className={`h-4 w-4 ${
-                              selectedScenario === scenario.id ? 'text-violet-600' : 'text-muted-foreground'
-                            }`} />
-                          </div>
-                          <div>
-                            <p className="font-medium text-sm">{scenario.label}</p>
-                            <p className="text-xs text-muted-foreground">{scenario.desc}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-              </div>
-
-              {/* Right Area: Simulation Mode & Launch */}
-              <div className="lg:col-span-8 space-y-4">
-                {/* Simulation Mode */}
-                <Card className="border-2 border-violet-200 dark:border-violet-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Simulation Mode</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div
-                        onClick={() => setSimulationMode('text')}
-                        className={`p-6 rounded-xl cursor-pointer transition-all border-2 ${
-                          simulationMode === 'text'
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-400'
-                            : 'border-muted hover:border-violet-200'
-                        }`}
-                      >
-                        <div className="flex flex-col items-center text-center">
-                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 ${
-                            simulationMode === 'text'
-                              ? 'bg-gradient-to-br from-violet-500 to-purple-600'
-                              : 'bg-muted'
-                          }`}>
-                            <MessageSquare className={`h-7 w-7 ${simulationMode === 'text' ? 'text-white' : 'text-muted-foreground'}`} />
-                          </div>
-                          <h4 className="font-semibold">Text Chat</h4>
-                          <p className="text-xs text-muted-foreground mt-1">Chat with your AI agent</p>
-                        </div>
-                      </div>
-                      <div
-                        onClick={() => setSimulationMode('voice')}
-                        className={`p-6 rounded-xl cursor-pointer transition-all border-2 ${
-                          simulationMode === 'voice'
-                            ? 'bg-violet-50 dark:bg-violet-900/20 border-violet-400'
-                            : 'border-muted hover:border-violet-200'
-                        }`}
-                      >
-                        <div className="flex flex-col items-center text-center">
-                          <div className={`h-14 w-14 rounded-full flex items-center justify-center mb-3 ${
-                            simulationMode === 'voice'
-                              ? 'bg-gradient-to-br from-violet-500 to-purple-600'
-                              : 'bg-muted'
-                          }`}>
-                            <Phone className={`h-7 w-7 ${simulationMode === 'voice' ? 'text-white' : 'text-muted-foreground'}`} />
-                          </div>
-                          <h4 className="font-semibold">Voice Call</h4>
-                          <p className="text-xs text-muted-foreground mt-1">Speak with your AI agent</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Email Template Generation - Restored Feature */}
+                {/* Email Template Generation */}
                 <Card className="border-2 border-indigo-200 dark:border-indigo-800">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Mail className="h-4 w-4 text-indigo-600" />
-                        Email Template Generation
+                        Email Templates
                       </div>
-                      <Badge variant="outline" className="bg-indigo-50">Content</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                     <div 
+                     <div
                         onClick={() => setShowEmailGenerator(true)}
                         className="p-4 rounded-xl cursor-pointer transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 flex items-center justify-between"
                       >
@@ -2472,11 +2370,58 @@ export default function ClientPortalDashboard() {
                           </div>
                           <div>
                             <h4 className="font-semibold text-sm">Generate AI Email Sequences</h4>
-                            <p className="text-xs text-muted-foreground">Create personalized outreach templates</p>
+                            <p className="text-xs text-muted-foreground">Create personalized outreach</p>
                           </div>
                         </div>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Right: Simulation Options */}
+              <div className="lg:col-span-8 space-y-4">
+                {/* Voice Simulation Card */}
+                <Card
+                  className={`border-2 cursor-pointer transition-all hover:shadow-lg ${
+                    previewCampaignId
+                      ? 'border-violet-300 hover:border-violet-400'
+                      : 'border-slate-200 opacity-60'
+                  }`}
+                  onClick={() => {
+                    if (previewCampaignId) {
+                      setSelectedCampaignForSimulation(previewCampaignId);
+                      setShowSimulationPanel(true);
+                    }
+                  }}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex items-start gap-6">
+                      <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-200">
+                        <Phone className="h-8 w-8 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-semibold mb-2">Voice & Text Simulation</h3>
+                        <p className="text-muted-foreground mb-4">
+                          Experience your AI agent with realistic voice conversations or text chat.
+                          Select from multiple voice personas and test different scenarios.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Voice Call</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Text Chat</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Email Preview</Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Multiple Voices</Badge>
+                        </div>
+                      </div>
+                      <Button
+                        size="lg"
+                        className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+                        disabled={!previewCampaignId}
+                      >
+                        <Play className="h-5 w-5 mr-2" />
+                        Launch
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -2494,13 +2439,19 @@ export default function ClientPortalDashboard() {
                         <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
                           <Brain className="h-4 w-4 text-violet-600" />
                         </div>
-                        <span className="text-sm">AI agent with your campaign's intelligence</span>
+                        <span className="text-sm">AI agent with campaign intelligence</span>
+                      </div>
+                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
+                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                          <Volume2 className="h-4 w-4 text-violet-600" />
+                        </div>
+                        <span className="text-sm">Multiple voice personas (male/female)</span>
                       </div>
                       <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
                         <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
                           <Building className="h-4 w-4 text-violet-600" />
                         </div>
-                        <span className="text-sm">Account-aware conversations</span>
+                        <span className="text-sm">Account & contact context aware</span>
                       </div>
                       <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
                         <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
@@ -2508,30 +2459,20 @@ export default function ClientPortalDashboard() {
                         </div>
                         <span className="text-sm">Real-time objection handling</span>
                       </div>
-                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
-                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                          <UserCheck className="h-4 w-4 text-violet-600" />
-                        </div>
-                        <span className="text-sm">Personalized engagement</span>
-                      </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Launch Button */}
-                <Button
-                  size="lg"
-                  className="w-full h-14 text-lg bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-lg"
-                  disabled={!previewCampaignId}
-                  onClick={() => {
-                    if (previewCampaignId) {
-                      setShowPreviewStudio(true);
-                    }
-                  }}
-                >
-                  <Play className="h-5 w-5 mr-2" />
-                  {previewCampaignId ? 'Start Simulation & Preview' : 'Select a Campaign to Start'}
-                </Button>
+                {/* Help Text */}
+                {!previewCampaignId && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-amber-800 dark:text-amber-200">Select a Campaign</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-300">Choose a campaign from the dropdown to start simulating your AI agent.</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -4062,7 +4003,10 @@ export default function ClientPortalDashboard() {
         onClose={() => setShowExportDialog(false)}
       />
 
-      {/* Voice Simulation Panel */}
+      {/* Unified Simulation Studio Panel
+          Single entry point for all simulation: Voice, Text, Email
+          Supports multiple voice personas (male/female) with proper context awareness
+      */}
       <CampaignSimulationPanel
         open={showSimulationPanel}
         onOpenChange={setShowSimulationPanel}
@@ -4100,26 +4044,6 @@ export default function ClientPortalDashboard() {
 
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
-
-      {/* Campaign Creation Wizard - Disabled for order-only mode
-          Clients now submit campaign requests via the AI agent order panel.
-          Campaign configuration is handled by the DemandGentic team.
-      <CampaignCreationWizard
-        open={showCampaignWizard}
-        onOpenChange={setShowCampaignWizard}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
-          queryClient.invalidateQueries({ queryKey: ['work-orders'] });
-        }}
-      />
-      */}
-
-      {/* Preview Studio - AI Agent voice preview and testing */}
-      <PreviewStudio
-        open={showPreviewStudio}
-        onOpenChange={setShowPreviewStudio}
-        preselectedCampaignId={previewCampaignId}
-      />
     </div>
   );
 }

@@ -62,6 +62,34 @@ const EXAMPLE_PROMPTS = [
   "I need help with an invoice issue",
 ];
 
+// Add missing imports
+import { motion, AnimatePresence } from 'framer-motion';
+import { Textarea } from '@/components/ui/textarea';
+
+// Typing Indicator Component (Unified)
+function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-1 p-2">
+      <motion.div
+        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
+        animate={{ y: [0, -5, 0] }}
+        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <motion.div
+        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
+        animate={{ y: [0, -5, 0] }}
+        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
+      />
+      <motion.div
+        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
+        animate={{ y: [0, -5, 0] }}
+        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
+      />
+      <span className="text-xs text-muted-foreground ml-2">AgentX is thinking...</span>
+    </div>
+  );
+}
+
 export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -69,95 +97,10 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
   const [isListening, setIsListening] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null); // Changed to TextArea
   const { toast } = useToast();
 
-  const getToken = () => localStorage.getItem('clientPortalToken');
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  // Chat mutation
-  const chatMutation = useMutation({
-    mutationFn: async (message: string) => {
-      const res = await fetch('/api/client-portal/agent/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          message,
-          conversationHistory,
-        }),
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Failed to send message');
-      }
-
-      return res.json();
-    },
-    onSuccess: (data) => {
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: data.response,
-        actions: data.actions,
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-      setConversationHistory(data.conversationHistory);
-
-      // Handle navigation if requested
-      if (data.navigateTo && onNavigate) {
-        onNavigate(data.navigateTo);
-      }
-      
-      // Auto-speak if the response is from a voice interaction or generally if enabled
-      // For now, we'll speak it if it's less than 200 chars to avoid reading long reports
-      if (data.response && data.response.length < 300) {
-         speak(data.response);
-      }
-
-      // Show toast for completed actions
-      if (data.actions?.length > 0) {
-        const successActions = data.actions.filter((a: any) => a.result.success);
-        if (successActions.length > 0) {
-          toast({
-            title: 'Actions completed',
-            description: `${successActions.length} action(s) executed successfully`,
-          });
-        }
-      }
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
-
-  const handleSend = useCallback(() => {
-    if (!input.trim() || chatMutation.isPending) return;
-
-    const userMessage: Message = {
-      role: 'user',
-      content: input.trim(),
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    chatMutation.mutate(input.trim());
-    setInput('');
-  }, [input, chatMutation]);
+// ... existing code ...
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -166,122 +109,30 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
     }
   };
 
-  const handleQuickAction = (prompt: string) => {
-    setInput(prompt);
-    // Auto-send after a brief delay for better UX
-    setTimeout(() => {
-      const userMessage: Message = {
-        role: 'user',
-        content: prompt,
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, userMessage]);
-      chatMutation.mutate(prompt);
-      setInput('');
-    }, 100);
-  };
-
-  // Voice input (Web Speech API) - push-to-talk
-  const recognitionRef = useRef<any>(null);
-
-  const startVoiceInput = () => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      toast({
-        title: 'Voice not supported',
-        description: 'Your browser does not support voice input',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (isListening) return;
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-    recognition.onerror = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(transcript);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  };
-
-  const stopVoiceInput = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {
-        // ignore
-      }
-      recognitionRef.current = null;
-      setIsListening(false);
-    }
-  };
-
-  const formatActionBadge = (action: string) => {
-    const actionLabels: Record<string, string> = {
-      navigate: 'Navigated',
-      list_campaigns: 'Listed Campaigns',
-      get_campaign_details: 'Campaign Details',
-      create_order: 'Created Order',
-      list_orders: 'Listed Orders',
-      get_order_status: 'Order Status',
-      get_billing_summary: 'Billing Summary',
-      list_invoices: 'Listed Invoices',
-      get_analytics_summary: 'Analytics',
-      request_campaign: 'Campaign Requested',
-      request_new_campaign: 'New Campaign Requested',
-      generate_email_template: 'Template Generated',
-      run_campaign_simulation: 'Simulation Run',
-      submit_support_ticket: 'Ticket Created',
-    };
-    return actionLabels[action] || action;
-  };
-
-  // Text-to-Speech
-  const speak = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    // Try to select a good voice
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha'));
-    if (preferredVoice) utterance.voice = preferredVoice;
-    window.speechSynthesis.speak(utterance);
-  };
+// ... existing code ...
 
   return (
-    <Card className={cn('flex flex-col', isExpanded ? 'fixed inset-4 z-50' : 'h-[600px]', className)}>
-      <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b">
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-            <Bot className="h-4 w-4 text-white" />
+    <Card className={cn('flex flex-col border-0 rounded-none shadow-none bg-background/50', isExpanded ? 'fixed inset-0 z-50 rounded-none' : 'h-full', className)}>
+      <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b border-border/40 bg-background/95 backdrop-blur sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+             <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/10">
+                <Bot className="h-4 w-4 text-primary" />
+             </div>
+             <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-background bg-green-500 animate-pulse" />
           </div>
           <div>
-            <CardTitle className="text-sm font-semibold">AgentX</CardTitle>
+            <CardTitle className="text-sm font-semibold leading-none tracking-tight">AgentX</CardTitle>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mt-0.5">
+              Client Assistant
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground"
             onClick={() => setIsExpanded(!isExpanded)}
           >
             {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -291,170 +142,170 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
 
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
         {messages.length === 0 ? (
-          <div className="space-y-6">
-            {/* Welcome Message */}
-            <div className="text-center py-6">
-              <div className="h-16 w-16 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mx-auto mb-4">
-                <Sparkles className="h-8 w-8 text-white" />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-6 flex flex-col items-center justify-center min-h-[400px]"
+          >
+            <div className="text-center space-y-4">
+               <div className="relative mx-auto w-fit">
+                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20 shadow-xl">
+                  <Bot className="h-10 w-10 text-primary" />
+                </div>
               </div>
-              <h3 className="text-lg font-semibold mb-2">Hello! I’m AgentX</h3>
-              <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                I can help you manage campaigns, create orders, check billing, view reports, and more. Just ask!
-              </p>
+              
+              <div className="space-y-2 max-w-sm mx-auto">
+                <h3 className="font-semibold text-xl tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">Hello! I’m AgentX</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  I can help you manage campaigns, create orders, check billing, view reports, and more.
+                </p>
+              </div>
             </div>
 
             {/* Quick Actions */}
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2 px-1">Quick Actions</p>
+            <div className="w-full max-w-sm space-y-3">
+              <p className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-widest text-center">Quick Actions</p>
               <div className="grid grid-cols-2 gap-2">
                 {QUICK_ACTIONS.map((action) => (
                   <Button
                     key={action.label}
                     variant="outline"
                     size="sm"
-                    className="justify-start gap-2 h-auto py-2 px-3"
+                    className="justify-start gap-2 h-auto py-2.5 px-3 text-xs font-normal border-border/50 hover:border-primary/20 hover:bg-primary/5 transition-all"
                     onClick={() => handleQuickAction(action.prompt)}
                   >
-                    <action.icon className="h-4 w-4 text-primary" />
-                    <span className="text-xs">{action.label}</span>
+                    <action.icon className="h-3.5 w-3.5 text-primary/70" />
+                    <span className="truncate">{action.label}</span>
                   </Button>
                 ))}
               </div>
             </div>
-
-            {/* Example Prompts */}
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2 px-1">Try saying...</p>
-              <div className="space-y-1">
-                {EXAMPLE_PROMPTS.map((prompt, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left text-sm text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-lg px-3 py-2 transition-colors"
-                    onClick={() => handleQuickAction(prompt)}
-                  >
-                    "{prompt}"
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          </motion.div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-6 pb-4">
             {messages.map((message, index) => (
-              <div
+              <motion.div
                 key={index}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
                 className={cn(
-                  'flex gap-3',
+                  'flex gap-3 group',
                   message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
                 )}
               >
-                <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarFallback className={cn(
-                    message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-gradient-to-br from-violet-500 to-purple-600 text-white'
-                  )}>
-                    {message.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                  </AvatarFallback>
-                </Avatar>
+                <div
+                  className={cn(
+                    'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border shadow-sm',
+                    message.role === 'user' 
+                      ? 'bg-primary border-primary/20' 
+                      : 'bg-background border-border'
+                  )}
+                >
+                    {message.role === 'user' ? <User className="h-4 w-4 text-primary-foreground" /> : <Bot className="h-4 w-4 text-primary" />}
+                </div>
 
                 <div className={cn(
-                  'flex flex-col gap-1 max-w-[80%]',
+                  'flex flex-col gap-1 max-w-[85%]',
                   message.role === 'user' ? 'items-end' : 'items-start'
                 )}>
+                  <div className="flex items-center gap-2 px-1">
+                     <span className="text-xs font-medium text-muted-foreground">{message.role === 'user' ? 'You' : 'AgentX'}</span>
+                     <span className="text-[10px] text-muted-foreground/50">{message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+
                   <div className={cn(
-                    'rounded-2xl px-4 py-2',
+                    'rounded-2xl px-4 py-3 text-sm shadow-sm border leading-relaxed',
                     message.role === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-md'
-                      : 'bg-muted rounded-bl-md'
+                      ? 'bg-primary text-primary-foreground border-primary/20 rounded-tr-none'
+                      : 'bg-card text-card-foreground border-border rounded-tl-none'
                   )}>
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    <p className="whitespace-pre-wrap">{message.content}</p>
                   </div>
 
                   {/* Show action badges for assistant messages */}
                   {message.actions && message.actions.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <div className="flex flex-wrap gap-1.5 mt-1">
                       {message.actions.map((action, actionIdx) => (
                         <Badge
                           key={actionIdx}
-                          variant={action.result.success ? 'default' : 'destructive'}
-                          className="text-xs"
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] py-0.5 px-2 gap-1 border",
+                            action.result.success 
+                              ? "bg-green-500/5 text-green-700 border-green-200" 
+                              : "bg-red-500/5 text-red-700 border-red-200"
+                          )}
                         >
+                          <Zap className="h-3 w-3" />
                           {formatActionBadge(action.action)}
                         </Badge>
                       ))}
                     </div>
                   )}
-
-                  <span className="text-xs text-muted-foreground">
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
                 </div>
-              </div>
+              </motion.div>
             ))}
 
             {/* Loading indicator */}
             {chatMutation.isPending && (
-              <div className="flex gap-3">
-                <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-600 text-white">
-                    <Bot className="h-4 w-4" />
-                  </AvatarFallback>
-                </Avatar>
-                <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm text-muted-foreground">Thinking...</span>
-                  </div>
-                </div>
-              </div>
+               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <TypingIndicator />
+               </motion.div>
             )}
           </div>
         )}
       </ScrollArea>
 
-      <Separator />
-
       {/* Input Area */}
-      <div className="p-4">
-        <div className="flex items-center gap-2">
+      <div className="p-4 border-t border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="relative flex items-end gap-2">
+          {/* Voice Input Button */}
           <Button
             variant="ghost"
             size="icon"
-            className={cn('shrink-0', isListening && 'bg-red-100 text-red-600')}
+            className={cn('shrink-0 h-9 w-9 rounded-full mb-1', isListening && 'bg-red-100 text-red-600 animate-pulse')}
             onMouseDown={startVoiceInput}
             onMouseUp={stopVoiceInput}
             onMouseLeave={stopVoiceInput}
             onTouchStart={startVoiceInput}
             onTouchEnd={stopVoiceInput}
-            aria-label="Hold to talk"
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </Button>
 
-          <Input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask me anything..."
-            className="flex-1"
-            disabled={chatMutation.isPending}
-          />
-
-          <Button
-            size="icon"
-            onClick={handleSend}
-            disabled={!input.trim() || chatMutation.isPending}
-            className="shrink-0"
-          >
-            {chatMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
+          <div className="relative flex-1 rounded-xl border border-input bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring transition-all">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask me anything..."
+              className="min-h-[48px] max-h-[200px] w-full resize-none border-0 shadow-none focus-visible:ring-0 py-3 px-4 pr-12 bg-transparent leading-relaxed scrollbar-hide"
+              rows={1}
+              disabled={chatMutation.isPending}
+            />
+             <div className="absolute right-2 bottom-2">
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={!input.trim() || chatMutation.isPending}
+                className={cn(
+                  "h-8 w-8 rounded-lg transition-all duration-200",
+                  !input.trim() && !chatMutation.isPending ? "opacity-50 grayscale" : "opacity-100 shadow-md",
+                  chatMutation.isPending && "opacity-80"
+                )}
+              >
+                {chatMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center mt-2">
+        <p className="text-[10px] text-muted-foreground/60 text-center mt-2.5 select-none">
           Verify important information before acting.
         </p>
       </div>

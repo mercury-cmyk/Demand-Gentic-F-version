@@ -1,7 +1,7 @@
 import { eq, isNull, and, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { leads, calls, callAttempts, contacts } from '../../shared/schema';
-import { transcribeLeadCall } from './assemblyai-transcription';
+import { transcribeLeadCall } from './google-transcription';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';

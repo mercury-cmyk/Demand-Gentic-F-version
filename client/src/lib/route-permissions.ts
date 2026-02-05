@@ -38,6 +38,8 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/ai-studio', roles: MANAGEMENT_ROLES, description: 'AI Studio Dashboard' },
   { pattern: /^\/ai-studio\//, roles: MANAGEMENT_ROLES, description: 'AI Studio pages' },
   { pattern: '/preview-studio', roles: MANAGEMENT_ROLES, description: 'Preview Studio' },
+  { pattern: '/voice-simulation', roles: MANAGEMENT_ROLES, description: 'Voice Simulation' },
+  { pattern: '/email-simulation', roles: MANAGEMENT_ROLES, description: 'Email Simulation' },
   { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
   { pattern: /^\/virtual-agents\//, roles: MANAGEMENT_ROLES, description: 'Virtual Agent pages' },
   { pattern: '/create-ai-agent', roles: MANAGEMENT_ROLES, description: 'Create AI Agent' },
@@ -123,14 +125,12 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   // ============================================
   // OPERATIONS - Management + Client
   // ============================================
-  { pattern: '/orders', roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER], description: 'Orders/Projects' },
   { pattern: '/imports', roles: MANAGEMENT_ROLES, description: 'Imports' },
 
   // ============================================
   // CLIENT PORTAL ADMIN - Admin only
   // ============================================
   { pattern: '/client-portal-admin', roles: [USER_ROLES.ADMIN], description: 'Client Portal Admin' },
-  { pattern: /^\/client-portal\/orders\//, roles: MANAGEMENT_ROLES, description: 'Client Portal Order' },
   { pattern: '/client-hierarchy-manager', roles: [USER_ROLES.ADMIN], description: 'Client Hierarchy Manager' },
 
   // ============================================

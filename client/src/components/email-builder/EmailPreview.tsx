@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Monitor, Smartphone, Tablet, Moon, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 
 interface EmailPreviewProps {
   open: boolean;
@@ -89,6 +90,7 @@ export function EmailPreview({
   const personalizedPreheader = personalizeTokens(preheader);
   const htmlWithPersonalization = renderPreviewWithPersonalization(htmlContent);
   const previewHtml = injectPreheader(htmlWithPersonalization, personalizedPreheader);
+  const sanitizedPreviewHtml = sanitizeHtmlForIframePreview(previewHtml);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -229,7 +231,7 @@ export function EmailPreview({
                       </style>
                     </head>
                     <body>
-                      ${previewHtml}
+                      ${sanitizedPreviewHtml}
                     </body>
                   </html>
                 `}

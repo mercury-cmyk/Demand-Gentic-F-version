@@ -180,7 +180,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
            <AgentState status="idle" />
            <Button
-             onClick={() => setLocation('/campaigns/new')}
+             onClick={() => setLocation('/campaigns/create')}
              className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-all"
            >
              <Plus className="w-4 h-4 mr-2" />

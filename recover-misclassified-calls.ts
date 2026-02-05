@@ -10,7 +10,7 @@ import { db } from "./server/db";
 import { dialerCallAttempts, contacts, accounts, campaigns, leads } from "./shared/schema";
 import { eq, and, desc, or, gt, isNotNull } from "drizzle-orm";
 import { fetchTelnyxRecording } from "./server/services/telnyx-recordings";
-import { transcribeLeadCall } from "./server/services/assemblyai-transcription";
+import { transcribeLeadCall } from "./server/services/google-transcription";
 import { analyzeLeadQualification } from "./server/services/ai-qa-analyzer";
 
 interface RecoveryResult {

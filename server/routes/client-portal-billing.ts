@@ -16,6 +16,75 @@ const router = Router();
 
 // ==================== COST TRACKING ====================
 
+// Lightweight summary for dashboard widgets (back-compat with older clients)
+router.get('/summary', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    const startDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1); // First of current month
+    const endDate = new Date();
+
+    const [totalCosts] = await db
+      .select({
+        total: sql<string>`COALESCE(SUM(total_cost), 0)::text`,
+      })
+      .from(clientActivityCosts)
+      .where(
+        and(
+          eq(clientActivityCosts.clientAccountId, clientAccountId),
+          gte(clientActivityCosts.activityDate, startDate),
+          lte(clientActivityCosts.activityDate, endDate)
+        )
+      );
+
+    const byType = await db
+      .select({
+        type: clientActivityCosts.activityType,
+        total: sql<string>`SUM(total_cost)::text`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(clientActivityCosts)
+      .where(
+        and(
+          eq(clientActivityCosts.clientAccountId, clientAccountId),
+          gte(clientActivityCosts.activityDate, startDate),
+          lte(clientActivityCosts.activityDate, endDate)
+        )
+      )
+      .groupBy(clientActivityCosts.activityType);
+
+    const monthlyTrend = await db
+      .select({
+        month: sql<string>`to_char(activity_date, 'YYYY-MM')`,
+        cost: sql<string>`SUM(total_cost)::text`,
+      })
+      .from(clientActivityCosts)
+      .where(
+        and(
+          eq(clientActivityCosts.clientAccountId, clientAccountId),
+          gte(clientActivityCosts.activityDate, new Date(Date.now() - 180 * 24 * 60 * 60 * 1000))
+        )
+      )
+      .groupBy(sql`to_char(activity_date, 'YYYY-MM')`)
+      .orderBy(sql`to_char(activity_date, 'YYYY-MM')`);
+
+    res.json({
+      totalCost: parseFloat(totalCosts?.total || '0'),
+      byType: byType.map((t) => ({
+        ...t,
+        total: parseFloat(t.total),
+      })),
+      monthlyTrend: monthlyTrend.map((m) => ({
+        ...m,
+        cost: parseFloat(m.cost),
+      })),
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Billing summary error:', error);
+    res.status(500).json({ message: 'Failed to get billing summary' });
+  }
+});
+
 // Get cost summary
 router.get('/costs/summary', async (req: Request, res: Response) => {
   try {

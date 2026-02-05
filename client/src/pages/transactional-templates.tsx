@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -769,7 +770,7 @@ export default function TransactionalTemplatesPage() {
             <div className="border rounded-lg overflow-hidden">
               <iframe
                 title="Email Preview"
-                srcDoc={showPreviewDialog?.htmlContent}
+                srcDoc={sanitizeHtmlForIframePreview(showPreviewDialog?.htmlContent || "")}
                 className="w-full h-96"
               />
             </div>

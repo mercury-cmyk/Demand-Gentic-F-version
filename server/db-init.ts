@@ -32,6 +32,36 @@ export async function initializeDatabase() {
         await setupAdminAsSuperOrgOwner(admin.id);
       }
 
+      // Optionally force specific users to be platform owners/admins
+      // Comma-separated list of usernames or emails:
+      //   SUPER_ORG_OWNERS=zahid,tabasum
+      const ownerListRaw = process.env.SUPER_ORG_OWNERS;
+      if (ownerListRaw && ownerListRaw.trim().length > 0) {
+        const identifiers = ownerListRaw
+          .split(/[,\n;]/g)
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        for (const identifier of identifiers) {
+          const match = users.find(u =>
+            u.username?.toLowerCase() === identifier.toLowerCase() ||
+            u.email?.toLowerCase() === identifier.toLowerCase()
+          );
+
+          if (!match) {
+            console.warn(`[DB-INIT] SUPER_ORG_OWNERS user not found: ${identifier}`);
+            continue;
+          }
+
+          if (match.role !== 'admin') {
+            await storage.updateUser(match.id, { role: 'admin' });
+          }
+          await storage.assignUserRole(match.id, 'admin', match.id);
+          await setupAdminAsSuperOrgOwner(match.id);
+          console.log(`[DB-INIT] ✅ Ensured SUPER_ORG_OWNER: ${match.username}`);
+        }
+      }
+
       return;
     }
 

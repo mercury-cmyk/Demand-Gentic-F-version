@@ -211,23 +211,27 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
         ) : (
           <div className="flex flex-col w-full h-full">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
                 <div className="relative">
-                  <Bot className="h-5 w-5 text-primary" />
+                  <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/10">
+                    <Bot className="h-4 w-4 text-primary" />
+                  </div>
                   <span
                     className={cn(
-                      'absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full',
+                      'absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-background',
                       statusDotClass,
                       agentStatus === 'thinking' && 'animate-pulse'
                     )}
                   />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-sm">AgentX</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {statusLabel} <span className="text-muted-foreground/40">•</span> {prettyRole}
-                  </p>
+                <div className="flex flex-col gap-0.5">
+                  <h3 className="font-semibold text-sm leading-none tracking-tight">AgentX</h3>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                    <span>{statusLabel}</span>
+                    <span className="opacity-30">•</span>
+                    <span>{prettyRole}</span>
+                  </div>
                 </div>
               </div>
 
@@ -237,10 +241,10 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                       onClick={resetSession}
                     >
-                      <RotateCcw className="h-4 w-4" />
+                      <RotateCcw className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -253,7 +257,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                       onClick={toggleCollapse}
                     >
                       <ChevronRight className="h-4 w-4" />
@@ -269,7 +273,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8"
+                      className="h-7 w-7 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors ml-1"
                       onClick={closePanel}
                     >
                       <X className="h-4 w-4" />

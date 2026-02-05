@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, CheckCircle, XCircle, Clock, Download, Loader2, Phone, Play, Pause, Eye, User, RefreshCw, Sparkles, Building2, Package, Send, X, Trash2, Tag, Plus, RotateCcw, Target, ChevronDown, ChevronUp, Globe, Briefcase } from "lucide-react";
@@ -57,6 +57,9 @@ import {
 
 export default function LeadsPage() {
   const [, navigate] = useLocation();
+  const searchString = useSearch();
+  const urlParams = useMemo(() => new URLSearchParams(searchString), [searchString]);
+  const tabFromUrl = urlParams.get('tab');
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -1899,33 +1902,30 @@ export default function LeadsPage() {
         </Collapsible>
       )}
 
-      <Tabs defaultValue="review" className="w-full">
-        <TabsList className="bg-card/70 border border-border/60">
-          <TabsTrigger value="review" data-testid="tab-review">
-            <Clock className="mr-2 h-4 w-4" />
-            Pending Review ({pendingLeads.length})
-          </TabsTrigger>
-          <TabsTrigger value="approved" data-testid="tab-approved">
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Approved ({approvedLeads.length})
-          </TabsTrigger>
-          {(userRoles.includes('admin') || userRoles.includes('campaign_manager')) && (
-            <TabsTrigger value="pm-review" data-testid="tab-pm-review">
-              <Briefcase className="mr-2 h-4 w-4" />
-              PM Review ({pmReviewLeads.length})
+      <Tabs defaultValue={tabFromUrl || "review"} className="w-full">
+        {/* Only show tab list when not accessed via PM Review direct link */}
+        {tabFromUrl !== 'pm-review' && (
+          <TabsList className="bg-card/70 border border-border/60">
+            <TabsTrigger value="review" data-testid="tab-review">
+              <Clock className="mr-2 h-4 w-4" />
+              Pending Review ({pendingLeads.length})
             </TabsTrigger>
-          )}
-          <TabsTrigger value="rejected" data-testid="tab-rejected">
-            <XCircle className="mr-2 h-4 w-4" />
-            Rejected ({rejectedLeads.length})
-          </TabsTrigger>
-          {userRoles.includes('admin') && (
-            <TabsTrigger value="deleted" data-testid="tab-deleted">
-              <Trash2 className="mr-2 h-4 w-4" />
-              Deleted ({deletedLeads.length})
+            <TabsTrigger value="approved" data-testid="tab-approved">
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Approved ({approvedLeads.length})
             </TabsTrigger>
-          )}
-        </TabsList>
+            <TabsTrigger value="rejected" data-testid="tab-rejected">
+              <XCircle className="mr-2 h-4 w-4" />
+              Rejected ({rejectedLeads.length})
+            </TabsTrigger>
+            {userRoles.includes('admin') && (
+              <TabsTrigger value="deleted" data-testid="tab-deleted">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Deleted ({deletedLeads.length})
+              </TabsTrigger>
+            )}
+          </TabsList>
+        )}
 
         <TabsContent value="review" className="space-y-4 mt-6">
           <div className="flex flex-wrap items-center justify-between gap-4">

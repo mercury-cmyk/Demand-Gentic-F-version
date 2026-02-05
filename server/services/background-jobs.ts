@@ -3,7 +3,7 @@
  * Runs AI-powered QA processing tasks and queue maintenance at regular intervals
  */
 
-import { processPendingTranscriptions } from './assemblyai-transcription';
+import { processPendingTranscriptions } from './google-transcription';
 import { processUnanalyzedLeads } from './ai-qa-analyzer';
 import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';

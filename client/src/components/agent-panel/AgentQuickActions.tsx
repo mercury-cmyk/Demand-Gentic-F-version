@@ -200,9 +200,9 @@ export function AgentQuickActions({
   };
 
   return (
-    <div className="px-3 py-2 border-b border-border">
+    <div className="px-3 py-3 border-b border-border/40 bg-muted/5">
       <ScrollArea className="w-full whitespace-nowrap">
-        <div className="flex gap-2">
+        <div className="flex gap-2 px-1">
           {actions.map((action) => {
             const Icon = action.icon;
             return (
@@ -210,10 +210,10 @@ export function AgentQuickActions({
                 key={action.id}
                 variant="outline"
                 size="sm"
-                className="h-8 px-3 text-xs shrink-0 hover:bg-primary/5 hover:border-primary/30"
+                className="h-7 px-3 text-[11px] font-medium shrink-0 rounded-full border-border/60 bg-background/50 backdrop-blur hover:bg-primary/5 hover:border-primary/20 hover:text-primary transition-all shadow-sm"
                 onClick={() => handleClick(action)}
               >
-                <Icon className="h-3.5 w-3.5 mr-1.5" />
+                <Icon className="h-3 w-3 mr-1.5 opacity-70" />
                 {action.label}
               </Button>
             );

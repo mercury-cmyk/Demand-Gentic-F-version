@@ -454,7 +454,7 @@ export async function transcribeTelnyxRecording(recordingId: string): Promise<{
     }
 
     // Use Google Speech-to-Text for transcription (returns transcript directly)
-    const { submitTranscription } = await import('./assemblyai-transcription');
+    const { submitTranscription } = await import('./google-transcription');
     
     const transcriptText = await submitTranscription(downloadUrl);
     

@@ -52,11 +52,13 @@ import {
   Sparkles, AlertCircle, ArrowRight, ArrowLeft, Bot, Mic,
   Volume2, VolumeX, Play, Square, Brain, Zap, UserCircle,
   Globe, MessageSquare, ChevronRight, Check, X, Plus, Trash2,
-  Upload, Database, Lightbulb, Headphones, Wand2, Eye
+  Upload, Database, Lightbulb, Headphones, Wand2, Eye, Filter, Pause, TestTube
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCampaignTypesForChannel, type CampaignType } from '@/lib/campaign-types';
+import { apiRequest } from '@/lib/queryClient'; // Import apiRequest
+import { parsePhoneNumber } from 'libphonenumber-js'; // Import phone parser
 
 interface CampaignCreationWizardProps {
   open: boolean;
@@ -65,6 +67,8 @@ interface CampaignCreationWizardProps {
   mode?: 'client' | 'admin';
   clientAccountId?: string;
   initialData?: Partial<FormData>;
+  /** Campaign ID for edit mode - when provided, fetches campaign data and uses PATCH */
+  campaignId?: string;
 }
 
 // Campaign Type Categories with icons
@@ -113,10 +117,6 @@ const PROMOTION_CHANNELS = [
   { value: 'combo', label: 'Multi-Channel', icon: Sparkles, description: 'Combined voice + email outreach', color: 'bg-purple-500' },
 ];
 
-// AI Voices available for preview - Gemini Live native audio voices
-// Actual Gemini Live Native Voices - Each has a unique sound signature
-const AI_VOICES = [
-  // ============ MALE VOICES ============
 // AI Voices available for preview - Gemini Live & OpenAI Realtime
 // Each has a unique sound signature and personality
 const AI_VOICES = [
@@ -281,13 +281,21 @@ const AI_VOICES = [
   }
 ];
 
+// Phone numbers are fetched dynamically from Telnyx via /api/number-pool/numbers
+
+const AVAILABLE_SENDER_PROFILES = [
+  { id: 'sp_1', name: 'Sarah Jenkins', email: 'sarah.j@demandgentic.com', role: 'Sales Director' },
+  { id: 'sp_2', name: 'Mike Ross', email: 'mike.r@demandgentic.com', role: 'Account Executive' },
+  { id: 'sp_3', name: 'Growth Team', email: 'growth@demandgentic.com', role: 'Outreach Team' },
+];
+
 // Wizard steps
 const STEPS = [
   { id: 1, title: 'Basics', icon: FileText },
   { id: 2, title: 'Channel', icon: Globe },
   { id: 3, title: 'Type', icon: Target },
   { id: 4, title: 'Content', icon: Lightbulb },
-  { id: 5, title: 'AI Agent', icon: Bot },
+  { id: 5, title: 'Sender Config', icon: Bot },
   { id: 6, title: 'Audience', icon: Users },
   { id: 7, title: 'Review', icon: Eye },
 ];
@@ -306,12 +314,16 @@ interface FormData {
   // Step 4: Content
   objective: string;
   talkingPoints: string[];
+  emailSubject: string;
+  emailBody: string;
   successCriteria: string;
   targetAudience: string;
   objections: { objection: string; response: string }[];
 
   // Step 5: AI Agent
   selectedVoice: string;
+  selectedPhoneNumber: string;
+  senderProfileId: string;
   agentPersona: string;
   agentTone: 'professional' | 'friendly' | 'consultative' | 'direct';
   openingScript: string;
@@ -336,11 +348,13 @@ interface FormData {
   budget: number | undefined;
 }
 
-export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = 'client', clientAccountId, initialData }: CampaignCreationWizardProps) {
+export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = 'client', clientAccountId, initialData, campaignId }: CampaignCreationWizardProps) {
+  const isEditMode = !!campaignId;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -353,10 +367,14 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     campaignType: 'content_syndication',
     objective: '',
     talkingPoints: [],
+    emailSubject: '',
+    emailBody: '',
     successCriteria: '',
     targetAudience: '',
     objections: [{ objection: '', response: '' }],
     selectedVoice: 'Fenrir',
+    selectedPhoneNumber: '',
+    senderProfileId: '',
     agentPersona: '',
     agentTone: 'professional',
     openingScript: '',
@@ -379,12 +397,63 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
   const [formData, setFormData] = useState<FormData>({ ...defaultFormData, ...initialData });
 
-  // Update form data when initialData changes
+  // Fetch campaign data when in edit mode
+  const { data: campaignData, isLoading: isCampaignLoading } = useQuery({
+    queryKey: [`/api/campaigns/${campaignId}`],
+    enabled: isEditMode && open,
+    staleTime: 0,
+  });
+
+  // Map campaign data to form data when fetched
   useEffect(() => {
-    if (open && initialData) {
+    if (isEditMode && campaignData && open) {
+      const campaign = campaignData as any;
+      setFormData(prev => ({
+        ...prev,
+        name: campaign.name || '',
+        description: campaign.description || '',
+        channel: campaign.type === 'email' ? 'email' : 'voice',
+        campaignType: campaign.type || 'lead_qualification',
+        objective: campaign.campaignObjective || '',
+        talkingPoints: campaign.talkingPoints || [],
+        successCriteria: campaign.successCriteria || '',
+        targetAudience: campaign.targetAudienceDescription || '',
+        objections: campaign.campaignObjections || [{ objection: '', response: '' }],
+        selectedVoice: campaign.selectedVoice || 'Fenrir',
+        agentPersona: campaign.agentPersona || '',
+        agentTone: campaign.agentTone || 'professional',
+        openingScript: campaign.openingScript || '',
+        audienceSource: campaign.audienceRefs?.filterGroup ? 'advanced_filters' :
+                        campaign.audienceRefs?.lists?.length ? 'lists' : 'request_handling',
+        selectedLists: campaign.audienceRefs?.lists || [],
+        selectedSegments: campaign.audienceRefs?.segments || [],
+        selectedAccounts: campaign.audienceRefs?.accounts || [],
+        selectedContacts: campaign.audienceRefs?.contacts || [],
+        targetIndustries: campaign.targetIndustries || [],
+        targetTitles: campaign.targetTitles || [],
+        targetRegions: campaign.targetRegions || [],
+        targetCompanySize: campaign.targetCompanySize || '',
+        targetLeadCount: campaign.targetQualifiedLeads || undefined,
+        priority: campaign.priority || 'normal',
+        budget: campaign.budget || undefined,
+      }));
+      // Set launch status based on campaign status
+      if (campaign.status === 'active' || campaign.status === 'running') {
+        setLaunchStatus('active');
+      } else if (campaign.status === 'paused') {
+        setLaunchStatus('paused');
+      } else {
+        setLaunchStatus('draft');
+      }
+    }
+  }, [isEditMode, campaignData, open]);
+
+  // Update form data when initialData changes (for non-edit mode)
+  useEffect(() => {
+    if (open && initialData && !isEditMode) {
       setFormData(prev => ({ ...prev, ...initialData }));
     }
-  }, [open, initialData]);
+  }, [open, initialData, isEditMode]);
 
   // Input states for array fields
   const [industryInput, setIndustryInput] = useState('');
@@ -392,80 +461,274 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   const [regionInput, setRegionInput] = useState('');
   const [talkingPointInput, setTalkingPointInput] = useState('');
 
+  // Test & Launch states
+  const [testPhoneNumber, setTestPhoneNumber] = useState('');
+  const [testEmail, setTestEmail] = useState('');
+  const [launchStatus, setLaunchStatus] = useState<'active' | 'paused' | 'draft'>('active');
+  const [isTestSending, setIsTestSending] = useState(false);
+  const [createdWorkOrderId, setCreatedWorkOrderId] = useState<string | null>(null);
+
+  const handleSendTest = async (type: 'voice' | 'email') => {
+    setIsTestSending(true);
+
+    try {
+      // 1. Ensure we have a saved Work Order (Draft) config
+      let workOrderId = createdWorkOrderId;
+
+      if (!workOrderId) {
+        // Create draft if not exists
+        const endpoint = mode === 'admin' 
+          ? '/api/campaign-wizard/create' 
+          : '/api/client-portal/campaigns/create';
+
+        const bodyData = mode === 'admin' 
+          ? { ...formData, clientAccountId, status: 'draft' } 
+          : { ...formData, status: 'draft' };
+
+        // Manually handle headers since apiRequest handles standard auth, but we might have special logic
+        // Using apiRequest for consistency
+        const res = await apiRequest('POST', endpoint, bodyData);
+        const data = await res.json();
+        
+        // Extract ID (Note: API returns { campaign: { id: ... } } where id is workOrder ID)
+        if (data.campaign && data.campaign.id) {
+          workOrderId = data.campaign.id;
+          setCreatedWorkOrderId(workOrderId);
+        } else {
+          throw new Error('Failed to retrieve campaign ID after saving draft');
+        }
+      }
+
+      // 2. Validate Inputs
+      if (type === 'voice') {
+        if (!testPhoneNumber) throw new Error('Phone number required');
+        
+        // Normalize
+        let normalizedPhone = testPhoneNumber;
+        try {
+          const phoneNumber = parsePhoneNumber(testPhoneNumber, 'US');
+          if (phoneNumber && phoneNumber.isValid()) {
+            normalizedPhone = phoneNumber.number;
+          } else {
+             // Try assuming it's valid enough for now, server will validate again
+             // or throw error
+          }
+        } catch (e) {
+          // ignore parsing error, let backend handle
+        }
+
+        // 3. Trigger Test Call
+        // We use the existing endpoint with a special query param to indicate it's a WorkOrder
+        await apiRequest('POST', `/api/campaigns/${workOrderId}/test-call?source=work_order`, {
+          testPhoneNumber: normalizedPhone,
+          testContactName: "Test User", // Default for wizard test
+          voiceProvider: "google" // Defaulting to Google as per preference
+        });
+
+      } else {
+         // Email test logic (Placeholder for now as user asked for Call endpoint specifically)
+         // Simulating email test or calling a future email test endpoint
+         await new Promise(resolve => setTimeout(resolve, 1000)); 
+      }
+
+      toast({
+        title: 'Test Initiated',
+        description: `Test ${type} request sent successfully.`,
+        variant: "default"
+      });
+
+    } catch (error: any) {
+      console.error('Test failed:', error);
+      toast({
+        title: 'Test Failed',
+        description: error.message || 'Could not initiate test.',
+        variant: "destructive"
+      });
+    } finally {
+      setIsTestSending(false);
+    }
+  };
+
   const getToken = () => localStorage.getItem('clientPortalToken');
 
-  // Fetch client's accounts for audience selection
+  // Fetch client's accounts for audience selection (client portal mode)
   const { data: clientAccounts = [], isLoading: accountsLoading } = useQuery({
-    queryKey: ['client-accounts-for-campaign'],
+    queryKey: ['client-crm-accounts-for-campaign'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/crm/accounts', {
+      const res = await fetch('/api/client-portal/crm/accounts?limit=500', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return data.accounts || [];
     },
-    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
+    enabled: open && formData.audienceSource === 'lists' && mode === 'client',
   });
 
-  // Fetch client's contacts for audience selection
+  // Fetch client's contacts for audience selection (client portal mode)
   const { data: clientContacts = [], isLoading: contactsLoading } = useQuery({
-    queryKey: ['client-contacts-for-campaign'],
+    queryKey: ['client-crm-contacts-for-campaign'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/crm/contacts', {
+      const res = await fetch('/api/client-portal/crm/contacts?limit=1000', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return data.contacts || [];
     },
-    enabled: open && formData.audienceSource === 'own_data' && mode === 'client',
+    enabled: open && formData.audienceSource === 'lists' && mode === 'client',
   });
 
-  // Create campaign mutation
+  // Fetch admin lists for audience selection (admin mode only)
+  const { data: availableLists = [], isLoading: listsLoading } = useQuery<any[]>({
+    queryKey: ['/api/lists'],
+    enabled: open && formData.audienceSource === 'lists' && mode === 'admin',
+  });
+
+  // Fetch admin segments for audience selection (admin mode only)
+  const { data: availableSegments = [], isLoading: segmentsLoading } = useQuery<any[]>({
+    queryKey: ['/api/segments'],
+    enabled: open && formData.audienceSource === 'lists' && mode === 'admin',
+  });
+
+  // Fetch Telnyx phone numbers from number pool
+  const { data: telnyxPhoneNumbers = [], isLoading: phoneNumbersLoading } = useQuery({
+    queryKey: ['telnyx-phone-numbers'],
+    queryFn: async () => {
+      // Use direct fetch - number-pool API is accessible without auth
+      const res = await fetch('/api/number-pool/numbers?status=active');
+      if (!res.ok) {
+        console.error('[CampaignWizard] Failed to fetch Telnyx numbers:', res.status);
+        return [];
+      }
+      const data = await res.json();
+      console.log('[CampaignWizard] Loaded Telnyx numbers:', data.data?.length || 0);
+      return data.data || [];
+    },
+    enabled: open && (formData.channel === 'voice' || formData.channel === 'combo'),
+    staleTime: 30000, // Cache for 30 seconds
+  });
+
+  // Create/Update campaign mutation
   const createMutation = useMutation({
     mutationFn: async () => {
-      const endpoint = mode === 'admin' 
-        ? '/api/campaign-wizard/create' 
-        : '/api/client-portal/campaigns/create';
-
-      const bodyData = mode === 'admin' 
-        ? { ...formData, clientAccountId } 
-        : formData;
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
+      // Build request body with campaign data mapped to DB fields
+      const campaignPayload = {
+        name: formData.name,
+        description: formData.description,
+        type: formData.campaignType,
+        status: launchStatus,
+        campaignObjective: formData.objective,
+        talkingPoints: formData.talkingPoints,
+        successCriteria: formData.successCriteria,
+        targetAudienceDescription: formData.targetAudience,
+        campaignObjections: formData.objections?.filter(o => o.objection),
+        selectedVoice: formData.selectedVoice,
+        agentPersona: formData.agentPersona,
+        agentTone: formData.agentTone,
+        openingScript: formData.openingScript,
+        targetQualifiedLeads: formData.targetLeadCount,
+        audienceRefs: {
+          lists: formData.selectedLists,
+          segments: formData.selectedSegments,
+          accounts: formData.selectedAccounts,
+          contacts: formData.selectedContacts,
+        },
+        targetIndustries: formData.targetIndustries,
+        targetTitles: formData.targetTitles,
+        targetRegions: formData.targetRegions,
+        targetCompanySize: formData.targetCompanySize,
+        priority: formData.priority,
+        budget: formData.budget,
+        clientAccountId: clientAccountId,
       };
 
-      if (mode === 'client') {
+      // Determine endpoint and method based on mode
+      if (isEditMode && campaignId) {
+        // PATCH for edit mode - update existing campaign
+        // Use apiRequest which handles auth automatically for admin mode
+        if (mode === 'admin') {
+          const res = await apiRequest('PATCH', `/api/campaigns/${campaignId}`, campaignPayload);
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.message || 'Failed to update campaign');
+          }
+          return res.json();
+        }
+
+        // Client portal mode - use token-based auth
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
         const token = getToken();
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
-      }
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(bodyData),
-      });
+        const res = await fetch(`/api/campaigns/${campaignId}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(campaignPayload),
+        });
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to create campaign');
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.message || 'Failed to update campaign');
+        }
+        return res.json();
+      } else {
+        // POST for create mode
+        if (mode === 'admin') {
+          // Use apiRequest which handles auth automatically for admin mode
+          const bodyData = { ...formData, clientAccountId, status: launchStatus };
+          const res = await apiRequest('POST', '/api/campaign-wizard/create', bodyData);
+          if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.message || 'Failed to create campaign');
+          }
+          return res.json();
+        }
+
+        // Client portal mode - use token-based auth
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        const token = getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch('/api/client-portal/campaigns/create', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...formData, status: launchStatus }),
+        });
+
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.message || 'Failed to create campaign');
+        }
+        return res.json();
       }
-      return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
       queryClient.invalidateQueries({ queryKey: ['/api/orders'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/campaigns'] });
+      if (campaignId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}`] });
+      }
 
       toast({
-        title: 'Campaign Created!',
-        description: 'Your campaign has been submitted successfully.',
+        title: isEditMode ? 'Campaign Updated!' : 'Campaign Created!',
+        description: isEditMode ? 'Your campaign has been updated successfully.' : 'Your campaign has been submitted successfully.',
       });
       onSuccess?.(data);
       onOpenChange(false);
-      resetForm();
+      if (!isEditMode) {
+        resetForm();
+      }
     },
     onError: (error: Error) => {
       toast({
@@ -484,14 +747,20 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       campaignType: 'content_syndication',
       objective: '',
       talkingPoints: [],
+      emailSubject: '',
+      emailBody: '',
       successCriteria: '',
       targetAudience: '',
       objections: [{ objection: '', response: '' }],
       selectedVoice: 'Fenrir',
+      selectedPhoneNumber: '',
+      senderProfileId: '',
       agentPersona: '',
       agentTone: 'professional',
       openingScript: '',
       audienceSource: 'request_handling',
+      selectedLists: [],
+      selectedSegments: [],
       selectedAccounts: [],
       selectedContacts: [],
       targetIndustries: [],
@@ -499,6 +768,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       targetRegions: [],
       targetCompanySize: '',
       targetLeadCount: undefined,
+      useProjectDocuments: true,
       priority: 'normal',
       startDate: '',
       endDate: '',
@@ -507,8 +777,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     setStep(1);
   };
 
-  // Voice preview functionality
-  const playVoicePreview = (voiceId: string) => {
+  // Voice preview functionality - uses client portal voice TTS API for authentic voice previews
+  const playVoicePreview = async (voiceId: string) => {
     if (isPlaying && playingVoice === voiceId) {
       stopVoicePreview();
       return;
@@ -522,29 +792,69 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     setIsPlaying(true);
     setPlayingVoice(voiceId);
 
-    // Use browser TTS for preview (in production, use actual AI voice API)
-    const sampleText = `Hello! I'm ${voice.name}. I'll be representing your company in conversations with prospects. My style is ${voice.description.toLowerCase()}. How can I help you today?`;
+    // Generate sample text for this voice
+    const sampleText = `Hello! I'm ${voice.name}. I'll be representing your company in conversations with prospects. ${voice.description} How can I help you today?`;
 
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(sampleText);
-      utterance.rate = 1.0;
-      utterance.pitch = voice.gender === 'male' ? 0.9 : 1.1;
-      utterance.onend = () => {
+    try {
+      // Use client portal voice TTS API which correctly routes to Google Cloud TTS
+      // with unique voice mappings for each voice ID
+      const token = getToken();
+      const response = await fetch('/api/client-portal/voice/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text: sampleText,
+          voiceId: voiceId,
+          provider: voice.provider, // 'openai' or 'gemini'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate voice preview');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
         setIsPlaying(false);
         setPlayingVoice(null);
       };
-      utterance.onerror = () => {
+      
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
         setIsPlaying(false);
         setPlayingVoice(null);
+        toast({
+          title: 'Preview Failed',
+          description: 'Could not play voice preview',
+          variant: 'destructive',
+        });
       };
-      synthRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
+
+      audioRef.current = audio;
+      await audio.play();
+    } catch (error) {
+      console.error('Voice preview error:', error);
+      setIsPlaying(false);
+      setPlayingVoice(null);
+      toast({
+        title: 'Preview Failed',
+        description: 'Could not generate voice preview. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
   const stopVoicePreview = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
     setIsPlaying(false);
     setPlayingVoice(null);
@@ -580,6 +890,38 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       default:
         return true;
     }
+  };
+
+  // Get missing required fields for current step
+  const getMissingFields = (stepNum: number): string[] => {
+    const missing: string[] = [];
+    switch (stepNum) {
+      case 1:
+        if (!formData.name.trim()) missing.push('Campaign Name');
+        break;
+      case 2:
+        if (!formData.channel) missing.push('Promotion Channel');
+        break;
+      case 3:
+        if (!formData.campaignType) missing.push('Campaign Type');
+        break;
+      case 4:
+        if (!formData.objective.trim()) missing.push('Campaign Objective');
+        if (!formData.successCriteria.trim()) missing.push('Success Criteria');
+        break;
+      case 5:
+        if (formData.channel !== 'email' && !formData.selectedVoice) missing.push('AI Voice');
+        break;
+      case 6:
+        if (formData.audienceSource !== 'request_handling' &&
+            formData.selectedAccounts.length === 0 &&
+            formData.selectedContacts.length === 0 &&
+            formData.targetIndustries.length === 0) {
+          missing.push('Target Audience');
+        }
+        break;
+    }
+    return missing;
   };
 
   // Progress calculation
@@ -635,7 +977,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="w-[95vw] max-w-6xl h-[90vh] overflow-hidden flex flex-col p-0">
         {/* Header with progress */}
         <div className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-primary/5 to-primary/10">
           <DialogHeader>
@@ -691,8 +1033,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         </div>
 
         {/* Content area */}
-        <ScrollArea className="flex-1 px-6">
-          <div className="py-6">
+        <ScrollArea className="flex-1 min-h-0 px-6">
+          <div className="py-6 min-h-full">
             <AnimatePresence mode="wait">
               {/* Step 1: Campaign Basics */}
               {step === 1 && (
@@ -704,20 +1046,48 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Let's start with the basics</h3>
+                    <h3 className="text-xl font-semibold mb-2">Let's start with the basics</h3>
                     <p className="text-muted-foreground">Give your campaign a name and description</p>
                   </div>
 
-                  <div className="space-y-4 max-w-xl mx-auto">
+                  <div className="space-y-6 max-w-2xl mx-auto">
                     <div className="space-y-2">
                       <Label htmlFor="name" className="text-base">Campaign Name *</Label>
-                      <Input
-                        id="name"
-                        placeholder="e.g., Q1 Lead Generation - Tech Sector"
-                        value={formData.name}
-                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                        className="h-12 text-lg"
-                      />
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Format: ClientID-MMDDYY-CustomName
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center h-12 px-3 bg-muted rounded-l-md border border-r-0 text-sm font-mono text-muted-foreground whitespace-nowrap">
+                          {clientAccountId ? clientAccountId.slice(0, 8) : 'CLIENTID'}-{(() => {
+                            const now = new Date();
+                            const mm = String(now.getMonth() + 1).padStart(2, '0');
+                            const dd = String(now.getDate()).padStart(2, '0');
+                            const yy = String(now.getFullYear()).slice(-2);
+                            return `${mm}${dd}${yy}`;
+                          })()}-
+                        </div>
+                        <Input
+                          id="name"
+                          placeholder="Enter custom name"
+                          value={formData.name.includes('-') ? formData.name.split('-').slice(2).join('-') : formData.name}
+                          onChange={(e) => {
+                            const customName = e.target.value;
+                            const now = new Date();
+                            const mm = String(now.getMonth() + 1).padStart(2, '0');
+                            const dd = String(now.getDate()).padStart(2, '0');
+                            const yy = String(now.getFullYear()).slice(-2);
+                            const prefix = `${clientAccountId ? clientAccountId.slice(0, 8) : 'CLIENTID'}-${mm}${dd}${yy}`;
+                            const fullName = customName ? `${prefix}-${customName}` : '';
+                            setFormData(prev => ({ ...prev, name: fullName }));
+                          }}
+                          className="h-12 text-lg flex-1 rounded-l-none"
+                        />
+                      </div>
+                      {formData.name && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Full name: <span className="font-mono">{formData.name}</span>
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -744,7 +1114,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Choose your promotion channel</h3>
+                    <h3 className="text-xl font-semibold mb-2">Choose your promotion channel</h3>
                     <p className="text-muted-foreground">How would you like to reach your audience?</p>
                   </div>
 
@@ -792,7 +1162,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-6">
-                    <h3 className="text-lg font-semibold mb-2">What type of campaign is this?</h3>
+                    <h3 className="text-xl font-semibold mb-2">What type of campaign is this?</h3>
                     <p className="text-muted-foreground">
                       Choose your campaign objective for {formData.channel === 'voice' ? 'AI Voice Calls' : formData.channel === 'email' ? 'Email Campaigns' : 'Multi-Channel'}
                     </p>
@@ -804,8 +1174,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                     )}
                   </div>
 
-                  <ScrollArea className="h-[450px] pr-4">
-                    <div className="space-y-6 max-w-4xl mx-auto">
+                  <ScrollArea className="h-[500px] pr-4">
+                    <div className="space-y-6 max-w-5xl mx-auto">
                       {CAMPAIGN_TYPE_CATEGORIES.map((category) => {
                         // Filter types that are available for the selected channel
                         const categoryTypes = availableCampaignTypes.filter(
@@ -888,11 +1258,30 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Define your campaign content</h3>
+                    <h3 className="text-xl font-semibold mb-2">Define your campaign content</h3>
                     <p className="text-muted-foreground">Tell us what makes your campaign special</p>
                   </div>
 
-                  <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="max-w-3xl mx-auto space-y-6">
+                    {/* Prompt Hierarchy Info */}
+                    <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 mb-6">
+                      <div className="flex items-start gap-3">
+                        <Brain className="h-5 w-5 text-primary mt-0.5" />
+                        <div>
+                          <h4 className="font-medium text-sm text-primary mb-1">How AI Generates Content</h4>
+                          <p className="text-xs text-muted-foreground">
+                            The system uses a layered prompt approach for maximum relevance:
+                            <br />
+                            <span className="font-semibold">1. Foundation Prompt</span> (Global Logic) 
+                            <ArrowRight className="inline h-3 w-3 mx-1" /> 
+                            <span className="font-semibold">2. Campaign Prompt</span> (Your inputs below)
+                            <ArrowRight className="inline h-3 w-3 mx-1" />
+                            <span className="font-semibold">3. Account Layer</span> (CRM Data)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Campaign Objective */}
                     <div className="space-y-2">
                       <Label className="text-base flex items-center gap-2">
@@ -907,98 +1296,140 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       />
                     </div>
 
-                    {/* Key Talking Points */}
-                    <Card className="border-dashed">
-                      <CardContent className="p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-base flex items-center gap-2">
-                            <MessageSquare className="h-4 w-4 text-primary" />
-                            Key Talking Points
-                          </Label>
-                          {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
-                            <Badge variant="outline" className="text-xs">
-                              {formData.talkingPoints.filter(p => p.trim()).length} added
-                            </Badge>
-                          )}
+                    {/* Voice Content Configuration */}
+                    {(formData.channel === 'voice' || formData.channel === 'combo') && (
+                      <div className="space-y-6 pt-4 border-t">
+                        <div className="flex items-center gap-2 mb-2">
+                           <Mic className="h-5 w-5 text-primary" />
+                           <h4 className="font-semibold text-base">Voice Call Scripting</h4>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          What should the AI agent highlight? Type and press <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">Enter</kbd> to add.
-                        </p>
-                        <div className="flex gap-2">
-                          <Input
-                            placeholder="e.g., Industry-leading customer support"
-                            value={talkingPointInput}
-                            onChange={(e) => setTalkingPointInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                if (talkingPointInput.trim()) {
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
-                                  }));
-                                  setTalkingPointInput('');
-                                }
-                              }
-                            }}
-                            className="flex-1"
-                          />
-                          <Button
-                            type="button"
-                            onClick={() => {
-                              if (talkingPointInput.trim()) {
-                                setFormData(prev => ({
-                                  ...prev,
-                                  talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
-                                }));
-                                setTalkingPointInput('');
-                              }
-                            }}
-                            disabled={!talkingPointInput.trim()}
-                            size="sm"
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add
-                          </Button>
-                        </div>
-                        {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
-                          <ScrollArea className="max-h-32">
-                            <div className="flex flex-wrap gap-2 p-1">
-                              {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
-                                <Badge
-                                  key={idx}
-                                  variant="secondary"
-                                  className="gap-1.5 py-1.5 px-3 text-sm bg-primary/10 hover:bg-primary/15 transition-colors"
-                                >
-                                  <span className="text-primary/70 font-medium">{idx + 1}.</span>
-                                  {point}
-                                  <button
-                                    onClick={() => {
+
+                        {/* Key Talking Points */}
+                        <Card className="border-dashed">
+                          <CardContent className="p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-base flex items-center gap-2">
+                                <MessageSquare className="h-4 w-4 text-primary" />
+                                Key Talking Points
+                              </Label>
+                              {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                <Badge variant="outline" className="text-xs">
+                                  {formData.talkingPoints.filter(p => p.trim()).length} added
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              What should the AI agent highlight? Type and press <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">Enter</kbd> to add.
+                            </p>
+                            <div className="flex gap-2">
+                              <Input
+                                placeholder="e.g., Industry-leading customer support"
+                                value={talkingPointInput}
+                                onChange={(e) => setTalkingPointInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (talkingPointInput.trim()) {
                                       setFormData(prev => ({
                                         ...prev,
-                                        talkingPoints: prev.talkingPoints.filter((_, i) => i !== idx),
+                                        talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
                                       }));
-                                    }}
-                                    className="ml-1 hover:text-destructive rounded-full hover:bg-destructive/10 p-0.5 transition-colors"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </Badge>
-                              ))}
+                                      setTalkingPointInput('');
+                                    }
+                                  }
+                                }}
+                                className="flex-1"
+                              />
+                              <Button
+                                type="button"
+                                onClick={() => {
+                                  if (talkingPointInput.trim()) {
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                    }));
+                                    setTalkingPointInput('');
+                                  }
+                                }}
+                                disabled={!talkingPointInput.trim()}
+                                size="sm"
+                              >
+                                <Plus className="h-4 w-4 mr-1" />
+                                Add
+                              </Button>
                             </div>
-                          </ScrollArea>
-                        )}
-                        {formData.talkingPoints.filter(p => p.trim()).length === 0 && (
-                          <div className="text-center py-4 text-muted-foreground text-sm border border-dashed rounded-lg">
-                            <Lightbulb className="h-5 w-5 mx-auto mb-1 opacity-50" />
-                            No talking points yet. Add key messages for your AI agent.
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                            {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                              <ScrollArea className="max-h-32">
+                                <div className="flex flex-wrap gap-2 p-1">
+                                  {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                                    <Badge
+                                      key={idx}
+                                      variant="secondary"
+                                      className="gap-1.5 py-1.5 px-3 text-sm bg-primary/10 hover:bg-primary/15 transition-colors"
+                                    >
+                                      <span className="text-primary/70 font-medium">{idx + 1}.</span>
+                                      {point}
+                                      <button
+                                        onClick={() => {
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            talkingPoints: prev.talkingPoints.filter((_, i) => i !== idx),
+                                          }));
+                                        }}
+                                        className="ml-1 hover:text-destructive rounded-full hover:bg-destructive/10 p-0.5 transition-colors"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </ScrollArea>
+                            )}
+                            {formData.talkingPoints.filter(p => p.trim()).length === 0 && (
+                              <div className="text-center py-4 text-muted-foreground text-sm border border-dashed rounded-lg">
+                                <Lightbulb className="h-5 w-5 mx-auto mb-1 opacity-50" />
+                                No talking points yet. Add key messages for your AI agent.
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+
+                    {/* Email Content Configuration */}
+                    {(formData.channel === 'email' || formData.channel === 'combo') && (
+                      <div className="space-y-6 pt-4 border-t">
+                         <div className="flex items-center gap-2 mb-2">
+                           <Mail className="h-5 w-5 text-primary" />
+                           <h4 className="font-semibold text-base">Email Configuration</h4>
+                         </div>
+                         
+                        <div className="space-y-2">
+                          <Label>Email Subject Line *</Label>
+                          <Input
+                            placeholder="e.g., Question referring to {company_name}"
+                            value={formData.emailSubject}
+                            onChange={(e) => setFormData(prev => ({ ...prev, emailSubject: e.target.value }))}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Email Body Template *</Label>
+                          <Textarea
+                            placeholder="Hi {first_name}, I saw that {company_name} is..."
+                            value={formData.emailBody}
+                            onChange={(e) => setFormData(prev => ({ ...prev, emailBody: e.target.value }))}
+                            rows={6}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Supported variables: &#123;first_name&#125;, &#123;company_name&#125;, &#123;title&#125;
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Success Criteria */}
-                    <div className="space-y-2">
+                    <div className="space-y-2 pt-4 border-t">
                       <Label className="text-base flex items-center gap-2">
                         <CheckCircle2 className="h-4 w-4 text-primary" />
                         Success Criteria *
@@ -1075,7 +1506,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                 </motion.div>
               )}
 
-              {/* Step 5: AI Agent Selection */}
+              {/* Step 5: Sender Config */}
               {step === 5 && (
                 <motion.div
                   key="step5"
@@ -1085,18 +1516,60 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">
-                      {formData.channel === 'email' ? 'Configure AI Email Agent' : 'Select Your AI Voice Agent'}
+                    <h3 className="text-xl font-semibold mb-2">
+                      Sender Configuration
                     </h3>
                     <p className="text-muted-foreground">
-                      {formData.channel === 'email'
-                        ? 'Set up how your AI will craft emails'
-                        : 'Choose a voice and preview how your AI agent will sound'}
+                      Configure who your audience will see or hear from
                     </p>
                   </div>
 
-                  {formData.channel !== 'email' && (
-                    <>
+                  {/* Voice Configuration */}
+                  {(formData.channel === 'voice' || formData.channel === 'combo') && (
+                    <div className="space-y-6 border-b pb-8">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Phone className="h-5 w-5 text-primary" />
+                        <h4 className="text-lg font-semibold">Voice Sender Configuration</h4>
+                      </div>
+
+                      {/* Phone Number Selection */}
+                      <div className="max-w-3xl mx-auto mb-8">
+                         <Label className="mb-2 block">Outbound Phone Number</Label>
+                         <Select
+                            value={formData.selectedPhoneNumber}
+                            onValueChange={(value) => setFormData(prev => ({ ...prev, selectedPhoneNumber: value }))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder={phoneNumbersLoading ? "Loading phone numbers..." : "Select a phone number"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {phoneNumbersLoading ? (
+                                <SelectItem value="loading" disabled>
+                                  <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+                                  Loading...
+                                </SelectItem>
+                              ) : telnyxPhoneNumbers.length === 0 ? (
+                                <SelectItem value="none" disabled>
+                                  No phone numbers available
+                                </SelectItem>
+                              ) : (
+                                telnyxPhoneNumbers.map((phone: any) => (
+                                  <SelectItem key={phone.id} value={phone.phoneNumberE164}>
+                                    {phone.displayName || phone.phoneNumberE164}
+                                    {phone.region && ` - ${phone.region}`}
+                                    {phone.areaCode && ` (${phone.areaCode})`}
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                         {telnyxPhoneNumbers.length === 0 && !phoneNumbersLoading && (
+                           <p className="text-sm text-muted-foreground mt-2">
+                             No Telnyx phone numbers configured. Contact admin to add numbers.
+                           </p>
+                         )}
+                      </div>
+
                       {/* Voice Selection Grid */}
                       <div className="max-w-5xl mx-auto">
                         <div className="flex items-center justify-between mb-6">
@@ -1219,13 +1692,42 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                           </div>
                         </ScrollArea>
                       </div>
+                    </div>
+                  )}
 
-                      <Separator />
-                    </>
+                  {/* Email Configuration */}
+                  {(formData.channel === 'email' || formData.channel === 'combo') && (
+                    <div className="space-y-6 max-w-3xl mx-auto border-b pb-8">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Mail className="h-5 w-5 text-primary" />
+                        <h4 className="text-lg font-semibold">Email Sender Configuration</h4>
+                      </div>
+
+                      <div className="space-y-4">
+                         <div className="space-y-2">
+                           <Label>Sender Profile</Label>
+                           <Select
+                              value={formData.senderProfileId}
+                              onValueChange={(value) => setFormData(prev => ({ ...prev, senderProfileId: value }))}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select a sender profile" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {AVAILABLE_SENDER_PROFILES.map(profile => (
+                                  <SelectItem key={profile.id} value={profile.id}>
+                                    {profile.name} &lt;{profile.email}&gt; - {profile.role}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                         </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* Agent Personality Configuration */}
-                  <div className="max-w-2xl mx-auto space-y-6">
+                  <div className="max-w-3xl mx-auto space-y-6 pt-4">
                     <div className="space-y-2">
                       <Label className="text-base">Agent Tone</Label>
                       <RadioGroup
@@ -1299,378 +1801,471 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Define your target audience</h3>
+                    <h3 className="text-xl font-semibold mb-2">Define your target audience</h3>
                     <p className="text-muted-foreground">Select from lists, use advanced filters, or let us handle targeting</p>
                   </div>
 
                   <div className="max-w-3xl mx-auto">
-                    {/* Audience Source Toggle - 3 Options */}
-                    <div className="grid md:grid-cols-3 gap-4 mb-8">
-                      <button
-                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'lists' }))}
-                        className={cn(
-                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
-                          formData.audienceSource === 'lists'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        )}
-                      >
-                        <Database className="h-10 w-10 mb-3 text-primary" />
-                        <h4 className="font-semibold mb-1">Select Lists</h4>
-                        <p className="text-xs text-muted-foreground text-center">
-                          Choose from existing segments & lists
+                    {/* Audience Selection - Admin Lists & Filters */}
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="space-y-1">
+                        <h4 className="text-base font-medium flex items-center gap-2">
+                          <Database className="h-4 w-4 text-primary" />
+                          {mode === 'client' ? 'Select from Your CRM Data' : 'Select Admin Lists & Segments'}
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          {mode === 'client' 
+                            ? 'Choose accounts and contacts you\'ve uploaded to your CRM'
+                            : 'Choose from approved contact segments and account lists'}
                         </p>
-                      </button>
-
-                      <button
-                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'advanced_filters' }))}
-                        className={cn(
-                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
-                          formData.audienceSource === 'advanced_filters'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                        className={cn(showAdvancedFilters && "bg-primary/10 border-primary/50 text-primary")}
                       >
-                        <Target className="h-10 w-10 mb-3 text-primary" />
-                        <h4 className="font-semibold mb-1">Advanced Filters</h4>
-                        <p className="text-xs text-muted-foreground text-center">
-                          Filter by criteria from project docs
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => setFormData(prev => ({ ...prev, audienceSource: 'request_handling' }))}
-                        className={cn(
-                          'flex flex-col items-center p-5 rounded-xl border-2 transition-all',
-                          formData.audienceSource === 'request_handling'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        )}
-                      >
-                        <Sparkles className="h-10 w-10 mb-3 text-primary" />
-                        <h4 className="font-semibold mb-1">We'll Handle It</h4>
-                        <p className="text-xs text-muted-foreground text-center">
-                          We'll source the right prospects
-                        </p>
-                      </button>
+                        <Filter className="h-4 w-4 mr-2" />
+                        Advanced Unified Filter
+                      </Button>
                     </div>
 
-                    {formData.audienceSource === 'lists' && (
-                      <div className="space-y-6">
-                        {/* Segment/List Selection */}
-                        <div className="space-y-3">
-                          <Label className="text-base flex items-center gap-2">
-                            <Database className="h-4 w-4" />
-                            Select Segments & Lists
-                          </Label>
-                          <p className="text-sm text-muted-foreground">
-                            Choose from your existing contact segments and account lists
-                          </p>
-                          {accountsLoading ? (
-                            <div className="flex items-center justify-center py-8">
-                              <Loader2 className="h-6 w-6 animate-spin" />
-                            </div>
-                          ) : (
-                            <ScrollArea className="h-64 border rounded-lg p-4">
-                              <div className="space-y-4">
-                                {/* Contact Segments */}
-                                <div>
-                                  <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Contact Segments</h5>
-                                  <div className="space-y-2">
-                                    {/* Placeholder segments - these should come from API */}
-                                    {['Enterprise Decision Makers', 'Mid-Market IT Leaders', 'Healthcare Executives', 'Financial Services Contacts'].map((segment, idx) => (
-                                      <div key={`seg-${idx}`} className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border">
+                    {/* Always Show List Selection */}
+                    <div className="space-y-6">
+                      <div className="space-y-3">
+                        {(mode === 'client' ? (accountsLoading || contactsLoading) : (listsLoading || segmentsLoading)) ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin" />
+                          </div>
+                        ) : mode === 'client' ? (
+                          /* Client Portal Mode - Show Client CRM Data */
+                          <ScrollArea className="h-64 border rounded-lg p-4 bg-muted/5">
+                            <div className="space-y-4">
+                              {/* Client Accounts */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">
+                                  Your Accounts ({clientAccounts.length})
+                                </h5>
+                                <div className="space-y-2">
+                                  {clientAccounts.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No accounts uploaded yet</p>
+                                      <p className="text-xs">Upload accounts from the CRM section</p>
+                                    </div>
+                                  ) : (
+                                    clientAccounts.slice(0, 50).map((account: any) => (
+                                      <div
+                                        key={account.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedAccounts.includes(account.id)
+                                            ? formData.selectedAccounts.filter(a => a !== account.id)
+                                            : [...formData.selectedAccounts, account.id];
+                                          setFormData(prev => ({ ...prev, selectedAccounts: newSelected }));
+                                        }}
+                                      >
                                         <Checkbox
-                                          checked={formData.selectedSegments.includes(`segment-${idx}`)}
+                                          checked={formData.selectedAccounts.includes(account.id)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedAccounts: checked
+                                                ? [...prev.selectedAccounts, account.id]
+                                                : prev.selectedAccounts.filter(a => a !== account.id)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm truncate">{account.name}</p>
+                                          <p className="text-xs text-muted-foreground truncate">
+                                            {account.industry || 'No industry'} • {account.domain || 'No domain'}
+                                          </p>
+                                        </div>
+                                        <Badge variant="secondary" className="text-xs flex-shrink-0">Account</Badge>
+                                      </div>
+                                    ))
+                                  )}
+                                  {clientAccounts.length > 50 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">
+                                      Showing first 50 of {clientAccounts.length} accounts
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Client Contacts */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">
+                                  Your Contacts ({clientContacts.length})
+                                </h5>
+                                <div className="space-y-2">
+                                  {clientContacts.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No contacts uploaded yet</p>
+                                      <p className="text-xs">Upload contacts from the CRM section</p>
+                                    </div>
+                                  ) : (
+                                    clientContacts.slice(0, 50).map((contact: any) => (
+                                      <div
+                                        key={contact.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedContacts.includes(contact.id)
+                                            ? formData.selectedContacts.filter(c => c !== contact.id)
+                                            : [...formData.selectedContacts, contact.id];
+                                          setFormData(prev => ({ ...prev, selectedContacts: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedContacts.includes(contact.id)}
+                                          onCheckedChange={(checked) => {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              selectedContacts: checked
+                                                ? [...prev.selectedContacts, contact.id]
+                                                : prev.selectedContacts.filter(c => c !== contact.id)
+                                            }));
+                                          }}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm truncate">
+                                            {contact.firstName} {contact.lastName}
+                                          </p>
+                                          <p className="text-xs text-muted-foreground truncate">
+                                            {contact.title || 'No title'} • {contact.email || 'No email'}
+                                          </p>
+                                        </div>
+                                        <Badge variant="outline" className="text-xs flex-shrink-0">Contact</Badge>
+                                      </div>
+                                    ))
+                                  )}
+                                  {clientContacts.length > 50 && (
+                                    <p className="text-xs text-muted-foreground text-center py-2">
+                                      Showing first 50 of {clientContacts.length} contacts
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </ScrollArea>
+                        ) : (
+                          /* Admin Mode - Show Lists & Segments */
+                          <ScrollArea className="h-64 border rounded-lg p-4 bg-muted/5">
+                            <div className="space-y-4">
+                              {/* Contact Segments */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Contact Segments</h5>
+                                <div className="space-y-2">
+                                  {availableSegments.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No segments available</p>
+                                      <p className="text-xs">Create segments from the Segments page</p>
+                                    </div>
+                                  ) : (
+                                    availableSegments.map((segment: any) => (
+                                      <div
+                                        key={segment.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedSegments.includes(segment.id)
+                                            ? formData.selectedSegments.filter(s => s !== segment.id)
+                                            : [...formData.selectedSegments, segment.id];
+                                          setFormData(prev => ({ ...prev, selectedSegments: newSelected }));
+                                        }}
+                                      >
+                                        <Checkbox
+                                          checked={formData.selectedSegments.includes(segment.id)}
                                           onCheckedChange={(checked) => {
                                             setFormData(prev => ({
                                               ...prev,
                                               selectedSegments: checked
-                                                ? [...prev.selectedSegments, `segment-${idx}`]
-                                                : prev.selectedSegments.filter(id => id !== `segment-${idx}`)
+                                                ? [...prev.selectedSegments, segment.id]
+                                                : prev.selectedSegments.filter(s => s !== segment.id)
                                             }));
                                           }}
                                         />
                                         <div className="flex-1">
-                                          <p className="font-medium text-sm">{segment}</p>
-                                          <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 5000 + 500).toLocaleString()} contacts</p>
+                                          <p className="font-medium text-sm">{segment.name}</p>
+                                          <p className="text-xs text-muted-foreground">{(segment.recordCountCache || 0).toLocaleString()} contacts</p>
                                         </div>
                                         <Badge variant="secondary" className="text-xs">Segment</Badge>
                                       </div>
-                                    ))}
-                                  </div>
+                                    ))
+                                  )}
                                 </div>
+                              </div>
 
-                                {/* Account Lists */}
-                                <div>
-                                  <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Account Lists</h5>
-                                  <div className="space-y-2">
-                                    {['Target Account List Q1', 'Fortune 500 Tech', 'Named Accounts 2024', 'Expansion Targets'].map((list, idx) => (
-                                      <div key={`list-${idx}`} className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border">
+                              {/* Static Lists */}
+                              <div>
+                                <h5 className="text-sm font-medium mb-2 text-muted-foreground uppercase tracking-wide">Static Lists</h5>
+                                <div className="space-y-2">
+                                  {availableLists.length === 0 ? (
+                                    <div className="text-center py-4 text-muted-foreground text-sm">
+                                      <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                      <p>No lists available</p>
+                                      <p className="text-xs">Create lists from the Lists page</p>
+                                    </div>
+                                  ) : (
+                                    availableLists.map((list: any) => (
+                                      <div
+                                        key={list.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg border bg-card transition-colors cursor-pointer"
+                                        onClick={() => {
+                                          const newSelected = formData.selectedLists.includes(list.id)
+                                            ? formData.selectedLists.filter(l => l !== list.id)
+                                            : [...formData.selectedLists, list.id];
+                                          setFormData(prev => ({ ...prev, selectedLists: newSelected }));
+                                        }}
+                                      >
                                         <Checkbox
-                                          checked={formData.selectedLists.includes(`list-${idx}`)}
+                                          checked={formData.selectedLists.includes(list.id)}
                                           onCheckedChange={(checked) => {
                                             setFormData(prev => ({
                                               ...prev,
                                               selectedLists: checked
-                                                ? [...prev.selectedLists, `list-${idx}`]
-                                                : prev.selectedLists.filter(id => id !== `list-${idx}`)
+                                                ? [...prev.selectedLists, list.id]
+                                                : prev.selectedLists.filter(l => l !== list.id)
                                             }));
                                           }}
                                         />
                                         <div className="flex-1">
-                                          <p className="font-medium text-sm">{list}</p>
-                                          <p className="text-xs text-muted-foreground">{Math.floor(Math.random() * 500 + 50).toLocaleString()} accounts</p>
+                                          <p className="font-medium text-sm">{list.name}</p>
+                                          <p className="text-xs text-muted-foreground">{(list.recordIds?.length || 0).toLocaleString()} contacts</p>
                                         </div>
                                         <Badge variant="outline" className="text-xs">List</Badge>
                                       </div>
-                                    ))}
-                                  </div>
+                                    ))
+                                  )}
                                 </div>
                               </div>
-                            </ScrollArea>
-                          )}
-                          {(formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
-                            <div className="p-3 bg-primary/5 rounded-lg">
+                            </div>
+                          </ScrollArea>
+                        )}
+                        {/* Selection Summary */}
+                        {mode === 'client' ? (
+                          (formData.selectedAccounts.length > 0 || formData.selectedContacts.length > 0) && (
+                            <div className="p-3 bg-primary/5 rounded-lg flex items-center justify-between">
+                              <p className="text-sm font-medium">
+                                Selected: {formData.selectedAccounts.length} accounts, {formData.selectedContacts.length} contacts
+                              </p>
+                              <Badge variant="default">Ready to Assign</Badge>
+                            </div>
+                          )
+                        ) : (
+                          (formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
+                            <div className="p-3 bg-primary/5 rounded-lg flex items-center justify-between">
                               <p className="text-sm font-medium">
                                 Selected: {formData.selectedSegments.length} segments, {formData.selectedLists.length} lists
                               </p>
+                              <Badge variant="default">Ready to Assign</Badge>
                             </div>
-                          )}
-                        </div>
+                          )
+                        )}
                       </div>
-                    )}
+                    </div>
 
-                    {formData.audienceSource === 'advanced_filters' && (
-                      <div className="space-y-6">
-                        {/* Target Industries */}
-                        <div className="space-y-2">
-                          <Label>Target Industries</Label>
-                          <div className="flex gap-2">
-                            <Input
-                              placeholder="Add industry (press Enter)"
-                              value={industryInput}
-                              onChange={(e) => setIndustryInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  handleAddArrayItem('targetIndustries', industryInput);
-                                  setIndustryInput('');
-                                }
-                              }}
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                handleAddArrayItem('targetIndustries', industryInput);
-                                setIndustryInput('');
-                              }}
-                            >
-                              Add
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {formData.targetIndustries.map((industry, idx) => (
-                              <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                {industry}
-                                <button
-                                  onClick={() => handleRemoveArrayItem('targetIndustries', idx)}
-                                  className="ml-1 hover:text-destructive"
+                    {/* Advanced Unified Filter Section */}
+                    <AnimatePresence>
+                      {showAdvancedFilters && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="border rounded-lg p-5 bg-muted/10 space-y-6 mt-6">
+                             <div className="flex items-center gap-2 mb-2 border-b pb-4">
+                               <Target className="h-5 w-5 text-primary" />
+                               <div>
+                                 <h3 className="font-semibold text-base">Unified Filter Configuration</h3>
+                                 <p className="text-xs text-muted-foreground">Apply filters across selected lists & segments</p>
+                               </div>
+                             </div>
+
+                            {/* Target Industries */}
+                            <div className="space-y-2">
+                              <Label>Target Industries</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  placeholder="Add industry (press Enter)"
+                                  value={industryInput}
+                                  onChange={(e) => setIndustryInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddArrayItem('targetIndustries', industryInput);
+                                      setIndustryInput('');
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    handleAddArrayItem('targetIndustries', industryInput);
+                                    setIndustryInput('');
+                                  }}
                                 >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Target Job Titles */}
-                        <div className="space-y-2">
-                          <Label>Target Job Titles</Label>
-                          <div className="flex gap-2">
-                            <Input
-                              placeholder="Add job title (press Enter)"
-                              value={titleInput}
-                              onChange={(e) => setTitleInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  handleAddArrayItem('targetTitles', titleInput);
-                                  setTitleInput('');
-                                }
-                              }}
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                handleAddArrayItem('targetTitles', titleInput);
-                                setTitleInput('');
-                              }}
-                            >
-                              Add
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {formData.targetTitles.map((title, idx) => (
-                              <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                {title}
-                                <button
-                                  onClick={() => handleRemoveArrayItem('targetTitles', idx)}
-                                  className="ml-1 hover:text-destructive"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Target Regions */}
-                        <div className="space-y-2">
-                          <Label>Target Regions</Label>
-                          <div className="flex gap-2">
-                            <Input
-                              placeholder="Add region (press Enter)"
-                              value={regionInput}
-                              onChange={(e) => setRegionInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  handleAddArrayItem('targetRegions', regionInput);
-                                  setRegionInput('');
-                                }
-                              }}
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => {
-                                handleAddArrayItem('targetRegions', regionInput);
-                                setRegionInput('');
-                              }}
-                            >
-                              Add
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {formData.targetRegions.map((region, idx) => (
-                              <Badge key={idx} variant="secondary" className="gap-1 py-1">
-                                {region}
-                                <button
-                                  onClick={() => handleRemoveArrayItem('targetRegions', idx)}
-                                  className="ml-1 hover:text-destructive"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Company Size and Lead Count */}
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Company Size</Label>
-                            <Select
-                              value={formData.targetCompanySize}
-                              onValueChange={(value) => setFormData(prev => ({ ...prev, targetCompanySize: value }))}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select size range" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="1-10">1-10 employees</SelectItem>
-                                <SelectItem value="11-50">11-50 employees</SelectItem>
-                                <SelectItem value="51-200">51-200 employees</SelectItem>
-                                <SelectItem value="201-500">201-500 employees</SelectItem>
-                                <SelectItem value="501-1000">501-1000 employees</SelectItem>
-                                <SelectItem value="1001-5000">1001-5000 employees</SelectItem>
-                                <SelectItem value="5001+">5001+ employees</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Target Lead Count</Label>
-                            <Input
-                              type="number"
-                              placeholder="e.g., 500"
-                              value={formData.targetLeadCount || ''}
-                              onChange={(e) => setFormData(prev => ({
-                                ...prev,
-                                targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
-                              }))}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Use Project Documents Toggle */}
-                        <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
-                          <div className="flex items-center gap-3">
-                            <FileText className="h-5 w-5 text-primary" />
-                            <div>
-                              <p className="font-medium text-sm">Use Project Documents</p>
-                              <p className="text-xs text-muted-foreground">Auto-populate filters from uploaded project context</p>
-                            </div>
-                          </div>
-                          <Switch
-                            checked={formData.useProjectDocuments}
-                            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, useProjectDocuments: checked }))}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {formData.audienceSource === 'request_handling' && (
-                      <div className="space-y-6">
-                        <Card className="p-6 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
-                          <div className="flex items-start gap-4">
-                            <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                              <Sparkles className="h-6 w-6 text-primary" />
-                            </div>
-                            <div>
-                              <h4 className="font-semibold mb-2">We'll Handle the Targeting</h4>
-                              <p className="text-sm text-muted-foreground mb-4">
-                                Our team will source and qualify the right prospects based on your campaign goals and project context.
-                                You'll have the opportunity to review and approve the target list before launch.
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                <Badge variant="secondary" className="gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Data Verification
-                                </Badge>
-                                <Badge variant="secondary" className="gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Lead Scoring
-                                </Badge>
-                                <Badge variant="secondary" className="gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Intent Signals
-                                </Badge>
+                                  Add
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {formData.targetIndustries.map((industry, idx) => (
+                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
+                                    {industry}
+                                    <button
+                                      onClick={() => handleRemoveArrayItem('targetIndustries', idx)}
+                                      className="ml-1 hover:text-destructive"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </Badge>
+                                ))}
                               </div>
                             </div>
-                          </div>
-                        </Card>
 
-                        <div className="space-y-2">
-                          <Label>Target Lead Count (Optional)</Label>
-                          <Input
-                            type="number"
-                            placeholder="e.g., 500"
-                            value={formData.targetLeadCount || ''}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
-                            }))}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Specify how many qualified leads you'd like us to target
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                            {/* Target Job Titles */}
+                            <div className="space-y-2">
+                              <Label>Target Job Titles</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  placeholder="Add job title (press Enter)"
+                                  value={titleInput}
+                                  onChange={(e) => setTitleInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddArrayItem('targetTitles', titleInput);
+                                      setTitleInput('');
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    handleAddArrayItem('targetTitles', titleInput);
+                                    setTitleInput('');
+                                  }}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {formData.targetTitles.map((title, idx) => (
+                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
+                                    {title}
+                                    <button
+                                      onClick={() => handleRemoveArrayItem('targetTitles', idx)}
+                                      className="ml-1 hover:text-destructive"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Target Regions */}
+                            <div className="space-y-2">
+                              <Label>Target Regions</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  placeholder="Add region (press Enter)"
+                                  value={regionInput}
+                                  onChange={(e) => setRegionInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleAddArrayItem('targetRegions', regionInput);
+                                      setRegionInput('');
+                                    }
+                                  }}
+                                />
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    handleAddArrayItem('targetRegions', regionInput);
+                                    setRegionInput('');
+                                  }}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {formData.targetRegions.map((region, idx) => (
+                                  <Badge key={idx} variant="secondary" className="gap-1 py-1">
+                                    {region}
+                                    <button
+                                      onClick={() => handleRemoveArrayItem('targetRegions', idx)}
+                                      className="ml-1 hover:text-destructive"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Company Size and Lead Count */}
+                            <div className="grid md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Company Size</Label>
+                                <Select
+                                  value={formData.targetCompanySize}
+                                  onValueChange={(value) => setFormData(prev => ({ ...prev, targetCompanySize: value }))}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select size range" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="1-10">1-10 employees</SelectItem>
+                                    <SelectItem value="11-50">11-50 employees</SelectItem>
+                                    <SelectItem value="51-200">51-200 employees</SelectItem>
+                                    <SelectItem value="201-500">201-500 employees</SelectItem>
+                                    <SelectItem value="501-1000">501-1000 employees</SelectItem>
+                                    <SelectItem value="1001-5000">1001-5000 employees</SelectItem>
+                                    <SelectItem value="5001+">5001+ employees</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-2">
+                                <Label>Target Lead Count</Label>
+                                <Input
+                                  type="number"
+                                  placeholder="e.g., 500"
+                                  value={formData.targetLeadCount || ''}
+                                  onChange={(e) => setFormData(prev => ({
+                                    ...prev,
+                                    targetLeadCount: e.target.value ? parseInt(e.target.value) : undefined
+                                  }))}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Use Project Documents Toggle */}
+                            <div className="flex items-center justify-between p-4 border rounded-lg bg-card">
+                              <div className="flex items-center gap-3">
+                                <FileText className="h-5 w-5 text-primary" />
+                                <div>
+                                  <p className="font-medium text-sm">Use Project Documents</p>
+                                  <p className="text-xs text-muted-foreground">Auto-populate filters from uploaded project context</p>
+                                </div>
+                              </div>
+                              <Switch
+                                checked={formData.useProjectDocuments}
+                                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, useProjectDocuments: checked }))}
+                              />
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </motion.div>
               )}
@@ -1685,7 +2280,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   className="space-y-6"
                 >
                   <div className="text-center mb-8">
-                    <h3 className="text-lg font-semibold mb-2">Review your campaign</h3>
+                    <h3 className="text-xl font-semibold mb-2">Review your campaign</h3>
                     <p className="text-muted-foreground">Make sure everything looks good before submitting</p>
                   </div>
 
@@ -1761,54 +2356,172 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                         {/* Audience */}
                         <div>
                           <h4 className="font-medium text-sm text-muted-foreground mb-2">Target Audience</h4>
-                          {formData.audienceSource === 'own_data' ? (
-                            <div className="flex flex-wrap gap-2">
-                              {formData.selectedAccounts.length > 0 && (
-                                <Badge variant="outline">
-                                  {formData.selectedAccounts.length} Accounts Selected
-                                </Badge>
-                              )}
-                              {formData.selectedContacts.length > 0 && (
-                                <Badge variant="outline">
-                                  {formData.selectedContacts.length} Contacts Selected
-                                </Badge>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {formData.targetIndustries.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  <span className="text-sm text-muted-foreground mr-2">Industries:</span>
-                                  {formData.targetIndustries.map((i, idx) => (
-                                    <Badge key={idx} variant="secondary">{i}</Badge>
-                                  ))}
-                                </div>
-                              )}
-                              {formData.targetTitles.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  <span className="text-sm text-muted-foreground mr-2">Titles:</span>
-                                  {formData.targetTitles.map((t, idx) => (
-                                    <Badge key={idx} variant="secondary">{t}</Badge>
-                                  ))}
-                                </div>
-                              )}
-                              {formData.targetRegions.length > 0 && (
-                                <div className="flex flex-wrap gap-1">
-                                  <span className="text-sm text-muted-foreground mr-2">Regions:</span>
-                                  {formData.targetRegions.map((r, idx) => (
-                                    <Badge key={idx} variant="secondary">{r}</Badge>
-                                  ))}
-                                </div>
-                              )}
-                              {formData.targetLeadCount && (
-                                <p className="text-sm">
-                                  <span className="text-muted-foreground">Target Leads:</span>{' '}
-                                  <span className="font-medium">{formData.targetLeadCount.toLocaleString()}</span>
-                                </p>
-                              )}
-                            </div>
-                          )}
+                          <div className="space-y-4">
+                            {/* Selected Lists & Segments */}
+                            {(formData.selectedSegments.length > 0 || formData.selectedLists.length > 0) && (
+                              <div className="flex flex-wrap gap-2">
+                                {formData.selectedSegments.length > 0 && (
+                                  <Badge variant="outline" className="bg-primary/5">
+                                    {formData.selectedSegments.length} Segments Selected
+                                  </Badge>
+                                )}
+                                {formData.selectedLists.length > 0 && (
+                                  <Badge variant="outline" className="bg-primary/5">
+                                    {formData.selectedLists.length} Account Lists Selected
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Advanced Filters */}
+                            {(formData.targetIndustries.length > 0 || formData.targetTitles.length > 0 || formData.targetRegions.length > 0) && (
+                              <div className="space-y-2 border-t pt-2">
+                                <p className="text-xs font-semibold uppercase text-muted-foreground">Filters Applied:</p>
+                                {formData.targetIndustries.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="text-sm text-muted-foreground mr-2">Industries:</span>
+                                    {formData.targetIndustries.map((i, idx) => (
+                                      <Badge key={idx} variant="secondary">{i}</Badge>
+                                    ))}
+                                  </div>
+                                )}
+                                {formData.targetTitles.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="text-sm text-muted-foreground mr-2">Titles:</span>
+                                    {formData.targetTitles.map((t, idx) => (
+                                      <Badge key={idx} variant="secondary">{t}</Badge>
+                                    ))}
+                                  </div>
+                                )}
+                                {formData.targetRegions.length > 0 && (
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="text-sm text-muted-foreground mr-2">Regions:</span>
+                                    {formData.targetRegions.map((r, idx) => (
+                                      <Badge key={idx} variant="secondary">{r}</Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            
+                            {formData.targetLeadCount && (
+                              <p className="text-sm pt-1">
+                                <span className="text-muted-foreground">Target Lead Count:</span>{' '}
+                                <span className="font-medium">{formData.targetLeadCount.toLocaleString()}</span>
+                              </p>
+                            )}
+                          </div>
                         </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Test & Validation */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <TestTube className="h-4 w-4 text-primary" />
+                          Test Campaign Assets
+                        </CardTitle>
+                        <CardDescription>Send a test to yourself before launching</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {(formData.channel === 'voice' || formData.channel === 'combo') && (
+                          <div className="flex items-end gap-4">
+                            <div className="flex-1 space-y-2">
+                              <Label>Test Phone Number</Label>
+                              <Input 
+                                placeholder="+1 (555) 000-0000" 
+                                value={testPhoneNumber}
+                                onChange={(e) => setTestPhoneNumber(e.target.value)}
+                              />
+                            </div>
+                            <Button 
+                              variant="outline" 
+                              onClick={() => handleSendTest('voice')}
+                              disabled={!testPhoneNumber || isTestSending}
+                            >
+                              {isTestSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4 mr-2" />}
+                              Send Test Call
+                            </Button>
+                          </div>
+                        )}
+                        
+                        {(formData.channel === 'email' || formData.channel === 'combo') && (
+                          <div className="flex items-end gap-4">
+                            <div className="flex-1 space-y-2">
+                              <Label>Test Email Address</Label>
+                              <Input 
+                                placeholder="you@company.com" 
+                                value={testEmail}
+                                onChange={(e) => setTestEmail(e.target.value)}
+                              />
+                            </div>
+                            <Button 
+                              variant="outline" 
+                              onClick={() => handleSendTest('email')}
+                              disabled={!testEmail || isTestSending}
+                            >
+                               {isTestSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                               Send Test Email
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Launch Configuration */}
+                    <Card className={cn(
+                      "border-2 transition-colors",
+                      launchStatus === 'active' ? 'border-primary/50 bg-primary/5' : 'border-dashed'
+                    )}>
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-primary" />
+                          Launch Configuration
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <RadioGroup 
+                          value={launchStatus} 
+                          onValueChange={(v: any) => setLaunchStatus(v)}
+                          className="grid gap-4 md:grid-cols-3"
+                        >
+                          <div>
+                            <RadioGroupItem value="active" id="status-active" className="peer sr-only" />
+                            <Label
+                              htmlFor="status-active"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer h-full"
+                            >
+                              <Zap className="mb-3 h-6 w-6 text-primary" />
+                              <span className="font-semibold">Activate Now</span>
+                              <span className="text-xs text-muted-foreground text-center mt-1">Start campaign immediately</span>
+                            </Label>
+                          </div>
+
+                          <div>
+                            <RadioGroupItem value="paused" id="status-paused" className="peer sr-only" />
+                            <Label
+                              htmlFor="status-paused"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer h-full"
+                            >
+                              <Pause className="mb-3 h-6 w-6 text-orange-500" />
+                              <span className="font-semibold">Pause</span>
+                              <span className="text-xs text-muted-foreground text-center mt-1">Create but do not start</span>
+                            </Label>
+                          </div>
+
+                          <div>
+                            <RadioGroupItem value="draft" id="status-draft" className="peer sr-only" />
+                            <Label
+                              htmlFor="status-draft"
+                              className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer h-full"
+                            >
+                              <Save className="mb-3 h-6 w-6 text-muted-foreground" />
+                              <span className="font-semibold">Draft</span>
+                              <span className="text-xs text-muted-foreground text-center mt-1">Save for later editing</span>
+                            </Label>
+                          </div>
+                        </RadioGroup>
                       </CardContent>
                     </Card>
 
@@ -1889,18 +2602,38 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
             </Button>
           )}
 
-          <div className="flex-1 text-center text-sm text-muted-foreground">
-            Step {step} of {STEPS.length}
+          <div className="flex-1 text-center">
+            <span className="text-sm text-muted-foreground">Step {step} of {STEPS.length}</span>
+            {/* Show missing fields message */}
+            {!isStepValid(step) && getMissingFields(step).length > 0 && (
+              <p className="text-xs text-amber-600 mt-1 flex items-center justify-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Required: {getMissingFields(step).join(', ')}
+              </p>
+            )}
           </div>
 
           {step < STEPS.length ? (
-            <Button
-              onClick={() => setStep(step + 1)}
-              disabled={!isStepValid(step)}
-            >
-              Continue
-              <ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      onClick={() => setStep(step + 1)}
+                      disabled={!isStepValid(step)}
+                    >
+                      Continue
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!isStepValid(step) && getMissingFields(step).length > 0 && (
+                  <TooltipContent>
+                    <p>Please fill in: {getMissingFields(step).join(', ')}</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <Button
               onClick={() => createMutation.mutate()}

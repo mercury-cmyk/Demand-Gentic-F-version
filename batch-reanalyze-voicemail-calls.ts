@@ -359,6 +359,7 @@ function generateReport() {
       correctionMade: r.correctionMade,
       error: r.error
     }))
+  };
 
   const reportPath = `voicemail-analysis-report-${new Date().toISOString().split('T')[0]}.json`;
   fs.writeFileSync(reportPath, JSON.stringify(exportData, null, 2));

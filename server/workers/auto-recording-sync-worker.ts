@@ -5,7 +5,7 @@ import { leads, dialerCallAttempts, campaignTestCalls } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
-import { submitTranscription, submitStructuredTranscription } from '../services/assemblyai-transcription';
+import { submitTranscription, submitStructuredTranscription } from '../services/google-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 

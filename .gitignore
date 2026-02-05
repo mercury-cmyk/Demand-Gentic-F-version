@@ -14,6 +14,11 @@ env.yaml
 env_vars.yaml
 .env*
 
+# GCP Service Account Keys (NEVER commit these)
+*service-account*.json
+*credentials*.json
+gcp-*.json
+
 # Logs
 logs/
 *.log

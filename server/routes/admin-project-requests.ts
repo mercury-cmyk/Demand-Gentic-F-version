@@ -1,0 +1,600 @@
+/**
+ * Admin Project Requests Routes
+ *
+ * API routes for managing client project requests:
+ * - List project requests with filtering
+ * - Approve projects with automatic campaign creation
+ * - Reject projects with notifications
+ */
+
+import { Router, Request, Response } from 'express';
+import { db } from '../db';
+import { eq, and, desc, sql, ne } from 'drizzle-orm';
+import { z } from 'zod';
+import {
+  clientProjects,
+  clientAccounts,
+  campaigns,
+  users,
+  clientCampaignAccess,
+  clientPortalActivityLogs,
+  campaignIntakeRequests,
+} from '@shared/schema';
+import { requireAuth } from '../auth';
+import { generateJSON } from '../services/vertex-ai';
+import { notificationService } from '../services/notification-service';
+
+const router = Router();
+
+// ==================== LIST PROJECT REQUESTS ====================
+
+/**
+ * List all project requests with filtering
+ */
+router.get('/', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { status = 'pending', clientAccountId, limit = '50', offset = '0' } = req.query;
+
+    let query = db
+      .select({
+        id: clientProjects.id,
+        name: clientProjects.name,
+        description: clientProjects.description,
+        status: clientProjects.status,
+        clientAccountId: clientProjects.clientAccountId,
+        clientName: clientAccounts.name,
+        budgetAmount: clientProjects.budgetAmount,
+        budgetCurrency: clientProjects.budgetCurrency,
+        requestedLeadCount: clientProjects.requestedLeadCount,
+        landingPageUrl: clientProjects.landingPageUrl,
+        projectFileUrl: clientProjects.projectFileUrl,
+        startDate: clientProjects.startDate,
+        endDate: clientProjects.endDate,
+        approvalNotes: clientProjects.approvalNotes,
+        createdAt: clientProjects.createdAt,
+        updatedAt: clientProjects.updatedAt,
+      })
+      .from(clientProjects)
+      .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+      .orderBy(desc(clientProjects.createdAt))
+      .limit(parseInt(limit as string))
+      .offset(parseInt(offset as string));
+
+    // Apply filters
+    const conditions = [];
+
+    if (status && status !== 'all') {
+      conditions.push(eq(clientProjects.status, status as any));
+    }
+
+    if (clientAccountId) {
+      conditions.push(eq(clientProjects.clientAccountId, clientAccountId as string));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+
+    const projects = await query;
+
+    res.json(projects);
+  } catch (error: any) {
+    console.error('[Admin Project Requests] List error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== GET SINGLE PROJECT REQUEST ====================
+
+/**
+ * Get a single project request with full details
+ */
+router.get('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [project] = await db
+      .select({
+        id: clientProjects.id,
+        name: clientProjects.name,
+        description: clientProjects.description,
+        projectCode: clientProjects.projectCode,
+        status: clientProjects.status,
+        clientAccountId: clientProjects.clientAccountId,
+        clientName: clientAccounts.name,
+        clientEmail: clientAccounts.contactEmail,
+        budgetAmount: clientProjects.budgetAmount,
+        budgetCurrency: clientProjects.budgetCurrency,
+        requestedLeadCount: clientProjects.requestedLeadCount,
+        landingPageUrl: clientProjects.landingPageUrl,
+        projectFileUrl: clientProjects.projectFileUrl,
+        startDate: clientProjects.startDate,
+        endDate: clientProjects.endDate,
+        approvalNotes: clientProjects.approvalNotes,
+        approvedBy: clientProjects.approvedBy,
+        approvedAt: clientProjects.approvedAt,
+        rejectionReason: clientProjects.rejectionReason,
+        createdAt: clientProjects.createdAt,
+        updatedAt: clientProjects.updatedAt,
+      })
+      .from(clientProjects)
+      .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+      .where(eq(clientProjects.id, id));
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Get campaigns associated with this project
+    const projectCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(eq(campaigns.projectId, id));
+
+    res.json({
+      ...project,
+      campaigns: projectCampaigns,
+    });
+  } catch (error: any) {
+    console.error('[Admin Project Requests] Get error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== APPROVE PROJECT ====================
+
+const approveSchema = z.object({
+  notes: z.string().optional(),
+  autoCreateCampaign: z.boolean().default(true),
+  campaignType: z.string().default('lead_qualification'),
+});
+
+/**
+ * Approve a project request and optionally auto-create a campaign
+ */
+router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+    const parsed = approveSchema.parse(req.body);
+
+    // Get the project
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, id));
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    if (project.status !== 'pending' && project.status !== 'draft') {
+      return res.status(400).json({ message: 'Only pending or draft projects can be approved' });
+    }
+
+    // Update project status
+    const [updatedProject] = await db
+      .update(clientProjects)
+      .set({
+        status: 'active',
+        approvalNotes: parsed.notes || null,
+        approvedBy: userId,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, id))
+      .returning();
+
+    // Check for linked Intake Request
+    let intakeRequestData = null;
+    if (updatedProject.intakeRequestId) {
+        const [intake] = await db.select().from(campaignIntakeRequests).where(eq(campaignIntakeRequests.id, updatedProject.intakeRequestId));
+        if (intake) {
+            intakeRequestData = intake;
+        }
+    }
+
+    let createdCampaign = null;
+
+    // Auto-create campaign if requested
+    if (parsed.autoCreateCampaign) {
+      try {
+        // Use Intake Request data if available
+        const effectiveCampaignType = intakeRequestData?.campaignType || parsed.campaignType;
+        
+        // Generate campaign configuration using AI
+        const campaignConfig = await generateCampaignConfig(project, effectiveCampaignType, intakeRequestData);
+
+        // Determine mapped campaign type for DB enum
+        let mappedType = effectiveCampaignType;
+        // Basic mapping backup if not already valid enum
+        if (!['lead_qualification', 'appointment_setting', 'high_quality_leads', 'webinar_invite', 'data_validation', 'email'].includes(mappedType)) {
+             mappedType = 'lead_qualification'; // Fallback
+        }
+
+        // Create the campaign with project attachments
+        [createdCampaign] = await db
+          .insert(campaigns)
+          .values({
+            name: `${project.name} - Campaign`,
+            type: mappedType as any,
+            status: 'draft',
+            clientAccountId: project.clientAccountId,
+            projectId: project.id,
+            creationMode: 'agentic',
+            campaignObjective: campaignConfig.objective || project.description || 'Generated from project request',
+            targetQualifiedLeads: project.requestedLeadCount || 100,
+            targetAudienceDescription: campaignConfig.targetAudience || '',
+            talkingPoints: campaignConfig.talkingPoints || null,
+            successCriteria: campaignConfig.successCriteria || null,
+            dialMode: (mappedType === 'email' || project.projectType === 'email_campaign') ? undefined : 'ai_agent',
+            ownerId: userId,
+            createdBy: userId,
+            approvalStatus: 'draft',
+            // Attach contexts from intake
+            intakeRequestId: intakeRequestData?.id || null,
+            // Transfer project attachments to campaign
+            landingPageUrl: project.landingPageUrl || null,
+            projectFileUrl: project.projectFileUrl || null,
+          })
+          .returning();
+
+        // Grant client access to the campaign
+        await db.insert(clientCampaignAccess).values({
+          clientAccountId: project.clientAccountId,
+          regularCampaignId: createdCampaign.id,
+          grantedBy: userId,
+        });
+
+        console.log('[Admin Project Requests] Auto-created campaign:', createdCampaign.id);
+      } catch (campaignError: any) {
+        console.error('[Admin Project Requests] Auto-create campaign error:', campaignError);
+        // Don't fail the approval, just log
+      }
+    }
+
+    // Log activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: project.clientAccountId,
+      entityType: 'project',
+      entityId: project.id,
+      action: 'project_approved',
+      details: {
+        approvedBy: userId,
+        autoCreateCampaign: parsed.autoCreateCampaign,
+        campaignId: createdCampaign?.id,
+        notes: parsed.notes,
+      },
+    });
+
+    // Notify client
+    try {
+      await notificationService.notifyClientOfProjectApproval(
+        project.clientAccountId,
+        project.name,
+        createdCampaign?.id
+      );
+    } catch (notifyError) {
+      console.error('[Admin Project Requests] Notification error:', notifyError);
+    }
+
+    res.json({
+      success: true,
+      project: updatedProject,
+      campaign: createdCampaign,
+      message: createdCampaign
+        ? `Project approved and campaign created (${createdCampaign.id})`
+        : 'Project approved successfully',
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('[Admin Project Requests] Approve error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== REJECT PROJECT ====================
+
+const rejectSchema = z.object({
+  reason: z.string().min(1, 'Rejection reason is required'),
+});
+
+/**
+ * Reject a project request
+ */
+router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+    const parsed = rejectSchema.parse(req.body);
+
+    // Get the project
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, id));
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    if (project.status !== 'pending' && project.status !== 'draft') {
+      return res.status(400).json({ message: 'Only pending or draft projects can be rejected' });
+    }
+
+    // Update project status
+    const [updatedProject] = await db
+      .update(clientProjects)
+      .set({
+        status: 'rejected',
+        rejectionReason: parsed.reason,
+        approvedBy: userId,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(clientProjects.id, id))
+      .returning();
+
+    // Log activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: project.clientAccountId,
+      entityType: 'project',
+      entityId: project.id,
+      action: 'project_rejected',
+      details: {
+        rejectedBy: userId,
+        reason: parsed.reason,
+      },
+    });
+
+    // Notify client
+    try {
+      await notificationService.notifyClientOfProjectRejection(
+        project.clientAccountId,
+        project.name,
+        parsed.reason
+      );
+    } catch (notifyError) {
+      console.error('[Admin Project Requests] Notification error:', notifyError);
+    }
+
+    res.json({
+      success: true,
+      project: updatedProject,
+      message: 'Project rejected',
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('[Admin Project Requests] Reject error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== DELETE PROJECT ====================
+
+/**
+ * Delete a project request
+ */
+router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+
+    // Get the project first
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, id));
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Check if there are associated campaigns
+    const associatedCampaigns = await db
+      .select({ id: campaigns.id })
+      .from(campaigns)
+      .where(eq(campaigns.projectId, id));
+
+    if (associatedCampaigns.length > 0) {
+      return res.status(400).json({
+        message: 'Cannot delete project with associated campaigns. Please delete or reassign campaigns first.',
+        campaignCount: associatedCampaigns.length,
+      });
+    }
+
+    // Delete client campaign access records for this project
+    await db
+      .delete(clientCampaignAccess)
+      .where(eq(clientCampaignAccess.regularCampaignId, id));
+
+    // Delete activity logs for this project
+    await db
+      .delete(clientPortalActivityLogs)
+      .where(
+        and(
+          eq(clientPortalActivityLogs.entityType, 'project'),
+          eq(clientPortalActivityLogs.entityId, id)
+        )
+      );
+
+    // Delete the project
+    await db
+      .delete(clientProjects)
+      .where(eq(clientProjects.id, id));
+
+    // Log this deletion activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: project.clientAccountId,
+      entityType: 'project',
+      entityId: id,
+      action: 'project_deleted',
+      details: {
+        deletedBy: userId,
+        projectName: project.name,
+      },
+    });
+
+    console.log('[Admin Project Requests] Deleted project:', id);
+
+    res.json({
+      success: true,
+      message: 'Project deleted successfully',
+    });
+  } catch (error: any) {
+    console.error('[Admin Project Requests] Delete error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== EDIT PROJECT ====================
+
+const editSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  budgetAmount: z.string().optional(),
+  requestedLeadCount: z.number().optional(),
+  landingPageUrl: z.string().url().optional().or(z.literal('')),
+  projectFileUrl: z.string().url().optional().or(z.literal('')),
+  status: z.enum(['draft', 'pending', 'active', 'paused', 'completed', 'archived', 'rejected']).optional(),
+});
+
+/**
+ * Edit a project request
+ */
+router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = (req as any).user?.id;
+    const parsed = editSchema.parse(req.body);
+
+    // Get the project first
+    const [project] = await db
+      .select()
+      .from(clientProjects)
+      .where(eq(clientProjects.id, id));
+
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Build update object with only provided fields
+    const updateData: any = {
+      updatedAt: new Date(),
+    };
+
+    if (parsed.name !== undefined) updateData.name = parsed.name;
+    if (parsed.description !== undefined) updateData.description = parsed.description;
+    if (parsed.budgetAmount !== undefined) updateData.budgetAmount = parsed.budgetAmount;
+    if (parsed.requestedLeadCount !== undefined) updateData.requestedLeadCount = parsed.requestedLeadCount;
+    if (parsed.landingPageUrl !== undefined) updateData.landingPageUrl = parsed.landingPageUrl || null;
+    if (parsed.projectFileUrl !== undefined) updateData.projectFileUrl = parsed.projectFileUrl || null;
+    if (parsed.status !== undefined) updateData.status = parsed.status;
+
+    // Update the project
+    const [updatedProject] = await db
+      .update(clientProjects)
+      .set(updateData)
+      .where(eq(clientProjects.id, id))
+      .returning();
+
+    // Log activity
+    await db.insert(clientPortalActivityLogs).values({
+      clientAccountId: project.clientAccountId,
+      entityType: 'project',
+      entityId: project.id,
+      action: 'project_edited',
+      details: {
+        editedBy: userId,
+        changes: parsed,
+      },
+    });
+
+    console.log('[Admin Project Requests] Edited project:', id);
+
+    res.json({
+      success: true,
+      project: updatedProject,
+      message: 'Project updated successfully',
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('[Admin Project Requests] Edit error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Generate campaign configuration using AI based on project details
+ */
+async function generateCampaignConfig(
+  project: any,
+  campaignType: string,
+  intakeRequest: any = null
+): Promise<{
+  objective: string;
+  targetAudience: string;
+  talkingPoints: string[] | null;
+  successCriteria: string;
+}> {
+  try {
+    const intakeContext = intakeRequest ? `
+INTAKE REQUEST DATA:
+- Raw Input: ${JSON.stringify(intakeRequest.rawInput)}
+- Extracted Context: ${JSON.stringify(intakeRequest.extractedContext)}
+- Priority: ${intakeRequest.priority}
+- Sources: ${JSON.stringify(intakeRequest.contextSources)}
+` : '';
+
+    const prompt = `You are a B2B demand generation expert. Based on the following project details, generate a campaign configuration.
+
+PROJECT DETAILS:
+- Name: ${project.name}
+- Description: ${project.description || 'Not provided'}
+- Budget: ${project.budgetAmount ? `$${project.budgetAmount}` : 'Not specified'}
+- Requested Leads: ${project.requestedLeadCount || 'Not specified'}
+- Landing Page: ${project.landingPageUrl || 'None'}
+- Campaign Type: ${campaignType}
+${intakeContext}
+
+Generate a JSON configuration with:
+{
+  "objective": "Clear, specific campaign objective (1-2 sentences)",
+  "targetAudience": "Description of ideal target audience",
+  "talkingPoints": ["Key point 1", "Key point 2", "Key point 3"],
+  "successCriteria": "What defines success for this campaign"
+}`;
+
+    const config = await generateJSON(prompt, { temperature: 0.4 });
+    return {
+      objective: config.objective || project.description || 'Lead generation campaign',
+      targetAudience: config.targetAudience || '',
+      talkingPoints: config.talkingPoints || null,
+      successCriteria: config.successCriteria || 'Generate qualified leads',
+    };
+  } catch (error) {
+    console.error('[Admin Project Requests] AI config generation error:', error);
+    return {
+      objective: project.description || 'Lead generation campaign',
+      targetAudience: '',
+      talkingPoints: null,
+      successCriteria: 'Generate qualified leads',
+    };
+  }
+}
+
+export default router;

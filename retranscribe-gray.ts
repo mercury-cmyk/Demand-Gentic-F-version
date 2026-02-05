@@ -1,7 +1,7 @@
 import { pool, db } from "./server/db";
 import { leads } from "./shared/schema";
 import { eq } from "drizzle-orm";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 
 async function retranscribeGrayCall() {
   console.log("========================================");

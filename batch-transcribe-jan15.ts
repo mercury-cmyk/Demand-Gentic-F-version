@@ -39,7 +39,7 @@ async function transcribeWithGoogleCloud(recordingUrl: string): Promise<string |
     console.log(`[Google Cloud STT] Starting transcription...`);
     
     // Use the unified Google Cloud Speech-to-Text service
-    const { submitTranscription } = await import('./server/services/assemblyai-transcription');
+    const { submitTranscription } = await import('./server/services/google-transcription');
     const transcript = await submitTranscription(recordingUrl);
     
     if (!transcript) {

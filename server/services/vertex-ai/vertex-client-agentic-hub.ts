@@ -326,7 +326,7 @@ Return JSON:
   "optimizedCriteria": { ... any suggested improvements }
 }`;
 
-      const analysis = await generateJSON<{
+      let analysis = await generateJSON<{
         isValid: boolean;
         validationNotes: string;
         estimatedCost: number;
@@ -337,6 +337,12 @@ Return JSON:
       }>(analysisPrompt, { temperature: 0.2 });
 
       console.log('[VertexClientAgenticHub] Order analysis result:', JSON.stringify(analysis, null, 2));
+
+      // Handle potential array response from LLM
+      if (Array.isArray(analysis)) {
+        // @ts-ignore
+        analysis = analysis[0];
+      }
 
       if (!analysis.isValid) {
         return {
@@ -379,8 +385,7 @@ Return JSON:
         budgetAmount: request.budget ? request.budget.toString() : null,
         startDate: new Date(),
         endDate: estimatedDeliveryDate,
-        projectType: projectType as any,
-        createdBy: this.context.clientUserId
+        projectType: projectType as any
       }).returning();
 
       // 2. Create Agentic Campaign
@@ -399,8 +404,7 @@ Return JSON:
       const [verifCampaign] = await db.insert(verificationCampaigns).values({
         name: `Order ${orderNumber} - Verification`,
         status: 'active',
-        monthlyTarget: request.volumeRequested,
-        createdBy: this.context.clientUserId
+        monthlyTarget: request.volumeRequested
       }).returning();
 
       const [order] = await db
@@ -559,13 +563,19 @@ Return JSON:
   "coachingPoints": ["point 1", "point 2"]
 }`;
 
-      const simulation = await generateJSON<{
+      let simulation = await generateJSON<{
         scenario: { prospectName: string; company: string; title: string };
         dialogue: { speaker: string; text: string; tone: string }[];
         objections: { objection: string; category: string; difficulty: number }[];
         expectedOutcome: string;
         coachingPoints: string[];
       }>(scenarioPrompt, { temperature: 0.7 });
+
+      // Handle potential array output from LLM
+      if (Array.isArray(simulation)) {
+        // @ts-ignore
+        simulation = simulation[0];
+      }
 
       // Generate transcript from dialogue
       const transcript = simulation.dialogue.map((d) => `${d.speaker.toUpperCase()}: ${d.text}`).join("\n");
@@ -597,7 +607,7 @@ Return JSON:
   "detailedFeedback": "paragraph of coaching feedback"
 }`;
 
-      const analysis = await generateJSON<{
+      let analysis = await generateJSON<{
         objectionCount: number;
         successfulResponses: number;
         missedOpportunities: string[];
@@ -606,6 +616,12 @@ Return JSON:
         overallScore: number;
         detailedFeedback: string;
       }>(analysisPrompt, { temperature: 0.3 });
+
+      // Handle potential array output from LLM
+      if (Array.isArray(analysis)) {
+        // @ts-ignore
+        analysis = analysis[0];
+      }
 
       const simulationId = `SIM-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
@@ -697,7 +713,7 @@ Return JSON:
   }
 }`;
 
-      const persona = await generateJSON<{
+      let persona = await generateJSON<{
         systemPrompt: string;
         voiceStyle: string;
         suggestedVoice: string;
@@ -710,6 +726,12 @@ Return JSON:
           buyingSignals: string[];
         };
       }>(personaPrompt, { temperature: 0.6 });
+
+      // Handle potential array output from LLM
+      if (Array.isArray(persona)) {
+        // @ts-ignore
+        persona = persona[0];
+      }
 
       const sessionId = `LIVE-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
@@ -839,10 +861,12 @@ Return JSON:
 
       console.log("[ClientAgenticHub] Generating email with Vertex AI...");
       
-      const result = await generateJSON<{
+      const rawResult = await generateJSON<{
         emails: GeneratedEmail[];
         copywritingNotes: string;
       }>(emailPrompt, { temperature: 0.7 });
+
+      const result = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
       console.log("[ClientAgenticHub] Email generation result:", JSON.stringify(result, null, 2));
 
@@ -957,10 +981,12 @@ Return JSON:
   ]
 }`;
 
-      const result = await generateJSON<{
+      const rawResult = await generateJSON<{
         sequenceStrategy: string;
         emails: (GeneratedEmail & { order: number; sendDelay: number; subjectVariant?: string; emailPurpose: string })[];
       }>(sequencePrompt, { temperature: 0.6 });
+
+      const result = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
       const sequenceId = `SEQ-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
@@ -1019,11 +1045,13 @@ Return JSON:
   "technicalSpecs": "technical details for the image"
 }`;
 
-      const promptResult = await generateJSON<{
+      const rawResult = await generateJSON<{
         refinedPrompt: string;
         styleKeywords: string[];
         technicalSpecs: string;
       }>(promptRefinementPrompt, { temperature: 0.4 });
+
+      const promptResult = Array.isArray(rawResult) ? rawResult[0] : rawResult;
 
       const variantCount = request.variants || 1;
       const generatedImages: GeneratedImage[] = [];
@@ -1217,7 +1245,7 @@ Return JSON:
   }
 }`;
 
-      const analysis = await generateJSON<{
+      let analysis = await generateJSON<{
         title: string;
         summary: string;
         keyMetrics: Record<string, any>;
@@ -1226,6 +1254,12 @@ Return JSON:
         recommendations: string[];
         trends: { volumeTrend: string; qualityTrend: string };
       }>(analysisPrompt, { temperature: 0.3 });
+
+      // Handle potential array response from LLM
+      if (Array.isArray(analysis)) {
+        // @ts-ignore
+        analysis = analysis[0];
+      }
 
       const reportId = `RPT-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 

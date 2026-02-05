@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
+import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
 import {
   Phone,
   PhoneCall,
@@ -156,22 +157,29 @@ export default function PreviewStudioPage() {
 
   // Fetch accounts for selected campaign
   const { data: accounts = [], isLoading: accountsLoading } = useQuery<Account[]>({
-    queryKey: ['/api/preview-studio/accounts', selectedCampaignId],
+    queryKey: ['/api/knowledge-blocks/campaigns', selectedCampaignId, 'accounts'],
     queryFn: async () => {
       if (!selectedCampaignId) return [];
-      const res = await apiRequest('GET', `/api/preview-studio/accounts?campaignId=${selectedCampaignId}`);
-      return res.json();
+      const res = await apiRequest('GET', `/api/knowledge-blocks/campaigns/${selectedCampaignId}/accounts`);
+      const data = await res.json();
+      return data.accounts || [];
     },
     enabled: !!selectedCampaignId,
   });
 
   // Fetch contacts for selected account
   const { data: contacts = [], isLoading: contactsLoading } = useQuery<Contact[]>({
-    queryKey: ['/api/preview-studio/contacts', selectedAccountId],
+    queryKey: ['/api/knowledge-blocks/accounts', selectedAccountId, 'contacts'],
     queryFn: async () => {
       if (!selectedAccountId) return [];
-      const res = await apiRequest('GET', `/api/preview-studio/contacts?accountId=${selectedAccountId}`);
-      return res.json();
+      const res = await apiRequest('GET', `/api/knowledge-blocks/accounts/${selectedAccountId}/contacts`);
+      const data = await res.json();
+      return (data.contacts || []).map((c: any) => ({
+        id: c.id,
+        fullName: c.firstName && c.lastName ? `${c.firstName} ${c.lastName}` : c.firstName || c.lastName || null,
+        jobTitle: c.jobTitle,
+        email: c.email,
+      }));
     },
     enabled: !!selectedAccountId,
   });
@@ -1069,7 +1077,7 @@ function EmailPreviewSection({
                   <div className="bg-white rounded-2xl overflow-hidden shadow-2xl">
                     {generatedEmail.html ? (
                       <iframe
-                        srcDoc={generatedEmail.html}
+                        srcDoc={sanitizeHtmlForIframePreview(generatedEmail.html)}
                         className="w-full h-[600px] border-0"
                         title="Email Preview"
                       />

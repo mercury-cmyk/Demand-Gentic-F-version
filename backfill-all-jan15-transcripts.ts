@@ -2,7 +2,7 @@ import { pool, db } from "./server/db";
 import { sql } from "drizzle-orm";
 import { leads, callSessions, campaignTestCalls } from "./shared/schema";
 import { eq } from "drizzle-orm";
-import { submitTranscription } from "./server/services/assemblyai-transcription";
+import { submitTranscription } from "./server/services/google-transcription";
 
 type CallRecord = {
   id: string;

@@ -1874,6 +1874,15 @@ export const campaigns = pgTable("campaigns", {
   // Account Intelligence Toggle - allows campaigns to work without intelligence generation delays
   requireAccountIntelligence: boolean("require_account_intelligence").default(false), // When false, skips intelligence lookup for immediate call start
 
+  // ==================== PROJECT ATTACHMENT FIELDS ====================
+  // These fields are populated from the linked project when auto-creating campaigns
+  landingPageUrl: text("landing_page_url"), // Client's landing page URL (from project)
+  projectFileUrl: text("project_file_url"), // Client's uploaded project brief/assets URL (from project)
+
+  // Intake request linkage for traceability
+  intakeRequestId: varchar("intake_request_id"), // Reference to campaign intake request
+  creationMode: text("creation_mode"), // 'manual' | 'agentic' | 'intake' - how the campaign was created
+
   // ==================== MULTI-CHANNEL CAMPAIGN FIELDS ====================
   // Enabled channels for this campaign (e.g., ['email', 'voice'] for both)
   enabledChannels: text("enabled_channels").array().default(sql`ARRAY['voice']::text[]`),
@@ -6495,6 +6504,30 @@ export const clientAccounts = pgTable("client_accounts", {
     showProjectDetails: true,
     allowedCampaignTypes: []
   }),
+
+  // Enhanced Client Profile
+  profile: jsonb("profile").$type<{
+    summary?: string; // What the client does
+    problemSolved?: string;
+    products?: string[];
+    services?: string[];
+    industries?: string[];
+    targetAudience?: string;
+    differentiators?: string;
+    engagementModel?: string; // How we work with them
+    priorities?: string[];
+    constraints?: string[];
+  }>().default({}),
+  
+  // Enhanced Settings (Personalization)
+  settings: jsonb("settings").$type<{
+    featureVisibility?: Record<string, boolean>; 
+    defaultCampaignTypes?: string[];
+    preferredWorkflows?: string[];
+    reportingEmphasis?: string[];
+    agentDefaults?: Record<string, any>; // Adapt agent behavior
+  }>().default({}),
+
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -6547,9 +6580,10 @@ export const clientPortalOrders = pgTable("client_portal_orders", {
   orderNumber: text("order_number").notNull().unique(),
   clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }).notNull(),
   clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
-  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }).notNull(),
+  campaignId: varchar("campaign_id").references(() => verificationCampaigns.id, { onDelete: 'cascade' }),  // Nullable - order can be created before campaign association
   
-  // Order details
+  // Flexible metadata for work order details
+  metadata: jsonb("metadata"),
   requestedQuantity: integer("requested_quantity").notNull(),
   approvedQuantity: integer("approved_quantity"),
   deliveredQuantity: integer("delivered_quantity").default(0).notNull(),
@@ -6858,6 +6892,8 @@ export const clientProjects = pgTable("client_projects", {
   // Project Type Classification (for client assignment)
   projectType: projectTypeEnum("project_type").default('custom'),
 
+  intakeRequestId: varchar("intake_request_id"), // Back-reference to intake request
+
   // Campaign Organization Reference (for three-tier hierarchy)
   campaignOrganizationId: varchar("campaign_organization_id"),
 
@@ -6871,6 +6907,12 @@ export const clientProjects = pgTable("client_projects", {
     autoApproveThreshold: 85,
     requireManualReview: false
   }),
+
+  // Approval workflow
+  approvalNotes: text("approval_notes"),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: 'set null' }),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
 
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
