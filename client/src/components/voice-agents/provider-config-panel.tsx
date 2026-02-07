@@ -87,7 +87,7 @@ export interface ProviderConfigPanelProps {
 
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI Realtime', description: 'GPT-4 based voice' },
-  { id: 'gemini', name: 'Google Gemini', description: 'Gemini Live voice' },
+  { id: 'gemini', name: 'Google Gemini', description: 'Live voice' },
 ];
 
 // ==================== COMPONENT ====================

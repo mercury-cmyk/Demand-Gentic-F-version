@@ -77,6 +77,7 @@ import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
 import ResourcesCentrePage from "@/pages/resources-centre";
+import ResourcesCentrePublicPage from "@/pages/resources-centre-public";
 import VerificationCampaignsPage from "@/pages/verification-campaigns";
 import VerificationCampaignConfigPage from "@/pages/verification-campaign-config";
 import VerificationCampaignStatsPage from "@/pages/verification-campaign-stats";
@@ -98,6 +99,8 @@ import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
 import ClientPortalAdmin from "@/pages/client-portal-admin";
 import AdminProjectRequests from "@/pages/admin-project-requests";
+import PublicBookingPage from "@/pages/public-booking";
+import AdminBookingsPage from "@/pages/admin-bookings";
 import ClientPortalLogin from "@/pages/client-portal-login";
 import ClientPortalJoin from "@/pages/client-portal-join";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
@@ -443,10 +446,10 @@ function AuthenticatedApp() {
               <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
               <Route path="/telephony/sip-trunks" component={TelephonySettingsPage} />
               
-              {/* Resources */}
+              {/* Resources (Admin) */}
               <Route path="/events" component={EventsPage} />
-              <Route path="/resources" component={ResourcesPage} />
-              <Route path="/resources-centre" component={ResourcesCentrePage} />
+              <Route path="/admin/resources" component={ResourcesPage} />
+              <Route path="/admin/resources-centre" component={ResourcesCentrePage} />
               <Route path="/news" component={NewsPage} />
               
               {/* Verification */}
@@ -481,6 +484,7 @@ function AuthenticatedApp() {
               {/* Client Portal & Hierarchy Management */}
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
+              <Route path="/admin/bookings" component={AdminBookingsPage} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />
               
@@ -554,30 +558,97 @@ function AuthenticatedApp() {
 function Router() {
   return (
     <Switch>
-      {/* Public landing page as default home */}
+      {/* ================================================
+          PUBLIC ROUTES - No authentication required
+          These pages are accessible to everyone
+          ================================================ */}
+
+      {/* Welcome page is the home page */}
       <Route path="/">
-        <Redirect to="/welcome" />
+        <LandingPage />
       </Route>
-      <Route path="/welcome" component={LandingPage} />
-      <Route path="/about" component={AboutPage} />
-      <Route path="/privacy" component={PrivacyPolicyPage} />
-      <Route path="/terms" component={TermsOfServicePage} />
-      <Route path="/gdpr" component={GDPRPolicyPage} />
+      <Route path="/welcome">
+        <LandingPage />
+      </Route>
+
+      {/* Static public pages */}
+      <Route path="/about">
+        <AboutPage />
+      </Route>
+      <Route path="/privacy">
+        <PrivacyPolicyPage />
+      </Route>
+      <Route path="/terms">
+        <TermsOfServicePage />
+      </Route>
+      <Route path="/gdpr">
+        <GDPRPolicyPage />
+      </Route>
+
+      {/* Public Resources Centre - Announcements, Insights, eBooks, Solution Briefs, Webinars */}
+      <Route path="/resources-centre">
+        <ResourcesCentrePublicPage />
+      </Route>
+      <Route path="/resources">
+        <ResourcesCentrePublicPage />
+      </Route>
+
+      {/* Authentication */}
       <Route path="/login" component={LoginPage} />
+
+      {/* Public lead forms and booking */}
       <Route path="/forms/:id" component={LeadFormPublicPage} />
+      <Route path="/book/:username/:slug" component={PublicBookingPage} />
+
+      {/* Client Portal public routes (login/join only) */}
       <Route path="/client-portal/login" component={ClientPortalLogin} />
       <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
-      <Route path="/client-portal/dashboard" component={ClientPortalDashboard} />
-      <Route path="/client-portal/simulations" component={ClientPortalSimulations} />
-      <Route path="/client-portal/preview-studio" component={ClientPortalPreviewStudio} />
-      <Route path="/client-portal/voice-simulation" component={ClientPortalVoiceSimulation} />
-      <Route path="/client-portal/email-simulation" component={ClientPortalEmailSimulation} />
-      <Route path="/client-portal/intelligence" component={ClientPortalIntelligence} />
+
+      {/* ================================================
+          PROTECTED ROUTES - Authentication required
+          All admin and authenticated routes below
+          ================================================ */}
+
+      {/* Client Portal authenticated routes */}
+      <Route path="/client-portal/dashboard">
+        <ProtectedRoute>
+          <ClientPortalDashboard />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/simulations">
+        <ProtectedRoute>
+          <ClientPortalSimulations />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/preview-studio">
+        <ProtectedRoute>
+          <ClientPortalPreviewStudio />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/voice-simulation">
+        <ProtectedRoute>
+          <ClientPortalVoiceSimulation />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/email-simulation">
+        <ProtectedRoute>
+          <ClientPortalEmailSimulation />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/intelligence">
+        <ProtectedRoute>
+          <ClientPortalIntelligence />
+        </ProtectedRoute>
+      </Route>
+
+      {/* Main dashboard */}
       <Route path="/dashboard">
         <ProtectedRoute>
           <AuthenticatedApp />
         </ProtectedRoute>
       </Route>
+
+      {/* All other routes require authentication */}
       <Route>
         <ProtectedRoute>
           <AuthenticatedApp />

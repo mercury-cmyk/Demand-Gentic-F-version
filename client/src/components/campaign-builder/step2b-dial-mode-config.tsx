@@ -23,7 +23,7 @@ interface Step2bDialModeConfigProps {
 }
 
 type DialMode = 'ai_agent';
-// Gemini Live Native Voices
+// Native live voices
 type AiVoice = string;
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
 
@@ -238,7 +238,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
             <div>
               <CardTitle className="text-lg">AI Voice Agent Mode</CardTitle>
               <CardDescription className="mt-1">
-                Intelligent AI agents handle calls autonomously using Gemini Live voice technology
+                Intelligent AI agents handle calls autonomously using live voice technology
               </CardDescription>
             </div>
           </div>

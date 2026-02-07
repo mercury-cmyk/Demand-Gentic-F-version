@@ -58,7 +58,7 @@ export function VirtualAgentVoiceSettings({ agent, onUpdate }: any) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="openai">OpenAI Realtime</SelectItem>
-            <SelectItem value="google">Google Gemini Live</SelectItem>
+            <SelectItem value="google">Live Voice</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -92,7 +92,7 @@ export function VirtualAgentVoiceSettings({ agent, onUpdate }: any) {
           provider === 'google' ? (
             <Select value={voice} onValueChange={handleVoiceChange} disabled={loadingVoices}>
               <SelectTrigger>
-                {loadingVoices ? <Loader2 className="w-4 h-4 animate-spin" /> : <SelectValue placeholder="Select Gemini Voice" />}
+                {loadingVoices ? <Loader2 className="w-4 h-4 animate-spin" /> : <SelectValue placeholder="Select Voice" />}
               </SelectTrigger>
               <SelectContent>
                 {geminiVoices.map((v) => (

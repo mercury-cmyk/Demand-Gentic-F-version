@@ -3,7 +3,7 @@
  *
  * Comprehensive API routes for client self-service agentic capabilities:
  * - Campaign Order Creation & Management
- * - Voice Simulations (Gemini Live)
+ * - Voice Simulations (Live Voice)
  * - Email Generation & Sequences
  * - Image Generation (Imagen 3)
  * - Campaign Reports & Analytics
@@ -489,7 +489,7 @@ router.post("/simulations/voice/run", async (req: Request, res: Response) => {
 });
 
 /**
- * Configure a Gemini Live real-time voice simulation session
+ * Configure a live real-time voice simulation session
  */
 router.post("/simulations/voice/live/configure", async (req: Request, res: Response) => {
   try {
@@ -1745,7 +1745,7 @@ router.get("/capabilities", (req: Request, res: Response) => {
       description: "Practice sales calls with AI-powered realistic simulations",
       features: [
         "Text-based simulations",
-        "Gemini Live real-time voice",
+        "Live real-time voice",
         "Multiple scenarios",
         "Performance analysis",
       ],

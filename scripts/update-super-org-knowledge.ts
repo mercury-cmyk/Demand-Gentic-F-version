@@ -63,12 +63,12 @@ async function main() {
             'Discovery & Strategy: Map solutions to buyer problems.',
             'Intelligence Activation: Agentic research and verification.',
             'Precision Content: Personalized emails, scripts, and responses.',
-            'Agentic Execution: Gemini Live voice, intelligent email sequences.',
+            'Agentic Execution: Live voice, intelligent email sequences.',
             'Optimization & Handoff: Real-time analysis and qualified lead delivery.'
         ],
         confidence: 1.0
     },
-    channels: { value: 'Email, Voice (Gemini Live), Content Assets, Digital', confidence: 1.0 }
+    channels: { value: 'Email, Voice, Content Assets, Digital', confidence: 1.0 }
   };
 
   const compiledOrgContext = `
@@ -106,7 +106,7 @@ DemandGentic.ai combines three pillars for precision demand generation:
 1. **Discovery & Strategy**: Define ICP and campaign architecture.
 2. **Intelligence Activation**: AI agents research and verify targets.
 3. **Precision Content**: Generate context-aware messaging.
-4. **Agentic Execution**: Deploy Voice (Gemini Live) and Email agents.
+4. **Agentic Execution**: Deploy Voice and Email agents.
 5. **Optimization & Handoff**: Continuous improvement and lead delivery.
 
 ## Corporate Identity

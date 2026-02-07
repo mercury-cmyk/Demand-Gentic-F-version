@@ -89,6 +89,7 @@ import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
+import bookingRouter from './routes/booking-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -304,7 +305,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GMAIL_CLIEN
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
 const GOOGLE_SCOPES =
   process.env.GOOGLE_OAUTH_SCOPES ??
-  "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+  "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events";
 const GOOGLE_REDIRECT_URI =
   process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`;
 
@@ -652,6 +653,9 @@ export function registerRoutes(app: Express) {
 
   // Health Check Endpoint
   app.use('/api', healthRouter);
+  
+  // Public Booking Routes
+  app.use('/api/bookings', bookingRouter);
 
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes

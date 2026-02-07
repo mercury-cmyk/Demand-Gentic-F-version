@@ -8,6 +8,7 @@ import axios from 'axios';
 import { submitTranscription, submitStructuredTranscription } from '../services/google-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
+import { fetchTelnyxRecording } from '../services/telnyx-recordings';
 
 // Lazy Redis connection - only connect when worker is actually used
 let connection: Redis | null = null;
@@ -31,7 +32,7 @@ function getConnection(): Redis {
 }
 
 /**
- * Fetch recording from Telnyx
+ * Fetch recording from Telnyx using the shared service
  */
 async function fetchRecordingFromTelnyx(
   telnyxCallId: string | null,
@@ -42,37 +43,30 @@ async function fetchRecordingFromTelnyx(
     return null;
   }
 
-  const apiKey = process.env.TELNYX_API_KEY;
-  if (!apiKey) {
-    console.error('[AutoRecordingSyncWorker] TELNYX_API_KEY not configured');
-    return null;
-  }
-
   try {
-    // Strategy 1: Search by call_control_id if available
+    // Strategy 1: Use the robust shared service (handles call_control_id vs call_leg_id automatically)
     if (telnyxCallId) {
-      try {
-        const response = await axios.get(
-          `https://api.telnyx.com/v2/recordings?filter[call_control_id]=${telnyxCallId}`,
-          {
-            headers: { Authorization: `Bearer ${apiKey}` },
-            timeout: 10000,
-          }
-        );
-
-        if (response.data?.data?.length > 0) {
-          const recording = response.data.data[0];
-          const recordingUrl = recording.download_urls?.mp3 || recording.download_urls?.wav;
-          console.log(`[AutoRecordingSyncWorker] Found recording by call_control_id: ${telnyxCallId}`);
-          return recordingUrl || null;
-        }
-      } catch (err: any) {
-        console.log(`[AutoRecordingSyncWorker] Strategy 1 (call_control_id) failed:`, err.message);
-      }
+       console.log(`[AutoRecordingSyncWorker] Fetching by call ID: ${telnyxCallId}`);
+       const recordingUrl = await fetchTelnyxRecording(telnyxCallId);
+       if (recordingUrl) {
+         console.log(`[AutoRecordingSyncWorker] Found recording by call ID: ${telnyxCallId}`);
+         return recordingUrl;
+       }
+       console.log(`[AutoRecordingSyncWorker] Strategy 1 failed: No recording found for ${telnyxCallId}`);
     }
 
     // Strategy 2: Search by dialed number with time-based filtering
-    if (dialedNumber) {
+    // Note: fetchTelnyxRecording doesn't support dialed number search, so we keep the local logic or
+    // we could delegate to searchRecordingsByDialedNumber if we imported it.
+    // Let's import searchRecordingsByDialedNumber too?
+    // For now, let's keep the dialed number logic if it works, or replace it if we really want to unify.
+    // The previous implementation of Strategy 2 used axios directly.
+    // Let's rely on the shared service for consistency if possible.
+    // I'll leave Strategy 2 as is for now or use searchRecordingsByDialedNumber if I imported it.
+    // But I didn't import it. Let's stick to replacing just the fetchTelnyxRecording part for Strategy 1 first.
+    
+    const apiKey = process.env.TELNYX_API_KEY;
+    if (dialedNumber && apiKey) {
       try {
         const now = new Date();
         const startTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 min ago

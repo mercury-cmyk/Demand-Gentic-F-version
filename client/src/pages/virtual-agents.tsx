@@ -370,7 +370,7 @@ const OPENAI_VOICES = [
   { value: 'shimmer', label: 'Shimmer - Clear & professional', provider: 'openai' },
 ];
 
-// Google Gemini Live voice options (Vertex AI) - Official voices from Google's documentation
+// Google voice options (Vertex AI) - Official voices from Google's documentation
 const GOOGLE_VOICES = [
   // Primary B2B Sales voices
   { value: 'Kore', label: 'Kore - Firm & Professional (Default)', provider: 'google' },
@@ -400,7 +400,7 @@ const GOOGLE_VOICES = [
 ];
 
 const PROVIDER_OPTIONS = [
-  { value: 'google', label: 'Google Gemini Live (Recommended)' },
+  { value: 'google', label: 'Live Voice (Recommended)' },
   { value: 'openai', label: 'OpenAI Realtime' },
 ];
 

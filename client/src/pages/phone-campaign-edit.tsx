@@ -535,7 +535,7 @@ export default function PhoneCampaignEditPage() {
                 AI Voice Agent Mode
               </CardTitle>
               <CardDescription>
-                AI voice agent handles calls autonomously using Gemini Live voice technology
+                AI voice agent handles calls autonomously using live voice technology
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

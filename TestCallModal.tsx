@@ -84,7 +84,7 @@ export function TestCallModal({ isOpen, onClose, agent }: any) {
               </div>
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="google" id="p-google" />
-                <Label htmlFor="p-google">Gemini Live</Label>
+                <Label htmlFor="p-google">Live Voice</Label>
               </div>
             </RadioGroup>
           </div>

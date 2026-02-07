@@ -187,6 +187,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/',
             roles: ALL_ROLES,
           },
+          {
+            id: 'bookings',
+            title: 'Bookings',
+            url: '/admin/bookings',
+            roles: MANAGEMENT_ROLES,
+            badge: { text: "New", variant: "new" }
+          },
         ],
       },
       {

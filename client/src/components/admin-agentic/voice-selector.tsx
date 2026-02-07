@@ -21,7 +21,7 @@ export interface VoiceOption {
 }
 
 // Official Gemini TTS voices (from Google's documentation)
-// These are the REAL voices supported by Gemini Live API
+// These are the REAL voices supported by the live voice API
 export const GEMINI_VOICES: VoiceOption[] = [
   // Top recommended for B2B sales
   { id: "Kore", name: "Kore", gender: "female", tone: "Firm, Professional", description: "Confident and direct", bestFor: "Executive outreach" },

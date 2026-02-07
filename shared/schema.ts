@@ -12851,7 +12851,7 @@ export type ClientFeatureFlag =
 
 export const bookingTypes = pgTable("booking_types", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: varchar("user_id").references(() => users.id),
   name: text("name").notNull(), // e.g. "Discovery Call"
   slug: text("slug").notNull(), // e.g. "discovery-call"
   description: text("description"),
@@ -12865,7 +12865,7 @@ export const bookingTypes = pgTable("booking_types", {
 
 export const availabilitySlots = pgTable("availability_slots", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id),
+  userId: varchar("user_id").references(() => users.id),
   dayOfWeek: integer("day_of_week").notNull(), // 0=Sunday, 1=Monday...
   startTime: text("start_time").notNull(), // "09:00"
   endTime: text("end_time").notNull(), // "17:00"
@@ -12876,7 +12876,7 @@ export const availabilitySlots = pgTable("availability_slots", {
 export const bookings = pgTable("bookings", {
   id: serial("id").primaryKey(),
   bookingTypeId: integer("booking_type_id").references(() => bookingTypes.id),
-  hostUserId: integer("host_user_id").references(() => users.id),
+  hostUserId: varchar("host_user_id").references(() => users.id),
   guestName: text("guest_name").notNull(),
   guestEmail: text("guest_email").notNull(),
   guestNotes: text("guest_notes"),
@@ -12890,7 +12890,7 @@ export const bookings = pgTable("bookings", {
 
 export const googleCalendarIntegrations = pgTable("google_calendar_integrations", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id).unique(),
+  userId: varchar("user_id").references(() => users.id).unique(),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   tokenExpiry: timestamp("token_expiry"),

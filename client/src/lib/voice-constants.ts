@@ -16,7 +16,7 @@ export interface VoiceOption {
   color: string;
 }
 
-// Gemini Live voices with unique characteristics
+// Live voice options with unique characteristics
 export const GEMINI_VOICES: VoiceOption[] = [
   // Top recommended for B2B sales
   { id: 'Kore', name: 'Kore', gender: 'female', tone: 'Firm, Professional', description: 'Confident and direct', bestFor: ['Executive outreach'], provider: 'gemini', color: 'from-green-400 to-emerald-500' },

@@ -69,13 +69,14 @@ export default function LandingPage() {
             <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Platform</a>
             <a href="#services" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Services</a>
             <a href="#data" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Data</a>
+            <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Resources</a>
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">About</a>
           </div>
           <div className="flex items-center gap-4">
             <Button variant="ghost" onClick={() => setLocation("/login")}>
               Sign In
             </Button>
-            <Button onClick={() => setLocation("/login")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
+            <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
               Schedule Demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
@@ -112,7 +113,7 @@ export default function LandingPage() {
 
             <p className="text-xl md:text-2xl text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
               Precision B2B demand generation powered by account-aware intelligence.
-              Expert strategists + autonomous AI agents + 500M verified contacts.
+              Expert strategists + autonomous AI agents + 70M+ verified contacts.
             </p>
 
             {/* Stats Pills */}
@@ -136,7 +137,7 @@ export default function LandingPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
+              <Button size="lg" onClick={() => setLocation("/book/admin/strategy")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25">
                 Schedule Strategy Call
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
@@ -434,7 +435,7 @@ export default function LandingPage() {
                 step: "04",
                 icon: Zap,
                 title: "Agentic Execution",
-                description: "Gemini Live voice agents make calls. Intelligent email sequences deploy. Real-time quality auditing on every interaction.",
+                description: "Live voice agents make calls. Intelligent email sequences deploy. Real-time quality auditing on every interaction.",
                 deliverable: "Active campaign execution",
                 color: "emerald",
               },

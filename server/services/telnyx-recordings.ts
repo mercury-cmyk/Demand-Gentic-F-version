@@ -88,41 +88,31 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
   }
 
   try {
-    // First, get the call details to find recordings (with retry)
-    const callResponse = await fetchWithRetry(
-      `${TELNYX_API_BASE}/calls/${callControlId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Proceed directly to fetch recordings.
+    // We skip fetching /calls/{id} because call_control_id expires (422) quickly,
+    // but the recording itself persists and can be looked up by that same ID.
 
-    // 404 and 422 are expected - call might not exist, recording not ready, or call_control_id expired
-    if (callResponse.status === 404 || callResponse.status === 422) {
-      console.log(`[Telnyx] Call not found or expired (${callResponse.status}):`, callControlId);
-      return null;
-    }
-
-    // Any other non-OK status is an error
-    if (!callResponse.ok) {
-      const errorText = await callResponse.text();
-      throw new Error(`Telnyx API error (${callResponse.status}): ${errorText}`);
-    }
-
-    const callData = await callResponse.json();
-    
     // Get recordings for this call (with retry)
-    const recordingsResponse = await fetchWithRetry(
+    // We try both call_control_id and call_leg_id filters as they can be interchangeable depending on context
+    let recordingsResponse = await fetchWithRetry(
       `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${callControlId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
+      { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
     );
+    
+    // If empty or failed, try as call_leg_id
+    try {
+        const dataClone = await recordingsResponse.clone().json().catch(() => ({ data: [] }));
+        if (!recordingsResponse.ok || !dataClone.data || dataClone.data.length === 0) {
+            console.log(`[Telnyx] No recordings found with call_control_id, trying call_leg_id: ${callControlId}`);
+            recordingsResponse = await fetchWithRetry(
+                `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${callControlId}`,
+                { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+            );
+        }
+    } catch (e) {
+      // Ignore clone error
+    }
+
 
     if (recordingsResponse.status === 404) {
       console.log('[Telnyx] Recordings not found (404) for call:', callControlId);
