@@ -2258,7 +2258,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       inputAudioFormat: session.audioFormat,
       outputAudioFormat: session.audioFormat,
       tools: providerTools,
-      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 800 }, // Optimized for natural conversation flow
+      turnDetection: { type: 'server_vad', threshold: 0.45, silenceDurationMs: 500 }, // Tuned for low-latency turn-taking (500ms silence = end of turn)
       temperature: 0.7,
       maxResponseTokens: costSettings.maxResponseTokens || 512,
       transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,

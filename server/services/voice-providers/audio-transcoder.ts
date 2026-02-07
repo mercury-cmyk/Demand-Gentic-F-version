@@ -588,22 +588,28 @@ function applyClarityBoost(pcmBuffer: Buffer, boostDb: number = 2.0): Buffer {
  * 5. Apply subtle high-frequency boost for clarity
  */
 export function g711ToPcm16k(g711Buffer: Buffer, format: G711Format): Buffer {
+  const isAlaw = format === 'alaw';
+
   // Step 1: Decode G.711 to PCM 8kHz
   const pcm8k = g711ToPcm8k(g711Buffer, format);
 
-  // Step 2: Remove DC offset first (this prevents clicking/popping)
+  // Step 2: Remove DC offset (prevents clicking/popping)
+  // Safe for inbound audio from PSTN which can have genuine DC offset
   const dcCorrected = removeDcOffset(pcm8k);
 
-  // Step 3: Apply VERY gentle noise gate - only on truly silent sections
-  // Using conservative threshold (60) and gentle ratio (0.6) to avoid cutting speech
-  const gatedPcm = softNoiseGate(dcCorrected, 60, 0.6);
+  // Step 3: Apply VERY gentle noise gate - only for µ-law
+  // A-law already has good noise floor characteristics; gating can clip speech transitions
+  const gatedPcm = isAlaw ? dcCorrected : softNoiseGate(dcCorrected, 60, 0.6);
 
   // Step 4: Upsample to 16kHz with linear interpolation
   // No filtering needed for upsampling (no aliasing risk)
   const pcm16k = resamplePcm(gatedPcm, 8000, 16000);
 
-  // Step 5: Apply subtle clarity boost (high-frequency enhancement)
-  const enhanced = applyClarityBoost(pcm16k);
+  // Step 5: Apply clarity boost ONLY for µ-law (US calls)
+  // SKIP for A-law: boosting high frequencies before Gemini processes it causes
+  // artifacts when re-encoded back to A-law on the outbound path.
+  // A-law's non-linear quantization amplifies these boosted HF components into audible noise.
+  const enhanced = isAlaw ? pcm16k : applyClarityBoost(pcm16k);
 
   return enhanced;
 }
