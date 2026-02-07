@@ -15,7 +15,7 @@
 
 import { db } from '../db';
 import { dialerCallAttempts, callSessions, activityLog } from '@shared/schema';
-import { eq, and, isNull, isNotNull, gt, lt, sql } from 'drizzle-orm';
+import { eq, and, or, isNull, isNotNull, gt, lt, sql } from 'drizzle-orm';
 import { transcribeFromRecording } from './google-transcription';
 
 const LOG_PREFIX = '[Transcription-Reliability]';
@@ -100,13 +100,34 @@ export async function checkTranscriptStatus(callAttemptId: string): Promise<Tran
  */
 export async function attemptFallbackTranscription(
   callAttemptId: string,
-  recordingUrl: string
+  recordingUrl: string | null,
+  telnyxCallId?: string | null
 ): Promise<TranscriptionResult> {
   console.log(`${LOG_PREFIX} Attempting fallback transcription for call ${callAttemptId}`);
 
   try {
+    let urlToUse = recordingUrl;
+
+    // If we don't have a recording URL (or it's been cleared), try to fetch a fresh one using Telnyx call ID.
+    if (!urlToUse && telnyxCallId) {
+      try {
+        const { fetchTelnyxRecording } = await import('./telnyx-recordings');
+        urlToUse = await fetchTelnyxRecording(telnyxCallId);
+      } catch (e: any) {
+        console.warn(`${LOG_PREFIX} Could not fetch recording URL from Telnyx for ${callAttemptId}:`, e?.message || e);
+      }
+    }
+
+    if (!urlToUse) {
+      return {
+        success: false,
+        source: 'fallback_stt',
+        error: 'No recording URL available for fallback transcription',
+      };
+    }
+
     // Use Google Cloud STT for fallback
-    const result = await transcribeFromRecording(recordingUrl);
+    const result = await transcribeFromRecording(urlToUse, { telnyxCallId });
 
     if (result && result.transcript && result.transcript.length > TRANSCRIPT_MIN_LENGTH) {
       // Save the fallback transcript
@@ -124,6 +145,7 @@ export async function attemptFallbackTranscription(
         source: 'google_stt',
         transcriptLength: result.transcript.length,
         wordCount: result.transcript.split(/\s+/).length,
+        refreshedVia: telnyxCallId ? 'telnyx_possible' : 'none',
       });
 
       return {
@@ -176,6 +198,7 @@ export async function processMissingTranscripts(): Promise<{
       .select({
         id: dialerCallAttempts.id,
         recordingUrl: dialerCallAttempts.recordingUrl,
+        telnyxCallId: dialerCallAttempts.telnyxCallId,
         callStartedAt: dialerCallAttempts.callStartedAt,
         callEndedAt: dialerCallAttempts.callEndedAt,
         campaignId: dialerCallAttempts.campaignId,
@@ -188,7 +211,10 @@ export async function processMissingTranscripts(): Promise<{
           isNull(dialerCallAttempts.aiTranscript),
           isNotNull(dialerCallAttempts.callEndedAt),
           lt(dialerCallAttempts.callEndedAt, cutoffTime),
-          isNotNull(dialerCallAttempts.recordingUrl)
+          or(
+            isNotNull(dialerCallAttempts.recordingUrl),
+            isNotNull(dialerCallAttempts.telnyxCallId)
+          )
         )
       )
       .limit(50); // Process in batches
@@ -208,17 +234,14 @@ export async function processMissingTranscripts(): Promise<{
         }
       }
 
-      if (call.recordingUrl) {
-        const result = await attemptFallbackTranscription(call.id, call.recordingUrl);
+      {
+        const result = await attemptFallbackTranscription(call.id, call.recordingUrl ?? null, call.telnyxCallId);
 
         if (result.success) {
           stats.succeeded++;
         } else {
           stats.failed++;
         }
-      } else {
-        console.warn(`${LOG_PREFIX} Call ${call.id} has no recording URL - cannot transcribe`);
-        stats.failed++;
       }
 
       // Small delay between calls to avoid rate limiting
@@ -433,14 +456,15 @@ export async function ensureTranscript(
   const [attempt] = await db
     .select({
       recordingUrl: dialerCallAttempts.recordingUrl,
+      telnyxCallId: dialerCallAttempts.telnyxCallId,
     })
     .from(dialerCallAttempts)
     .where(eq(dialerCallAttempts.id, callAttemptId))
     .limit(1);
 
-  if (attempt?.recordingUrl) {
+  if (attempt?.recordingUrl || attempt?.telnyxCallId) {
     console.log(`${LOG_PREFIX} No real-time transcript - attempting fallback from recording`);
-    return await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl);
+    return await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
   }
 
   console.warn(`${LOG_PREFIX} No transcript and no recording URL available`);

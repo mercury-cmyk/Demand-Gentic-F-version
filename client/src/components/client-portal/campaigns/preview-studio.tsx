@@ -134,12 +134,29 @@ function CallStatusIndicator({ status }: { status: 'idle' | 'connecting' | 'conn
   );
 }
 
+interface Account {
+  id: string;
+  name: string;
+  domain?: string | null;
+  industry?: string | null;
+}
+
+interface Contact {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  jobTitle: string | null;
+}
+
 export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: PreviewStudioProps) {
   const [mode, setMode] = useState<'text' | 'voice'>('text');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(preselectedCampaignId || '');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
+  const [selectedContactId, setSelectedContactId] = useState<string | undefined>();
   const [selectedScenario, setSelectedScenario] = useState<string>('cold_intro');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -175,6 +192,40 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
     },
     enabled: open,
   });
+
+  // Fetch accounts for selected campaign
+  const { data: accounts = [], isLoading: accountsLoading } = useQuery<Account[]>({
+    queryKey: ['/api/knowledge-blocks/campaigns', selectedCampaignId, 'accounts'],
+    queryFn: async () => {
+      if (!selectedCampaignId) return [];
+      const res = await fetch(`/api/knowledge-blocks/campaigns/${selectedCampaignId}/accounts`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.accounts || [];
+    },
+    enabled: !!selectedCampaignId && open,
+  });
+
+  // Fetch contacts for selected account
+  const { data: contacts = [], isLoading: contactsLoading } = useQuery<Contact[]>({
+    queryKey: ['/api/knowledge-blocks/accounts', selectedAccountId, 'contacts'],
+    queryFn: async () => {
+      if (!selectedAccountId) return [];
+      const res = await fetch(`/api/knowledge-blocks/accounts/${selectedAccountId}/contacts`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.contacts || [];
+    },
+    enabled: !!selectedAccountId && open,
+  });
+
+  // Get selected entities for display
+  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+  const selectedContact = contacts.find(c => c.id === selectedContactId);
 
   // Set preselected campaign when campaigns load
   useEffect(() => {
@@ -325,6 +376,8 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
         },
         body: JSON.stringify({
           campaignId: selectedCampaignId,
+          accountId: selectedAccountId,
+          contactId: selectedContactId,
           scenario: selectedScenario,
         }),
       });
@@ -338,7 +391,15 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
     },
     onSuccess: (data) => {
       setSessionId(data.sessionId);
-      setContext(data.context);
+      const contactName = selectedContact
+        ? `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() || 'Contact'
+        : data.context?.contactName || 'Simulated Contact';
+      setContext({
+        ...data.context,
+        accountName: selectedAccount?.name || data.context?.accountName || 'Account',
+        contactName,
+        contactTitle: selectedContact?.jobTitle || data.context?.contactTitle,
+      });
       setSimulationStarted(true);
       setCallStatus('connected');
       setCallDuration(0);
@@ -550,7 +611,7 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
                   <Target className="h-4 w-4 text-primary" />
                   Select Campaign
                 </Label>
-                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                <Select value={selectedCampaignId} onValueChange={(v) => { setSelectedCampaignId(v); setSelectedAccountId(undefined); setSelectedContactId(undefined); }}>
                   <SelectTrigger className="h-12">
                     <SelectValue placeholder={campaignsLoading ? "Loading..." : "Choose a campaign"} />
                   </SelectTrigger>
@@ -565,6 +626,55 @@ export function PreviewStudio({ open, onOpenChange, preselectedCampaignId }: Pre
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Account & Contact Selection */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  Account & Contact
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    value={selectedAccountId}
+                    onValueChange={(v) => { setSelectedAccountId(v); setSelectedContactId(undefined); }}
+                    disabled={!selectedCampaignId}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          <div className="flex flex-col">
+                            <span>{account.name}</span>
+                            {account.industry && <span className="text-xs text-muted-foreground">{account.industry}</span>}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={selectedContactId}
+                    onValueChange={setSelectedContactId}
+                    disabled={!selectedAccountId}
+                  >
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {contacts.map((contact) => (
+                        <SelectItem key={contact.id} value={contact.id}>
+                          <div className="flex flex-col">
+                            <span>{contact.firstName} {contact.lastName}</span>
+                            {contact.jobTitle && <span className="text-xs text-muted-foreground">{contact.jobTitle}</span>}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {/* Scenario Selection */}

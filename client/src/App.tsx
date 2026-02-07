@@ -63,7 +63,6 @@ const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
-import CampaignAnalyticsPage from "@/pages/campaign-analytics";
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
@@ -386,7 +385,6 @@ function AuthenticatedApp() {
               {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
-              <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />
               </Route>

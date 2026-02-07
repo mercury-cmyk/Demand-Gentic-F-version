@@ -1,9 +1,13 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import path from 'path';
 
-dotenv.config({ path: '.env.local' });
+// Load .env first, then .env.local to override
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
-const JWT_SECRET = process.env.JWT_SECRET || '4f34480d3577e15deefcdf3be6e875afc6f2304ac4870f89dfb550076314fb45';
+// Match the default from server/auth.ts
+const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 
 // Generate a test token for user with admin privileges
 const testToken = jwt.sign(

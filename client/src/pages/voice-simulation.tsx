@@ -149,6 +149,21 @@ interface SimulationContext {
   firstMessage?: string;
 }
 
+interface Account {
+  id: string;
+  name: string;
+  domain?: string | null;
+  industry?: string | null;
+}
+
+interface Contact {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  jobTitle: string | null;
+}
+
 export default function VoiceSimulationPage() {
   const [, setLocation] = useLocation();
   const [view, setView] = useState<'setup' | 'simulation'>('setup');
@@ -157,6 +172,8 @@ export default function VoiceSimulationPage() {
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | undefined>();
+  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
+  const [selectedContactId, setSelectedContactId] = useState<string | undefined>();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
@@ -176,12 +193,42 @@ export default function VoiceSimulationPage() {
     },
   });
 
+  // Fetch accounts for selected campaign
+  const { data: accounts = [], isLoading: accountsLoading } = useQuery<Account[]>({
+    queryKey: ['/api/knowledge-blocks/campaigns', selectedCampaignId, 'accounts'],
+    queryFn: async () => {
+      if (!selectedCampaignId) return [];
+      const res = await apiRequest('GET', `/api/knowledge-blocks/campaigns/${selectedCampaignId}/accounts`);
+      const data = await res.json();
+      return data.accounts || [];
+    },
+    enabled: !!selectedCampaignId,
+  });
+
+  // Fetch contacts for selected account
+  const { data: contacts = [], isLoading: contactsLoading } = useQuery<Contact[]>({
+    queryKey: ['/api/knowledge-blocks/accounts', selectedAccountId, 'contacts'],
+    queryFn: async () => {
+      if (!selectedAccountId) return [];
+      const res = await apiRequest('GET', `/api/knowledge-blocks/accounts/${selectedAccountId}/contacts`);
+      const data = await res.json();
+      return data.contacts || [];
+    },
+    enabled: !!selectedAccountId,
+  });
+
+  // Get selected entities for display
+  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+  const selectedContact = contacts.find(c => c.id === selectedContactId);
+
   // Start simulation mutation
   const startSimulationMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCampaignId) throw new Error("A campaign must be selected.");
       const res = await apiRequest('POST', '/api/simulations/start', {
         campaignId: selectedCampaignId,
+        accountId: selectedAccountId,
+        contactId: selectedContactId,
         personaPreset: 'neutral_dm', maxTurns: 20, simulationSpeed: 'fast'
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to start simulation');
@@ -189,7 +236,16 @@ export default function VoiceSimulationPage() {
     },
     onSuccess: (data) => {
       setSessionId(data.session?.id);
-      setContext({ campaignId: selectedCampaignId!, campaignName: data.agentContext?.agentName || 'Campaign', accountName: 'Simulated Account', contactName: 'Simulated Contact' });
+      const contactName = selectedContact
+        ? `${selectedContact.firstName || ''} ${selectedContact.lastName || ''}`.trim() || 'Contact'
+        : 'Simulated Contact';
+      setContext({
+        campaignId: selectedCampaignId!,
+        campaignName: data.agentContext?.agentName || 'Campaign',
+        accountName: selectedAccount?.name || 'Simulated Account',
+        contactName,
+        contactTitle: selectedContact?.jobTitle || undefined,
+      });
       const firstMsg: Message = {
         role: 'assistant',
         content: (data.session?.transcript?.[0]?.content || 'Hello, how can I help you today?'),
@@ -449,9 +505,10 @@ export default function VoiceSimulationPage() {
           <CardDescription className="text-white/60">Configure and test your AI voice agent in realistic call scenarios.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Campaign Selection */}
           <div className="space-y-2">
             <Label className="font-medium text-white/70 flex items-center gap-2"><Target className="h-4 w-4" />Select Campaign</Label>
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+            <Select value={selectedCampaignId} onValueChange={(v) => { setSelectedCampaignId(v); setSelectedAccountId(undefined); setSelectedContactId(undefined); }}>
               <SelectTrigger className="bg-white/5 border-white/10 text-white">
                 <SelectValue placeholder={campaignsLoading ? "Loading campaigns..." : "Choose a campaign to simulate"} />
               </SelectTrigger>
@@ -463,6 +520,55 @@ export default function VoiceSimulationPage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Account & Contact Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="font-medium text-white/70 flex items-center gap-2"><Building2 className="h-4 w-4" />Account</Label>
+              <Select
+                value={selectedAccountId}
+                onValueChange={(v) => { setSelectedAccountId(v); setSelectedContactId(undefined); }}
+                disabled={!selectedCampaignId}
+              >
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectValue placeholder={accountsLoading ? "Loading..." : "Select account"} />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a2e] border-white/10 max-h-60">
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id} className="text-white focus:bg-white/10">
+                      <div className="flex flex-col">
+                        <span>{a.name}</span>
+                        {a.industry && <span className="text-xs text-white/40">{a.industry}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="font-medium text-white/70 flex items-center gap-2"><UserCircle className="h-4 w-4" />Contact</Label>
+              <Select
+                value={selectedContactId}
+                onValueChange={setSelectedContactId}
+                disabled={!selectedAccountId}
+              >
+                <SelectTrigger className="bg-white/5 border-white/10 text-white">
+                  <SelectValue placeholder={contactsLoading ? "Loading..." : "Select contact"} />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1a2e] border-white/10 max-h-60">
+                  {contacts.map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="text-white focus:bg-white/10">
+                      <div className="flex flex-col">
+                        <span>{c.firstName} {c.lastName}</span>
+                        {c.jobTitle && <span className="text-xs text-white/40">{c.jobTitle}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="space-y-3">

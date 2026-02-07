@@ -260,19 +260,21 @@ export function getRecordingStats(callId: string): {
 }
 
 // ============================================================================
-// WAV FILE CREATION
+// WAV FILE CREATION (STEREO for Speaker Separation)
 // ============================================================================
 
 /**
- * Create a WAV file from μ-law encoded audio chunks
- * Mixes inbound and outbound audio into a stereo file
- * (Left channel = user, Right channel = AI)
+ * Create a Stereo WAV file from disconnected μ-law encoded audio chunks.
+ * Uses timestamps to synchronize audio streams (filling gaps with silence).
+ * 
+ * Channel 0 (Left): Inbound (User/Prospect)
+ * Channel 1 (Right): Outbound (AI Agent)
  * 
  * @param inboundChunks - User audio chunks (G.711 μ-law)
  * @param outboundChunks - AI audio chunks (G.711 μ-law)
  * @param inboundTimestamps - Timestamps for inbound chunks
  * @param outboundTimestamps - Timestamps for outbound chunks
- * @param startTime - Recording start time
+ * @param startTime - Recording start time (reference for t=0)
  */
 function createWavFromMulaw(
   inboundChunks: Buffer[],
@@ -281,32 +283,71 @@ function createWavFromMulaw(
   outboundTimestamps: number[],
   startTime: number
 ): Buffer {
-  // Convert all chunks to linear PCM
-  const inboundPcm = mulawToPcm(Buffer.concat(inboundChunks));
-  const outboundPcm = mulawToPcm(Buffer.concat(outboundChunks));
-
-  // For simplicity, create a mono mix (average of both channels)
-  // A proper implementation would use timestamps for precise mixing
-  const maxLength = Math.max(inboundPcm.length, outboundPcm.length);
-  const mixedPcm = Buffer.alloc(maxLength);
-
-  for (let i = 0; i < maxLength; i += 2) {
-    const inSample = i < inboundPcm.length ? inboundPcm.readInt16LE(i) : 0;
-    const outSample = i < outboundPcm.length ? outboundPcm.readInt16LE(i) : 0;
-    
-    // Mix both channels (clamp to prevent overflow)
-    let mixed = Math.round((inSample + outSample) / 2);
-    mixed = Math.max(-32768, Math.min(32767, mixed));
-    
-    if (i + 1 < maxLength) {
-      mixedPcm.writeInt16LE(mixed, i);
-    }
-  }
-
-  // Create WAV header
-  const wavHeader = createWavHeader(mixedPcm.length, 8000, 1, 16);
+  // 1. Calculate total duration
+  let maxTimeMs = 0;
   
-  return Buffer.concat([wavHeader, mixedPcm]);
+  const calculateEnd = (chunks: Buffer[], timestamps: number[]) => {
+    if (chunks.length === 0 || timestamps.length === 0) return;
+    const lastIdx = timestamps.length - 1;
+    const startOffsetMs = timestamps[lastIdx] - startTime;
+    // 8kHz = 8 samples/ms = 8 bytes/ms (u-law)
+    const durationMs = chunks[lastIdx].length / 8;
+    maxTimeMs = Math.max(maxTimeMs, startOffsetMs + durationMs);
+  };
+  
+  calculateEnd(inboundChunks, inboundTimestamps);
+  calculateEnd(outboundChunks, outboundTimestamps);
+
+  // Add 1 second buffer for safety
+  maxTimeMs += 1000;
+
+  // 2. Allocate Stereo PCM Buffer (16-bit)
+  // 8 samples/ms * maxTimeMs * 2 channels * 2 bytes/sample
+  const totalSamples = Math.ceil(maxTimeMs * 8);
+  const bufferSize = totalSamples * 4; // 4 bytes per stereo frame (L+R)
+  const stereoPcm = Buffer.alloc(bufferSize, 0); // Initialize with silence
+
+  // 3. Helper to write chunks to specific channel
+  const placeChunks = (chunks: Buffer[], timestamps: number[], channel: 0 | 1) => {
+    chunks.forEach((chunk, idx) => {
+      // Calculate start sample index based on timestamp
+      const offsetMs = timestamps[idx] - startTime;
+      if (offsetMs < 0) return; // ignore pre-start audio
+      
+      const startSampleIndex = Math.floor(offsetMs * 8);
+      
+      // Convert chunk to PCM
+      const pcmChunk = mulawToPcm(chunk); // returns 16-bit PCM buffer
+      
+      // Write samples to stereo buffer
+      for (let i = 0; i < pcmChunk.length; i += 2) {
+        // Read 16-bit sample
+        const sample = pcmChunk.readInt16LE(i);
+        
+        // Calculate position in stereo buffer
+        // Frame index = startSampleIndex + (i/2)
+        // Byte index = Frame index * 4 + Channel offset * 2
+        const frameIndex = startSampleIndex + (i / 2);
+        if (frameIndex >= totalSamples) break;
+        
+        const byteIndex = (frameIndex * 4) + (channel * 2);
+        
+        if (byteIndex + 1 < stereoPcm.length) {
+          stereoPcm.writeInt16LE(sample, byteIndex);
+        }
+      }
+    });
+  };
+
+  // 4. Place Audio
+  placeChunks(inboundChunks, inboundTimestamps, 0);  // Left = User
+  placeChunks(outboundChunks, outboundTimestamps, 1); // Right = AI
+
+  // 5. Create WAV header
+  console.log(`${LOG_PREFIX} Generating Stereo WAV: ${Math.round(totalSamples/8000)}s duration, ${stereoPcm.length} bytes`);
+  const wavHeader = createWavHeader(stereoPcm.length, 8000, 2, 16);
+  
+  return Buffer.concat([wavHeader, stereoPcm]);
 }
 
 /**

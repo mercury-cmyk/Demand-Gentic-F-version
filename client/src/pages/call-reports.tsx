@@ -202,7 +202,18 @@ export default function CallReportsPage() {
     if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
     if (selectedAgent !== 'all') params.append('agentId', selectedAgent);
     params.append('disposition', disposition);
-    
+
+    setLocation(`/call-reports/details?${params}`);
+  };
+
+  const handleQAStatusClick = (qaStatus: string) => {
+    const params = new URLSearchParams();
+    if (dateRange.from) params.append('from', dateRange.from);
+    if (dateRange.to) params.append('to', dateRange.to);
+    if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
+    if (selectedAgent !== 'all') params.append('agentId', selectedAgent);
+    params.append('qaStatus', qaStatus);
+
     setLocation(`/call-reports/details?${params}`);
   };
   

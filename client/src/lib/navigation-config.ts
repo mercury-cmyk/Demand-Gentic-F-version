@@ -376,14 +376,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Campaign engagement metrics',
       },
       {
-        id: 'campaign-analytics',
-        title: 'Campaign Analytics',
-        url: '/campaign-analytics',
-        icon: 'BarChart3',
-        roles: MANAGEMENT_ROLES,
-        description: 'Detailed campaign performance and queue stats',
-      },
-      {
         id: 'call-reports',
         title: 'Call Reports',
         url: '/call-reports',

@@ -92,6 +92,7 @@ router.post('/retry/:callAttemptId', requireAuth, requireRole(['admin']), async 
     const [attempt] = await db
       .select({
         recordingUrl: dialerCallAttempts.recordingUrl,
+        telnyxCallId: dialerCallAttempts.telnyxCallId,
         fullTranscript: dialerCallAttempts.fullTranscript,
       })
       .from(dialerCallAttempts)
@@ -105,10 +106,10 @@ router.post('/retry/:callAttemptId', requireAuth, requireRole(['admin']), async 
       });
     }
 
-    if (!attempt.recordingUrl) {
+    if (!attempt.recordingUrl && !attempt.telnyxCallId) {
       return res.status(400).json({
         success: false,
-        message: 'No recording URL available for this call',
+        message: 'No recording URL (or Telnyx call id) available for this call',
       });
     }
 
@@ -122,7 +123,7 @@ router.post('/retry/:callAttemptId', requireAuth, requireRole(['admin']), async 
     }
 
     // Attempt fallback transcription
-    const result = await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl);
+    const result = await attemptFallbackTranscription(callAttemptId, attempt.recordingUrl ?? null, attempt.telnyxCallId);
 
     res.json({
       success: result.success,

@@ -226,6 +226,14 @@ export async function syncFromTelnyx(): Promise<{
 // ==================== CRUD OPERATIONS ====================
 
 /**
+ * Number with reputation data for API responses
+ */
+export interface TelnyxNumberWithReputation extends TelnyxNumber {
+  reputationScore: number | null;
+  reputationBand: string | null;
+}
+
+/**
  * Get all numbers with optional filtering
  */
 export async function getNumbers(options?: {
@@ -234,8 +242,32 @@ export async function getNumbers(options?: {
   hasAssignment?: boolean;
   limit?: number;
   offset?: number;
-}): Promise<TelnyxNumber[]> {
-  let query = db.select().from(telnyxNumbers).$dynamic();
+}): Promise<TelnyxNumberWithReputation[]> {
+  // Build the base query with reputation join
+  let query = db
+    .select({
+      id: telnyxNumbers.id,
+      telnyxNumberId: telnyxNumbers.telnyxNumberId,
+      phoneNumberE164: telnyxNumbers.phoneNumberE164,
+      telnyxConnectionId: telnyxNumbers.telnyxConnectionId,
+      displayName: telnyxNumbers.displayName,
+      region: telnyxNumbers.region,
+      areaCode: telnyxNumbers.areaCode,
+      status: telnyxNumbers.status,
+      maxCallsPerHour: telnyxNumbers.maxCallsPerHour,
+      maxCallsPerDay: telnyxNumbers.maxCallsPerDay,
+      callsThisHour: telnyxNumbers.callsThisHour,
+      callsToday: telnyxNumbers.callsToday,
+      lastUsedAt: telnyxNumbers.lastUsedAt,
+      tags: telnyxNumbers.tags,
+      createdAt: telnyxNumbers.createdAt,
+      updatedAt: telnyxNumbers.updatedAt,
+      reputationScore: numberReputation.score,
+      reputationBand: numberReputation.band,
+    })
+    .from(telnyxNumbers)
+    .leftJoin(numberReputation, eq(numberReputation.numberId, telnyxNumbers.id))
+    .$dynamic();
 
   if (options?.status) {
     query = query.where(eq(telnyxNumbers.status, options.status as any));
@@ -544,20 +576,28 @@ export async function getPoolSummary(): Promise<NumberPoolSummary> {
     statusCounts.map(s => [s.status, Number(s.count)])
   );
 
-  // Get reputation band counts
+  // Get reputation band counts using LEFT JOIN to include numbers without reputation records
   const bandCounts = await db
     .select({
       band: numberReputation.band,
       count: count(),
     })
-    .from(numberReputation)
-    .innerJoin(telnyxNumbers, eq(numberReputation.numberId, telnyxNumbers.id))
+    .from(telnyxNumbers)
+    .leftJoin(numberReputation, eq(numberReputation.numberId, telnyxNumbers.id))
     .where(eq(telnyxNumbers.status, 'active'))
     .groupBy(numberReputation.band);
 
-  const bandMap = Object.fromEntries(
-    bandCounts.map(b => [b.band, Number(b.count)])
-  );
+  // Build band map, treating null bands as 'healthy' (default for new numbers)
+  const bandMap: Record<string, number> = {
+    healthy: 0,
+    warning: 0,
+    risk: 0,
+    burned: 0,
+  };
+  for (const b of bandCounts) {
+    const band = b.band || 'healthy'; // Numbers without reputation records default to healthy
+    bandMap[band] = (bandMap[band] || 0) + Number(b.count);
+  }
 
   // Count unassigned numbers
   const [unassigned] = await db
@@ -590,6 +630,66 @@ export async function getPoolSummary(): Promise<NumberPoolSummary> {
     riskNumbers: bandMap['risk'] || 0,
     burnedNumbers: bandMap['burned'] || 0,
     unassignedNumbers: Number(unassigned?.count) || 0,
+  };
+}
+
+// ==================== CALL STATISTICS ====================
+
+export interface NumberPoolCallStats {
+  totalCallsToday: number;
+  totalCallsThisHour: number;
+  activeNumbersUsedToday: number;
+  avgCallsPerNumber: number;
+  topNumbers: Array<{
+    id: string;
+    phoneNumberE164: string;
+    callsToday: number;
+    callsThisHour: number;
+  }>;
+}
+
+/**
+ * Get aggregate call statistics for the number pool
+ */
+export async function getCallStats(): Promise<NumberPoolCallStats> {
+  // Get aggregate stats
+  const [aggregates] = await db
+    .select({
+      totalCallsToday: sql<number>`COALESCE(SUM(${telnyxNumbers.callsToday}), 0)::int`,
+      totalCallsThisHour: sql<number>`COALESCE(SUM(${telnyxNumbers.callsThisHour}), 0)::int`,
+      activeNumbersUsedToday: sql<number>`COUNT(CASE WHEN ${telnyxNumbers.callsToday} > 0 THEN 1 END)::int`,
+      totalActiveNumbers: sql<number>`COUNT(CASE WHEN ${telnyxNumbers.status} = 'active' THEN 1 END)::int`,
+    })
+    .from(telnyxNumbers);
+
+  // Get top 10 numbers by calls today
+  const topNumbers = await db
+    .select({
+      id: telnyxNumbers.id,
+      phoneNumberE164: telnyxNumbers.phoneNumberE164,
+      callsToday: telnyxNumbers.callsToday,
+      callsThisHour: telnyxNumbers.callsThisHour,
+    })
+    .from(telnyxNumbers)
+    .where(sql`${telnyxNumbers.callsToday} > 0`)
+    .orderBy(desc(telnyxNumbers.callsToday))
+    .limit(10);
+
+  const avgCallsPerNumber = aggregates.activeNumbersUsedToday > 0
+    ? Math.round(aggregates.totalCallsToday / aggregates.activeNumbersUsedToday)
+    : 0;
+
+  return {
+    totalCallsToday: aggregates.totalCallsToday,
+    totalCallsThisHour: aggregates.totalCallsThisHour,
+    activeNumbersUsedToday: aggregates.activeNumbersUsedToday,
+    avgCallsPerNumber,
+    topNumbers: topNumbers.map(n => ({
+      id: n.id,
+      phoneNumberE164: n.phoneNumberE164,
+      callsToday: n.callsToday ?? 0,
+      callsThisHour: n.callsThisHour ?? 0,
+    })),
   };
 }
 

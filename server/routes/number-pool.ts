@@ -22,6 +22,7 @@ import {
   updateNumber,
   deleteNumber,
   getPoolSummary,
+  getCallStats,
   // Assignment service
   createAssignment,
   getAssignments,
@@ -255,6 +256,19 @@ router.get('/summary', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: summary,
+  });
+}));
+
+/**
+ * GET /api/number-pool/stats
+ * Get aggregate call statistics for the number pool
+ */
+router.get('/stats', asyncHandler(async (req, res) => {
+  const stats = await getCallStats();
+
+  res.json({
+    success: true,
+    data: stats,
   });
 }));
 

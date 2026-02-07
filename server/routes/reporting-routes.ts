@@ -695,30 +695,55 @@ router.get('/agent/:agentId', requireAuth, async (req: Request, res: Response) =
 });
 
 /**
+ * Reverse mapping from display labels back to canonical dispositions for filtering
+ */
+const DISPLAY_TO_CANONICAL_MAP: Record<string, string[]> = {
+  'Qualified Lead': ['qualified_lead', 'converted_qualified'],
+  'Not Interested': ['not_interested'],
+  'DNC Request': ['do_not_call', 'dnc_added'],
+  'Voicemail': ['voicemail'],
+  'No Answer': ['no_answer'],
+  'Invalid Data': ['invalid_data'],
+  'Unknown': ['unknown', ''],
+  'needs review': ['needs_review', 'needs review'],
+};
+
+/**
  * GET /api/reports/calls/details
- * 
+ *
  * Get detailed call list with filters
+ * UNIFIED: Queries both legacy callSessions and new dialerCallAttempts tables
  */
 router.get('/details', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { 
-      from, 
-      to, 
-      campaignId, 
-      agentId, 
+    const {
+      from,
+      to,
+      campaignId,
+      agentId,
       disposition: dispositionFilter,
-      limit = '100',
+      page = '1',
+      limit = '50',
       offset = '0'
     } = req.query;
-    
+
     const user = (req as any).user;
     const userRoles = user?.roles || [user?.role];
     const isAdmin = userRoles.includes('admin') || userRoles.includes('campaign_manager');
-    
-    // Build conditions
+
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+    const offsetNum = (pageNum - 1) * limitNum;
+
+    // Map display disposition to canonical values for filtering
+    const canonicalDispositions = dispositionFilter
+      ? DISPLAY_TO_CANONICAL_MAP[dispositionFilter as string] || [dispositionFilter as string]
+      : null;
+
+    // ========== LEGACY CALL SESSIONS ==========
     const sessionConditions: any[] = [];
     const jobConditions: any[] = [];
-    
+
     if (from) {
       sessionConditions.push(gte(callSessions.startedAt, new Date(from as string)));
     }
@@ -729,26 +754,27 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       jobConditions.push(eq(callJobs.campaignId, campaignId as string));
     }
     if (agentId) {
-      // RBAC: Non-admin users can only filter by their own ID
       if (!isAdmin && user?.userId !== agentId) {
         return res.status(403).json({ error: 'You can only view your own calls' });
       }
       jobConditions.push(eq(callJobs.agentId, agentId as string));
     } else if (!isAdmin) {
-      // If no agent filter and not admin, default to their own calls
       jobConditions.push(eq(callJobs.agentId, user?.userId));
     }
-    
-    // Get detailed call list
-    const allConditions = [
+
+    const legacyConditions = [
       ...sessionConditions,
       ...jobConditions,
-      dispositionFilter ? eq(dispositions.label, dispositionFilter as string) : null
+      canonicalDispositions ? or(
+        inArray(dispositions.label, canonicalDispositions),
+        inArray(dispositions.systemAction, canonicalDispositions)
+      ) : null
     ].filter(Boolean);
-    
-    const calls = await db
+
+    const legacyCalls = await db
       .select({
-        callId: callSessions.id,
+        id: callSessions.id,
+        source: sql<string>`'legacy'`,
         campaignId: campaigns.id,
         campaignName: campaigns.name,
         agentId: callJobs.agentId,
@@ -760,11 +786,10 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
         accountId: accounts.id,
         accountName: accounts.name,
         disposition: dispositions.label,
-        dispositionAction: dispositions.systemAction,
         dispositionNotes: callDispositions.notes,
-        startedAt: callSessions.startedAt,
-        endedAt: callSessions.endedAt,
-        durationSec: callSessions.durationSec,
+        startTime: callSessions.startedAt,
+        endTime: callSessions.endedAt,
+        duration: callSessions.durationSec,
         recordingUrl: callSessions.recordingUrl,
         status: callSessions.status,
       })
@@ -776,29 +801,87 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       .leftJoin(users, eq(callJobs.agentId, users.id))
       .leftJoin(callDispositions, eq(callSessions.id, callDispositions.callSessionId))
       .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
-      .where(allConditions.length > 0 ? and(...allConditions) : undefined)
-      .orderBy(desc(callSessions.startedAt))
-      .limit(parseInt(limit as string))
-      .offset(parseInt(offset as string));
-    
-    // Get total count for pagination
-    const [{ total }] = await db
+      .where(legacyConditions.length > 0 ? and(...legacyConditions) : undefined)
+      .orderBy(desc(callSessions.startedAt));
+
+    // ========== DIALER CALL ATTEMPTS ==========
+    const dialerConditions: any[] = [];
+
+    if (from) {
+      dialerConditions.push(gte(dialerCallAttempts.createdAt, new Date(from as string)));
+    }
+    if (to) {
+      dialerConditions.push(lte(dialerCallAttempts.createdAt, new Date(to as string)));
+    }
+    if (campaignId) {
+      dialerConditions.push(eq(dialerCallAttempts.campaignId, campaignId as string));
+    }
+    // For dialer calls, filter by human agent or allow all for AI calls
+    if (agentId && !isAdmin) {
+      dialerConditions.push(eq(dialerCallAttempts.humanAgentId, agentId as string));
+    }
+
+    // Filter by canonical disposition
+    if (canonicalDispositions) {
+      dialerConditions.push(inArray(dialerCallAttempts.disposition, canonicalDispositions));
+    }
+
+    const dialerCalls = await db
       .select({
-        total: sql<number>`COUNT(DISTINCT ${callSessions.id})::int`,
+        id: dialerCallAttempts.id,
+        source: sql<string>`'dialer'`,
+        campaignId: campaigns.id,
+        campaignName: campaigns.name,
+        agentId: dialerCallAttempts.humanAgentId,
+        agentName: sql<string>`COALESCE(CONCAT(${users.firstName}, ' ', ${users.lastName}), '🤖 ' || ${virtualAgents.name}, 'AI Agent')`,
+        contactId: contacts.id,
+        contactName: sql<string>`CONCAT(${contacts.firstName}, ' ', ${contacts.lastName})`,
+        contactEmail: contacts.email,
+        contactPhone: contacts.directPhoneE164,
+        accountId: accounts.id,
+        accountName: accounts.name,
+        disposition: dialerCallAttempts.disposition,
+        dispositionNotes: sql<string>`NULL`,
+        startTime: dialerCallAttempts.createdAt,
+        endTime: dialerCallAttempts.endedAt,
+        duration: dialerCallAttempts.callDurationSeconds,
+        recordingUrl: dialerCallAttempts.recordingUrl,
+        status: dialerCallAttempts.status,
       })
-      .from(callSessions)
-      .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
-      .leftJoin(callDispositions, eq(callSessions.id, callDispositions.callSessionId))
-      .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
-      .where(allConditions.length > 0 ? and(...allConditions) : undefined);
-    
+      .from(dialerCallAttempts)
+      .innerJoin(campaigns, eq(dialerCallAttempts.campaignId, campaigns.id))
+      .innerJoin(contacts, eq(dialerCallAttempts.contactId, contacts.id))
+      .innerJoin(accounts, eq(contacts.accountId, accounts.id))
+      .leftJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
+      .leftJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
+      .where(dialerConditions.length > 0 ? and(...dialerConditions) : undefined)
+      .orderBy(desc(dialerCallAttempts.createdAt));
+
+    // ========== MERGE AND SORT ==========
+    const allCalls = [...legacyCalls, ...dialerCalls]
+      .map(call => ({
+        ...call,
+        // Normalize disposition display
+        disposition: DISPOSITION_DISPLAY_MAP[call.disposition || '']?.label || call.disposition || 'Unknown',
+      }))
+      .sort((a, b) => {
+        const dateA = new Date(a.startTime || 0).getTime();
+        const dateB = new Date(b.startTime || 0).getTime();
+        return dateB - dateA;
+      });
+
+    // Apply pagination to merged results
+    const total = allCalls.length;
+    const paginatedCalls = allCalls.slice(offsetNum, offsetNum + limitNum);
+
     res.json({
-      calls,
+      calls: paginatedCalls,
       pagination: {
         total,
-        limit: parseInt(limit as string),
-        offset: parseInt(offset as string),
-        hasMore: parseInt(offset as string) + parseInt(limit as string) < total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+        hasMore: offsetNum + limitNum < total,
       },
     });
   } catch (error) {

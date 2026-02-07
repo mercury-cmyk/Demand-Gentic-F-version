@@ -43,7 +43,7 @@ const initiateTestCallSchema = z.object({
 router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     const isWorkOrderSource = req.query.source === 'work_order';
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });

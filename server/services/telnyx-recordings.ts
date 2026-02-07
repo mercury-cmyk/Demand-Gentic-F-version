@@ -1,7 +1,6 @@
 import { eq, isNull, and, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { leads, calls, callAttempts, contacts } from '../../shared/schema';
-import { transcribeLeadCall } from './google-transcription';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
@@ -381,9 +380,11 @@ async function updateLeadWithRecording(leadId: string, recordingUrl: string, dur
     .where(eq(leads.id, leadId));
 
   // Trigger transcription asynchronously (don't wait)
-  transcribeLeadCall(leadId).catch(err => {
-    console.error(`[Telnyx-Sync] Failed to start transcription for lead ${leadId}:`, err);
-  });
+  import('./google-transcription')
+    .then(({ transcribeLeadCall }) => transcribeLeadCall(leadId))
+    .catch(err => {
+      console.error(`[Telnyx-Sync] Failed to start transcription for lead ${leadId}:`, err);
+    });
 }
 
 /**

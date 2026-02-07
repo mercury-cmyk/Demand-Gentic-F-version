@@ -45,6 +45,8 @@ import {
   Loader2,
   TrendingUp,
   Activity,
+  PhoneCall,
+  BarChart3,
 } from "lucide-react";
 
 interface TelnyxNumber {
@@ -75,6 +77,19 @@ interface PoolSummary {
   unassignedNumbers: number;
 }
 
+interface CallStats {
+  totalCallsToday: number;
+  totalCallsThisHour: number;
+  activeNumbersUsedToday: number;
+  avgCallsPerNumber: number;
+  topNumbers: Array<{
+    id: string;
+    phoneNumberE164: string;
+    callsToday: number;
+    callsThisHour: number;
+  }>;
+}
+
 export default function NumberPoolPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -99,6 +114,17 @@ export default function NumberPoolPage() {
     },
   });
 
+  // Fetch call stats
+  const { data: statsData } = useQuery({
+    queryKey: ["/api/number-pool/stats"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/number-pool/stats");
+      if (!res.ok) throw new Error("Failed to fetch stats");
+      return res.json();
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
   // Sync from Telnyx mutation
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -107,7 +133,8 @@ export default function NumberPoolPage() {
       return res.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/number-pool"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/number-pool/numbers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/number-pool/summary"] });
       toast({
         title: "Sync Complete",
         description: `Added: ${data.data?.added || 0}, Updated: ${data.data?.updated || 0}`,
@@ -130,7 +157,8 @@ export default function NumberPoolPage() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/number-pool"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/number-pool/numbers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/number-pool/summary"] });
       toast({ title: "Status Updated" });
     },
     onError: (error: Error) => {
@@ -154,6 +182,13 @@ export default function NumberPoolPage() {
     riskNumbers: 0,
     burnedNumbers: 0,
     unassignedNumbers: 0,
+  };
+  const callStats: CallStats = statsData?.data || {
+    totalCallsToday: 0,
+    totalCallsThisHour: 0,
+    activeNumbersUsedToday: 0,
+    avgCallsPerNumber: 0,
+    topNumbers: [],
   };
 
   // Filter numbers by search
@@ -295,6 +330,81 @@ export default function NumberPoolPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Call Activity Stats */}
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PhoneCall className="h-5 w-5 text-primary" />
+            Call Activity
+          </CardTitle>
+          <CardDescription>
+            Real-time call statistics across all numbers
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-primary/5 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <Activity className="h-4 w-4" />
+                Calls This Hour
+              </div>
+              <p className="text-3xl font-bold text-primary">{callStats.totalCallsThisHour}</p>
+            </div>
+            <div className="bg-green-500/5 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <PhoneCall className="h-4 w-4" />
+                Calls Today
+              </div>
+              <p className="text-3xl font-bold text-green-600">{callStats.totalCallsToday}</p>
+            </div>
+            <div className="bg-blue-500/5 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <Phone className="h-4 w-4" />
+                Numbers Used Today
+              </div>
+              <p className="text-3xl font-bold text-blue-600">{callStats.activeNumbersUsedToday}</p>
+            </div>
+            <div className="bg-amber-500/5 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
+                <BarChart3 className="h-4 w-4" />
+                Avg Calls/Number
+              </div>
+              <p className="text-3xl font-bold text-amber-600">{callStats.avgCallsPerNumber}</p>
+            </div>
+          </div>
+
+          {/* Top Numbers by Calls */}
+          {callStats.topNumbers.length > 0 && (
+            <div className="mt-6">
+              <h4 className="text-sm font-medium text-muted-foreground mb-3">Top Numbers by Usage Today</h4>
+              <div className="space-y-2">
+                {callStats.topNumbers.slice(0, 5).map((num, index) => (
+                  <div
+                    key={num.id}
+                    className="flex items-center justify-between p-2 bg-muted/50 rounded-lg"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-muted-foreground w-5">
+                        #{index + 1}
+                      </span>
+                      <span className="font-mono text-sm">{num.phoneNumberE164}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="text-muted-foreground">
+                        {num.callsThisHour}/hr
+                      </span>
+                      <span className="font-medium">
+                        {num.callsToday} today
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Numbers Table */}
       <Card>
