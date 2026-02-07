@@ -29,6 +29,7 @@ import {
   leads,
   verificationCampaigns,
   clientProjects,
+  campaignIntakeRequests, 
 } from "@shared/schema";
 import { eq, and, desc, gte, lte, sql, inArray } from "drizzle-orm";
 import {

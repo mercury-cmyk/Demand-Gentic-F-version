@@ -33,7 +33,7 @@ import {
   AlertTriangle, CheckCircle2, Info, ChevronDown,
   Smartphone, Monitor, FileText, Lightbulb, Zap, AlertCircle,
   User, Building2, AtSign, MousePointer, LayoutTemplate, Loader2,
-  Plus
+  Plus, UserCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { sanitizeHtmlForIframePreview } from '@/lib/html-preview';
@@ -1146,6 +1146,31 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                 <Zap className="w-3 h-3 mr-1" />
                                 Insert Button
                               </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full text-xs border-green-200 text-green-700 hover:bg-green-50"
+                                onClick={() => {
+                                  const ctaHtml = `
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+  <tr>
+    <td style="background-color: #059669; border-radius: 6px;">
+      <a href="{{campaign.landing_page_prefilled}}" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
+        Register Now
+      </a>
+    </td>
+  </tr>
+</table>`;
+                                  setBodyContent(prev => prev + ctaHtml);
+                                  setEditorMode('html');
+                                }}
+                              >
+                                <UserCheck className="w-3 h-3 mr-1" />
+                                Prefilled Form Button
+                              </Button>
+                              <div className="text-[10px] text-green-600 bg-green-50 p-1.5 rounded border border-green-100">
+                                Prefilled buttons auto-fill the registration form with contact details (name, email, company)
+                              </div>
                             </CollapsibleContent>
                           </Collapsible>
 

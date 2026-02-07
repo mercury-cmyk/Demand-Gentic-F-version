@@ -12,8 +12,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-p
 // Generate a test token for user with admin privileges
 const testToken = jwt.sign(
   {
-    userId: 1,
-    email: 'admin@demandgentic.ai',
+    userId: 'da0c653b-c853-47b9-82df-de9b7b754378', // Use actual Admin User ID from DB
+    email: 'zahid.m@pivotal-b2b.com',
     role: 'admin'
   },
   JWT_SECRET,

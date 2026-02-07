@@ -6,6 +6,7 @@
 import { db } from '../db';
 import { contacts, accounts, campaigns, senderProfiles } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import { generateTrackingUrl } from './urlGenerator';
 
 interface MergeData {
   contact?: Record<string, string | undefined>;
@@ -50,6 +51,7 @@ export const MERGE_TAGS = {
   // Campaign fields
   'campaign.name': 'Campaign Name',
   'campaign.landing_page': 'Landing Page URL',
+  'campaign.landing_page_prefilled': 'Landing Page with Prefilled Contact Info',
   
   // Sender fields
   'sender.name': 'Sender Name',
@@ -153,6 +155,21 @@ export async function getMergeDataForContact(
       id: campaign.id,
       name: campaign.name || '',
       landing_page: campaign.landingPageUrl || '',
+      // Generate prefilled landing page URL with contact details for form auto-fill
+      landing_page_prefilled: campaign.landingPageUrl
+        ? generateTrackingUrl(campaign.landingPageUrl, {
+            email: contact.email || undefined,
+            firstName: contact.firstName || undefined,
+            lastName: contact.lastName || undefined,
+            company: account?.name || undefined,
+            jobTitle: contact.jobTitle || undefined,
+            campaignId: campaign.id,
+            campaignName: campaign.name || undefined,
+            utmSource: 'demandgentic',
+            utmMedium: 'email',
+            utmCampaign: campaign.name || undefined,
+          })
+        : '',
     } : undefined,
     sender: sender ? {
       name: sender.fromName || '',
@@ -273,6 +290,7 @@ export function previewWithSampleData(content: string): string {
     campaign: {
       name: 'Q1 Product Launch',
       landing_page: 'https://example.com/landing',
+      landing_page_prefilled: 'https://example.com/landing?email=john.doe%40example.com&first_name=John&last_name=Doe&company=Acme%20Corporation&utm_source=demandgentic&utm_medium=email&utm_campaign=Q1%20Product%20Launch',
     },
     sender: {
       name: 'Sarah Johnson',
