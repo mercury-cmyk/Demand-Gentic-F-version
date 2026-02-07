@@ -37,12 +37,23 @@ import {
 
 // ==================== TYPES ====================
 
+export interface NumberPoolConfig {
+  enabled: boolean;
+  maxCallsPerNumber?: number;
+  rotationStrategy?: 'round_robin' | 'reputation_based' | 'region_match';
+  cooldownHours?: number;
+}
+
 export interface CallerIdRequest {
   campaignId: string;
   virtualAgentId?: string;
   prospectNumber: string;
   prospectRegion?: string;
   prospectTimezone?: string;
+  /** Campaign-level number pool configuration */
+  numberPoolConfig?: NumberPoolConfig;
+  /** Optional call type label for metrics (e.g., ai_calls_initiate, preview_phone_test) */
+  callType?: string;
 }
 
 export interface CallerIdResult {
@@ -67,6 +78,60 @@ export interface CallCompletionData {
   campaignId?: string;
   sipCode?: number;
   sipReason?: string;
+}
+
+// ==================== METRICS ====================
+
+type CallerIdMetricSnapshot = {
+  total: number;
+  pool: number;
+  legacy: number;
+  byReason: Record<string, number>;
+  lastLogAt: number;
+};
+
+const CALLER_ID_METRICS = new Map<string, CallerIdMetricSnapshot>();
+const CALLER_ID_METRIC_LOG_EVERY = Number(process.env.NUMBER_POOL_METRIC_LOG_EVERY || 50);
+const CALLER_ID_METRIC_LOG_INTERVAL_MS = Number(process.env.NUMBER_POOL_METRIC_LOG_INTERVAL_MS || 60000);
+
+function trackCallerIdMetric(callType: string, result: CallerIdResult): void {
+  const key = callType || 'unknown';
+  const snapshot = CALLER_ID_METRICS.get(key) || {
+    total: 0,
+    pool: 0,
+    legacy: 0,
+    byReason: {},
+    lastLogAt: 0,
+  };
+
+  snapshot.total += 1;
+  if (result.isPoolNumber) {
+    snapshot.pool += 1;
+  } else {
+    snapshot.legacy += 1;
+  }
+
+  const reasonKey = result.selectionReason || 'unknown';
+  snapshot.byReason[reasonKey] = (snapshot.byReason[reasonKey] || 0) + 1;
+
+  const now = Date.now();
+  const shouldLogByCount = CALLER_ID_METRIC_LOG_EVERY > 0 && snapshot.total % CALLER_ID_METRIC_LOG_EVERY === 0;
+  const shouldLogByTime = now - snapshot.lastLogAt >= CALLER_ID_METRIC_LOG_INTERVAL_MS;
+
+  if (shouldLogByCount || shouldLogByTime) {
+    snapshot.lastLogAt = now;
+    const topReasons = Object.entries(snapshot.byReason)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([reason, count]) => `${reason}:${count}`)
+      .join(', ');
+
+    console.log(
+      `[NumberPoolMetrics] ${key} total=${snapshot.total} pool=${snapshot.pool} legacy=${snapshot.legacy} reasons=[${topReasons}]`
+    );
+  }
+
+  CALLER_ID_METRICS.set(key, snapshot);
 }
 
 // ==================== MAIN FUNCTIONS ====================
@@ -97,25 +162,37 @@ export interface CallCompletionData {
 export async function getCallerIdForCall(
   request: CallerIdRequest
 ): Promise<CallerIdResult> {
+  const callType = request.callType || 'unknown';
+  const recordAndReturn = (result: CallerIdResult): CallerIdResult => {
+    trackCallerIdMetric(callType, result);
+    return result;
+  };
+  // Check if campaign explicitly disabled number pool rotation
+  const campaignPoolConfig = request.numberPoolConfig;
+  if (campaignPoolConfig && campaignPoolConfig.enabled === false) {
+    console.log(`[NumberPoolIntegration] Campaign has disabled number pool rotation`);
+    return recordAndReturn(useLegacyCallerId('campaign_pool_disabled'));
+  }
+
   // PRIORITY 1: Check for agent-assigned phone number
   if (request.virtualAgentId) {
     const agentNumber = await getAgentAssignedNumber(request.virtualAgentId);
     if (agentNumber) {
       console.log(`[NumberPoolIntegration] Using agent-assigned number ${agentNumber.e164} for agent ${request.virtualAgentId}`);
-      return {
+      return recordAndReturn({
         callerId: agentNumber.e164,
         numberId: agentNumber.numberId,
         decisionId: null,
         jitterDelayMs: calculateAgentJitter(agentNumber.numberId),
         selectionReason: 'agent_assigned',
         isPoolNumber: true,
-      };
+      });
     }
   }
 
-  // PRIORITY 2: Check if number pool is enabled
+  // PRIORITY 2: Check if number pool is enabled (system-wide)
   if (!isNumberPoolEnabled()) {
-    return useLegacyCallerId('pool_disabled');
+    return recordAndReturn(useLegacyCallerId('pool_disabled'));
   }
 
   try {
@@ -131,28 +208,28 @@ export async function getCallerIdForCall(
     if (selection.numberId) {
       console.log(`[NumberPoolIntegration] Selected pool number ${selection.numberE164} for ${request.prospectNumber}`);
 
-      return {
+      return recordAndReturn({
         callerId: selection.numberE164,
         numberId: selection.numberId,
         decisionId: selection.decisionId,
         jitterDelayMs: selection.jitterDelayMs,
         selectionReason: selection.selectionReason,
         isPoolNumber: true,
-      };
+      });
     }
 
     // Router returned fallback number
-    return {
+    return recordAndReturn({
       callerId: selection.numberE164,
       numberId: null,
       decisionId: null,
       jitterDelayMs: 0,
       selectionReason: selection.selectionReason,
       isPoolNumber: false,
-    };
+    });
   } catch (error) {
     console.error('[NumberPoolIntegration] Selection error:', error);
-    return useLegacyCallerId('selection_error');
+    return recordAndReturn(useLegacyCallerId('selection_error'));
   }
 }
 

@@ -72,23 +72,37 @@ export const organizationTypeEnum = pgEnum('organization_type', ['super', 'clien
 export const organizationMemberRoleEnum = pgEnum('organization_member_role', ['owner', 'admin', 'member']);
 
 // Campaign enums
+// IMPORTANT: Keep in sync with client/src/lib/campaign-types.ts UNIFIED_CAMPAIGN_TYPES
 export const campaignTypeEnum = pgEnum('campaign_type', [
+  // Legacy types
   'email',
   'call',
   'combo',
-  'content_syndication',
+  // Event-based campaigns
+  'webinar_invite',
   'live_webinar',
   'on_demand_webinar',
-  'high_quality_leads',
   'executive_dinner',
   'leadership_forum',
   'conference',
+  // Lead generation campaigns
+  'content_syndication',
+  'high_quality_leads',
+  // Sales qualification campaigns
   'sql',
-  'appointment_generation',
+  'bant_qualification',
+  'bant_leads', // Legacy alias for bant_qualification
   'lead_qualification',
+  // Appointment setting campaigns
+  'appointment_setting',
+  'appointment_generation', // Legacy alias for appointment_setting
+  'demo_request',
+  // Data & verification campaigns
   'data_validation',
-  'bant_leads',
-  'webinar_invite'
+  // Follow-up campaigns
+  'follow_up',
+  'nurture',
+  're_engagement'
 ]);
 export const accountCapModeEnum = pgEnum('account_cap_mode', ['queue_size', 'connected_calls', 'positive_disp']);
 export const queueStatusEnum = pgEnum('queue_status', ['queued', 'in_progress', 'done', 'removed']);
@@ -830,6 +844,51 @@ export type InsertPromptRegistry = z.infer<typeof insertPromptRegistrySchema>;
 export type InsertPromptVersions = z.infer<typeof insertPromptVersionsSchema>;
 export type PromptRegistry = typeof promptRegistry.$inferSelect;
 export type PromptVersion = typeof promptVersions.$inferSelect;
+
+// ==================== CUSTOM CALL FLOWS ====================
+// Updated types to match actual call flow step structure
+
+export const customCallFlows = pgTable("custom_call_flows", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  objective: text("objective").notNull(),
+  successCriteria: text("success_criteria").notNull(),
+  maxTotalTurns: integer("max_total_turns").notNull().default(20),
+  steps: jsonb("steps").$type<Array<{
+    stepId: string;
+    name: string;
+    mappedState?: string;
+    goal?: string;
+    allowedIntents?: string[];
+    forbiddenIntents?: string[];
+    allowedQuestions?: number;
+    maxTurnsInStep?: number;
+    mustDo?: string[];
+    mustNotDo?: string[];
+    exitCriteria?: Array<{ signal: string; description: string; nextStep?: string }>;
+    branches?: Array<{ trigger: string; condition: string; targetStep?: string; capability?: string; description?: string }>;
+    fallback?: { action: string; maxAttempts?: number; message?: string };
+  }>>().default([]),
+  version: integer("version").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  nameIdx: index("custom_call_flows_name_idx").on(table.name),
+  activeIdx: index("custom_call_flows_active_idx").on(table.isActive),
+}));
+
+export const customCallFlowMappings = pgTable("custom_call_flow_mappings", {
+  campaignType: text("campaign_type").primaryKey(),
+  callFlowId: text("call_flow_id").notNull(),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  callFlowIdx: index("custom_call_flow_mappings_flow_idx").on(table.callFlowId),
+}));
 
 // User Roles junction table (many-to-many: users can have multiple roles)
 export const userRoles = pgTable("user_roles", {
@@ -1894,6 +1953,11 @@ export const campaigns = pgTable("campaigns", {
   // Links campaign to a specific Telnyx phone number from the number pool
   callerPhoneNumberId: varchar("caller_phone_number_id"), // References telnyx_numbers.id (not a FK to avoid circular deps)
   callerPhoneNumber: text("caller_phone_number"), // Denormalized E.164 phone number for quick access
+
+  // ==================== NUMBER POOL ROTATION SETTINGS ====================
+  // Configuration for automatic phone number rotation to avoid spam flags
+  // Schema: { enabled: boolean, maxCallsPerNumber?: number, rotationStrategy?: 'round_robin' | 'reputation_based' | 'region_match', cooldownHours?: number }
+  numberPoolConfig: jsonb("number_pool_config"),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -4320,6 +4384,92 @@ export const sipTrunkConfigs = pgTable("sip_trunk_configs", {
   defaultIdx: index("sip_trunk_configs_default_idx").on(table.isDefault),
 }));
 
+// Telephony Provider Type Enum
+export const telephonyProviderTypeEnum = pgEnum("telephony_provider_type", [
+  'telnyx',
+  'sip_trunk',
+  'twilio',
+  'bandwidth',
+  'custom'
+]);
+
+// Telephony Provider Transport Enum
+export const sipTransportEnum = pgEnum("sip_transport", [
+  'udp',
+  'tcp',
+  'tls',
+  'wss'
+]);
+
+// Telephony Providers - Abstraction layer for multiple telephony providers
+// ISOLATED: This is for the new provider abstraction system, separate from existing Telnyx workflow
+export const telephonyProviders = pgTable("telephony_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(), // Friendly name
+  type: telephonyProviderTypeEnum("type").notNull(), // Provider type
+  enabled: boolean("enabled").notNull().default(false), // Enable/disable provider
+  priority: integer("priority").notNull().default(100), // Lower = higher priority for selection
+  
+  // API Authentication (for hosted providers like Telnyx, Twilio)
+  apiKey: text("api_key"), // Encrypted in production
+  apiSecret: text("api_secret"), // Encrypted in production
+  
+  // SIP Connection (for direct SIP trunk providers)
+  sipDomain: text("sip_domain"),
+  sipUsername: text("sip_username"),
+  sipPassword: text("sip_password"), // Encrypted in production
+  sipProxy: text("sip_proxy"),
+  sipPort: integer("sip_port").default(5060),
+  sipTransport: sipTransportEnum("sip_transport").default('udp'),
+  
+  // Provider Connection IDs (for hosted providers)
+  connectionId: text("connection_id"),
+  outboundProfileId: text("outbound_profile_id"),
+  
+  // Routing Configuration
+  outboundNumbers: jsonb("outbound_numbers").$type<string[]>(), // Available caller IDs
+  allowedDestinations: jsonb("allowed_destinations").$type<string[]>(), // Patterns like "+1*"
+  blockedDestinations: jsonb("blocked_destinations").$type<string[]>(), // Blocked patterns
+  
+  // Rate Limiting
+  maxCps: integer("max_cps").default(10), // Max calls per second
+  maxConcurrent: integer("max_concurrent").default(100), // Max concurrent calls
+  
+  // Failover Configuration
+  failoverProviderId: varchar("failover_provider_id"), // Self-reference for failover chain
+  healthCheckInterval: integer("health_check_interval").default(60), // Seconds between health checks
+  
+  // Cost Tracking
+  costPerMinute: real("cost_per_minute"), // Cost per minute in cents
+  costPerCall: real("cost_per_call"), // Setup cost per call in cents
+  currency: varchar("currency", { length: 3 }).default('USD'),
+  
+  // Metadata
+  providerMetadata: jsonb("provider_metadata").$type<Record<string, unknown>>(), // Provider-specific settings
+  createdById: varchar("created_by_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  enabledIdx: index("telephony_providers_enabled_idx").on(table.enabled),
+  typeIdx: index("telephony_providers_type_idx").on(table.type),
+  priorityIdx: index("telephony_providers_priority_idx").on(table.priority),
+}));
+
+// Provider Health Check History - Track provider health over time
+export const telephonyProviderHealthHistory = pgTable("telephony_provider_health_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerId: varchar("provider_id").references(() => telephonyProviders.id, { onDelete: 'cascade' }).notNull(),
+  healthy: boolean("healthy").notNull(),
+  latencyMs: integer("latency_ms"),
+  errorCount: integer("error_count").default(0),
+  lastError: text("last_error"),
+  activeCallCount: integer("active_call_count").default(0),
+  checkedAt: timestamp("checked_at").notNull().defaultNow(),
+}, (table) => ({
+  providerIdx: index("telephony_provider_health_provider_idx").on(table.providerId),
+  checkedAtIdx: index("telephony_provider_health_checked_at_idx").on(table.checkedAt),
+}));
+
 // Call Recording Access Log - Audit trail for QA/Admin playback & downloads
 export const callRecordingAccessLogs = pgTable("call_recording_access_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -4729,6 +4879,18 @@ export const insertSipTrunkConfigSchema = createInsertSchema(sipTrunkConfigs).om
   id: true,
   createdAt: true,
   updatedAt: true,
+});
+
+// Telephony Provider insert schema
+export const insertTelephonyProviderSchema = createInsertSchema(telephonyProviders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertTelephonyProviderHealthHistorySchema = createInsertSchema(telephonyProviderHealthHistory).omit({
+  id: true,
+  checkedAt: true,
 });
 
 export const insertCallRecordingAccessLogSchema = createInsertSchema(callRecordingAccessLogs).omit({

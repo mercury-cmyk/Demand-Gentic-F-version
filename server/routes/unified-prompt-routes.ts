@@ -133,14 +133,77 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * GET /api/prompts/categories
- * Get prompt counts by category
+ * Get available prompt categories with metadata
  */
 router.get('/categories', async (req: Request, res: Response) => {
   try {
-    const counts = await unifiedPromptService.getCategoryCounts();
-    res.json({ success: true, categories: counts });
+    const categories = [
+      {
+        id: 'voice',
+        name: 'Voice Agents',
+        description: 'Prompts for voice-based AI agents (phone calls)',
+        icon: 'Phone',
+        color: 'blue',
+      },
+      {
+        id: 'email',
+        name: 'Email Agents',
+        description: 'Prompts for email-based AI agents',
+        icon: 'Mail',
+        color: 'purple',
+      },
+      {
+        id: 'intelligence',
+        name: 'Intelligence',
+        description: 'Prompts for research and analysis agents',
+        icon: 'Brain',
+        color: 'yellow',
+      },
+      {
+        id: 'compliance',
+        name: 'Compliance',
+        description: 'Prompts for regulatory and compliance checks',
+        icon: 'Shield',
+        color: 'red',
+      },
+      {
+        id: 'system',
+        name: 'System',
+        description: 'Core system prompts and utilities',
+        icon: 'Settings',
+        color: 'gray',
+      },
+    ];
+    res.json({ success: true, categories });
   } catch (error: any) {
     console.error('[UnifiedPrompts] GET /categories error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/prompts/stats
+ * Get prompt statistics by category and type
+ */
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const counts = await unifiedPromptService.getCategoryCounts();
+    const { total } = await unifiedPromptService.listAll({ limit: 0 });
+
+    const stats = {
+      total,
+      byCategory: counts,
+      byType: {
+        foundational: 0,
+        system: 0,
+        specialized: 0,
+        template: 0,
+      },
+      recentlyUpdated: 0,
+    };
+    res.json(stats);
+  } catch (error: any) {
+    console.error('[UnifiedPrompts] GET /stats error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

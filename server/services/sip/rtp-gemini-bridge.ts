@@ -19,6 +19,8 @@ import { eq } from 'drizzle-orm';
 import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from '../voice-providers/audio-transcoder';
 import { processDisposition } from '../disposition-engine';
 import * as sipClient from './sip-client';
+import { releaseProspectLock } from '../active-call-tracker';
+import { handleCallCompleted } from '../number-pool-integration';
 
 // Gemini API configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -79,8 +81,20 @@ function getModelName(): string {
   }
 }
 
-// Gemini voice options
-const GEMINI_VOICES = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr'];
+// Gemini voice options - All 30 Gemini Live voices supported
+// Must match client/src/lib/voice-constants.ts GEMINI_VOICES
+const GEMINI_VOICES = [
+  // Core voices (original 8)
+  'Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr',
+  // Professional voices
+  'Sulafat', 'Gacrux', 'Achird', 'Schedar', 'Sadaltager', 'Pulcherrima',
+  // Specialized voices
+  'Algieba', 'Despina', 'Iapetus', 'Erinome', 'Vindemiatrix', 'Achernar',
+  // Dynamic voices
+  'Sadachbia', 'Laomedeia', 'Autonoe', 'Callirrhoe', 'Umbriel',
+  // Character voices
+  'Enceladus', 'Algenib', 'Rasalgethi', 'Alnilam', 'Zubenelgenubi',
+];
 
 /**
  * Bridge session for a single call
@@ -118,6 +132,7 @@ interface CallContext {
   contactId?: string;
   phoneNumber?: string;
   maxCallDurationSeconds?: number;
+  callerNumberId?: string | null;
 }
 
 interface AudioMetrics {
@@ -380,10 +395,10 @@ async function connectToGemini(session: BridgeSession): Promise<void> {
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: {
-                  // For Vertex AI Gemini Live, use only supported voice names: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr
-                  // Custom voice names from agent persona are not supported, so use a default
-                  voice_name: ['Puck', 'Charon', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Zephyr'].includes(session.voiceName) 
-                    ? session.voiceName 
+                  // For Vertex AI Gemini Live, use supported voice names from GEMINI_VOICES array
+                  // Fallback to 'Puck' if voice is not in the supported list
+                  voice_name: GEMINI_VOICES.includes(session.voiceName)
+                    ? session.voiceName
                     : 'Puck',
                 },
               },
@@ -655,9 +670,36 @@ async function handleGeminiDisconnect(session: BridgeSession): Promise<void> {
 /**
  * Close a bridge session
  */
-export function closeBridgeSession(callId: string): void {
+export async function closeBridgeSession(callId: string): Promise<void> {
   const session = bridgeSessions.get(callId);
   if (!session) return;
+
+  // Release the prospect lock to allow future calls to this number
+  if (session.callContext?.phoneNumber) {
+    releaseProspectLock(session.callContext.phoneNumber, 'sip_session_closed');
+    console.log(`[RTP Bridge] 🔓 Released prospect lock for ${session.callContext.phoneNumber}`);
+  }
+
+  // Update number pool stats if using pool number
+  if (session.callContext?.callerNumberId) {
+    try {
+      const durationSec = Math.round((Date.now() - session.metrics.startTime) / 1000);
+      await handleCallCompleted({
+        numberId: session.callContext.callerNumberId,
+        callSessionId: callId,
+        dialerAttemptId: session.callContext.callAttemptId,
+        answered: session.callAnswered,
+        durationSec,
+        disposition: session.dispositionProcessed ? 'not_interested' : 'no_answer',
+        failed: false,
+        prospectNumber: session.callContext.phoneNumber || '',
+        campaignId: session.callContext.campaignId,
+      });
+      console.log(`[RTP Bridge] 📊 Number pool stats updated for ${session.callContext.callerNumberId}`);
+    } catch (statsErr) {
+      console.error(`[RTP Bridge] Failed to update number pool stats:`, statsErr);
+    }
+  }
 
   if (session.geminiWs) {
     try {

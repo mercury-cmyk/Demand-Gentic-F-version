@@ -8,7 +8,9 @@ import {
   clientUsers,
   campaigns,
   virtualAgents,
-  users
+  users,
+  customCallFlows,
+  customCallFlowMappings
 } from '@shared/schema';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../auth';
@@ -75,8 +77,8 @@ function mapChannelToOrderType(channel: string, campaignType: string): WorkOrder
 router.post('/create', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
   try {
     const campaignSchema = z.object({
-      // Admin specific
-      clientAccountId: z.string().min(1, 'Client Account ID is required'),
+      // Admin specific - required to associate campaign with a client
+      clientAccountId: z.string().min(1, 'Client Account ID is required. Please select a client before creating a campaign.'),
       
       // Step 1: Basics
       name: z.string().min(1, 'Campaign name is required'),
@@ -261,11 +263,11 @@ router.get('/agents', requireAuth, async (req: Request, res: Response) => {
 router.post('/voice-preview', requireAuth, async (req: Request, res: Response) => {
     try {
       const { voiceId, text } = req.body;
-  
+
       if (!voiceId || !text) {
         return res.status(400).json({ message: 'Voice ID and text are required' });
       }
-  
+
       res.json({
         success: true,
         message: 'Voice preview generated',
@@ -276,6 +278,157 @@ router.post('/voice-preview', requireAuth, async (req: Request, res: Response) =
       res.status(500).json({ message: 'Failed to generate voice preview' });
     }
   });
+
+// ==================== CALL FLOW ROUTES ====================
+
+import {
+  getDefaultCallFlowForCampaignType,
+  getAllDefaultCallFlows,
+  validateCallFlow,
+  type CallFlow,
+  type CallFlowStep,
+} from '../services/call-flow-defaults';
+
+async function getWizardCustomFlows(): Promise<CallFlow[]> {
+  const rows = await db
+    .select()
+    .from(customCallFlows)
+    .where(eq(customCallFlows.isActive, true));
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    objective: row.objective,
+    successCriteria: row.successCriteria,
+    maxTotalTurns: row.maxTotalTurns ?? 20,
+    steps: (row.steps as CallFlowStep[]) ?? [],
+    isDefault: false,
+    isSystemFlow: false,
+    version: row.version ?? 1,
+  }));
+}
+
+async function getWizardFlowById(flowId: string): Promise<CallFlow | null> {
+  const systemFlow = getAllDefaultCallFlows().find((flow) => flow.id === flowId);
+  if (systemFlow) return systemFlow;
+
+  const [row] = await db
+    .select()
+    .from(customCallFlows)
+    .where(eq(customCallFlows.id, flowId))
+    .limit(1);
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    objective: row.objective,
+    successCriteria: row.successCriteria,
+    maxTotalTurns: row.maxTotalTurns ?? 20,
+    steps: (row.steps as CallFlowStep[]) ?? [],
+    isDefault: false,
+    isSystemFlow: false,
+    version: row.version ?? 1,
+  };
+}
+
+/**
+ * GET /call-flows - Get all available default call flows
+ */
+router.get('/call-flows', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const systemFlows = getAllDefaultCallFlows();
+    const customFlows = await getWizardCustomFlows();
+    const callFlows = [...systemFlows, ...customFlows];
+    res.json({
+      success: true,
+      callFlows: callFlows.map(flow => ({
+        id: flow.id,
+        name: flow.name,
+        objective: flow.objective,
+        successCriteria: flow.successCriteria,
+        maxTotalTurns: flow.maxTotalTurns,
+        stepCount: flow.steps.length,
+        isDefault: flow.isDefault,
+        isSystemFlow: flow.isSystemFlow ?? flow.isDefault,
+      }))
+    });
+  } catch (error) {
+    console.error('[CAMPAIGN WIZARD] Get call flows error:', error);
+    res.status(500).json({ message: 'Failed to fetch call flows' });
+  }
+});
+
+/**
+ * GET /call-flows/:campaignType - Get default call flow for a campaign type
+ */
+router.get('/call-flows/:campaignType', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { campaignType } = req.params;
+    const [mapping] = await db
+      .select({ callFlowId: customCallFlowMappings.callFlowId })
+      .from(customCallFlowMappings)
+      .where(eq(customCallFlowMappings.campaignType, campaignType))
+      .limit(1);
+
+    let callFlow: CallFlow;
+
+    let mappedFlowId = mapping?.callFlowId;
+
+    if (!mappedFlowId && campaignType === 'content_syndication') {
+      const [ukefFlow] = await db
+        .select({ id: customCallFlows.id })
+        .from(customCallFlows)
+        .where(sql`lower(${customCallFlows.name}) like ${'%ukef%'}`)
+        .limit(1);
+
+      if (ukefFlow?.id) {
+        mappedFlowId = ukefFlow.id;
+      }
+    }
+
+    if (mappedFlowId) {
+      const mappedFlow = await getWizardFlowById(mappedFlowId);
+      callFlow = mappedFlow || getDefaultCallFlowForCampaignType(campaignType);
+    } else {
+      callFlow = getDefaultCallFlowForCampaignType(campaignType);
+    }
+
+    res.json({
+      success: true,
+      callFlow,
+      campaignType,
+    });
+  } catch (error) {
+    console.error('[CAMPAIGN WIZARD] Get call flow for type error:', error);
+    res.status(500).json({ message: 'Failed to fetch call flow' });
+  }
+});
+
+/**
+ * POST /call-flows/validate - Validate a custom call flow
+ */
+router.post('/call-flows/validate', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { callFlow } = req.body;
+
+    if (!callFlow) {
+      return res.status(400).json({ message: 'Call flow is required' });
+    }
+
+    const validation = validateCallFlow(callFlow);
+
+    res.json({
+      success: true,
+      valid: validation.valid,
+      errors: validation.errors,
+    });
+  } catch (error) {
+    console.error('[CAMPAIGN WIZARD] Validate call flow error:', error);
+    res.status(500).json({ message: 'Failed to validate call flow' });
+  }
+});
 
 
 export default router;

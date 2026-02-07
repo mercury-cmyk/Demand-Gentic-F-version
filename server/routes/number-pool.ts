@@ -41,6 +41,8 @@ import {
   endCooldown,
   processExpiredCooldowns,
   COOLDOWN_TRIGGERS,
+  // Repair functions
+  ensureReputationRecords,
 } from '../services/number-pool';
 import {
   assignNumberToAgent,
@@ -213,10 +215,31 @@ router.delete('/numbers/:id', asyncHandler(async (req, res) => {
  */
 router.post('/sync', asyncHandler(async (req, res) => {
   const result = await syncFromTelnyx();
-
+  
+  // Ensure all numbers have reputation records
+  const reputationCreated = await ensureReputationRecords();
+  
   res.json({
     success: true,
-    data: result,
+    data: {
+      ...result,
+      reputationRecordsCreated: reputationCreated,
+    },
+  });
+}));
+
+/**
+ * POST /api/number-pool/repair
+ * Repair missing reputation records
+ */
+router.post('/repair', asyncHandler(async (req, res) => {
+  const created = await ensureReputationRecords();
+  
+  res.json({
+    success: true,
+    data: {
+      reputationRecordsCreated: created,
+    },
   });
 }));
 

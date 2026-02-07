@@ -36,6 +36,7 @@ import {
 import { transcribeLeadCall } from "./telnyx-transcription";
 import { analyzeCall } from "./call-quality-analyzer";
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
+import callQualityTracker from "./call-quality-tracker";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -164,6 +165,29 @@ export async function processDisposition(
 
     // Update dialer run statistics
     await updateDialerRunStats(callAttempt.dialerRunId, disposition);
+
+    // Track call quality metrics for number reputation (anti-spam)
+    try {
+      if (callAttempt.fromNumber) {
+        const durationSeconds = callAttempt.callDurationSeconds || callAttempt.talkDurationSec || 0;
+        const answered = !['no_answer', 'voicemail'].includes(disposition);
+        
+        await callQualityTracker.recordCallQuality({
+          callId: callAttempt.id,
+          numberId: callAttempt.fromNumber, // This is the phone number used
+          phoneNumberE164: callAttempt.fromNumber,
+          durationSeconds,
+          answered,
+          disconnectReason: mapDispositionToDisconnectReason(disposition),
+          disconnectedBy: durationSeconds < 20 ? 'prospect' : 'unknown',
+          prospectSpokeFirst: true, // We don't track this yet
+        });
+        result.actions.push('Call quality metrics recorded');
+      }
+    } catch (qualityError) {
+      // Don't fail the disposition processing if quality tracking fails
+      console.warn(`[DispositionEngine] Failed to track call quality:`, qualityError);
+    }
 
     // Log governance action
     await logGovernanceAction({
@@ -938,4 +962,24 @@ export async function updateContactSuppression(
     `outcome=${outcome}, nextEligible=${nextEligibleAt.toISOString()}` +
     (suppressionReason ? `, reason=${suppressionReason}` : '')
   );
+}
+/**
+ * Map disposition to disconnect reason for call quality tracking
+ */
+function mapDispositionToDisconnectReason(disposition: string): 'completed' | 'hangup' | 'no_answer' | 'busy' | 'failed' | 'voicemail' {
+  switch (disposition) {
+    case 'qualified_lead':
+    case 'not_interested':
+      return 'completed';
+    case 'do_not_call':
+      return 'hangup';
+    case 'voicemail':
+      return 'voicemail';
+    case 'no_answer':
+      return 'no_answer';
+    case 'invalid_data':
+      return 'failed';
+    default:
+      return 'completed';
+  }
 }

@@ -283,8 +283,29 @@ export function buildCampaignContextSection(config: {
   objections?: Array<{ objection: string; response: string }> | null;
   successCriteria?: string | null;
   brief?: string | null;
+  campaignType?: string | null;
 }): string {
   const sections: string[] = [];
+
+  // Campaign type provides critical context for how to approach the call
+  if (config.campaignType) {
+    const typeDescriptions: Record<string, string> = {
+      'appointment_generation': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
+      'appointment_setting': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
+      'content_syndication': 'Content Syndication Campaign - Focus on getting consent to receive content and validating interest.',
+      'lead_qualification': 'Lead Qualification Campaign - Focus on discovery and gathering qualifying information.',
+      'sql': 'Sales Qualified Lead Campaign - Focus on identifying sales-ready prospects with budget, authority, need, and timeline.',
+      'bant_leads': 'BANT Qualification Campaign - Qualify leads on Budget, Authority, Need, and Timeline.',
+      'data_validation': 'Data Validation Campaign - Verify and update contact information.',
+      'high_quality_leads': 'High-Quality Leads Campaign - Focus on identifying highly qualified prospects.',
+      'webinar_invite': 'Webinar Invitation Campaign - Focus on driving webinar registrations.',
+      'live_webinar': 'Live Webinar Campaign - Focus on driving live webinar attendance.',
+      'on_demand_webinar': 'On-Demand Webinar Campaign - Focus on driving on-demand content consumption.',
+      'executive_dinner': 'Executive Dinner Campaign - Focus on securing attendance from senior executives.',
+    };
+    const typeDesc = typeDescriptions[config.campaignType] || `Campaign Type: ${config.campaignType}`;
+    sections.push(`## CAMPAIGN TYPE\n${typeDesc}`);
+  }
 
   // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL
   if (config.objective) {

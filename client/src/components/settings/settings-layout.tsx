@@ -20,6 +20,8 @@ import {
   ChevronRight,
   Crown,
   Brain,
+  Eye,
+  GitBranch,
 } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
 
@@ -99,11 +101,27 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     category: 'infrastructure',
   },
   {
+    id: 'call-flows',
+    label: 'Call Flows',
+    href: ROUTES.SETTINGS_CALL_FLOWS,
+    icon: GitBranch,
+    description: 'Pre-set call flows for campaigns',
+    category: 'infrastructure',
+  },
+  {
     id: 'knowledge-hub',
     label: 'Knowledge Hub',
     href: ROUTES.SETTINGS_KNOWLEDGE_HUB,
     icon: Brain,
     description: 'Unified AI knowledge source',
+    category: 'infrastructure',
+  },
+  {
+    id: 'prompt-inspector',
+    label: 'Prompt Inspector',
+    href: ROUTES.SETTINGS_PROMPT_INSPECTOR,
+    icon: Eye,
+    description: 'View all knowledge layers',
     category: 'infrastructure',
   },
   {

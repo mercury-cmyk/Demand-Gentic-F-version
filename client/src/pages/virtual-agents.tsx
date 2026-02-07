@@ -370,23 +370,33 @@ const OPENAI_VOICES = [
   { value: 'shimmer', label: 'Shimmer - Clear & professional', provider: 'openai' },
 ];
 
-// Google Gemini Live voice options (Vertex AI)
+// Google Gemini Live voice options (Vertex AI) - Official voices from Google's documentation
 const GOOGLE_VOICES = [
-  { value: 'Kore', label: 'Kore - Soft & Friendly (Default)', provider: 'google' },
-  { value: 'Puck', label: 'Puck - Light & Expressive', provider: 'google' },
-  { value: 'Charon', label: 'Charon - Deep & Authoritative', provider: 'google' },
-  { value: 'Fenrir', label: 'Fenrir - Calm & Measured', provider: 'google' },
-  { value: 'Aoede', label: 'Aoede - Bright & Warm', provider: 'google' },
-  { value: 'Orion', label: 'Orion - Balanced & Clear', provider: 'google' },
-  { value: 'Vega', label: 'Vega - Warm & Confident (Sales)', provider: 'google' },
-  { value: 'Pegasus', label: 'Pegasus - Calm & Professional (B2B)', provider: 'google' },
-  { value: 'Ursa', label: 'Ursa - Strong & Steady', provider: 'google' },
-  { value: 'Nova', label: 'Nova - Bright & Energetic', provider: 'google' },
-  { value: 'Dipper', label: 'Dipper - Clear & Articulate', provider: 'google' },
-  { value: 'Capella', label: 'Capella - Melodic & Smooth', provider: 'google' },
-  { value: 'Orbit', label: 'Orbit - Modern & Dynamic', provider: 'google' },
-  { value: 'Lyra', label: 'Lyra - Elegant & Refined', provider: 'google' },
-  { value: 'Eclipse', label: 'Eclipse - Bold & Distinctive', provider: 'google' },
+  // Primary B2B Sales voices
+  { value: 'Kore', label: 'Kore - Firm & Professional (Default)', provider: 'google' },
+  { value: 'Fenrir', label: 'Fenrir - Excitable & Persuasive', provider: 'google' },
+  { value: 'Charon', label: 'Charon - Informative & Authoritative', provider: 'google' },
+  { value: 'Aoede', label: 'Aoede - Breezy & Friendly', provider: 'google' },
+  { value: 'Puck', label: 'Puck - Upbeat & Lively', provider: 'google' },
+  // Professional voices
+  { value: 'Zephyr', label: 'Zephyr - Bright & Clear', provider: 'google' },
+  { value: 'Leda', label: 'Leda - Youthful & Modern', provider: 'google' },
+  { value: 'Orus', label: 'Orus - Firm & Reliable', provider: 'google' },
+  { value: 'Sulafat', label: 'Sulafat - Warm & Caring', provider: 'google' },
+  { value: 'Gacrux', label: 'Gacrux - Mature & Credible', provider: 'google' },
+  { value: 'Schedar', label: 'Schedar - Even & Composed', provider: 'google' },
+  { value: 'Achird', label: 'Achird - Friendly & Welcoming', provider: 'google' },
+  // Specialized voices
+  { value: 'Sadaltager', label: 'Sadaltager - Knowledgeable & Expert', provider: 'google' },
+  { value: 'Pulcherrima', label: 'Pulcherrima - Forward & Assertive', provider: 'google' },
+  { value: 'Algieba', label: 'Algieba - Smooth & Polished', provider: 'google' },
+  { value: 'Despina', label: 'Despina - Elegant & Articulate', provider: 'google' },
+  { value: 'Iapetus', label: 'Iapetus - Clear & Precise', provider: 'google' },
+  { value: 'Erinome', label: 'Erinome - Professional Presenter', provider: 'google' },
+  // Dynamic voices
+  { value: 'Sadachbia', label: 'Sadachbia - Lively & Dynamic', provider: 'google' },
+  { value: 'Laomedeia', label: 'Laomedeia - Upbeat & Positive', provider: 'google' },
+  { value: 'Autonoe', label: 'Autonoe - Bright & Cheerful', provider: 'google' },
 ];
 
 const PROVIDER_OPTIONS = [

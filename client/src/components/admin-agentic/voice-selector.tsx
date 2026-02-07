@@ -5,8 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Play, Pause, Volume2, Check, Search, User, Mic } from "lucide-react";
+import { Play, Pause, Volume2, Check, Search, User, Mic, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getAuthHeaders } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export interface VoiceOption {
   id: string;
@@ -18,23 +20,48 @@ export interface VoiceOption {
   sampleUrl?: string;
 }
 
-// Default Gemini voices with metadata
+// Official Gemini TTS voices (from Google's documentation)
+// These are the REAL voices supported by Gemini Live API
 export const GEMINI_VOICES: VoiceOption[] = [
-  { id: "Kore", name: "Kore", gender: "female", tone: "Warm, Professional", description: "Confident and approachable", bestFor: "Executive outreach" },
-  { id: "Fenrir", name: "Fenrir", gender: "male", tone: "Bold, Confident", description: "Strong and persuasive", bestFor: "Enterprise sales" },
-  { id: "Charon", name: "Charon", gender: "male", tone: "Deep, Authoritative", description: "Trustworthy and commanding", bestFor: "Technical decision makers" },
-  { id: "Aoede", name: "Aoede", gender: "female", tone: "Friendly, Energetic", description: "Upbeat and engaging", bestFor: "Mid-market outreach" },
-  { id: "Pegasus", name: "Pegasus", gender: "male", tone: "Clear, Professional", description: "Clear and articulate", bestFor: "General B2B" },
-  { id: "Leda", name: "Leda", gender: "female", tone: "Consultative", description: "Thoughtful and advisory", bestFor: "High-value prospects" },
-  { id: "Vega", name: "Vega", gender: "female", tone: "Modern, Dynamic", description: "Contemporary and energetic", bestFor: "Tech companies" },
-  { id: "Zephyr", name: "Zephyr", gender: "male", tone: "Calm, Trustworthy", description: "Steady and reliable", bestFor: "Financial services" },
-  { id: "Orus", name: "Orus", gender: "male", tone: "Warm, Empathetic", description: "Understanding and personable", bestFor: "Healthcare, Education" },
-  { id: "Puck", name: "Puck", gender: "male", tone: "Bright, Enthusiastic", description: "Lively and engaging", bestFor: "Startups, SMB" },
-  { id: "Altair", name: "Altair", gender: "male", tone: "Professional, Direct", description: "Efficient and clear", bestFor: "Executive communications" },
-  { id: "Lyra", name: "Lyra", gender: "female", tone: "Sophisticated, Elegant", description: "Refined and polished", bestFor: "Luxury, Premium brands" },
-  { id: "Clio", name: "Clio", gender: "female", tone: "Intellectual, Articulate", description: "Knowledgeable and clear", bestFor: "Research, Consulting" },
-  { id: "Nova", name: "Nova", gender: "female", tone: "Fresh, Innovative", description: "Modern and forward-thinking", bestFor: "Innovation, Product launches" },
-  { id: "Atlas", name: "Atlas", gender: "male", tone: "Powerful, Grounded", description: "Strong and dependable", bestFor: "Manufacturing, Industrial" },
+  // Top recommended for B2B sales
+  { id: "Kore", name: "Kore", gender: "female", tone: "Firm, Professional", description: "Confident and direct", bestFor: "Executive outreach" },
+  { id: "Fenrir", name: "Fenrir", gender: "male", tone: "Excitable, Energetic", description: "Enthusiastic and persuasive", bestFor: "Enterprise sales" },
+  { id: "Charon", name: "Charon", gender: "male", tone: "Informative, Authoritative", description: "Trustworthy and knowledgeable", bestFor: "Technical decision makers" },
+  { id: "Aoede", name: "Aoede", gender: "female", tone: "Breezy, Friendly", description: "Light and approachable", bestFor: "Mid-market outreach" },
+  { id: "Puck", name: "Puck", gender: "male", tone: "Upbeat, Lively", description: "Energetic and engaging", bestFor: "Startups, SMB" },
+  { id: "Leda", name: "Leda", gender: "female", tone: "Youthful, Fresh", description: "Modern and relatable", bestFor: "Tech companies" },
+  { id: "Zephyr", name: "Zephyr", gender: "male", tone: "Bright, Clear", description: "Articulate and professional", bestFor: "Financial services" },
+  { id: "Orus", name: "Orus", gender: "male", tone: "Firm, Steady", description: "Reliable and trustworthy", bestFor: "Healthcare, Education" },
+  
+  // Additional professional voices
+  { id: "Sulafat", name: "Sulafat", gender: "female", tone: "Warm, Caring", description: "Empathetic and personable", bestFor: "Customer success" },
+  { id: "Gacrux", name: "Gacrux", gender: "male", tone: "Mature, Experienced", description: "Seasoned and credible", bestFor: "C-suite conversations" },
+  { id: "Achird", name: "Achird", gender: "female", tone: "Friendly, Approachable", description: "Welcoming and warm", bestFor: "First contact calls" },
+  { id: "Schedar", name: "Schedar", gender: "male", tone: "Even, Balanced", description: "Calm and composed", bestFor: "Complex negotiations" },
+  { id: "Sadaltager", name: "Sadaltager", gender: "male", tone: "Knowledgeable, Expert", description: "Authoritative consultant", bestFor: "Advisory calls" },
+  { id: "Pulcherrima", name: "Pulcherrima", gender: "female", tone: "Forward, Confident", description: "Bold and assertive", bestFor: "Closing calls" },
+  
+  // Specialized voices
+  { id: "Algieba", name: "Algieba", gender: "male", tone: "Smooth, Polished", description: "Refined delivery", bestFor: "Premium brands" },
+  { id: "Despina", name: "Despina", gender: "female", tone: "Smooth, Professional", description: "Elegant and articulate", bestFor: "Luxury market" },
+  { id: "Iapetus", name: "Iapetus", gender: "male", tone: "Clear, Precise", description: "Technical and accurate", bestFor: "Product demos" },
+  { id: "Erinome", name: "Erinome", gender: "female", tone: "Clear, Articulate", description: "Professional presenter", bestFor: "Presentations" },
+  { id: "Vindemiatrix", name: "Vindemiatrix", gender: "female", tone: "Gentle, Soft", description: "Calming presence", bestFor: "Sensitive topics" },
+  { id: "Achernar", name: "Achernar", gender: "female", tone: "Soft, Reassuring", description: "Comforting and kind", bestFor: "Support calls" },
+  
+  // Dynamic voices
+  { id: "Sadachbia", name: "Sadachbia", gender: "female", tone: "Lively, Dynamic", description: "High-energy and exciting", bestFor: "Product launches" },
+  { id: "Laomedeia", name: "Laomedeia", gender: "female", tone: "Upbeat, Positive", description: "Optimistic and motivating", bestFor: "Follow-up calls" },
+  { id: "Autonoe", name: "Autonoe", gender: "female", tone: "Bright, Cheerful", description: "Sunny and engaging", bestFor: "Relationship building" },
+  { id: "Callirrhoe", name: "Callirrhoe", gender: "female", tone: "Easy-going, Relaxed", description: "Casual and comfortable", bestFor: "Informal calls" },
+  { id: "Umbriel", name: "Umbriel", gender: "male", tone: "Easy-going, Laid-back", description: "Relaxed and natural", bestFor: "Warm introductions" },
+  
+  // Character voices  
+  { id: "Enceladus", name: "Enceladus", gender: "male", tone: "Breathy, Intimate", description: "Thoughtful whisper", bestFor: "Confidential discussions" },
+  { id: "Algenib", name: "Algenib", gender: "male", tone: "Gravelly, Deep", description: "Distinctive and memorable", bestFor: "Brand differentiation" },
+  { id: "Rasalgethi", name: "Rasalgethi", gender: "male", tone: "Informative, Educational", description: "Teacher-like clarity", bestFor: "Training calls" },
+  { id: "Alnilam", name: "Alnilam", gender: "male", tone: "Firm, Decisive", description: "Strong and commanding", bestFor: "Leadership messaging" },
+  { id: "Zubenelgenubi", name: "Zubenelgenubi", gender: "male", tone: "Casual, Conversational", description: "Natural and unscripted", bestFor: "Peer-to-peer" },
 ];
 
 interface VoiceSelectorProps {
@@ -52,9 +79,11 @@ export function VoiceSelector({
   voices = GEMINI_VOICES,
   className,
 }: VoiceSelectorProps) {
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [loadingVoice, setLoadingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const filteredVoices = voices.filter((voice) => {
@@ -74,30 +103,88 @@ export function VoiceSelector({
         audioRef.current.currentTime = 0;
       }
       setPlayingVoice(null);
+      setLoadingVoice(null);
       return;
     }
 
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    setLoadingVoice(voice.id);
+
     // If we have a sample URL, play it
     if (voice.sampleUrl) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
       audioRef.current = new Audio(voice.sampleUrl);
-      audioRef.current.onended = () => setPlayingVoice(null);
-      await audioRef.current.play();
+      audioRef.current.onended = () => {
+        setPlayingVoice(null);
+        setLoadingVoice(null);
+      };
+      audioRef.current.onerror = () => {
+        setPlayingVoice(null);
+        setLoadingVoice(null);
+      };
       setPlayingVoice(voice.id);
+      setLoadingVoice(null);
+      await audioRef.current.play();
     } else {
-      // Generate a preview using Web Speech API as fallback
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(
-          `Hello, this is ${voice.name}. I'm a ${voice.tone.toLowerCase()} voice, perfect for ${voice.bestFor.toLowerCase()}.`
-        );
-        utterance.rate = 0.9;
-        utterance.pitch = voice.gender === "female" ? 1.1 : 0.9;
-        utterance.onend = () => setPlayingVoice(null);
-        window.speechSynthesis.speak(utterance);
+      // Use the voice provider API to generate a real preview
+      try {
+        const response = await fetch('/api/voice-providers/preview', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            voiceId: voice.id,
+            provider: 'gemini', // Gemini voices
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Server error: ${response.status}`);
+        }
+
+        const audioBlob = await response.blob();
+        if (audioBlob.size === 0) {
+          throw new Error('No audio data received');
+        }
+
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioRef.current = new Audio(audioUrl);
+        audioRef.current.onended = () => {
+          setPlayingVoice(null);
+          setLoadingVoice(null);
+          URL.revokeObjectURL(audioUrl);
+        };
+        audioRef.current.onerror = (e) => {
+          console.error('Audio playback error:', e);
+          setPlayingVoice(null);
+          setLoadingVoice(null);
+          URL.revokeObjectURL(audioUrl);
+          toast({
+            title: "Playback Error",
+            description: "Could not play audio. Please try again.",
+            variant: "destructive",
+          });
+        };
         setPlayingVoice(voice.id);
+        setLoadingVoice(null);
+        await audioRef.current.play();
+      } catch (error) {
+        console.error('Voice preview failed:', error);
+        setPlayingVoice(null);
+        setLoadingVoice(null);
+        toast({
+          title: "Preview Unavailable",
+          description: error instanceof Error ? error.message : "Could not load voice preview. Please try again.",
+          variant: "destructive",
+        });
       }
     }
   };
@@ -153,6 +240,7 @@ export function VoiceSelector({
           const isSelected = selectedVoice === voice.id;
           const isRecommended = recommendedVoice === voice.id;
           const isPlaying = playingVoice === voice.id;
+          const isLoading = loadingVoice === voice.id;
 
           return (
             <Card
@@ -210,12 +298,18 @@ export function VoiceSelector({
                     variant="outline"
                     size="sm"
                     className="flex-1"
+                    disabled={isLoading}
                     onClick={(e) => {
                       e.stopPropagation();
                       handlePlayPreview(voice);
                     }}
                   >
-                    {isPlaying ? (
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Loading
+                      </>
+                    ) : isPlaying ? (
                       <>
                         <Pause className="h-3 w-3 mr-1" />
                         Stop

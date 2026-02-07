@@ -43,7 +43,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSipTrunkConfigSchema } from "@shared/schema";
 import { z } from "zod";
-import { Phone, Plus, Trash2, Star, Power, Settings, Download, User, PhoneCall } from "lucide-react";
+import { Phone, Plus, Trash2, Star, Settings, Download, PhoneCall, Globe, Server, RefreshCw, CheckCircle2, AlertCircle, Copy } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -391,6 +391,9 @@ export default function TelephonySettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Telnyx Webhook Management */}
+        <TelnyxWebhookManagement />
+
         {/* SIP Trunk Section Header */}
         <div className="pt-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -629,7 +632,7 @@ export default function TelephonySettingsPage() {
                   <FormItem>
                     <FormLabel>Connection ID (Optional)</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} value={field.value ?? ''} />
                     </FormControl>
                     <FormDescription>
                       Provider-specific connection identifier
@@ -645,7 +648,7 @@ export default function TelephonySettingsPage() {
                   <FormItem>
                     <FormLabel>Caller ID Number (Optional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="+1234567890" {...field} />
+                      <Input placeholder="+1234567890" {...field} value={field.value ?? ''} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -685,5 +688,408 @@ export default function TelephonySettingsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </SettingsLayout>
+  );
+}
+
+// ==================== TELNYX WEBHOOK MANAGEMENT COMPONENT ====================
+
+interface WebhookConfig {
+  voiceUrl: string;
+  voiceFallbackUrl?: string;
+  statusCallbackUrl?: string;
+  voiceMethod?: string;
+  statusCallbackMethod?: string;
+  active?: boolean;
+  inbound?: boolean;
+  outbound?: boolean;
+}
+
+interface CallControlConfig {
+  webhookUrl: string;
+  webhookFailoverUrl?: string;
+  active?: boolean;
+}
+
+interface AppInfo {
+  id: string;
+  name: string;
+  voiceUrl?: string;
+  statusCallbackUrl?: string;
+  webhookUrl?: string;
+  active: boolean;
+  isCurrent: boolean;
+}
+
+interface TelnyxWebhookData {
+  success: boolean;
+  texmlAppId?: string;
+  appName?: string;
+  currentConfig?: WebhookConfig;
+  callControlAppId?: string;
+  callControlAppName?: string;
+  callControlConfig?: CallControlConfig;
+  allTexmlApps?: AppInfo[];
+  allCallControlApps?: AppInfo[];
+  environment?: {
+    ngrokUrl: string;
+    productionUrl: string;
+    isDevMode: boolean;
+  };
+  updatedAt?: string;
+  message?: string;
+  results?: {
+    texml?: { success: boolean; name?: string; error?: string };
+    callControl?: { success: boolean; name?: string; error?: string };
+  };
+}
+
+function TelnyxWebhookManagement() {
+  const { toast } = useToast();
+  const [customNgrokUrl, setCustomNgrokUrl] = useState('');
+  const [customProdUrl, setCustomProdUrl] = useState('');
+  const [isCustomDialogOpen, setIsCustomDialogOpen] = useState(false);
+
+  // Fetch current webhook configuration
+  const { data: webhookData, isLoading, refetch } = useQuery<TelnyxWebhookData>({
+    queryKey: ['/api/telnyx/webhook-config'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/telnyx/webhook-config');
+      return res.json();
+    },
+    retry: false,
+  });
+
+  // Switch to dev mutation
+  const switchToDevMutation = useMutation({
+    mutationFn: async (ngrokUrl?: string) => {
+      const res = await apiRequest('POST', '/api/telnyx/webhook-config/switch-to-dev', {
+        ngrokUrl: ngrokUrl || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/telnyx/webhook-config'] });
+      const results = data.results || {};
+      const successApps = [
+        results.texml?.success && results.texml.name,
+        results.callControl?.success && results.callControl.name,
+      ].filter(Boolean);
+      toast({
+        title: 'Switched to Development',
+        description: successApps.length > 0
+          ? `Updated: ${successApps.join(', ')} → ${data.config?.baseUrl}`
+          : `Webhooks now pointing to: ${data.config?.baseUrl}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Switch Failed',
+        description: error.message || 'Failed to switch to dev URLs',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Switch to prod mutation
+  const switchToProdMutation = useMutation({
+    mutationFn: async (productionUrl?: string) => {
+      const res = await apiRequest('POST', '/api/telnyx/webhook-config/switch-to-prod', {
+        productionUrl: productionUrl || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/telnyx/webhook-config'] });
+      const results = data.results || {};
+      const successApps = [
+        results.texml?.success && results.texml.name,
+        results.callControl?.success && results.callControl.name,
+      ].filter(Boolean);
+      toast({
+        title: 'Switched to Production',
+        description: successApps.length > 0
+          ? `Updated: ${successApps.join(', ')} → ${data.config?.baseUrl}`
+          : `Webhooks now pointing to: ${data.config?.baseUrl}`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Switch Failed',
+        description: error.message || 'Failed to switch to production URLs',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: 'Copied',
+      description: 'URL copied to clipboard',
+    });
+  };
+
+  // Determine if currently pointing to dev or prod
+  const isPointingToDev = webhookData?.currentConfig?.voiceUrl?.includes('ngrok') ||
+                          webhookData?.currentConfig?.voiceUrl?.includes('localhost');
+  const isPointingToProd = webhookData?.currentConfig?.voiceUrl?.includes(webhookData?.environment?.productionUrl || 'demandgentic');
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            Telnyx Webhook Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <RefreshCw className="h-5 w-5 animate-spin mr-2" />
+            Loading webhook configuration...
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!webhookData?.success) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            Telnyx Webhook Configuration
+          </CardTitle>
+          <CardDescription>
+            Manage your Telnyx TeXML application webhook URLs
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2 p-4 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded-lg">
+            <AlertCircle className="h-5 w-5 text-yellow-600" />
+            <div>
+              <p className="font-medium text-yellow-800 dark:text-yellow-200">Configuration Required</p>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                {webhookData?.message || 'Please ensure TELNYX_API_KEY and TELNYX_TEXML_APP_ID are set in your environment.'}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5" />
+              Telnyx Webhook Configuration
+            </CardTitle>
+            <CardDescription>
+              Switch between development (ngrok) and production webhook URLs for AI calls
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Apps Info - TeXML and Call Control */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* TeXML Application */}
+          <div className="p-3 bg-muted/50 rounded-lg border">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Phone className="h-4 w-4" />
+                TeXML Application
+              </p>
+              <Badge variant={webhookData.currentConfig?.active ? 'default' : 'secondary'} className="text-xs">
+                {webhookData.currentConfig?.active ? 'Active' : 'Inactive'}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground font-mono truncate">{webhookData.appName || webhookData.texmlAppId || 'Not configured'}</p>
+            <div className="mt-2 text-xs">
+              <p className="text-muted-foreground truncate">Voice: {webhookData.currentConfig?.voiceUrl || 'Not set'}</p>
+            </div>
+          </div>
+
+          {/* Call Control Application */}
+          <div className="p-3 bg-muted/50 rounded-lg border">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <PhoneCall className="h-4 w-4" />
+                Call Control Application
+              </p>
+              <Badge variant={webhookData.callControlConfig?.active ? 'default' : 'secondary'} className="text-xs">
+                {webhookData.callControlConfig?.active ? 'Active' : webhookData.callControlAppId ? 'Inactive' : 'N/A'}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground font-mono truncate">{webhookData.callControlAppName || webhookData.callControlAppId || 'Not configured'}</p>
+            <div className="mt-2 text-xs">
+              <p className="text-muted-foreground truncate">Webhook: {webhookData.callControlConfig?.webhookUrl || 'Not set'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Current Configuration */}
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold">Current Webhook URLs</h4>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-2 bg-muted/30 rounded border">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">TeXML Voice URL</p>
+                <p className="text-sm font-mono truncate">{webhookData.currentConfig?.voiceUrl || 'Not set'}</p>
+              </div>
+              {webhookData.currentConfig?.voiceUrl && (
+                <Button variant="ghost" size="sm" onClick={() => copyToClipboard(webhookData.currentConfig!.voiceUrl)}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between p-2 bg-muted/30 rounded border">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">TeXML Status Callback</p>
+                <p className="text-sm font-mono truncate">{webhookData.currentConfig?.statusCallbackUrl || 'Not set'}</p>
+              </div>
+              {webhookData.currentConfig?.statusCallbackUrl && (
+                <Button variant="ghost" size="sm" onClick={() => copyToClipboard(webhookData.currentConfig!.statusCallbackUrl!)}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between p-2 bg-muted/30 rounded border">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">Call Control Webhook</p>
+                <p className="text-sm font-mono truncate">{webhookData.callControlConfig?.webhookUrl || 'Not set'}</p>
+              </div>
+              {webhookData.callControlConfig?.webhookUrl && (
+                <Button variant="ghost" size="sm" onClick={() => copyToClipboard(webhookData.callControlConfig!.webhookUrl)}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Current Mode Indicator */}
+          <div className="flex items-center gap-2 mt-2">
+            {isPointingToDev ? (
+              <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                <Server className="h-3 w-3 mr-1" />
+                Development Mode (ngrok)
+              </Badge>
+            ) : isPointingToProd ? (
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Production Mode
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <AlertCircle className="h-3 w-3 mr-1" />
+                Custom Configuration
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {/* Quick Switch Buttons */}
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold">Quick Switch</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Button
+                variant={isPointingToDev ? 'default' : 'outline'}
+                className="w-full"
+                onClick={() => switchToDevMutation.mutate(undefined)}
+                disabled={switchToDevMutation.isPending}
+              >
+                <Server className="h-4 w-4 mr-2" />
+                {switchToDevMutation.isPending ? 'Switching...' : 'Switch to Dev (ngrok)'}
+              </Button>
+              {webhookData.environment?.ngrokUrl && (
+                <p className="text-xs text-muted-foreground text-center truncate">
+                  {webhookData.environment.ngrokUrl}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Button
+                variant={isPointingToProd ? 'default' : 'outline'}
+                className="w-full"
+                onClick={() => switchToProdMutation.mutate(undefined)}
+                disabled={switchToProdMutation.isPending}
+              >
+                <Globe className="h-4 w-4 mr-2" />
+                {switchToProdMutation.isPending ? 'Switching...' : 'Switch to Production'}
+              </Button>
+              {webhookData.environment?.productionUrl && (
+                <p className="text-xs text-muted-foreground text-center truncate">
+                  {webhookData.environment.productionUrl}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Custom URL Input */}
+        <div className="space-y-3 pt-3 border-t">
+          <h4 className="text-sm font-semibold">Custom URLs</h4>
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs text-muted-foreground">Custom ngrok URL</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://abc123.ngrok.io"
+                  value={customNgrokUrl}
+                  onChange={(e) => setCustomNgrokUrl(e.target.value)}
+                  className="font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => switchToDevMutation.mutate(customNgrokUrl)}
+                  disabled={!customNgrokUrl || switchToDevMutation.isPending}
+                >
+                  Apply
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground">Custom Production URL</label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://api.yourdomain.com"
+                  value={customProdUrl}
+                  onChange={(e) => setCustomProdUrl(e.target.value)}
+                  className="font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => switchToProdMutation.mutate(customProdUrl)}
+                  disabled={!customProdUrl || switchToProdMutation.isPending}
+                >
+                  Apply
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Last Updated */}
+        {webhookData.updatedAt && (
+          <p className="text-xs text-muted-foreground text-right">
+            Last updated: {new Date(webhookData.updatedAt).toLocaleString()}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

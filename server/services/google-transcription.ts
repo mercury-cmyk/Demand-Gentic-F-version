@@ -96,6 +96,24 @@ function getEncodingFromMimeType(mimeType: string): protos.google.cloud.speech.v
   }
 }
 
+function getWavChannelCount(base64: string): number | null {
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length < 44) {
+      return null;
+    }
+
+    if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
+      return null;
+    }
+
+    const channels = buffer.readUInt16LE(22);
+    return channels > 0 ? channels : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Submit audio to Google Speech-to-Text for transcription
  */
@@ -137,10 +155,15 @@ export async function submitTranscription(audioUrl: string): Promise<string | nu
       useEnhanced: true,
       // Enable profanity filter (optional, can be disabled)
       profanityFilter: false,
-      // Enable multi-channel recognition for stereo recordings (Agent vs Prospect)
-      audioChannelCount: 2,
-      enableSeparateRecognitionPerChannel: true,
     };
+
+    if (audioData.mimeType === 'audio/wav') {
+      const wavChannels = getWavChannelCount(audioData.base64);
+      if (wavChannels) {
+        config.audioChannelCount = wavChannels;
+        config.enableSeparateRecognitionPerChannel = wavChannels > 1;
+      }
+    }
 
     const audio: RecognitionAudio = {
       content: audioData.base64,
@@ -218,6 +241,21 @@ export async function submitTranscription(audioUrl: string): Promise<string | nu
     console.error('[Transcription] Error with Google Speech-to-Text:', error);
     return null;
   }
+}
+
+/**
+ * Transcribe a recording URL and return a structured result
+ * Used by transcription-reliability fallback.
+ */
+export async function transcribeFromRecording(
+  recordingUrl: string
+): Promise<{ transcript: string; wordCount: number } | null> {
+  const transcript = await submitTranscription(recordingUrl);
+  if (!transcript) return null;
+  return {
+    transcript,
+    wordCount: transcript.split(/\s+/).length,
+  };
 }
 
 /**
@@ -423,6 +461,14 @@ export async function submitStructuredTranscription(audioUrl: string): Promise<S
       },
       useEnhanced: true,
     };
+
+    if (audioData.mimeType === 'audio/wav') {
+      const wavChannels = getWavChannelCount(audioData.base64);
+      if (wavChannels) {
+        config.audioChannelCount = wavChannels;
+        config.enableSeparateRecognitionPerChannel = wavChannels > 1;
+      }
+    }
 
     const audio: RecognitionAudio = {
       content: audioData.base64,

@@ -582,8 +582,8 @@ export async function getPoolSummary(): Promise<NumberPoolSummary> {
   return {
     totalNumbers: total,
     activeNumbers: statusMap['active'] || 0,
-    pausedNumbers: statusMap['paused'] || 0,
-    cooldownNumbers: statusMap['cooldown'] || 0,
+    pausedNumbers: statusMap['suspended'] || 0,  // Schema uses 'suspended' not 'paused'
+    cooldownNumbers: statusMap['cooling'] || 0,  // Schema uses 'cooling' not 'cooldown'
     retiredNumbers: statusMap['retired'] || 0,
     healthyNumbers: bandMap['healthy'] || 0,
     warningNumbers: bandMap['warning'] || 0,
@@ -655,6 +655,47 @@ export async function resetDailyCounters(): Promise<number> {
   console.log(`[NumberService] Reset daily counters for ${count} numbers`);
 
   return count;
+}
+
+/**
+ * Ensure all numbers have reputation records
+ * This is a repair function that creates missing reputation records
+ */
+export async function ensureReputationRecords(): Promise<number> {
+  // Find numbers without reputation records
+  const numbersWithoutRep = await db
+    .select({ id: telnyxNumbers.id, phoneNumberE164: telnyxNumbers.phoneNumberE164 })
+    .from(telnyxNumbers)
+    .leftJoin(numberReputation, eq(telnyxNumbers.id, numberReputation.numberId))
+    .where(isNull(numberReputation.id));
+
+  let created = 0;
+  for (const number of numbersWithoutRep) {
+    try {
+      await db
+        .insert(numberReputation)
+        .values({
+          numberId: number.id,
+          score: 70,
+          band: 'healthy',
+          totalCalls: 0,
+          answeredCalls: 0,
+          avgDurationSec: '0',
+          shortCalls: 0,
+          immediateHangups: 0,
+          voicemailCalls: 0,
+          failedCalls: 0,
+          lastCalculatedAt: new Date(),
+        })
+        .onConflictDoNothing();
+      created++;
+    } catch (err) {
+      console.warn(`[NumberService] Failed to create reputation for ${number.phoneNumberE164}:`, err);
+    }
+  }
+
+  console.log(`[NumberService] Created ${created} missing reputation records`);
+  return created;
 }
 
 // ==================== INTERNAL HELPERS ====================

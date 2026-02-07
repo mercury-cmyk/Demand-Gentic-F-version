@@ -655,7 +655,12 @@ export async function analyzeCall(
         .limit(1);
 
       if (attempt) {
-        transcript = (attempt as any).transcript || "";
+        const attemptTranscript =
+          (attempt as any).fullTranscript ||
+          (attempt as any).aiTranscript ||
+          (attempt as any).transcript ||
+          "";
+        transcript = attemptTranscript;
         callDurationSeconds = attempt.callDurationSeconds || 0;
         disposition = attempt.disposition || undefined;
         campaignId = attempt.campaignId;

@@ -40,7 +40,7 @@ import { EmailCampaignPanel, type EmailStats } from "@/components/campaigns/emai
 import { AgentAssignmentDialog } from "@/components/campaigns/agent-assignment-dialog";
 import { VoiceSelectionDialog } from "@/components/campaigns/voice-selection-dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CampaignCreationWizard } from "@/components/client-portal/campaigns";
+// CampaignCreationWizard removed - now using telemarketing wizard page
 
 type EmailStatsResponse = {
   totalSent: number;
@@ -81,7 +81,6 @@ export default function CampaignsPage() {
   const [selectedCampaignForAgents, setSelectedCampaignForAgents] = useState<any>(null);
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
   const [selectedCampaignForVoice, setSelectedCampaignForVoice] = useState<any>(null);
-  const [showCampaignWizard, setShowCampaignWizard] = useState(false);
   const [editCampaignId, setEditCampaignId] = useState<string | null>(null);
 
   // Sync tab with URL parameter
@@ -117,7 +116,14 @@ export default function CampaignsPage() {
         campaigns.map(async (campaign: any) => {
           const snapshot: CampaignPerformanceSnapshotData = { email: null, call: null };
           const isEmail = campaign.type === "email" || campaign.type === "combo";
-          const isCall = campaign.type === "call" || campaign.type === "telemarketing" || campaign.type === "combo";
+          // All phone-based campaign types
+          const phoneCampaignTypesForSnapshot = [
+            'call', 'telemarketing', 'combo', 'sql',
+            'content_syndication', 'appointment_generation', 'high_quality_leads',
+            'live_webinar', 'on_demand_webinar', 'executive_dinner',
+            'leadership_forum', 'conference'
+          ];
+          const isCall = phoneCampaignTypesForSnapshot.includes(campaign.type) || campaign.dialMode === 'ai_agent';
 
           if (isEmail) {
             const response = await fetch(`/api/campaigns/${campaign.id}/email-stats`, { headers });
@@ -162,9 +168,15 @@ export default function CampaignsPage() {
     staleTime: 0, // Always fetch fresh data
   });
 
-  // Fetch queue stats for phone campaigns
+  // Fetch queue stats for phone campaigns (all types that support phone/AI calling)
+  const phoneCampaignTypes = [
+    'call', 'telemarketing', 'sql',
+    'content_syndication', 'appointment_generation', 'high_quality_leads',
+    'live_webinar', 'on_demand_webinar', 'executive_dinner',
+    'leadership_forum', 'conference'
+  ];
   const phoneCampaigns = campaigns.filter((c: any) =>
-    c.type === 'call' || c.type === 'telemarketing' || c.type === 'sql'
+    phoneCampaignTypes.includes(c.type) || c.dialMode === 'ai_agent'
   );
   const { data: queueStats = {} } = useQuery<Record<string, QueueStats>>({
     queryKey: ["/api/campaigns/queue-stats", phoneCampaigns.map((c: any) => c.id).join(',')],
@@ -257,6 +269,42 @@ export default function CampaignsPage() {
     },
   });
 
+  // Start AI Calls mutation
+  const startAiCallsMutation = useMutation({
+    mutationFn: async (campaignId: string) => {
+      const response = await apiRequest("POST", "/api/ai-calls/batch-start", {
+        campaignId,
+        limit: 10,
+        delayBetweenCalls: 3000,
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Failed to start AI calls");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({
+        title: "AI Calls Started",
+        description: `Started ${data.callsInitiated || 0} AI calls. ${data.skipped || 0} contacts skipped.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to Start AI Calls",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleStartAiCallsClick = (campaign: any) => {
+    if (confirm(`Start AI calls for "${campaign.name}"? Up to 10 contacts will be dialed.`)) {
+      startAiCallsMutation.mutate(String(campaign.id));
+    }
+  };
+
   const handleDeleteClick = (campaign: any) => {
     setCampaignToDelete(campaign);
     setDeleteDialogOpen(true);
@@ -269,16 +317,11 @@ export default function CampaignsPage() {
   };
 
   const handleEditClick = (campaign: any) => {
-    // Use the Campaign Creation Wizard for agentic campaigns (created from project requests)
-    if (campaign.creationMode === 'agentic') {
-      setEditCampaignId(campaign.id);
-      setShowCampaignWizard(true);
-      return;
-    }
-
-    // Legacy edit pages for other campaigns
-    if (campaign.type === 'call' || campaign.type === 'telemarketing') {
-      setLocation(`/campaigns/phone/${campaign.id}/edit`);
+    // All phone/telemarketing campaigns use the unified 12-step wizard in edit mode
+    if (campaign.type === 'call' || campaign.type === 'telemarketing' || campaign.type === 'appointment_generation' || campaign.type === 'content_syndication' || campaign.type === 'high_quality_leads' || campaign.type === 'live_webinar' || campaign.type === 'on_demand_webinar' || campaign.type === 'executive_dinner' || campaign.type === 'leadership_forum' || campaign.type === 'conference' || campaign.type === 'sql') {
+      setLocation(`/campaigns/telemarketing/${campaign.id}/edit`);
+    } else if (campaign.type === 'email') {
+      setLocation(`/campaigns/email/${campaign.id}/edit`);
     } else {
       setLocation(`/campaigns/${campaign.type}/edit/${campaign.id}`);
     }
@@ -306,15 +349,22 @@ export default function CampaignsPage() {
     setVoiceDialogOpen(true);
   };
 
+  // All campaign types that support phone/AI calling
+  const PHONE_CAMPAIGN_TYPES = [
+    'call', 'telemarketing', 'sql',
+    'content_syndication', 'appointment_generation', 'high_quality_leads',
+    'live_webinar', 'on_demand_webinar', 'executive_dinner',
+    'leadership_forum', 'conference'
+  ];
   const isPhoneCampaign = (campaign: any) =>
-    campaign.type === 'call' || campaign.type === 'telemarketing' || campaign.type === 'sql';
+    PHONE_CAMPAIGN_TYPES.includes(campaign.type) || campaign.dialMode === 'ai_agent';
   const isEmailCampaign = (campaign: any) => campaign.type === 'email';
 
   const filteredCampaigns = campaigns.filter((c: any) => {
-    // Handle "call" tab to also include "telemarketing" type campaigns
+    // Handle "call" tab to include all phone-based campaign types
     const matchesTab = activeTab === "all" ||
       c.type === activeTab ||
-      (activeTab === "call" && (c.type === "telemarketing" || c.type === "call"));
+      (activeTab === "call" && (PHONE_CAMPAIGN_TYPES.includes(c.type) || c.dialMode === 'ai_agent'));
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTab && matchesSearch;
   });
@@ -363,7 +413,7 @@ export default function CampaignsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button className="gap-2 shadow-sm" onClick={() => setShowCampaignWizard(true)}>
+          <Button className="gap-2 shadow-sm" onClick={() => setLocation("/campaigns/create")}>
             <Plus className="w-4 h-4" />
             New Campaign
           </Button>
@@ -623,6 +673,17 @@ export default function CampaignsPage() {
                                 </DropdownMenuItem>
                                 {isPhone && (
                                   <>
+                                    {/* Start AI Calls - only for active AI agent campaigns */}
+                                    {(campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
+                                      <DropdownMenuItem
+                                        onClick={() => handleStartAiCallsClick(campaign)}
+                                        disabled={startAiCallsMutation.isPending}
+                                        className="text-green-600"
+                                      >
+                                        <Phone className="mr-2 h-4 w-4" />
+                                        {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
+                                      </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
                                       <Mic className="mr-2 h-4 w-4" />
                                       Select AI Voice
@@ -736,26 +797,6 @@ export default function CampaignsPage() {
         }}
       />
 
-      {/* Campaign Creation Wizard - Admin Mode (Create & Edit) */}
-      <CampaignCreationWizard
-        open={showCampaignWizard}
-        onOpenChange={(open) => {
-          setShowCampaignWizard(open);
-          if (!open) {
-            setEditCampaignId(null); // Clear edit ID when closing
-          }
-        }}
-        mode="admin"
-        campaignId={editCampaignId || undefined}
-        onSuccess={(campaign) => {
-          queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
-          toast({
-            title: editCampaignId ? "Campaign Updated" : "Campaign Created",
-            description: `Campaign "${campaign?.name || 'Campaign'}" has been ${editCampaignId ? 'updated' : 'created'} successfully.`,
-          });
-          setEditCampaignId(null);
-        }}
-      />
         </div>
       </div>
     </div>

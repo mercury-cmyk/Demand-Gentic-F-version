@@ -49,7 +49,7 @@ router.get('/campaign-intake', requireAuth, async (req: Request, res: Response) 
         rawInput: campaignIntakeRequests.rawInput,
         extractedContext: campaignIntakeRequests.extractedContext,
         assignedPmId: campaignIntakeRequests.assignedPmId,
-        assignedPmName: users.fullName,
+        assignedPmName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('assigned_pm_name'),
         requestedLeadCount: campaignIntakeRequests.requestedLeadCount,
         requestedStartDate: campaignIntakeRequests.requestedStartDate,
         estimatedCost: campaignIntakeRequests.estimatedCost,
@@ -157,7 +157,11 @@ router.get('/campaign-intake/:id', requireAuth, async (req: Request, res: Respon
     let assignedPm = null;
     if (intakeRequest.assignedPmId) {
       [assignedPm] = await db
-        .select({ id: users.id, fullName: users.fullName, email: users.email })
+        .select({ 
+          id: users.id, 
+          fullName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`.as('full_name'),
+          email: users.email 
+        })
         .from(users)
         .where(eq(users.id, intakeRequest.assignedPmId));
     }
@@ -341,7 +345,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
               titles: context.targetTitles || [],
               regions: context.geographies || [],
             }),
-            startDate: updated.requestedStartDate || new Date(),
+            startDate: (updated.requestedStartDate || new Date()).toISOString().split('T')[0],
             createdBy: userId,
           })
           .returning();
@@ -491,7 +495,7 @@ router.post('/agentic-campaign/:id/chat', requireAuth, async (req: Request, res:
     const response = await vertexChat(systemPrompt, messages as any, { temperature: 0.7 });
 
     // Extract any structured data from the response
-    const extractedData = await extractConfigurationFromResponse(response, session.currentStep);
+    const extractedData = await extractConfigurationFromResponse(response, session.currentStep || 'context');
 
     // Update session with new messages and extracted data
     const newMessage = {
@@ -519,8 +523,8 @@ router.post('/agentic-campaign/:id/chat', requireAuth, async (req: Request, res:
     };
 
     if (extractedData && Object.keys(extractedData).length > 0) {
-      const stepConfigKey = `${session.currentStep}Config` as keyof typeof session;
-      const existingConfig = session[stepConfigKey] || {};
+      const stepConfigKey = `${session.currentStep || 'context'}Config` as keyof typeof session;
+      const existingConfig = (session[stepConfigKey] as Record<string, unknown>) || {};
       updateData[stepConfigKey] = { ...existingConfig, ...extractedData };
     }
 
@@ -793,7 +797,6 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
           },
         } : null,
         intakeRequestId: session.intakeRequestId,
-        agenticSessionId: session.id,
         creationMode: 'agentic',
         ownerId: userId,
       })
@@ -803,8 +806,6 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
     await db
       .update(agenticCampaignSessions)
       .set({
-        campaignId: campaign.id,
-        isComplete: true,
         updatedAt: new Date(),
       })
       .where(eq(agenticCampaignSessions.id, id));
@@ -857,7 +858,7 @@ Extract and return JSON with:
   "confidence": 0.0-1.0
 }`;
 
-    const analysis = await generateJSON(analysisPrompt, { temperature: 0.3 });
+    const analysis = await generateJSON(analysisPrompt, { temperature: 0.3 }) as { productOrService?: string; suggestedObjective?: string };
 
     // Update session context
     const [session] = await db
@@ -869,15 +870,15 @@ Extract and return JSON with:
       const contextSources = (session as any).contextSources || { urls: [], documents: [], inputs: [] };
       contextSources.urls = [...(contextSources.urls || []), url];
 
-      const contextConfig = (session.contextConfig as any) || {};
+      const contextConfig = (session.contextConfig as Record<string, unknown>) || {};
 
       await db
         .update(agenticCampaignSessions)
         .set({
           contextConfig: {
             ...contextConfig,
-            productServiceInfo: analysis.productOrService || contextConfig.productServiceInfo,
-            objective: analysis.suggestedObjective || contextConfig.objective,
+            productServiceInfo: analysis?.productOrService || contextConfig.productServiceInfo,
+            objective: analysis?.suggestedObjective || contextConfig.objective,
           },
           updatedAt: new Date(),
         })
@@ -898,18 +899,40 @@ Extract and return JSON with:
  */
 router.get('/voice-options', requireAuth, async (req: Request, res: Response) => {
   try {
-    // Gemini Live voices with metadata
+    // Official Google Gemini Live TTS voices (30 available)
     const voiceOptions = [
-      { id: 'Kore', name: 'Kore', gender: 'female', tone: 'warm', description: 'Warm, professional female voice ideal for executive outreach' },
-      { id: 'Fenrir', name: 'Fenrir', gender: 'male', tone: 'bold', description: 'Bold, confident male voice for enterprise sales' },
-      { id: 'Charon', name: 'Charon', gender: 'male', tone: 'authoritative', description: 'Deep, authoritative voice for technical decision makers' },
-      { id: 'Aoede', name: 'Aoede', gender: 'female', tone: 'energetic', description: 'Friendly, energetic voice for mid-market outreach' },
-      { id: 'Pegasus', name: 'Pegasus', gender: 'male', tone: 'professional', description: 'Clear, professional voice for general B2B' },
-      { id: 'Leda', name: 'Leda', gender: 'female', tone: 'consultative', description: 'Consultative voice for high-value prospects' },
-      { id: 'Vega', name: 'Vega', gender: 'female', tone: 'modern', description: 'Modern, dynamic voice for tech companies' },
-      { id: 'Puck', name: 'Puck', gender: 'male', tone: 'friendly', description: 'Approachable, friendly voice for warm outreach' },
-      { id: 'Orion', name: 'Orion', gender: 'male', tone: 'professional', description: 'Strong, reliable voice for enterprise deals' },
-      { id: 'Ursa', name: 'Ursa', gender: 'female', tone: 'warm', description: 'Nurturing, trustworthy voice for relationship building' },
+      // Female voices
+      { id: 'Kore', name: 'Kore', gender: 'female', tone: 'warm', description: 'Warm, professional voice ideal for executive outreach' },
+      { id: 'Aoede', name: 'Aoede', gender: 'female', tone: 'bright', description: 'Bright, engaging voice for mid-market outreach' },
+      { id: 'Leda', name: 'Leda', gender: 'female', tone: 'youthful', description: 'Youthful, consultative voice for high-value prospects' },
+      { id: 'Callirrhoe', name: 'Callirrhoe', gender: 'female', tone: 'casual', description: 'Easy-going, casual voice for warm outreach' },
+      { id: 'Autonoe', name: 'Autonoe', gender: 'female', tone: 'bright', description: 'Bright, balanced voice for friendly conversations' },
+      { id: 'Despina', name: 'Despina', gender: 'female', tone: 'expressive', description: 'Smooth, expressive voice for storytelling' },
+      { id: 'Erinome', name: 'Erinome', gender: 'female', tone: 'clear', description: 'Clear, precise voice for informative content' },
+      { id: 'Laomedeia', name: 'Laomedeia', gender: 'female', tone: 'upbeat', description: 'Upbeat, dynamic voice for engaging presentations' },
+      { id: 'Pulcherrima', name: 'Pulcherrima', gender: 'female', tone: 'forward', description: 'Forward, articulate voice for modern business' },
+      { id: 'Vindemiatrix', name: 'Vindemiatrix', gender: 'female', tone: 'gentle', description: 'Gentle, refined voice for premium experiences' },
+      { id: 'Achernar', name: 'Achernar', gender: 'female', tone: 'soft', description: 'Soft, intimate voice for personal connections' },
+      // Male voices
+      { id: 'Puck', name: 'Puck', gender: 'male', tone: 'upbeat', description: 'Upbeat, friendly voice for warm outreach' },
+      { id: 'Charon', name: 'Charon', gender: 'male', tone: 'informative', description: 'Informative, authoritative voice for technical audiences' },
+      { id: 'Fenrir', name: 'Fenrir', gender: 'male', tone: 'bold', description: 'Bold, confident voice for enterprise sales' },
+      { id: 'Orus', name: 'Orus', gender: 'male', tone: 'firm', description: 'Firm, confident voice for professional settings' },
+      { id: 'Zephyr', name: 'Zephyr', gender: 'male', tone: 'bright', description: 'Bright, optimistic voice for engaging content' },
+      { id: 'Enceladus', name: 'Enceladus', gender: 'male', tone: 'clear', description: 'Clear, direct voice for straightforward messaging' },
+      { id: 'Iapetus', name: 'Iapetus', gender: 'male', tone: 'clear', description: 'Clear, even voice for balanced communication' },
+      { id: 'Umbriel', name: 'Umbriel', gender: 'male', tone: 'calm', description: 'Calm, reassuring voice for trust-building' },
+      { id: 'Algieba', name: 'Algieba', gender: 'male', tone: 'smooth', description: 'Smooth, flowing voice for pleasant conversations' },
+      { id: 'Algenib', name: 'Algenib', gender: 'male', tone: 'raspy', description: 'Raspy, distinctive voice for memorable pitches' },
+      { id: 'Rasalgethi', name: 'Rasalgethi', gender: 'male', tone: 'informed', description: 'Informed, mature voice for executive discussions' },
+      { id: 'Alnilam', name: 'Alnilam', gender: 'male', tone: 'firm', description: 'Firm, strong voice for authoritative presentations' },
+      { id: 'Schedar', name: 'Schedar', gender: 'male', tone: 'even', description: 'Even, steady voice for professional calls' },
+      { id: 'Gacrux', name: 'Gacrux', gender: 'male', tone: 'mature', description: 'Mature, experienced voice for senior audiences' },
+      { id: 'Achird', name: 'Achird', gender: 'male', tone: 'friendly', description: 'Friendly, approachable voice for relationship building' },
+      { id: 'Zubenelgenubi', name: 'Zubenelgenubi', gender: 'male', tone: 'casual', description: 'Casual, conversational voice for informal settings' },
+      { id: 'Sadachbia', name: 'Sadachbia', gender: 'male', tone: 'lively', description: 'Lively, energetic voice for dynamic outreach' },
+      { id: 'Sadaltager', name: 'Sadaltager', gender: 'male', tone: 'knowledgeable', description: 'Knowledgeable, articulate voice for consultative sales' },
+      { id: 'Sulafat', name: 'Sulafat', gender: 'male', tone: 'warm', description: 'Warm, engaging voice for nurturing prospects' },
     ];
 
     res.json({ success: true, data: voiceOptions });
@@ -1216,7 +1239,7 @@ router.post('/migration/run', requireAuth, async (req: Request, res: Response) =
         await db
           .update(campaigns)
           .set({ dialMode: dialModeForType as any, updatedAt: new Date() })
-          .where(eq(campaigns.id, camp.campaignId));
+          .where(eq(campaigns.id, camp.id));
       }
     }
     results.dialModeSet = campaignsWithoutDialMode.length;

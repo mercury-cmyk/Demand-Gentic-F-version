@@ -319,7 +319,7 @@ export default function CallRecordingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === 'admin' || user?.role === 'campaign_manager';
+  const isAdmin = user?.role === 'admin' || user?.role === 'campaign_manager' || user?.role === 'quality_analyst';
   
   // Filters
   const [searchQuery, setSearchQuery] = useState('');

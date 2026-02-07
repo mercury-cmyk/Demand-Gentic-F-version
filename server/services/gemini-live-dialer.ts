@@ -32,6 +32,9 @@ import {
   recordOutboundAudio,
   stopRecordingAndUpload
 } from "./call-recording-manager";
+import { ensureTranscript } from "./transcription-reliability";
+import { releaseProspectLock } from "./active-call-tracker";
+import { handleCallCompleted } from "./number-pool-integration";
 
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
@@ -89,17 +92,19 @@ function getModelName(): string {
   }
 }
 
-// Preferred Gemini 2.5 Flash Native Audio voices
-// Available voices: Puck, Charon, Kore, Fenrir, Aoede, Leda, Orus, Zephyr
+// All 30 Gemini Live voices - must match client/src/lib/voice-constants.ts
+// IMPORTANT: All voices are supported by Gemini Live API as of 2025
 const GEMINI_VOICE_PREFERENCES = [
-  "Puck",
-  "Charon",
-  "Kore",
-  "Fenrir",
-  "Aoede",
-  "Leda",
-  "Orus",
-  "Zephyr",
+  // Core voices (original 8) - most tested and reliable
+  "Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr",
+  // Professional voices
+  "Sulafat", "Gacrux", "Achird", "Schedar", "Sadaltager", "Pulcherrima",
+  // Specialized voices
+  "Algieba", "Despina", "Iapetus", "Erinome", "Vindemiatrix", "Achernar",
+  // Dynamic voices
+  "Sadachbia", "Laomedeia", "Autonoe", "Callirrhoe", "Umbriel",
+  // Character voices
+  "Enceladus", "Algenib", "Rasalgethi", "Alnilam", "Zubenelgenubi",
 ];
 
 function normalizeVoiceName(preferred?: string) {
@@ -126,9 +131,20 @@ const MAX_RECONNECT_DELAY = 30000; // 30 second max reconnect delay
 const MAX_RECONNECT_ATTEMPTS = 5; // Max reconnect attempts before giving up
 
 // AMD (Answering Machine Detection) constants
-// CRITICAL: Wait for AMD result before speaking to avoid talking to voicemail/IVR
-const AMD_WAIT_TIMEOUT_MS = 4000; // Max 4 seconds to wait for AMD result
-const AMD_CHECK_INTERVAL_MS = 100; // Check for AMD result every 100ms
+// NOTE: TeXML endpoint no longer triggers AMD, so this is mostly a backup timeout
+// Reduced from 4000ms to 500ms since AMD webhooks rarely arrive for TeXML calls
+const AMD_WAIT_TIMEOUT_MS = 500; // Max 0.5 seconds to wait for AMD result (reduced from 4s)
+const AMD_CHECK_INTERVAL_MS = 50; // Check for AMD result every 50ms (faster polling)
+
+// NATURAL CONVERSATION: Wait for human to speak first, but with timeout
+// If human doesn't speak within this time, AI takes initiative
+// Set to 5 seconds - enough time for human to answer and say "Hello?"
+const WAIT_FOR_HUMAN_SPEECH_MS = 5000; // Wait up to 5 seconds for human to speak first
+
+// EARLY AUDIO QUALITY GATE
+// Check quality within first 10 seconds and end call if degraded
+const AUDIO_QUALITY_INITIAL_CHECK_SECONDS = 10;
+const AUDIO_QUALITY_MIN_SCORE = 60;
 
 // ==================== PLACEHOLDER SUBSTITUTION ====================
 
@@ -158,6 +174,12 @@ interface CallContext {
   campaignId?: string;
   contactId?: string;
   phoneNumber?: string;
+  virtualAgentId?: string;
+  disposition?: CanonicalDisposition;
+  // Test call flag - skip AMD wait for test calls
+  isTestCall?: boolean;
+  // Number pool tracking
+  callerNumberId?: string | null;
 }
 
 // Call Flow Types (matching client-side definitions)
@@ -321,20 +343,67 @@ function buildCallFlowInstructions(callFlow: CallFlowConfig, context: CallContex
 
   const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
 
-  let instructions = `
-## CALL FLOW STATE MACHINE (YOU MUST FOLLOW THIS EXACTLY)
+  const contactName = context.contactName || context.contactFirstName || 'there';
 
-⚠️ CRITICAL: You are executing a STRICT state machine. You MUST follow these steps IN ORDER.
-- Do NOT skip steps
-- Do NOT improvise outside the defined flow
-- Only branch where explicitly allowed
-- Each step has specific entry conditions, allowed phrases, and exit conditions
+  let instructions = `
+## CALL FLOW GUIDANCE (SUPPLEMENTARY - DOES NOT OVERRIDE CORE RULES)
+
+**⚠️ IMPORTANT HIERARCHY - What the call flow IS and IS NOT:**
+
+**The call flow below is GUIDANCE for conversation structure. It helps you navigate the call stages.**
+
+**The call flow DOES NOT override:**
+1. ✅ Your IDENTITY rules (who you are, how you introduce yourself)
+2. ✅ Your KNOWLEDGE (product info, talking points, campaign context, company background)
+3. ✅ MANDATORY identity verification before any pitch
+4. ✅ MANDATORY introduction after identity is confirmed
+5. ✅ Objection handling from campaign context
+6. ✅ Gatekeeper vs. right party detection rules
+7. ✅ Compliance rules and professional conduct
+8. ✅ Your natural conversational ability - use your knowledge to have intelligent discussions
+
+**HOW TO USE THE CALL FLOW:**
+- The steps below provide a STRUCTURE for the conversation
+- Use your campaign knowledge and product info to ENRICH each step
+- The "allowed utterances" are EXAMPLES - adapt them using your actual knowledge
+- If the prospect asks questions, ANSWER them using your knowledge, then return to the flow
+- Never say "I don't have that information" if it's in your campaign context above
 
 ${callFlow.complianceNotes ? `**Compliance Requirements:** ${callFlow.complianceNotes}\n` : ''}
 **Flow Mode:** ${callFlow.strictOrder ? 'STRICT ORDER - Follow steps sequentially' : 'FLEXIBLE - Steps can be reordered based on conversation'}
 **Default Behavior:** ${callFlow.defaultBehavior === 'continue_to_next' ? 'Continue to next step' : callFlow.defaultBehavior === 'end_call' ? 'End call' : 'Transfer call'}
 
-### CALL FLOW STEPS:
+### CALL FLOW STEPS (USE AS GUIDANCE, ENRICH WITH YOUR KNOWLEDGE):
+
+## ⚠️ MANDATORY PRE-STEP: IDENTITY VERIFICATION (CANNOT BE SKIPPED)
+
+**BEFORE ANY OTHER STEP, you MUST verify you are speaking with the right person.**
+
+This is NON-NEGOTIABLE and applies to ALL call flows. You MUST:
+
+1. **Ask for the contact by name:** "Hello, may I please speak with ${contactName}?"
+2. **WAIT for their response** - they may say "speaking", "yes", "that's me", or transfer you
+3. **ONLY AFTER they confirm identity** proceed to introduce yourself
+
+**Identity Confirmation Signals:**
+- "Yes" / "Yeah" / "That's me" / "Speaking" / "This is [name]" / "Go ahead"
+
+**Gatekeeper Signals (NOT the right person):**
+- "Who's calling?" / "What's this about?" / "May I ask what company?"
+- "Let me transfer you" / "Hold please" / "They're not available"
+
+**IF GATEKEEPER:** Be brief, professional, ask to be transferred or when to call back. Do NOT pitch to gatekeepers.
+
+**IF RIGHT PARTY CONFIRMED:** ONLY THEN proceed to Step 1 below.
+
+---
+
+## MANDATORY INTRO & PURPOSE GATE (REQUIRED - AFTER IDENTITY CONFIRMED)
+Before you proceed beyond the opening and into any discovery or value steps, you MUST complete:
+1) A brief introduction (who you are and your organization): "I'm calling from ${orgRef}."
+2) A clear purpose statement (why you're calling, in one concise sentence)
+
+You may NOT ask discovery questions, pitch, or advance steps until both are completed.
 
 `;
 
@@ -397,24 +466,48 @@ ${substitutedObjections.map(o => `- If they say: "${o.objection}"
 ` : ''}
 ${step.nextSteps.length > 0 ? `**Next step based on outcome:**
 ${step.nextSteps.map(n => `- ${n.condition} → Go to: ${n.stepId.replace(/_/g, ' ').toUpperCase()}`).join('\n')}
-` : '**This is the final step - end the call gracefully.**'}
+` : (i === callFlow.steps.length - 1 ? '**This is the FINAL step - end the call gracefully after completing this step.**' : '**After completing this step, continue the natural conversation.**')}
 `;
   }
 
   instructions += `
 ---
 
-## STATE MACHINE EXECUTION RULES
+## HOW TO EXECUTE THE CALL
 
-1. **Start at Step 1** unless the prospect's response indicates you should skip (e.g., if they answer and confirm identity immediately, skip gatekeeper handling)
-2. **Never skip required steps** - You MUST complete all required steps before ending the call
-3. **Use the allowed utterances** - These are your scripts. Adapt the tone but keep the structure
-4. **Handle objections using the provided responses** - Don't improvise objection handling
-5. **Track your progress** - Know which step you're on and what comes next
-6. **Exit conditions must be met** - Don't move to the next step until current step's exit conditions are satisfied
-7. **Follow branching rules** - When multiple paths exist, choose based on the prospect's response
+**⚠️ CRITICAL ORDER: Identity Verification → Introduction → Flow Steps**
 
-**REMEMBER:** You are executing a defined workflow, not having a free-form conversation. Stay on script while maintaining natural conversation flow.
+**Step 0: VERIFY IDENTITY (MANDATORY - NEVER SKIP)**
+- Ask "May I speak with [Name]?" and WAIT for their response
+- Distinguish gatekeeper from right party (see rules above)
+
+**Step 1: INTRODUCE YOURSELF (MANDATORY - AFTER IDENTITY CONFIRMED)**
+- Say who you are and your organization
+- Use your campaign context to explain why you're calling
+
+**Step 2+: FOLLOW THE FLOW STEPS BELOW**
+- Use the steps as STRUCTURE, but enrich with your knowledge
+- The example phrases are starting points - personalize using campaign context
+
+## CRITICAL REMINDERS
+
+**USE YOUR KNOWLEDGE:**
+- You have detailed product/service information - USE IT when explaining value
+- You have talking points - WEAVE them naturally into the conversation
+- You have campaign objectives - let them GUIDE your discovery questions
+- You have objection handling - USE those responses when objections arise
+
+**DON'T BE ROBOTIC:**
+- The flow steps are a GUIDE, not a rigid script
+- Answer prospect questions intelligently using your knowledge
+- Have a natural conversation while hitting the key points
+- If prospect engages deeply on a topic, explore it using your knowledge
+
+**NEVER SAY:**
+- "I don't have information about that" (if it's in your context)
+- "Let me stick to the script"
+- "That's not in my call flow"
+- Generic responses when you have specific knowledge
 
 `;
 
@@ -448,7 +541,22 @@ function buildDemandGenticIdentityPreamble(context: CallContext): string {
     reasonForCalling = "I'm reaching out to learn more about your current priorities and see if there might be some synergies";
   }
 
-  return `## YOUR IDENTITY (CRITICAL)
+  return `## CRITICAL: CONVERSATION INITIATION RULES
+
+**DO NOT SPEAK until you receive a specific instruction message from the system.**
+
+This is an OUTBOUND call. The call flow is:
+1. You will receive audio from the phone connection
+2. The human will answer and typically say "Hello?" or similar
+3. ONLY THEN will you receive an instruction telling you what to say
+4. Follow that instruction EXACTLY
+
+**If you hear audio but haven't received an instruction to speak yet, STAY SILENT.**
+**Your first words should ONLY come after you receive a system message saying "respond with this EXACT message".**
+
+---
+
+## YOUR IDENTITY (CRITICAL)
 
 You are an AI voice assistant from ${orgRef}.
 
@@ -465,6 +573,35 @@ ${context.contactName ? `
 
 **Opening (after phone is answered):**
 "Hello, may I please speak with ${context.contactName || '[the contact]'}${context.contactJobTitle ? `, the ${context.contactJobTitle}` : ''}${context.accountName ? ` at ${context.accountName}` : ''}?"
+
+## CRITICAL: GATEKEEPER vs RIGHT PARTY DETECTION
+
+**LISTEN CAREFULLY to the response after your opening. You MUST determine WHO you're speaking with:**
+
+### GATEKEEPER RESPONSES (someone OTHER than the contact):
+- "Who's calling?" / "What's this regarding?"
+- "May I ask what this is about?"
+- "Let me check if they're available"
+- "They're in a meeting" / "They're not available"
+- "I can transfer you" / "Hold please"
+- "This is [different name]" / "Speaking" from a voice that sounds like a receptionist
+- "What company are you with?"
+
+**HOW TO HANDLE GATEKEEPERS:**
+1. Be polite and professional: "This is [calling from ${orgRef}]"
+2. If they ask what it's about, be brief: "I'm following up on a business matter with ${context.contactName || 'them'}"
+3. If they can transfer you: "That would be great, thank you"
+4. If the person is unavailable: "When would be a good time to reach them?" then use submit_disposition with "no_answer" and end_call
+5. Do NOT pitch to the gatekeeper - they are not the decision maker
+
+### RIGHT PARTY RESPONSES (the actual contact you're calling):
+- "Yes" / "Yeah" / "That's me" / "Speaking"
+- "This is ${context.contactName || '[name]'}" / "I'm ${context.contactName || '[name]'}"
+- "Yes I am" / "I am" / "Go ahead"
+- A casual "yeah, what's up?" or similar
+
+**HOW TO HANDLE RIGHT PARTY:**
+Only AFTER they confirm identity, proceed to introduce yourself and your purpose.
 
 ${context.campaignObjective ? `## INTERNAL CAMPAIGN OBJECTIVE (DO NOT SAY THIS TO THE PROSPECT)
 
@@ -507,6 +644,8 @@ You MUST IMMEDIATELY respond WITHOUT ANY PAUSE. Never wait silently. The very ne
 **NEVER GO SILENT after identity confirmation.** If you're not sure what to say, default to:
 "Thanks for confirming! I'm calling from ${orgRef}. ${reasonForCalling}. Would you have a quick moment to chat?"
 
+**COMPLIANCE GATE:** You MUST complete BOTH the introduction and the purpose statement BEFORE asking any discovery questions or proceeding to subsequent steps.
+
 ## CRITICAL: WHAT TO SAY vs WHAT NOT TO SAY
 
 **NEVER SAY these internal terms to the prospect:**
@@ -546,6 +685,18 @@ Examples of early questions:
 **⚠️ NEVER go silent when asked a direct question. ALWAYS respond immediately with a conversational answer.**
 **⚠️ Silence after identity confirmation = CRITICAL FAILURE**
 
+---
+
+## ⚠️ KNOWLEDGE HIERARCHY (CRITICAL)
+
+**YOUR KNOWLEDGE AND CONTEXT ALWAYS TAKE PRIORITY.**
+
+Everything you've learned above (identity rules, product info, talking points, campaign objectives, objection handling) is your PRIMARY knowledge. Any call flow steps below are SUPPLEMENTARY GUIDANCE for conversation structure only.
+
+**IF THERE'S A CONFLICT:** Your core knowledge and identity rules WIN. The call flow is a GUIDE, not a replacement for intelligent conversation.
+
+---
+
 ${callFlowInstructions ? callFlowInstructions : `## CALL FLOW (HOW THE CONVERSATION SHOULD PROGRESS)
 
 1. **Opening**: Confirm you're speaking with the right person
@@ -565,15 +716,49 @@ ${talkingPointsStr}
 BEFORE ending any call, you MUST call \`submit_disposition\` to record the call outcome:
 
 **When to submit disposition:**
-- When prospect shows interest → disposition: "qualified_lead"
-- When prospect declines/not interested → disposition: "not_interested"
-- When prospect requests removal from list → disposition: "do_not_call"
-- When you reach voicemail/machine → disposition: "voicemail"
-- When prospect asks for callback → disposition: "no_answer" (will retry)
-- When you reach wrong person/number → disposition: "invalid_data"
-- When blocked by gatekeeper → disposition: "no_answer" (will retry)
+- "qualified_lead" - STRICT CRITERIA REQUIRED (see below)
+- "not_interested" - Prospect explicitly declined or said no
+- "do_not_call" - Prospect requested removal from list
+- "voicemail" - Reached voicemail or automated system
+- "no_answer" - Callback requested, gatekeeper block, or will retry
+- "invalid_data" - Wrong number or disconnected
 
-**Example sequence:**
+## ⚠️ CRITICAL: "qualified_lead" DISPOSITION REQUIREMENTS
+
+**DO NOT use "qualified_lead" unless ALL of these are TRUE:**
+
+1. ✅ **MEANINGFUL CONVERSATION**: You had at least 3 back-and-forth exchanges with the prospect
+2. ✅ **POSITIVE RESPONSE**: Prospect expressed EXPLICIT interest (not just listening)
+   - They said things like "yes", "sounds good", "I'm interested", "tell me more", "let's do it"
+   - NOT just "okay" or passive acknowledgment
+3. ✅ **EMAIL CONFIRMED**: You asked for and they confirmed their email address
+4. ✅ **MEETING SCHEDULED**: You proposed specific dates/times and they agreed to one
+5. ✅ **PROPER GOODBYE**: You thanked them and said a proper farewell
+
+**If ANY of these are missing, use a different disposition:**
+- Had conversation but no meeting booked → "not_interested" (they didn't commit)
+- They said "maybe" or "send info" without scheduling → "not_interested" 
+- Call cut short → "no_answer" (will retry)
+- They were receptive but didn't explicitly agree → "not_interested"
+
+**A simple "yes I'm interested" is NOT enough for qualified_lead. You MUST complete the full booking flow.**
+
+**Example of VALID qualified_lead call:**
+Agent: "Would Tuesday at 2pm or Wednesday at 10am work better?"
+Prospect: "Wednesday at 10 works for me."
+Agent: "Perfect! I'll send the calendar invite to your email. Is it still john@company.com?"
+Prospect: "Yes, that's correct."
+Agent: "Great! You'll receive that shortly. Thank you so much for your time today, John!"
+Prospect: "Thanks, talk to you Wednesday."
+→ NOW you can submit qualified_lead
+
+**Example of INVALID qualified_lead (should be not_interested):**
+Agent: "Would you be interested in learning more?"
+Prospect: "Sure, send me some information."
+Agent: "Great, thank you!"
+→ This is NOT qualified - no meeting booked, no time confirmed. Use "not_interested"
+
+**Example sequence for a proper disposition:**
 1. Prospect says "I'm not interested, thanks"
 2. You respond "I understand, thank you for your time"
 3. Call submit_disposition with disposition="not_interested", notes="Prospect declined politely"
@@ -689,6 +874,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let incomingAudioCount: number = 0;
   const AUDIO_CHUNKS_BEFORE_SPEAKING = 3; // Wait for a few audio chunks to confirm call is connected
 
+  // NATURAL CONVERSATION: Wait for human to speak first before AI responds
+  // This is more natural for outbound calls - the human says "Hello?" first
+  let humanHasSpoken: boolean = false;
+  let waitingForHumanSpeech: boolean = true; // Set to false to have AI speak first
+  let humanSpeechWaitTimer: NodeJS.Timeout | null = null;
+
   // AMD (Answering Machine Detection) tracking
   // CRITICAL: Wait for AMD result before speaking to avoid talking to voicemail/IVR
   let amdCheckComplete: boolean = false;
@@ -704,6 +895,10 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     submittedAt: number;
   } | null = null;
   let dispositionProcessed: boolean = false;
+
+  // CRITICAL: Track when end_call has been requested to prevent duplicate processing
+  // This prevents the AI from looping and calling end_call/submit_disposition repeatedly
+  let endCallRequested: boolean = false;
 
   // CRITICAL: Track voicemail/machine detection to prevent reconnection attempts
   // When voicemail is detected, we should immediately cleanup and NOT try to reconnect
@@ -722,17 +917,14 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     connectionDrops: 0,
   };
 
-  // Initialize audio quality monitoring
-  if (callId) {
-    audioQualityMonitor.startCall(callId);
-  }
-
   // Keepalive and reconnection state
   let keepaliveInterval: NodeJS.Timeout | null = null;
   let audioTimeoutTimer: NodeJS.Timeout | null = null;
   let maxCallDurationTimer: NodeJS.Timeout | null = null;
+  let initialQualityCheckTimer: NodeJS.Timeout | null = null;
   let reconnectAttempts = 0;
   let geminiConnected = false;
+  let qualityGateTriggered = false;
 
   // Cleanup function for graceful shutdown
   function cleanup() {
@@ -740,6 +932,8 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (audioTimeoutTimer) clearTimeout(audioTimeoutTimer);
     if (maxCallDurationTimer) clearTimeout(maxCallDurationTimer);
     if (amdWaitTimer) clearTimeout(amdWaitTimer);
+    if (humanSpeechWaitTimer) clearTimeout(humanSpeechWaitTimer);
+    if (initialQualityCheckTimer) clearTimeout(initialQualityCheckTimer);
     if (geminiWs) {
       geminiWs.close();
       geminiWs = null;
@@ -759,10 +953,86 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     return false;
   }
 
+  // Start the "wait for human speech" timer
+  // If human doesn't speak within timeout, AI takes initiative and speaks first
+  function startHumanSpeechWaitTimer() {
+    if (humanSpeechWaitTimer) return; // Already started
+    if (!waitingForHumanSpeech || humanHasSpoken) return; // Not waiting or already spoke
+
+    console.log(`[Gemini Live] ⏳ Starting human speech wait timer (${WAIT_FOR_HUMAN_SPEECH_MS}ms)`);
+    humanSpeechWaitTimer = setTimeout(() => {
+      if (!humanHasSpoken && !openingMessageSent) {
+        console.log(`[Gemini Live] ⏱️ Human speech wait timeout - AI taking initiative`);
+        humanHasSpoken = true; // Pretend human spoke so AI can respond
+        trySendOpeningMessage();
+      }
+    }, WAIT_FOR_HUMAN_SPEECH_MS);
+  }
+
+  function scheduleInitialQualityCheck() {
+    if (initialQualityCheckTimer || qualityGateTriggered) return;
+    if (!callId) return;
+
+    initialQualityCheckTimer = setTimeout(async () => {
+      if (qualityGateTriggered || !callAnswered) return;
+      const snapshot = audioQualityMonitor.getQualitySnapshot(callId);
+      if (!snapshot) return;
+
+      const isDegraded =
+        snapshot.score < AUDIO_QUALITY_MIN_SCORE ||
+        snapshot.rating === 'poor' ||
+        snapshot.rating === 'degraded' ||
+        snapshot.issues.includes('audio_timeout') ||
+        snapshot.issues.includes('connection_drop');
+
+      if (!isDegraded) return;
+
+      qualityGateTriggered = true;
+      console.warn(
+        `[Gemini Live] ⚠️ Early audio quality gate triggered (score=${snapshot.score}, rating=${snapshot.rating}). Ending call.`
+      );
+
+      if (callContext.callAttemptId && !dispositionProcessed) {
+        try {
+          callContext.disposition = 'no_answer';
+          await processDisposition(callContext.callAttemptId, 'no_answer', 'technical_quality');
+          dispositionProcessed = true;
+
+          if (callContext.queueItemId) {
+            await db.update(campaignQueue)
+              .set({
+                status: 'queued',
+                updatedAt: new Date(),
+                enqueuedReason: `Technical quality issue (score ${snapshot.score}, rating ${snapshot.rating})`,
+              })
+              .where(eq(campaignQueue.id, callContext.queueItemId));
+          }
+        } catch (error) {
+          console.error('[Gemini Live] ❌ Failed to process technical quality disposition:', error);
+        }
+      }
+
+      if (callControlId) {
+        try {
+          await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+              'Content-Type': 'application/json'
+            }
+          });
+        } catch (error) {
+          console.error('[Gemini Live] ❌ Failed to hang up after quality gate:', error);
+        }
+      }
+    }, AUDIO_QUALITY_INITIAL_CHECK_SECONDS * 1000);
+  }
+
   // CRITICAL: Only send opening message when ALL conditions are met:
   // 1. Gemini setup is complete
   // 2. Call is answered (receiving audio)
   // 3. AMD check is complete (human detected or timeout)
+  // 4. Human has spoken first (or timeout reached)
   // This prevents the AI from speaking to voicemail, IVR, or while phone is ringing
   function trySendOpeningMessage() {
     // Check all conditions
@@ -791,9 +1061,14 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
       console.log('[Gemini Live] ⏳ Waiting for Gemini WebSocket to be ready');
       return;
     }
+    // NATURAL CONVERSATION: Wait for human to speak first (e.g., say "Hello?")
+    // This is more natural for outbound calls - the contact answers and speaks first
+    if (waitingForHumanSpeech && !humanHasSpoken) {
+      console.log('[Gemini Live] ⏳ Waiting for human to speak first (natural conversation flow)');
+      return;
+    }
 
     openingMessageSent = true;
-    console.log('[Gemini Live] ✅ All conditions met (setup, answered, AMD=human) - sending opening message now');
 
     // Build the canonical opening message with all contact variables
     // Priority: 1) Custom firstMessage from campaign settings, 2) Canonical format with all variables
@@ -821,25 +1096,48 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
       console.log(`[Gemini Live] 📋 Built canonical opening with contact variables`);
     }
 
-    const openingMessage = `Say ONLY this exact message now: "${openingText}"
+    // Determine if human spoke first or if we're initiating after timeout
+    const humanInitiated = humanHasSpoken && humanSpeechWaitTimer === null; // Timer was cleared because human spoke
 
-CRITICAL RULES:
-- Do NOT add anything before or after this message
-- After speaking, STOP and WAIT in silence for their response
-- Do NOT assume they confirmed identity - wait for explicit "yes" or name confirmation
-- Do NOT proceed to pitch until you HEAR explicit confirmation
-- Listen carefully - the next words must come from THEM`;
+    if (humanInitiated) {
+      // Human spoke first (e.g., "Hello?") - respond to their greeting
+      console.log('[Gemini Live] ✅ Human spoke first - responding to their greeting');
+      const openingMessage = `The person just answered and said something like "Hello?". Respond with this EXACT message:
 
-    geminiWs?.send(JSON.stringify({
-      clientContent: {
-        turns: [{
-          role: 'user',
-          parts: [{ text: openingMessage }],
-        }],
-        turnComplete: true,
-      },
-    }));
-    console.log(`[Gemini Live] 📢 Opening message sent: "${openingText}"`);
+"${openingText}"
+
+THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear their response.`;
+
+      geminiWs?.send(JSON.stringify({
+        clientContent: {
+          turns: [{
+            role: 'user',
+            parts: [{ text: openingMessage }],
+          }],
+          turnComplete: true,
+        },
+      }));
+    } else {
+      // Timeout expired - AI takes initiative (human was silent)
+      console.log('[Gemini Live] ✅ Timeout expired - AI taking initiative');
+      const openingMessage = `The call has been connected but the person hasn't spoken yet. Initiate the conversation with this EXACT message:
+
+"${openingText}"
+
+THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear their response.`;
+
+      geminiWs?.send(JSON.stringify({
+        clientContent: {
+          turns: [{
+            role: 'user',
+            parts: [{ text: openingMessage }],
+          }],
+          turnComplete: true,
+        },
+      }));
+    }
+
+    console.log(`[Gemini Live] 📢 Opening message queued: "${openingText}"`);
   }
 
   // 1. Handle messages from Telnyx (Inbound from PSTN)
@@ -856,6 +1154,10 @@ CRITICAL RULES:
           streamSid = msg.stream_id || msg.start?.stream_id;
           callId = msg.start?.call_id;
           callControlId = msg.start?.call_control_id;
+
+          if (callId) {
+            audioQualityMonitor.startCall(callId);
+          }
 
           // Detect G.711 format from Telnyx message
           // This ensures UK (+44) calls correctly use A-law
@@ -904,6 +1206,10 @@ CRITICAL RULES:
                 campaignId: config.campaign_id || config.campaignId,
                 contactId: config.contact_id || config.contactId,
                 phoneNumber: config.to_number || config.toNumber || config.called_number || config.calledNumber || config.phone_number,
+                // Test call flag - when true, skip AMD wait since it's a human tester
+                isTestCall: config.is_test_call || config.isTestCall || false,
+                // Number pool tracking - used for stats update on call completion
+                callerNumberId: config.caller_number_id || config.callerNumberId || null,
               };
 
               // Re-check format if phoneNumber was in client_state but not in start message
@@ -937,6 +1243,23 @@ CRITICAL RULES:
                       callContext.callFlow = (campaign as any).callFlow as CallFlowConfig;
                       console.log(`[Gemini Live] 📋 Loaded call flow from campaign: ${callContext.callFlow.steps?.length || 0} steps`);
                     }
+                    // Load campaign context fields if not provided (removed from client_state to avoid HTTP 431)
+                    if (!callContext.campaignObjective && (campaign as any).campaignObjective) {
+                      callContext.campaignObjective = (campaign as any).campaignObjective;
+                    }
+                    if (!callContext.successCriteria && (campaign as any).successCriteria) {
+                      callContext.successCriteria = (campaign as any).successCriteria;
+                    }
+                    if (!callContext.targetAudienceDescription && (campaign as any).targetAudienceDescription) {
+                      callContext.targetAudienceDescription = (campaign as any).targetAudienceDescription;
+                    }
+                    if (!callContext.productServiceInfo && (campaign as any).productServiceInfo) {
+                      callContext.productServiceInfo = (campaign as any).productServiceInfo;
+                    }
+                    if (!callContext.talkingPoints && (campaign as any).talkingPoints) {
+                      callContext.talkingPoints = (campaign as any).talkingPoints;
+                    }
+                    console.log(`[Gemini Live] 📋 Loaded campaign context from DB: objective=${!!callContext.campaignObjective}, talkingPoints=${(callContext.talkingPoints as any)?.length || 0}`);
                   }
                 } catch (dbErr) {
                   console.warn('[Gemini Live] Failed to load campaign data:', dbErr);
@@ -985,6 +1308,8 @@ CRITICAL RULES:
             callAnswered = true;
             console.log(`[Gemini Live] 📞 Call answered detected (received ${incomingAudioCount} audio chunks)`);
 
+            scheduleInitialQualityCheck();
+
             // Start max call duration timer if configured
             if (callContext.maxCallDurationSeconds && callContext.maxCallDurationSeconds > 0) {
               const maxDurationMs = callContext.maxCallDurationSeconds * 1000;
@@ -1029,7 +1354,14 @@ CRITICAL RULES:
 
             // CRITICAL: Wait for AMD (Answering Machine Detection) result before speaking
             // This prevents the AI from speaking to voicemail, IVR, or automated systems
-            if (callControlId && !amdCheckComplete) {
+            // SKIP for test calls - they are verified humans, no need to wait
+            if (callContext.isTestCall) {
+              console.log(`[Gemini Live] 🧪 TEST CALL DETECTED - Skipping AMD wait, waiting for human to speak first`);
+              amdCheckComplete = true;
+              // Start timer to wait for human speech (or timeout and AI speaks)
+              startHumanSpeechWaitTimer();
+              trySendOpeningMessage(); // Will check if human has spoken
+            } else if (callControlId && !amdCheckComplete) {
               // Capture callControlId as non-null for use in closure
               const safeCallControlId = callControlId;
               console.log(`[Gemini Live] 🔍 Starting AMD wait period (max ${AMD_WAIT_TIMEOUT_MS}ms) for ${safeCallControlId}`);
@@ -1077,8 +1409,9 @@ CRITICAL RULES:
                   return;
                 }
 
-                // Human detected - proceed to speak
-                console.log(`[Gemini Live] 👤 AMD confirmed HUMAN - proceeding to speak`);
+                // Human detected - start waiting for them to speak first
+                console.log(`[Gemini Live] 👤 AMD confirmed HUMAN - waiting for human to speak first`);
+                startHumanSpeechWaitTimer();
                 trySendOpeningMessage();
               } else {
                 // AMD result not yet available - start polling with timeout
@@ -1138,8 +1471,9 @@ CRITICAL RULES:
                       return;
                     }
 
-                    // Human detected - proceed to speak
-                    console.log(`[Gemini Live] 👤 AMD confirmed HUMAN - proceeding to speak`);
+                    // Human detected - start waiting for them to speak first
+                    console.log(`[Gemini Live] 👤 AMD confirmed HUMAN - waiting for human to speak first`);
+                    startHumanSpeechWaitTimer();
                     trySendOpeningMessage();
                     return;
                   }
@@ -1147,7 +1481,8 @@ CRITICAL RULES:
                   // Check if timeout reached
                   if (elapsed >= AMD_WAIT_TIMEOUT_MS) {
                     amdCheckComplete = true;
-                    console.log(`[Gemini Live] ⏱️ AMD wait timeout after ${elapsed}ms (${amdCheckCount} checks) - defaulting to HUMAN, proceeding to speak`);
+                    console.log(`[Gemini Live] ⏱️ AMD wait timeout after ${elapsed}ms (${amdCheckCount} checks) - defaulting to HUMAN, waiting for speech`);
+                    startHumanSpeechWaitTimer();
                     trySendOpeningMessage();
                     return;
                   }
@@ -1160,9 +1495,10 @@ CRITICAL RULES:
                 amdWaitTimer = setTimeout(checkAmdResult, AMD_CHECK_INTERVAL_MS);
               }
             } else if (!callControlId) {
-              // No callControlId (shouldn't happen) - skip AMD check and proceed
-              console.log(`[Gemini Live] ⚠️ No callControlId available for AMD check - proceeding without AMD`);
+              // No callControlId (shouldn't happen) - skip AMD check and wait for human speech
+              console.log(`[Gemini Live] ⚠️ No callControlId available for AMD check - waiting for human speech`);
               amdCheckComplete = true;
+              startHumanSpeechWaitTimer();
               trySendOpeningMessage();
             }
           }
@@ -1394,8 +1730,24 @@ CRITICAL RULES:
             } catch (transcriptError) {
               console.error('[Gemini Live] ❌ Failed to save transcript:', transcriptError);
             }
-          } else if (transcriptTurns.length === 0) {
-            console.log('[Gemini Live] ⚠️ No transcript turns captured - transcription may not be working');
+          } else if (transcriptTurns.length === 0 && callContext.callAttemptId) {
+            // FALLBACK: No real-time transcript captured - try to transcribe from recording
+            console.log('[Gemini Live] ⚠️ No transcript turns captured - triggering fallback transcription');
+
+            // Schedule fallback transcription (non-blocking)
+            // Give recording a chance to upload first (5 second delay)
+            setTimeout(async () => {
+              try {
+                const result = await ensureTranscript(callContext.callAttemptId!);
+                if (result.success) {
+                  console.log(`[Gemini Live] ✅ Fallback transcription succeeded: ${result.wordCount || 0} words`);
+                } else {
+                  console.warn(`[Gemini Live] ⚠️ Fallback transcription failed: ${result.error}`);
+                }
+              } catch (fallbackError) {
+                console.error('[Gemini Live] ❌ Fallback transcription error:', fallbackError);
+              }
+            }, 5000);
           }
 
           // End quality monitoring
@@ -1811,19 +2163,24 @@ CRITICAL RULES:
         // DEBUG: Log message types to identify transcription message structure
         const msgKeys = Object.keys(response || {});
         console.log('[Gemini Live] 📥 Message keys:', msgKeys.join(', '));
-        console.log('[Gemini Live] 📥 Message received:', JSON.stringify(response).substring(0, 300));
+        console.log('[Gemini Live] 📥 Message received:', JSON.stringify(response).substring(0, 500));
 
         // CAPTURE TRANSCRIPTION: Handle output_transcription (AI speech) and input_transcription (user speech)
         // These are sent when outputAudioTranscription/inputAudioTranscription are enabled in setup
         // NOTE: Transcription can be at top level OR inside serverContent depending on Gemini API version
         const serverContentTranscript = response.serverContent || response.server_content;
         
-        // AI agent's speech transcription - check BOTH top-level and nested in serverContent
+        // AI agent's speech transcription - check ALL possible locations in Gemini response
+        // CRITICAL FIX: Gemini may nest transcription in different places depending on API version
         const outputTranscription = 
           response.outputTranscription || 
           response.output_transcription || 
           serverContentTranscript?.outputTranscription || 
-          serverContentTranscript?.output_transcription;
+          serverContentTranscript?.output_transcription ||
+          // Also check for transcription nested in modelTurn
+          serverContentTranscript?.modelTurn?.outputTranscription ||
+          serverContentTranscript?.model_turn?.output_transcription;
+        
         if (outputTranscription?.text) {
           const agentText = outputTranscription.text.trim();
           if (agentText) {
@@ -1832,16 +2189,36 @@ CRITICAL RULES:
               text: agentText,
               timestamp: Date.now()
             });
-            console.log(`[Gemini Live] 📝 Agent transcript: "${agentText.substring(0, 50)}..."`);
+            console.log(`[Gemini Live] 📝 Agent transcript captured: "${agentText.substring(0, 100)}${agentText.length > 100 ? '...' : ''}"`);
+          }
+        } else if (serverContentTranscript?.modelTurn?.parts) {
+          // FALLBACK: If outputTranscription is missing but modelTurn has text parts, use those
+          // This handles cases where transcription is not available but text responses are
+          for (const part of serverContentTranscript.modelTurn.parts) {
+            if (part.text) {
+              const fallbackText = part.text.trim();
+              if (fallbackText && !transcriptTurns.some(t => t.role === 'agent' && t.text === fallbackText)) {
+                transcriptTurns.push({
+                  role: 'agent',
+                  text: fallbackText,
+                  timestamp: Date.now()
+                });
+                console.log(`[Gemini Live] 📝 Agent transcript (fallback from text part): "${fallbackText.substring(0, 100)}${fallbackText.length > 100 ? '...' : ''}"`);
+              }
+            }
           }
         }
         
-        // User/contact's speech transcription - check BOTH top-level and nested in serverContent
+        // User/contact's speech transcription - check ALL possible locations
         const inputTranscription = 
           response.inputTranscription || 
           response.input_transcription || 
           serverContentTranscript?.inputTranscription || 
-          serverContentTranscript?.input_transcription;
+          serverContentTranscript?.input_transcription ||
+          // Also check for transcription nested in userTurn
+          serverContentTranscript?.userTurn?.inputTranscription ||
+          serverContentTranscript?.user_turn?.input_transcription;
+        
         if (inputTranscription?.text) {
           const contactText = inputTranscription.text.trim();
           if (contactText) {
@@ -1850,8 +2227,28 @@ CRITICAL RULES:
               text: contactText,
               timestamp: Date.now()
             });
-            console.log(`[Gemini Live] 📝 Contact transcript: "${contactText.substring(0, 50)}..."`);
+            console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
+
+            // NATURAL CONVERSATION: Detect when human speaks first
+            // This triggers the AI to respond with its opening message
+            if (!humanHasSpoken && waitingForHumanSpeech) {
+              humanHasSpoken = true;
+              // Clear the timeout since human spoke
+              if (humanSpeechWaitTimer) {
+                clearTimeout(humanSpeechWaitTimer);
+                humanSpeechWaitTimer = null;
+              }
+              console.log(`[Gemini Live] 👤 Human spoke first: "${contactText.substring(0, 30)}..." - AI will now respond`);
+              trySendOpeningMessage();
+            }
           }
+        }
+        
+        // DIAGNOSTIC: Log when we receive audio but no transcript
+        // This helps identify when transcription is failing silently
+        const hasAudioOutput = serverContentTranscript?.modelTurn?.parts?.some((p: any) => p.inlineData?.data);
+        if (hasAudioOutput && !outputTranscription?.text) {
+          console.warn(`[Gemini Live] ⚠️ TRANSCRIPT ISSUE: Received AI audio but NO outputTranscription. Check if outputAudioTranscription is enabled.`);
         }
 
         // Handle Audio Output from Gemini
@@ -1864,6 +2261,13 @@ CRITICAL RULES:
             }
 
             if (part.inlineData?.data) {
+              // CRITICAL: Drop Gemini audio output if we haven't sent opening message yet
+              // This prevents Gemini from speaking prematurely before we tell it to
+              if (!openingMessageSent) {
+                console.log(`[Gemini Live] 🚫 Dropping premature audio output - waiting for opening message instruction`);
+                continue; // Skip this audio chunk but continue processing other parts
+              }
+
               // Calculate bytes received
               const audioBytes = Buffer.byteLength(part.inlineData.data, 'base64');
               metrics.totalBytesReceived += audioBytes;
@@ -2023,7 +2427,126 @@ CRITICAL RULES:
             // Handle submit_disposition tool - AI reports call outcome
             if (call.name === 'submit_disposition') {
               const { disposition, notes, callback_date, interest_level } = call.args;
+
+              // CRITICAL: Prevent duplicate disposition processing
+              // Gemini can sometimes call submit_disposition multiple times in a loop
+              if (dispositionProcessed || submittedDisposition) {
+                console.log(`[Gemini Live] ⚠️ Disposition already submitted (${submittedDisposition?.disposition || 'processed'}), ignoring duplicate: ${disposition}`);
+                // Still send tool response to prevent Gemini from retrying
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [
+                      {
+                        name: call.name,
+                        id: call.id,
+                        response: { output: `Disposition already recorded as "${submittedDisposition?.disposition || 'processed'}". Proceed to end_call.` }
+                      }
+                    ]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return; // Skip processing
+              }
+
               console.log(`[Gemini Live] 📊 submit_disposition tool invoked. Disposition: ${disposition}, Notes: ${notes || 'N/A'}`);
+
+              // ================== QUALIFIED_LEAD VALIDATION ==================
+              // CRITICAL: Validate that qualified_lead actually met the criteria
+              // This prevents false qualifications that damage campaign metrics
+              if (disposition === 'qualified_lead') {
+                // Build transcript text from captured turns for validation
+                const allTranscriptText = transcriptTurns
+                  .map(t => t.text.toLowerCase())
+                  .join(' ');
+                const agentTranscriptText = transcriptTurns
+                  .filter(t => t.role === 'agent')
+                  .map(t => t.text.toLowerCase())
+                  .join(' ');
+                const contactTranscriptText = transcriptTurns
+                  .filter(t => t.role === 'contact')
+                  .map(t => t.text.toLowerCase())
+                  .join(' ');
+
+                // Check for email confirmation evidence
+                const hasEmailMention = allTranscriptText.includes('email') ||
+                                        allTranscriptText.includes('@') ||
+                                        allTranscriptText.includes('send you') ||
+                                        allTranscriptText.includes('send it to');
+
+                // Check for time/date confirmation evidence (for appointment campaigns)
+                const hasTimeConfirmation = allTranscriptText.includes('schedule') ||
+                                            allTranscriptText.includes('calendar') ||
+                                            allTranscriptText.includes('time') ||
+                                            allTranscriptText.includes('date') ||
+                                            allTranscriptText.includes('monday') ||
+                                            allTranscriptText.includes('tuesday') ||
+                                            allTranscriptText.includes('wednesday') ||
+                                            allTranscriptText.includes('thursday') ||
+                                            allTranscriptText.includes('friday') ||
+                                            allTranscriptText.includes('next week') ||
+                                            allTranscriptText.includes('tomorrow') ||
+                                            allTranscriptText.includes('morning') ||
+                                            allTranscriptText.includes('afternoon');
+
+                // Check for proper goodbye from agent
+                const hasGoodbye = agentTranscriptText.includes('thank you') ||
+                                  agentTranscriptText.includes('thanks') ||
+                                  agentTranscriptText.includes('goodbye') ||
+                                  agentTranscriptText.includes('take care') ||
+                                  agentTranscriptText.includes('have a great') ||
+                                  agentTranscriptText.includes('have a good');
+
+                // Check for positive affirmation from contact (not just any response)
+                const hasPositiveResponse = contactTranscriptText.includes('yes') ||
+                                           contactTranscriptText.includes('sure') ||
+                                           contactTranscriptText.includes('okay') ||
+                                           contactTranscriptText.includes('sounds good') ||
+                                           contactTranscriptText.includes('interested') ||
+                                           contactTranscriptText.includes('tell me more') ||
+                                           contactTranscriptText.includes('let\'s do it');
+
+                // Minimum conversation requirements
+                const hasMinimumConversation = transcriptTurns.length >= 6; // At least 3 exchanges
+                const hasContactParticipation = transcriptTurns.filter(t => t.role === 'contact').length >= 2;
+
+                // Build list of missing requirements
+                const missingSteps: string[] = [];
+                if (!hasMinimumConversation) missingSteps.push('have a meaningful conversation (at least 3 exchanges)');
+                if (!hasContactParticipation) missingSteps.push('get verbal responses from the contact');
+                if (!hasPositiveResponse) missingSteps.push('receive explicit interest/agreement from contact');
+                if (!hasEmailMention) missingSteps.push('confirm their email address');
+                if (!hasTimeConfirmation) missingSteps.push('confirm meeting date/time');
+                if (!hasGoodbye) missingSteps.push('say a proper goodbye');
+
+                // BLOCK the qualified_lead if critical criteria not met
+                if (missingSteps.length > 0) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING qualified_lead DISPOSITION: Missing criteria: ${missingSteps.join(', ')}`);
+                  console.warn(`[Gemini Live] 📝 Transcript analysis: turns=${transcriptTurns.length}, email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
+
+                  // Send error response to force AI to complete the flow
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [
+                        {
+                          name: call.name,
+                          id: call.id,
+                          response: {
+                            error: `INCOMPLETE QUALIFICATION: You cannot submit qualified_lead yet. You must first: ${missingSteps.join(', ')}. After completing these steps, submit the disposition again. If the prospect is not actually interested, use "not_interested" instead.`
+                          }
+                        }
+                      ]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return; // Don't process the disposition
+                }
+                console.log(`[Gemini Live] ✅ qualified_lead validation PASSED: email=${hasEmailMention}, time=${hasTimeConfirmation}, goodbye=${hasGoodbye}, positive=${hasPositiveResponse}`);
+              }
+              // ================== END VALIDATION ==================
 
               // Store the disposition for processing on call end
               submittedDisposition = {
@@ -2133,6 +2656,30 @@ CRITICAL RULES:
             // This works with audio-only mode since Gemini explicitly calls this function
             if (call.name === 'end_call') {
               const { reason } = call.args;
+
+              // CRITICAL: Prevent duplicate end_call processing
+              // Gemini can sometimes call end_call multiple times in a loop
+              if (endCallRequested) {
+                console.log(`[Gemini Live] ⚠️ end_call already requested, ignoring duplicate. Reason: ${reason}`);
+                // Still send tool response to prevent Gemini from retrying
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [
+                      {
+                        name: call.name,
+                        id: call.id,
+                        response: { output: "Call already ending" }
+                      }
+                    ]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return; // Skip processing
+              }
+
+              endCallRequested = true;
               console.log(`[Gemini Live] 📞 end_call tool invoked. Reason: ${reason}`);
 
               // Send acknowledgment back to Gemini
@@ -2169,6 +2716,15 @@ CRITICAL RULES:
                     console.error('[Gemini Live] Failed to execute Telnyx hangup:', error);
                   }
                 }
+
+                // CRITICAL: Close Gemini connection after hangup to prevent loop
+                // This stops the AI from continuing to generate responses after call ends
+                setTimeout(() => {
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    console.log(`[Gemini Live] 🔌 Closing Gemini connection after end_call`);
+                    geminiWs.close(1000, 'Call ended normally');
+                  }
+                }, 500); // Additional 500ms for cleanup
               }, 500); // 500ms delay to let final goodbye audio play
             }
           }
@@ -2438,6 +2994,33 @@ CRITICAL RULES:
         console.log(`[Gemini Live] ✅ Queue item ${callContext.queueItemId} re-queued (no tracking ID)`);
       } catch (queueError) {
         console.error('[Gemini Live] ❌ Failed to update queue item:', queueError);
+      }
+    }
+
+    // Release the prospect lock to allow future calls to this number
+    if (callContext.phoneNumber) {
+      releaseProspectLock(callContext.phoneNumber, 'call_closed');
+      console.log(`[Gemini Live] 🔓 Released prospect lock for ${callContext.phoneNumber}`);
+    }
+
+    // Update number pool stats if using pool number
+    if (callContext.callerNumberId) {
+      try {
+        const durationSec = Math.round((Date.now() - metrics.startTime) / 1000);
+        await handleCallCompleted({
+          numberId: callContext.callerNumberId,
+          callSessionId: callContext.callAttemptId,
+          dialerAttemptId: callContext.callAttemptId,
+          answered: callAnswered,
+          durationSec,
+          disposition: callContext.disposition || (dispositionProcessed ? 'not_interested' : 'no_answer'),
+          failed: false,
+          prospectNumber: callContext.phoneNumber || '',
+          campaignId: callContext.campaignId,
+        });
+        console.log(`[Gemini Live] 📊 Number pool stats updated for ${callContext.callerNumberId}`);
+      } catch (statsErr) {
+        console.error(`[Gemini Live] Failed to update number pool stats:`, statsErr);
       }
     }
 

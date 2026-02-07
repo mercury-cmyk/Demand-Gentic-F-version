@@ -219,6 +219,30 @@ Quality: ${metrics.qualityRating.toUpperCase()} (${metrics.qualityScore}/100)
   getMetrics(callId: string): AudioQualityMetrics | null {
     return this.metrics.get(callId) || null;
   }
+
+  /**
+   * Get a real-time quality snapshot without ending monitoring
+   */
+  getQualitySnapshot(callId: string): {
+    score: number;
+    rating: AudioQualityMetrics['qualityRating'];
+    issues: string[];
+    durationSeconds: number;
+  } | null {
+    const metrics = this.metrics.get(callId);
+    if (!metrics) return null;
+
+    const durationSeconds = (Date.now() - metrics.startTime) / 1000;
+    const score = this.calculateQualityScore(metrics);
+    const rating = this.getQualityRating(score);
+
+    return {
+      score,
+      rating,
+      issues: [...metrics.issues],
+      durationSeconds,
+    };
+  }
   
   /**
    * Generate audio quality alert if issues detected

@@ -8,6 +8,7 @@
  * - Geographic matching (local presence)
  * - Cooldown status
  * - Concurrent call limits
+ * - Number warmup status (new numbers have reduced limits)
  * 
  * @see docs/NUMBER_POOL_MANAGEMENT_SYSTEM.md
  */
@@ -25,6 +26,7 @@ import {
   type TelnyxNumber,
   type NumberReputationRecord,
 } from "@shared/number-pool-schema";
+import { canMakeCallDuringWarmup, getNumberWarmupStatus } from "./number-warmup-service";
 
 // ==================== TYPES ====================
 
@@ -86,6 +88,25 @@ export class CallRoutingError extends Error {
   }
 }
 
+/**
+ * Error thrown when all numbers have reached their hourly call limit.
+ * The orchestrator should pause calling until limits reset (next hour).
+ */
+export class AllNumbersAtHourlyLimitError extends Error {
+  public readonly filterStats: Record<string, number>;
+  public readonly totalNumbers: number;
+  public readonly numbersAtHourlyCap: number;
+
+  constructor(filterStats: Record<string, number>, totalNumbers: number) {
+    const numbersAtHourlyCap = filterStats.at_hourly_cap || 0;
+    super(`All ${totalNumbers} numbers at hourly limit (${numbersAtHourlyCap} at cap). Calls paused until limits reset.`);
+    this.name = 'AllNumbersAtHourlyLimitError';
+    this.filterStats = filterStats;
+    this.totalNumbers = totalNumbers;
+    this.numbersAtHourlyCap = numbersAtHourlyCap;
+  }
+}
+
 // ==================== MAIN SERVICE ====================
 
 /**
@@ -107,9 +128,28 @@ export async function selectNumber(
 
     // Step 2: Filter numbers
     const { available, filtered } = await filterNumbers(pool, request);
-    
+
     if (available.length === 0) {
       console.warn('[NumberRouter] All numbers filtered:', filtered);
+
+      // CRITICAL: If all numbers are at hourly limit, throw specific error
+      // The orchestrator should PAUSE calling, not fall back to legacy number
+      const atHourlyCap = filtered.at_hourly_cap || 0;
+      const atDailyCap = filtered.at_daily_cap || 0;
+      const warmupLimited = filtered.warmup_limited || 0;
+
+      // If majority of filtering is due to hourly/daily caps, signal to pause
+      if (atHourlyCap > 0 && atHourlyCap >= pool.length * 0.5) {
+        console.warn(`[NumberRouter] 🚫 HOURLY LIMIT REACHED: ${atHourlyCap}/${pool.length} numbers at hourly cap`);
+        throw new AllNumbersAtHourlyLimitError(filtered, pool.length);
+      }
+
+      if (atDailyCap > 0 && atDailyCap >= pool.length * 0.5) {
+        console.warn(`[NumberRouter] 🚫 DAILY LIMIT REACHED: ${atDailyCap}/${pool.length} numbers at daily cap`);
+        throw new AllNumbersAtHourlyLimitError(filtered, pool.length);
+      }
+
+      // For other filtering reasons (cooldown, warmup, concurrent), use fallback
       return useFallbackNumber('all_filtered');
     }
 
@@ -235,6 +275,7 @@ async function filterNumbers(
     in_cooldown: 0,
     concurrent_in_use: 0,
     recently_called_prospect: 0,
+    warmup_limited: 0,
   };
   
   const available: EligibleNumber[] = [];
@@ -247,16 +288,33 @@ async function filterNumbers(
       continue;
     }
 
-    // Check hourly cap
-    const maxHourly = num.maxCallsPerHour ?? MAX_CALLS_PER_HOUR_DEFAULT;
-    if ((num.callsThisHour ?? 0) >= maxHourly) {
+    // Check warmup limits (new numbers have reduced caps)
+    const warmupCheck = canMakeCallDuringWarmup({
+      id: num.id,
+      phoneNumberE164: num.phoneNumberE164,
+      acquiredAt: num.acquiredAt,
+      maxCallsPerHour: num.maxCallsPerHour,
+      maxCallsPerDay: num.maxCallsPerDay,
+      callsThisHour: num.callsThisHour,
+      callsToday: num.callsToday,
+    });
+
+    if (!warmupCheck.canCall) {
+      console.log(`[NumberRouter] Number ${num.phoneNumberE164} filtered by warmup: ${warmupCheck.reason}`);
+      filtered.warmup_limited++;
+      continue;
+    }
+
+    // Check hourly cap (using warmup-adjusted effective limits)
+    const effectiveMaxHourly = warmupCheck.warmupStatus.effectiveMaxCallsPerHour;
+    if ((num.callsThisHour ?? 0) >= effectiveMaxHourly) {
       filtered.at_hourly_cap++;
       continue;
     }
 
-    // Check daily cap
-    const maxDaily = num.maxCallsPerDay ?? MAX_CALLS_PER_DAY_DEFAULT;
-    if ((num.callsToday ?? 0) >= maxDaily) {
+    // Check daily cap (using warmup-adjusted effective limits)
+    const effectiveMaxDaily = warmupCheck.warmupStatus.effectiveMaxCallsPerDay;
+    if ((num.callsToday ?? 0) >= effectiveMaxDaily) {
       filtered.at_daily_cap++;
       continue;
     }

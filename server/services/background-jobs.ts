@@ -7,6 +7,7 @@ import { processPendingTranscriptions } from './google-transcription';
 import { processUnanalyzedLeads } from './ai-qa-analyzer';
 import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
+import { processMissingTranscripts } from './transcription-reliability';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
 import { eq, lt, and, inArray, sql } from 'drizzle-orm';
@@ -122,7 +123,12 @@ export function startBackgroundJobs() {
 
       isTranscriptionRunning = true;
       try {
+        // Process legacy leads transcriptions (Google STT)
         await processPendingTranscriptions();
+
+        // Process AI call transcripts that may be missing (fallback for Gemini Live)
+        // This catches any calls where real-time transcription failed
+        await processMissingTranscripts();
       } catch (error) {
         console.error('[Background Jobs] Transcription job error:', error);
       } finally {

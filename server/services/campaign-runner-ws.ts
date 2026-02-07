@@ -24,6 +24,7 @@ import {
   getBusinessHoursForCountry 
 } from "../utils/business-hours";
 import { processDisposition } from "./disposition-engine";
+import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "./number-pool-integration";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
 
@@ -132,6 +133,8 @@ export interface CampaignTask {
   };
   // Caller ID
   fromNumber: string;
+  callerNumberId?: string | null;
+  callerNumberDecisionId?: string | null;
   // Virtual agent info
   virtualAgentId?: string | null;
   agentName: string;
@@ -448,6 +451,20 @@ class CampaignRunnerService {
         if (!result.success) {
           console.error(`${LOG_PREFIX} Disposition engine errors:`, result.errors);
         }
+
+        if (task.callerNumberId) {
+          await handleNumberPoolCallCompleted({
+            numberId: task.callerNumberId,
+            dialerAttemptId: callAttempt.id,
+            answered: connected,
+            durationSec: Number.isFinite(callDurationSeconds) ? callDurationSeconds : 0,
+            disposition: canonicalDisposition,
+            failed: isNoAnswer,
+            failureReason: isNoAnswer ? 'no_answer' : undefined,
+            prospectNumber: task.phoneNumber,
+            campaignId: task.campaignId,
+          });
+        }
       } catch (error) {
         console.error(`${LOG_PREFIX} Failed to process task disposition:`, error);
         try {
@@ -495,6 +512,7 @@ class CampaignRunnerService {
       } catch (error) {
         console.error(`${LOG_PREFIX} Failed to update task failure:`, error);
       }
+      releaseNumberWithoutOutcome(runner.currentTask.callerNumberId || null);
     }
 
     // Clear current task
@@ -663,6 +681,28 @@ class CampaignRunnerService {
         // Cast agent to any for optional extended fields
         const agentExt = agent as any;
 
+        let fromNumber = campaignExt.fromNumber || process.env.TELNYX_FROM_NUMBER || '';
+        let callerNumberId: string | null = null;
+        let callerNumberDecisionId: string | null = null;
+
+        try {
+          const callerIdResult = await getCallerIdForCall({
+            campaignId,
+            prospectNumber: phoneResult.phone,
+            virtualAgentId: agent?.id || undefined,
+            callType: 'campaign_runner_ws',
+          });
+          fromNumber = callerIdResult.callerId;
+          callerNumberId = callerIdResult.numberId;
+          callerNumberDecisionId = callerIdResult.decisionId;
+
+          if (callerIdResult.jitterDelayMs > 0) {
+            await numberPoolSleep(callerIdResult.jitterDelayMs);
+          }
+        } catch (poolError) {
+          console.warn(`${LOG_PREFIX} Number pool selection failed, using legacy caller ID:`, poolError);
+        }
+
         const task: CampaignTask = {
           taskId: `${campaignId}-${item.queueItem.id}-${Date.now()}`,
           campaignId,
@@ -696,7 +736,9 @@ class CampaignRunnerService {
               enabled: true,
             },
           },
-          fromNumber: campaignExt.fromNumber || process.env.TELNYX_FROM_NUMBER || '',
+          fromNumber,
+          callerNumberId,
+          callerNumberDecisionId,
           virtualAgentId: agent?.id || null,
           agentName: agent?.name || 'AI Agent',
           agentFullName: agent?.name || 'AI Sales Agent',

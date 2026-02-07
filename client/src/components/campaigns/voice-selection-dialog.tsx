@@ -5,7 +5,7 @@
  * Features rich voice profiles with gender, tone, and use case tags.
  */
 
-import { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,112 +19,12 @@ import {
 } from '@/components/ui/dialog';
 import { CheckCircle, Headphones, Play, Pause, Mic, Volume2, User, Users, Loader2, Sparkles, Check, ArrowRight } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/queryClient';
+import { apiRequest, getAuthHeaders } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-// Actual Gemini Live Native Voices - Each has a unique sound signature
-const AI_VOICES = [
-  // ============ MALE VOICES ============
-  {
-    id: 'Puck',
-    name: 'Puck',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Upbeat & Energetic',
-    description: 'A youthful, enthusiastic voice with high energy. Perfect for exciting product launches and engaging cold calls.',
-    bestFor: ['Product Launches', 'Cold Calling', 'Tech Startups'],
-    color: 'from-orange-500 to-amber-500',
-    bgColor: 'bg-orange-50',
-    borderColor: 'border-orange-200'
-  },
-  {
-    id: 'Charon',
-    name: 'Charon',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Deep & Mature',
-    description: 'A rich, bass-heavy voice that conveys wisdom and experience. Ideal for enterprise deals and senior executives.',
-    bestFor: ['Enterprise Sales', 'Executive Outreach', 'Financial Services'],
-    color: 'from-slate-600 to-slate-800',
-    bgColor: 'bg-slate-50',
-    borderColor: 'border-slate-200'
-  },
-  {
-    id: 'Fenrir',
-    name: 'Fenrir',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Bold & Confident',
-    description: 'A strong, assertive voice that commands attention. Great for persuasive sales and overcoming objections.',
-    bestFor: ['Sales Calls', 'Lead Qualification', 'B2B Outreach'],
-    color: 'from-blue-500 to-indigo-600',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200'
-  },
-  {
-    id: 'Orus',
-    name: 'Orus',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Warm & Conversational',
-    description: 'A friendly, approachable voice that feels like talking to a trusted colleague. Perfect for relationship building.',
-    bestFor: ['Customer Success', 'Account Management', 'Renewals'],
-    color: 'from-teal-500 to-cyan-500',
-    bgColor: 'bg-teal-50',
-    borderColor: 'border-teal-200'
-  },
-
-  // ============ FEMALE VOICES ============
-  {
-    id: 'Kore',
-    name: 'Kore',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Calm & Soothing',
-    description: 'A gentle, reassuring voice that puts people at ease. Excellent for healthcare, insurance, and sensitive topics.',
-    bestFor: ['Healthcare', 'Insurance', 'Financial Services'],
-    color: 'from-green-400 to-emerald-500',
-    bgColor: 'bg-green-50',
-    borderColor: 'border-green-200'
-  },
-  {
-    id: 'Aoede',
-    name: 'Aoede',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Bright & Friendly',
-    description: 'A cheerful, welcoming voice that creates instant rapport. Ideal for customer outreach and appointment setting.',
-    bestFor: ['Appointment Setting', 'Customer Outreach', 'Surveys'],
-    color: 'from-rose-400 to-pink-500',
-    bgColor: 'bg-rose-50',
-    borderColor: 'border-rose-200'
-  },
-  {
-    id: 'Leda',
-    name: 'Leda',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Professional & Articulate',
-    description: 'A clear, polished voice with executive presence. Perfect for C-suite conversations and professional services.',
-    bestFor: ['Executive Outreach', 'Professional Services', 'Consulting'],
-    color: 'from-violet-500 to-purple-600',
-    bgColor: 'bg-violet-50',
-    borderColor: 'border-violet-200'
-  },
-  {
-    id: 'Zephyr',
-    name: 'Zephyr',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Light & Modern',
-    description: 'A fresh, contemporary voice that resonates with younger audiences. Great for tech and modern brands.',
-    bestFor: ['SaaS Sales', 'Tech Industry', 'Modern Brands'],
-    color: 'from-cyan-500 to-blue-500',
-    bgColor: 'bg-cyan-50',
-    borderColor: 'border-cyan-200'
-  },
-];
+// Import voices from shared constants
+import { GEMINI_VOICES as AI_VOICES } from '@/lib/voice-constants';
 
 export interface VoiceSelectionDialogProps {
   open: boolean;
@@ -156,31 +56,88 @@ export function VoiceSelectionDialog({
     }
   });
 
-  // Voice preview function
-  const playVoicePreview = (voice: typeof AI_VOICES[0]) => {
+  // Audio reference for playing previews
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+
+  // Loading state for voice preview
+  const [loadingVoiceId, setLoadingVoiceId] = React.useState<string | null>(null);
+
+  // Voice preview function - uses real Google TTS voices via API
+  const playVoicePreview = async (voice: typeof AI_VOICES[0]) => {
     if (playingVoiceId === voice.id) {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
+      // Stop playing
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
       }
       setPlayingVoiceId(null);
+      setLoadingVoiceId(null);
       return;
     }
 
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
     }
 
-    setPlayingVoiceId(voice.id);
+    setLoadingVoiceId(voice.id);
 
-    const sampleText = `Hello! I'm ${voice.name}. ${voice.description.split('.')[0]}. How can I help you today?`;
+    // Use the voice provider API to generate a real preview with unique voice
+    try {
+      const response = await fetch('/api/voice-providers/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          voiceId: voice.id,
+          provider: voice.provider || 'gemini', // Use voice provider or default to gemini
+        }),
+      });
 
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(sampleText);
-      utterance.rate = 1.0;
-      utterance.pitch = voice.gender === 'male' ? 0.9 : 1.1;
-      utterance.onend = () => setPlayingVoiceId(null);
-      utterance.onerror = () => setPlayingVoiceId(null);
-      window.speechSynthesis.speak(utterance);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
+
+      const audioBlob = await response.blob();
+      if (audioBlob.size === 0) {
+        throw new Error('No audio data received');
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+      audioRef.current = new Audio(audioUrl);
+      audioRef.current.onended = () => {
+        setPlayingVoiceId(null);
+        setLoadingVoiceId(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+      audioRef.current.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        setPlayingVoiceId(null);
+        setLoadingVoiceId(null);
+        URL.revokeObjectURL(audioUrl);
+        toast({
+          title: "Playback Error",
+          description: "Could not play audio. Please try again.",
+          variant: "destructive",
+        });
+      };
+      setPlayingVoiceId(voice.id);
+      setLoadingVoiceId(null);
+      await audioRef.current.play();
+    } catch (error) {
+      console.error('Voice preview failed:', error);
+      setPlayingVoiceId(null);
+      setLoadingVoiceId(null);
+      toast({
+        title: "Preview Unavailable",
+        description: error instanceof Error ? error.message : "Could not load voice preview. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -284,11 +241,7 @@ export function VoiceSelectionDialog({
 
             {/* Selected Voice Preview */}
             {selectedVoice && (
-              <div className={cn(
-                "flex items-center gap-3 px-4 py-2 rounded-xl border-2",
-                selectedVoice.bgColor,
-                selectedVoice.borderColor
-              )}>
+              <div className="flex items-center gap-3 px-4 py-2 rounded-xl border-2 border-violet-300 bg-violet-50">
                 <Check className="h-5 w-5 text-green-600" />
                 <span className="text-sm font-medium text-slate-700">
                   Selected: <span className="font-bold">{selectedVoice.name}</span>
@@ -306,7 +259,7 @@ export function VoiceSelectionDialog({
                   className={cn(
                     "cursor-pointer transition-all duration-300 hover:shadow-xl relative overflow-hidden group border-2",
                     selectedVoiceId === voice.id
-                      ? `ring-2 ring-offset-2 ring-violet-500 shadow-lg ${voice.borderColor}`
+                      ? "ring-2 ring-offset-2 ring-violet-500 shadow-lg border-violet-400"
                       : "border-slate-200 hover:border-violet-300"
                   )}
                   onClick={() => setSelectedVoiceId(voice.id)}
@@ -341,7 +294,7 @@ export function VoiceSelectionDialog({
                           >
                             {voice.gender}
                           </Badge>
-                          <span className="text-xs text-slate-400">{voice.accent}</span>
+                          <span className="text-xs text-slate-400">{voice.provider}</span>
                         </div>
                       </div>
                     </div>
@@ -365,7 +318,7 @@ export function VoiceSelectionDialog({
                         <Badge
                           key={i}
                           variant="secondary"
-                          className={cn("text-xs font-normal", voice.bgColor)}
+                          className="text-xs font-normal bg-slate-100"
                         >
                           {tag}
                         </Badge>
@@ -376,6 +329,7 @@ export function VoiceSelectionDialog({
                     <Button
                       variant={playingVoiceId === voice.id ? 'default' : 'outline'}
                       size="lg"
+                      disabled={loadingVoiceId === voice.id}
                       className={cn(
                         "w-full h-11 rounded-xl font-medium transition-all duration-200",
                         playingVoiceId === voice.id
@@ -387,7 +341,12 @@ export function VoiceSelectionDialog({
                         playVoicePreview(voice);
                       }}
                     >
-                      {playingVoiceId === voice.id ? (
+                      {loadingVoiceId === voice.id ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Loading...
+                        </>
+                      ) : playingVoiceId === voice.id ? (
                         <>
                           <Pause className="h-4 w-4 mr-2" />
                           Stop Preview

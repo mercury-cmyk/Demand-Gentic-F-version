@@ -273,38 +273,68 @@ export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
   'fable': 'Fenrir',
   'nova': 'Kore',
   'shimmer': 'Puck',
-  'onyx': 'Orion',
+  'onyx': 'Gacrux',
   // New OpenAI voices with most natural speech (gpt-realtime exclusive)
-  'cedar': 'Vega',   // Cedar: warm, confident - maps to Vega
-  'marin': 'Pegasus',    // Marin: calm, professional - maps to Pegasus
+  'cedar': 'Sulafat',   // Cedar: warm, confident - maps to Sulafat (warm)
+  'marin': 'Schedar',   // Marin: calm, professional - maps to Schedar (even)
 };
 
+// Official Gemini TTS voices (30 total) - all real Google voices
+export const VALID_GEMINI_VOICES = [
+  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
+  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
+  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
+  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
+];
+
 export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
+  // Primary mappings
   'Aoede': 'alloy',
   'Charon': 'echo',
   'Fenrir': 'fable',
   'Kore': 'nova',
   'Puck': 'shimmer',
-  'Orion': 'onyx',
-  'Vega': 'cedar',
-  'Pegasus': 'marin',
-  'Ursa': 'alloy',
-  'Nova': 'nova',
-  'Dipper': 'echo',
-  'Capella': 'fable',
-  'Orbit': 'shimmer',
-  'Lyra': 'onyx',
-  'Eclipse': 'cedar',
+  'Gacrux': 'onyx',
+  'Sulafat': 'cedar',
+  'Schedar': 'marin',
+  // Secondary mappings for all other Gemini voices
+  'Zephyr': 'alloy',
+  'Leda': 'nova',
+  'Orus': 'echo',
+  'Callirrhoe': 'alloy',
+  'Autonoe': 'nova',
+  'Enceladus': 'echo',
+  'Iapetus': 'marin',
+  'Umbriel': 'alloy',
+  'Algieba': 'cedar',
+  'Despina': 'nova',
+  'Erinome': 'nova',
+  'Algenib': 'onyx',
+  'Rasalgethi': 'echo',
+  'Laomedeia': 'shimmer',
+  'Achernar': 'nova',
+  'Alnilam': 'fable',
+  'Pulcherrima': 'fable',
+  'Achird': 'alloy',
+  'Zubenelgenubi': 'alloy',
+  'Vindemiatrix': 'nova',
+  'Sadachbia': 'shimmer',
+  'Sadaltager': 'echo',
 };
 
 export function mapVoiceToProvider(voice: string, targetProvider: VoiceProviderType): string {
   if (targetProvider === 'google') {
-    // If already a Gemini voice, return as-is
-    if (Object.keys(GEMINI_TO_OPENAI_VOICE_MAP).includes(voice)) {
+    // If already a valid Gemini voice, return as-is
+    if (VALID_GEMINI_VOICES.includes(voice)) {
       return voice;
     }
     // Map from OpenAI voice
-    return OPENAI_TO_GEMINI_VOICE_MAP[voice.toLowerCase()] || 'Kore';
+    const mapped = OPENAI_TO_GEMINI_VOICE_MAP[voice.toLowerCase()];
+    if (mapped) return mapped;
+    // Default to Kore (firm, professional)
+    console.warn(`[VoiceMapper] Unknown voice "${voice}" - defaulting to Kore`);
+    return 'Kore';
   } else {
     // If already an OpenAI voice, return as-is
     if (Object.keys(OPENAI_TO_GEMINI_VOICE_MAP).includes(voice.toLowerCase())) {

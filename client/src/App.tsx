@@ -55,7 +55,7 @@ import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
 import CallRecordingsPage from "@/pages/call-recordings";
-import CallIntelligenceDashboard from "@/pages/call-intelligence-dashboard";
+// CallIntelligenceDashboard removed - page deprecated
 import UnifiedIntelligencePage from "@/pages/unified-intelligence";
 
 // Lazy-loaded components
@@ -82,6 +82,7 @@ import VerificationConsolePage from "@/pages/verification-console";
 import VerificationUploadPage from "@/pages/verification-upload";
 import VerificationSuppressionUploadPage from "@/pages/verification-suppression-upload";
 import PhoneBulkEditorPage from "@/pages/phone-bulk-editor";
+import NumberPoolPage from "@/pages/number-pool";
 import EmailValidationTest from "./pages/email-validation-test";
 import PivotalPipelineManagementPage from "@/pages/pivotal-pipeline-management";
 import PipelineManagementPage from "@/pages/pipeline-management";
@@ -126,8 +127,10 @@ import UsersSettingsPage from "@/pages/settings/users";
 import TelephonySettingsPage from "@/pages/settings/telephony";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
+import CallFlowManagementPage from "@/pages/call-flow-management";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
 import PromptManagementPage from "@/pages/prompt-management";
+import PromptInspectorPage from "@/pages/prompt-inspector";
 import SmtpProvidersPage from "@/pages/smtp-providers";
 import TransactionalTemplatesPage from "@/pages/transactional-templates";
 import DomainManagementPage from "@/pages/domain-management";
@@ -324,6 +327,8 @@ function AuthenticatedApp() {
               </Route>
               <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
               <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Unified 12-step wizard for creating AND editing telemarketing campaigns */}
+              <Route path="/campaigns/telemarketing/:id/edit" component={TelemarketingCreatePage} />
               {/* Legacy redirects for /campaigns/telemarketing */}
               <Route path="/campaigns/telemarketing">
                 {() => { window.location.href = '/campaigns'; return null; }}
@@ -350,6 +355,7 @@ function AuthenticatedApp() {
               <Route path="/campaigns/webinar_invite/edit/:id" component={PhoneCampaignEditPage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
+              <Route path="/number-pool" component={NumberPoolPage} />
               
               {/* Leads */}
               <Route path="/leads" component={LeadsPage} />
@@ -377,7 +383,7 @@ function AuthenticatedApp() {
               <Route path="/call-reports" component={CallReportsPage} />
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               <Route path="/call-recordings" component={CallRecordingsPage} />
-              <Route path="/call-intelligence" component={CallIntelligenceDashboard} />
+              {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
               <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
@@ -394,8 +400,10 @@ function AuthenticatedApp() {
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
+              <Route path="/settings/call-flows" component={CallFlowManagementPage} />
               <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
               <Route path="/settings/prompts" component={PromptManagementPage} />
+              <Route path="/settings/prompt-inspector" component={PromptInspectorPage} />
 
               {/* Settings Hub */}
               <Route path="/settings" component={SettingsIndexPage} />

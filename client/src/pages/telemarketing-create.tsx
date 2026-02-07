@@ -1,23 +1,140 @@
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-builder/campaign-wizard";
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
-import { Step2TelemarketingContent } from "@/components/campaign-builder/step2-telemarketing-content";
 import { Step0CampaignType } from "@/components/campaign-builder/step0-campaign-type";
 import { StepClientProject } from "@/components/campaign-builder/step-client-project";
-import { StepPhoneNumber } from "@/components/campaign-builder/step-phone-number";
-import { Step2bDialModeConfig } from "@/components/campaign-builder/step2b-dial-mode-config";
+import { StepCallFlow } from "@/components/campaign-builder/step-call-flow";
+import { StepAIVoice } from "@/components/campaign-builder/step-ai-voice";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
 import { Step4Compliance } from "@/components/campaign-builder/step4-compliance";
-import { Step4bSuppressions } from "@/components/campaign-builder/step4b-suppressions";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
 import { Step5Summary } from "@/components/campaign-builder/step5-summary";
+import { StepContentContext } from "@/components/campaign-builder/step-content-context";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Loader2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export default function TelemarketingCreatePage() {
   const [, setLocation] = useLocation();
+  const params = useParams<{ id?: string }>();
+  const campaignId = params?.id;
+  const isEditMode = !!campaignId;
   const { toast } = useToast();
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(null);
+  const [isStartingCalls, setIsStartingCalls] = useState(false);
 
+  // Fetch existing campaign data when in edit mode
+  const { data: existingCampaign, isLoading: isLoadingCampaign } = useQuery({
+    queryKey: ['/api/campaigns', campaignId],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/campaigns/${campaignId}`);
+      return res.json();
+    },
+    enabled: isEditMode,
+  });
+
+  // Transform existing campaign data to wizard format
+  const getInitialData = () => {
+    if (!existingCampaign) return {};
+
+    return {
+      // Basic info
+      name: existingCampaign.name,
+      type: existingCampaign.type,
+      // Client & Project
+      clientAccountId: existingCampaign.clientAccountId,
+      projectId: existingCampaign.projectId,
+      organizationId: existingCampaign.problemIntelligenceOrgId,
+      // Phone
+      callerPhoneNumberId: existingCampaign.callerPhoneNumberId,
+      callerPhoneNumber: existingCampaign.callerPhoneNumber,
+      // Number pool rotation config
+      numberPoolConfig: existingCampaign.numberPoolConfig || { enabled: true, rotationStrategy: 'reputation_based', maxCallsPerNumber: 50, cooldownHours: 4 },
+      // Content
+      content: {
+        script: existingCampaign.callScript,
+        qualificationFields: existingCampaign.qualificationQuestions,
+      },
+      // Campaign context
+      campaignObjective: existingCampaign.campaignObjective,
+      productServiceInfo: existingCampaign.productServiceInfo,
+      talkingPoints: existingCampaign.talkingPoints,
+      targetAudienceDescription: existingCampaign.targetAudienceDescription,
+      successCriteria: existingCampaign.successCriteria,
+      campaignObjections: existingCampaign.campaignObjections,
+      // Call flow
+      callFlow: existingCampaign.callFlow ? {
+        useDefault: false,
+        customFlow: existingCampaign.callFlow,
+      } : { useDefault: true },
+      // Scheduling
+      scheduling: {
+        type: existingCampaign.scheduleJson?.type || 'immediate',
+        ...existingCampaign.scheduleJson,
+        dialingPace: existingCampaign.throttlingConfig?.pace,
+        targetQualifiedLeads: existingCampaign.targetQualifiedLeads,
+        startDate: existingCampaign.startDate,
+        endDate: existingCampaign.endDate,
+        costPerLead: existingCampaign.costPerLead,
+      },
+      // QA
+      qaParameters: existingCampaign.qaParameters,
+      // Account cap
+      accountCap: {
+        enabled: existingCampaign.accountCapEnabled,
+        leadsPerAccount: existingCampaign.accountCapValue,
+        mode: existingCampaign.accountCapMode,
+      },
+      // AI Agent settings (voice, persona)
+      aiAgentSettings: existingCampaign.aiAgentSettings,
+      // Dial mode
+      dialMode: existingCampaign.dialMode || 'ai_agent',
+    };
+  };
+
+  // Start AI Calls handler
+  const handleStartAiCalls = async () => {
+    if (!createdCampaignId) return;
+    setIsStartingCalls(true);
+    try {
+      await apiRequest('POST', '/api/ai-calls/batch-start', {
+        campaignId: createdCampaignId,
+        limit: 10,
+        delayBetweenCalls: 3000,
+      });
+      toast({
+        title: "AI Calls Started",
+        description: "AI agents are now making calls for your campaign.",
+      });
+      setShowSuccessDialog(false);
+      setLocation("/campaigns");
+    } catch (error: any) {
+      toast({
+        title: "Failed to Start Calls",
+        description: error?.message || "Please try again from the campaigns page.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsStartingCalls(false);
+    }
+  };
+
+  // Simplified wizard: 9 steps (down from 13)
+  // Combined: Campaign Context + Call Script → Content & Context
+  // Removed: Phone Number (uses default number pool)
+  // Combined: Compliance includes suppressions and account cap
   const steps: CampaignWizardStep[] = [
     {
       id: "type",
@@ -32,10 +149,10 @@ export default function TelemarketingCreatePage() {
       component: StepClientProject,
     },
     {
-      id: "phone-number",
-      title: "Caller ID",
-      description: "Select the phone number for outbound calls",
-      component: StepPhoneNumber,
+      id: "content-context",
+      title: "Content & Context",
+      description: "Define objective, talking points, and AI context",
+      component: StepContentContext,
     },
     {
       id: "audience",
@@ -44,45 +161,33 @@ export default function TelemarketingCreatePage() {
       component: Step1AudienceSelection,
     },
     {
-      id: "content",
-      title: "Call Script",
-      description: "Create your call script and qualification questions",
-      component: Step2TelemarketingContent,
+      id: "call-flow",
+      title: "Call Flow",
+      description: "Select pre-configured call flow or customize",
+      component: StepCallFlow,
     },
     {
-      id: "dial-mode",
-      title: "Dial Mode",
-      description: "Configure manual or power dial with AMD settings",
-      component: Step2bDialModeConfig,
+      id: "ai-voice",
+      title: "AI Voice",
+      description: "Select the AI voice and persona",
+      component: StepAIVoice,
     },
     {
       id: "scheduling",
       title: "Scheduling",
-      description: "Configure call windows, agent assignment, and pacing",
+      description: "Configure call windows and pacing",
       component: Step3Scheduling,
     },
     {
       id: "compliance",
       title: "Compliance",
-      description: "Automated DNC checks and compliance verification",
+      description: "DNC checks, account caps, and suppressions",
       component: Step4Compliance,
-    },
-    {
-      id: "suppressions",
-      title: "Suppressions",
-      description: "Optional campaign-level exclusions (accounts, contacts, domains)",
-      component: Step4bSuppressions,
-    },
-    {
-      id: "qa-parameters",
-      title: "AI Quality",
-      description: "Configure AI lead qualification criteria and scoring",
-      component: StepQAParameters,
     },
     {
       id: "summary",
       title: "Summary",
-      description: "Review and launch your dialer campaign",
+      description: "Review and launch your campaign",
       component: Step5Summary,
     },
   ];
@@ -153,6 +258,8 @@ export default function TelemarketingCreatePage() {
         // Telnyx Phone Number Assignment
         callerPhoneNumberId: data.callerPhoneNumberId || null,
         callerPhoneNumber: data.callerPhoneNumber || null,
+        // Number Pool Rotation Configuration
+        numberPoolConfig: data.numberPoolConfig || { enabled: true, rotationStrategy: 'reputation_based', maxCallsPerNumber: 50, cooldownHours: 4 },
         // Campaign Context fields (AI Agent Campaign Layer)
         campaignObjective: data.campaignObjective || null,
         productServiceInfo: data.productServiceInfo || null,
@@ -160,36 +267,65 @@ export default function TelemarketingCreatePage() {
         targetAudienceDescription: data.targetAudienceDescription || null,
         successCriteria: data.successCriteria || null,
         campaignObjections: data.campaignObjections?.length > 0 ? data.campaignObjections : null,
+        // Call Flow Layer (Layer 3.5) - Deterministic conversation flow
+        // Pass the selected flow ID so the system knows which flow to use
+        callFlowId: data.callFlow?.flowId || null,
+        callFlow: data.callFlow?.useDefault !== false
+          ? (data.callFlow?.selectedFlow || null) // Use selected flow (could be system or custom)
+          : data.callFlow?.customFlow || null, // Custom modified flow from wizard
       };
 
-      await apiRequest("POST", "/api/campaigns", campaignPayload);
-
-      if (data.action === "draft") {
+      let result;
+      if (isEditMode && campaignId) {
+        // Update existing campaign
+        result = await apiRequest("PATCH", `/api/campaigns/${campaignId}`, campaignPayload);
         toast({
-          title: "Draft Saved",
-          description: "Your dialer campaign has been saved as a draft.",
+          title: "Campaign Updated",
+          description: "Your campaign changes have been saved.",
         });
+        setLocation("/campaigns");
       } else {
-        toast({
-          title: "Campaign Launched!",
-          description: "Your dialer campaign is now running. Agents can start calling.",
-        });
-      }
+        // Create new campaign
+        const response = await apiRequest("POST", "/api/campaigns", campaignPayload);
+        result = await response.json();
 
-      setLocation("/phone-campaigns");
+        if (data.action === "draft") {
+          toast({
+            title: "Draft Saved",
+            description: "Your dialer campaign has been saved as a draft.",
+          });
+          setLocation("/campaigns");
+        } else {
+          // Show success dialog with option to start AI calls
+          setCreatedCampaignId(result.id || result.campaign?.id);
+          setShowSuccessDialog(true);
+        }
+      }
     } catch (error: any) {
-      console.error("Campaign creation error:", error);
+      console.error("Campaign save error:", error);
       toast({
         title: "Error",
-        description: error?.message || "Failed to create campaign. Please try again.",
+        description: error?.message || `Failed to ${isEditMode ? 'update' : 'create'} campaign. Please try again.`,
         variant: "destructive",
       });
     }
   };
 
   const handleCancel = () => {
-    setLocation("/phone-campaigns");
+    setLocation("/campaigns");
   };
+
+  // Show loading state when fetching existing campaign
+  if (isEditMode && isLoadingCampaign) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading campaign...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -198,7 +334,55 @@ export default function TelemarketingCreatePage() {
         steps={steps}
         onComplete={handleComplete}
         onCancel={handleCancel}
+        initialData={isEditMode ? getInitialData() : undefined}
+        title={isEditMode ? "Edit Campaign" : undefined}
       />
+
+      {/* Post-Creation Success Dialog */}
+      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-green-500">&#10003;</span>
+              Campaign Created Successfully!
+            </DialogTitle>
+            <DialogDescription>
+              Your campaign is now active. Would you like to start AI calls immediately?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Starting AI calls will begin dialing contacts from your audience queue.
+              You can also start calls later from the Campaigns dashboard.
+            </p>
+          </div>
+          <DialogFooter className="flex gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSuccessDialog(false);
+                setLocation("/campaigns");
+              }}
+            >
+              Go to Dashboard
+            </Button>
+            <Button
+              onClick={handleStartAiCalls}
+              disabled={isStartingCalls}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {isStartingCalls ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                "Start AI Calls Now"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

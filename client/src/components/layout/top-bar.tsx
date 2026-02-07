@@ -1,4 +1,4 @@
-import { Bell, HelpCircle, LogOut, Settings, Mail, Phone, Zap, UserCog, ShieldCheck, Database, Bot } from "lucide-react";
+import { Bell, HelpCircle, LogOut, Settings, Mail, Phone, Zap, UserCog, ShieldCheck, Database, Bot, GitBranch } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -102,6 +102,13 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel>Settings & Administration</DropdownMenuLabel>
               <DropdownMenuSeparator />
+
+              {/* All Settings Link */}
+              <DropdownMenuItem onClick={() => setLocation('/settings')} data-testid="menu-all-settings">
+                <Settings className="mr-2 h-4 w-4" />
+                All Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               
               {/* Infrastructure Section */}
               <DropdownMenuSub>
@@ -121,6 +128,10 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
                   <DropdownMenuItem onClick={() => setLocation('/settings/integrations')} data-testid="menu-integrations">
                     <Zap className="mr-2 h-4 w-4" />
                     Integrations & APIs
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/call-flows')} data-testid="menu-call-flows">
+                    <GitBranch className="mr-2 h-4 w-4" />
+                    Call Flows
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>

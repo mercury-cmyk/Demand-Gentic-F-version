@@ -83,6 +83,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Anti-loop protection
   private sttRestartCount: number = 0;
   private sttLastRestartTime: number = 0;
+  private sttErrorLoggedAt: number = 0; // Rate-limit error logging
 
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -366,11 +367,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             this.startRecognizeStream().catch(() => {});
           }
 
-          if (this.recognizeStream) {
+          // Only write if stream exists and is writable (not destroyed)
+          if (this.recognizeStream && !this.recognizeStream.destroyed && this.recognizeStream.writable) {
             try {
               this.recognizeStream.write(pcmBuffer);
             } catch (sttErr) {
-              // Ignore write errors - stream may be restarting
+              // Stream may be closing - ignore silently
             }
           }
         }
@@ -513,7 +515,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
              this.recognizeStream.on('end', () => {}); // No-op
          }
       } else {
-        console.warn(`${LOG_PREFIX} STT stream error:`, errorMsg);
+        // Rate-limit STT error logs to prevent flooding
+        if (!this.sttErrorLoggedAt || Date.now() - this.sttErrorLoggedAt > 5000) {
+          console.warn(`${LOG_PREFIX} STT stream error:`, errorMsg);
+          this.sttErrorLoggedAt = Date.now();
+        }
         // Prevent rapid restart loop on other errors too
         if (this.sttRestartCount > 3) {
             console.error(`${LOG_PREFIX} Too many STT errors (${this.sttRestartCount}). Disabling STT temporarily.`);

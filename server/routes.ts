@@ -82,8 +82,13 @@ import unifiedPromptRouter from './routes/unified-prompt-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
+import callFlowManagementRouter from './routes/call-flow-management';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
+import telephonyProvidersRouter from './routes/telephony-providers';
+import telnyxWebhookRouter from './routes/telnyx-webhook-management';
+import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
+import documentExtractRouter from './routes/document-extract';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -106,7 +111,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, campaignOrganizations, type InsertMailboxAccount, type Account } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -4872,6 +4877,33 @@ export function registerRoutes(app: Express) {
       }
 
       const campaign = await storage.createCampaign(campaignData);
+
+      // === AUTO-ASSIGN PHONE NUMBERS FROM POOL ===
+      // When number pool rotation is enabled (default), ensure campaign has access to pool numbers
+      const poolConfig = campaignData.numberPoolConfig as { enabled?: boolean } | null;
+      const isPoolEnabled = !poolConfig || poolConfig.enabled !== false;
+
+      if (isPoolEnabled && campaign.type === 'call' && !campaign.callerPhoneNumberId) {
+        try {
+          // Import number pool functions
+          const { telnyxNumbers } = await import('@shared/number-pool-schema');
+
+          // Check if we have active numbers in the pool
+          const activeNumbers = await db
+            .select({ id: telnyxNumbers.id, phoneNumberE164: telnyxNumbers.phoneNumberE164 })
+            .from(telnyxNumbers)
+            .where(eq(telnyxNumbers.status, 'active'))
+            .limit(5);
+
+          if (activeNumbers.length > 0) {
+            console.log(`[Campaign Create] Number pool enabled with ${activeNumbers.length}+ active numbers available for rotation`);
+          } else {
+            console.log(`[Campaign Create] Number pool enabled but no active numbers in pool - using legacy TELNYX_FROM_NUMBER`);
+          }
+        } catch (poolErr) {
+          console.warn('[Campaign Create] Could not check number pool:', poolErr);
+        }
+      }
 
       // Auto-populate queue from audience if defined
       if (campaign.audienceRefs && campaign.type === 'call') {
@@ -13358,8 +13390,43 @@ Provide JSON response with:
   // ==================== CAMPAIGN WIZARD (ADMIN) ====================
   app.use('/api/campaign-wizard', campaignWizardRouter);
 
+  // ==================== CALL FLOW MANAGEMENT (ADMIN) ====================
+  app.use('/api/call-flows', callFlowManagementRouter);
+
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
+
+  // ==================== TELEPHONY PROVIDERS (Super Admin) ====================
+  app.use('/api/admin/telephony-providers', requireAuth, telephonyProvidersRouter);
+
+  // ==================== TELNYX WEBHOOK MANAGEMENT (Admin) ====================
+  app.use('/api/telnyx', telnyxWebhookRouter);
+
+  // ==================== TRANSCRIPTION MANAGEMENT (Admin) ====================
+  app.use('/api/transcription', transcriptionManagementRouter);
+
+  // ==================== DOCUMENT EXTRACTION (AI) ====================
+  app.use('/api/documents', documentExtractRouter);
+
+  // ==================== CAMPAIGN ORGANIZATIONS ====================
+  // Returns the list of Problem Intelligence organizations for campaign context
+  app.get('/api/campaign-organizations', requireAuth, async (req, res) => {
+    try {
+      const orgs = await db.select({
+        id: campaignOrganizations.id,
+        name: campaignOrganizations.name,
+        industry: campaignOrganizations.industry,
+      })
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.isActive, true))
+      .orderBy(campaignOrganizations.name);
+
+      res.json({ organizations: orgs });
+    } catch (error) {
+      console.error('[Campaign Organizations] Error:', error);
+      res.status(500).json({ message: 'Failed to fetch organizations' });
+    }
+  });
 
   // ==================== CLIENT HIERARCHY / ASSIGNMENT ====================
   app.use('/api/admin', requireAuth, clientAssignmentRouter);
