@@ -21,6 +21,9 @@ import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import LandingPage from "@/pages/landing";
 import AboutPage from "@/pages/about";
+import PrivacyPolicyPage from "@/pages/privacy-policy";
+import TermsOfServicePage from "@/pages/terms-of-service";
+import GDPRPolicyPage from "@/pages/gdpr-policy";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
@@ -551,8 +554,15 @@ function AuthenticatedApp() {
 function Router() {
   return (
     <Switch>
+      {/* Public landing page as default home */}
+      <Route path="/">
+        <Redirect to="/welcome" />
+      </Route>
       <Route path="/welcome" component={LandingPage} />
       <Route path="/about" component={AboutPage} />
+      <Route path="/privacy" component={PrivacyPolicyPage} />
+      <Route path="/terms" component={TermsOfServicePage} />
+      <Route path="/gdpr" component={GDPRPolicyPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/forms/:id" component={LeadFormPublicPage} />
       <Route path="/client-portal/login" component={ClientPortalLogin} />
@@ -563,6 +573,11 @@ function Router() {
       <Route path="/client-portal/voice-simulation" component={ClientPortalVoiceSimulation} />
       <Route path="/client-portal/email-simulation" component={ClientPortalEmailSimulation} />
       <Route path="/client-portal/intelligence" component={ClientPortalIntelligence} />
+      <Route path="/dashboard">
+        <ProtectedRoute>
+          <AuthenticatedApp />
+        </ProtectedRoute>
+      </Route>
       <Route>
         <ProtectedRoute>
           <AuthenticatedApp />

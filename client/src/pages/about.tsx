@@ -38,12 +38,16 @@ export default function AboutPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setLocation("/welcome")}>
-            <img
-              src="/demangent-logo.png"
-              alt="DemandGentic.ai"
-              className="h-8 w-auto"
-            />
-            <span className="font-bold text-lg">DemandGentic.ai</span>
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
+              <div className="relative flex items-center justify-center">
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+            </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
             <a href="/welcome#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Platform</a>
@@ -592,22 +596,29 @@ export default function AboutPage() {
       {/* Footer */}
       <footer className="py-16 px-6 bg-slate-950 text-white">
         <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-12 mb-12">
+          <div className="grid md:grid-cols-5 gap-12 mb-12">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                <img
-                  src="/demangent-logo.png"
-                  alt="DemandGentic.ai"
-                  className="h-8 w-auto brightness-0 invert"
-                />
-                <span className="font-bold text-lg">DemandGentic.ai</span>
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 shrink-0">
+                  <div className="relative flex items-center justify-center">
+                    <span className="font-bold text-sm text-white tracking-tighter">DG</span>
+                    <Sparkles className="h-2 w-2 text-blue-400 absolute -top-1 -right-1.5" />
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+                </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
                 Technology as a steward of progress — using data to solve problems, not create noise.
               </p>
-              <p className="text-slate-500 text-xs">
-                by Pivotal B2B
-              </p>
+              <div className="text-slate-500 text-xs space-y-1">
+                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
+                <p>Lewes, Delaware</p>
+                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
+                <p><a href="https://pivotal-b2b.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">pivotal-b2b.com</a></p>
+              </div>
             </div>
 
             <div>
@@ -631,24 +642,32 @@ export default function AboutPage() {
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Company</h4>
+              <h4 className="font-semibold mb-4">Resources</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
+                <li><a href="/resources-centre" className="hover:text-white transition-colors">Resources Center</a></li>
                 <li><span className="text-white">About Us</span></li>
-                <li><a href="#" className="hover:text-white transition-colors">Contact</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Press</a></li>
+                <li><a href="/welcome" className="hover:text-white transition-colors">Home</a></li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-4">Get Started</h4>
+              <ul className="space-y-2 text-slate-400 text-sm">
+                <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
+                <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
+                <li><a href="mailto:contact@pivotal-b2b.com" className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2024 DemandGentic.ai by Pivotal B2B. All rights reserved.
+              © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
-              <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-              <a href="#" className="hover:text-white transition-colors">GDPR</a>
+              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
+              <a href="/gdpr" className="hover:text-white transition-colors">GDPR</a>
             </div>
           </div>
         </div>

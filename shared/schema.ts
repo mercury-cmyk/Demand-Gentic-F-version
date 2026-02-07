@@ -12846,3 +12846,96 @@ export type ClientFeatureFlag =
   | 'reports_export'
   | 'api_access';
 
+
+// Calendar & Booking System Schema
+
+export const bookingTypes = pgTable("booking_types", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  name: text("name").notNull(), // e.g. "Discovery Call"
+  slug: text("slug").notNull(), // e.g. "discovery-call"
+  description: text("description"),
+  duration: integer("duration").notNull(), // in minutes
+  isActive: boolean("is_active").default(true),
+  color: text("color").default("#3b82f6"), // For UI
+  requiresApproval: boolean("requires_approval").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const availabilitySlots = pgTable("availability_slots", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  dayOfWeek: integer("day_of_week").notNull(), // 0=Sunday, 1=Monday...
+  startTime: text("start_time").notNull(), // "09:00"
+  endTime: text("end_time").notNull(), // "17:00"
+  timezone: text("timezone").default("UTC"),
+  isActive: boolean("is_active").default(true),
+});
+
+export const bookings = pgTable("bookings", {
+  id: serial("id").primaryKey(),
+  bookingTypeId: integer("booking_type_id").references(() => bookingTypes.id),
+  hostUserId: integer("host_user_id").references(() => users.id),
+  guestName: text("guest_name").notNull(),
+  guestEmail: text("guest_email").notNull(),
+  guestNotes: text("guest_notes"),
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time").notNull(),
+  status: text("status").default("confirmed"), // confirmed, cancelled, rescheduled
+  googleEventId: text("google_event_id"), // For Google Calendar sync
+  meetingUrl: text("meeting_url"), // Google Meet link or other
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const googleCalendarIntegrations = pgTable("google_calendar_integrations", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).unique(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiry: timestamp("token_expiry"),
+  calendarId: text("calendar_id").default("primary"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Relationships
+export const bookingTypesRelations = relations(bookingTypes, ({ one, many }) => ({
+  user: one(users, {
+    fields: [bookingTypes.userId],
+    references: [users.id],
+  }),
+  bookings: many(bookings),
+}));
+
+export const bookingsRelations = relations(bookings, ({ one }) => ({
+  bookingType: one(bookingTypes, {
+    fields: [bookings.bookingTypeId],
+    references: [bookingTypes.id],
+  }),
+  host: one(users, {
+    fields: [bookings.hostUserId],
+    references: [users.id],
+  }),
+}));
+
+export const availabilitySlotsRelations = relations(availabilitySlots, ({ one }) => ({
+  user: one(users, {
+    fields: [availabilitySlots.userId],
+    references: [users.id],
+  }),
+}));
+
+export const googleCalendarIntegrationsRelations = relations(googleCalendarIntegrations, ({ one }) => ({
+  user: one(users, {
+    fields: [googleCalendarIntegrations.userId],
+    references: [users.id],
+  }),
+}));
+
+// Insert Schemas
+export const insertBookingTypeSchema = createInsertSchema(bookingTypes);
+export const insertAvailabilitySlotSchema = createInsertSchema(availabilitySlots);
+export const insertBookingSchema = createInsertSchema(bookings);
+export const insertGoogleCalendarIntegrationSchema = createInsertSchema(googleCalendarIntegrations);

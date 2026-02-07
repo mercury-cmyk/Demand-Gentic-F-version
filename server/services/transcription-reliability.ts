@@ -119,6 +119,14 @@ export async function attemptFallbackTranscription(
     }
 
     if (!urlToUse) {
+      // Mark as failed in DB to prevent infinite retry loops
+      await db.update(dialerCallAttempts)
+        .set({
+          fullTranscript: '[SYSTEM: No recording available]',
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, callAttemptId));
+
       return {
         success: false,
         source: 'fallback_stt',
@@ -164,6 +172,22 @@ export async function attemptFallbackTranscription(
     };
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Fallback transcription failed:`, error);
+
+    // Check for permanent errors (like 422 or 404 from Telnyx/Google) to prevent retry loops
+    const errorMessage = error.message || 'Unknown error';
+    const isPermanentError = errorMessage.includes('422') || 
+                             errorMessage.includes('not found') || 
+                             errorMessage.includes('expired') ||
+                             errorMessage.includes('Invalid');
+
+    if (isPermanentError) {
+      await db.update(dialerCallAttempts)
+        .set({
+          fullTranscript: `[SYSTEM: Transcription failed - ${errorMessage}]`,
+          updatedAt: new Date(),
+        })
+        .where(eq(dialerCallAttempts.id, callAttemptId));
+    }
 
     await logTranscriptionActivity(callAttemptId, 'fallback_failed', {
       error: error.message,

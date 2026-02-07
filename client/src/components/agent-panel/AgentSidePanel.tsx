@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentChatInterface } from './AgentChatInterface';
-import { AgentQuickActions } from './AgentQuickActions';
+// import { AgentQuickActions } from './AgentQuickActions';
 
 interface AgentSidePanelProps {
   className?: string;
@@ -286,9 +286,8 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
-
+            {/* Quick Actions moved to ChatInterface */}
+            
             {/* Chat Interface */}
             <div className="flex-1 overflow-hidden">
               <AgentChatInterface

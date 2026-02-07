@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
@@ -141,16 +141,20 @@ export default function LoginPage() {
       
       <Card className="w-full max-w-md relative shadow-smooth-lg border-0 animate-fade-in">
         <CardHeader className="space-y-1 text-center">
-          <div className="flex justify-center mb-4">
-            <img
-              src="/demangent-logo.png"
-              alt="DemandGentic.ai By Pivotal B2B"
-              className="h-12 w-auto"
-            />
+          <div className="flex justify-center mb-6">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10 shrink-0 shadow-sm">
+                <div className="relative flex items-center justify-center">
+                  <span className="font-bold text-xl text-primary tracking-tighter">DG</span>
+                  <Sparkles className="h-4 w-4 text-blue-500 absolute -top-1.5 -right-2" />
+                </div>
+              </div>
+            </div>
           </div>
           <CardTitle className="text-3xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
-            DemandGentic.ai By Pivotal B2B
+            DemandGentic.ai
           </CardTitle>
+          <div className="text-muted-foreground font-medium text-xs uppercase tracking-widest mt-1 mb-2">Human Intel, AI Execute By Pivotal B2B</div>
           <CardDescription className="text-base">
             Intelligent B2B demand generation platform
           </CardDescription>

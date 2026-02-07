@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentPlanViewer } from './AgentPlanViewer';
+import { AgentQuickActions } from './AgentQuickActions';
 
 interface Message {
   id: string;
@@ -138,6 +139,11 @@ export function AgentChatInterface({
 
     try {
       const token = getAuthToken();
+      
+      if (!token) {
+        throw new Error('Authentication required. Please log in.');
+      }
+
       const response = await fetch(`/api/agent-panel/chat?clientPortal=${isClientPortal}`, {
         method: 'POST',
         headers: {
@@ -329,6 +335,10 @@ export function AgentChatInterface({
               </Button>
             </div>
           </div>
+        </div>
+        
+        <div className="mt-4 mb-2">
+           <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
         </div>
 
         <p className="text-[10px] text-muted-foreground/60 mt-2 text-center select-none">

@@ -54,12 +54,16 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img
-              src="/demangent-logo.png"
-              alt="DemandGentic.ai"
-              className="h-8 w-auto"
-            />
-            <span className="font-bold text-lg">DemandGentic.ai</span>
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
+              <div className="relative flex items-center justify-center">
+                <span className="font-bold text-sm text-violet-700 tracking-tighter">DG</span>
+                <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+            </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
             <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Platform</a>
@@ -115,7 +119,7 @@ export default function LandingPage() {
             <div className="flex flex-wrap justify-center gap-3 mb-10">
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
                 <Database className="h-4 w-4 text-violet-600" />
-                <span className="text-sm font-semibold">500M+ Verified Contacts</span>
+                <span className="text-sm font-semibold">70M+ Verified Contacts</span>
               </div>
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
                 <Globe className="h-4 w-4 text-blue-600" />
@@ -127,7 +131,7 @@ export default function LandingPage() {
               </div>
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
                 <Phone className="h-4 w-4 text-amber-600" />
-                <span className="text-sm font-semibold">Gemini Live Voice AI</span>
+                <span className="text-sm font-semibold">AI Voice Agents</span>
               </div>
             </div>
 
@@ -339,7 +343,7 @@ export default function LandingPage() {
                 <Badge className="mb-4 bg-blue-100 text-blue-700 border-none">Global Data</Badge>
                 <h3 className="text-2xl font-bold mb-3">Precision Data</h3>
                 <p className="text-muted-foreground mb-6">
-                  500M+ verified contacts across 195 countries. 98% email accuracy.
+                  70M+ verified contacts across 195 countries. 98% email accuracy.
                   Weekly refresh. Multi-source verification.
                 </p>
                 <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
@@ -414,7 +418,7 @@ export default function LandingPage() {
                 step: "02",
                 icon: Search,
                 title: "Intelligence Activation",
-                description: "AI agents scan our 500M+ database, research accounts, verify facts, and match prospects to your problem framework.",
+                description: "AI agents scan our 70M+ database, research accounts, verify facts, and match prospects to your problem framework.",
                 deliverable: "Verified target accounts",
                 color: "indigo",
               },
@@ -490,7 +494,7 @@ export default function LandingPage() {
           {/* Stats Grid */}
           <div className="grid md:grid-cols-4 gap-6 mb-16">
             {[
-              { number: "500M+", label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", icon: Users },
+              { number: "70M+", label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", icon: Users },
               { number: "195+", label: "Countries Covered", sublabel: "True global reach for campaigns", icon: Globe },
               { number: "98%", label: "Email Accuracy", sublabel: "Real-time verification before send", icon: Target },
               { number: "Weekly", label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", icon: RefreshCw },
@@ -666,7 +670,7 @@ export default function LandingPage() {
                 icon: Database,
                 badge: "Data",
                 title: "B2B Data & Enrichment",
-                description: "Access our 500M+ verified contact database or enrich your existing data with our verification engine.",
+                description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.",
                 features: ["Custom list building", "Database enrichment", "Continuous hygiene"],
                 ideal: "Campaign fuel",
                 color: "cyan",
@@ -730,7 +734,7 @@ export default function LandingPage() {
               {
                 icon: Phone,
                 title: "Voice Agent",
-                subtitle: "Gemini Live",
+                subtitle: "Live Calling",
                 description: "Real-time conversational AI that makes actual phone calls. Natural conversation with live objection handling.",
                 capabilities: ["Gatekeeper navigation", "BANT qualification", "Real-time adaptation"],
                 color: "amber",
@@ -952,9 +956,9 @@ export default function LandingPage() {
           {/* Value Pills */}
           <div className="flex flex-wrap justify-center gap-3 mb-10">
             {[
-              "500M+ Verified Contacts",
+              "70M+ Verified Contacts",
               "98% Data Accuracy",
-              "Gemini Live Voice AI",
+              "AI Voice Agents",
               "Full-Service Delivery",
             ].map((pill, i) => (
               <div key={i} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/20">
@@ -984,29 +988,36 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="py-16 px-6 bg-slate-900 text-white">
         <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-12 mb-12">
+          <div className="grid md:grid-cols-5 gap-12 mb-12">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                <img
-                  src="/demangent-logo.png"
-                  alt="DemandGentic.ai"
-                  className="h-8 w-auto brightness-0 invert"
-                />
-                <span className="font-bold text-lg">DemandGentic.ai</span>
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 shrink-0">
+                  <div className="relative flex items-center justify-center">
+                    <span className="font-bold text-sm text-white tracking-tighter">DG</span>
+                    <Sparkles className="h-2 w-2 text-blue-400 absolute -top-1 -right-1.5" />
+                  </div>
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+                </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
                 The end of algorithmic noise. The era of agentic reasoning.
               </p>
-              <p className="text-slate-500 text-xs">
-                by Pivotal B2B
-              </p>
+              <div className="text-slate-500 text-xs space-y-1">
+                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
+                <p>Lewes, Delaware</p>
+                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
+                <p><a href="https://pivotal-b2b.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">pivotal-b2b.com</a></p>
+              </div>
             </div>
 
             <div>
               <h4 className="font-semibold mb-4">Platform</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="#" className="hover:text-white transition-colors">AI Agents</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Data & Intelligence</a></li>
+                <li><a href="#platform" className="hover:text-white transition-colors">AI Agents</a></li>
+                <li><a href="#data" className="hover:text-white transition-colors">Data & Intelligence</a></li>
                 <li><a href="#" className="hover:text-white transition-colors">Integrations</a></li>
                 <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
               </ul>
@@ -1015,33 +1026,41 @@ export default function LandingPage() {
             <div>
               <h4 className="font-semibold mb-4">Services</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="#" className="hover:text-white transition-colors">AI-Led ABM</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Content Demand</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">AI SDR</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Appointments</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Data Services</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">AI-Led ABM</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Content Demand</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">AI SDR</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Appointments</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Data Services</a></li>
               </ul>
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Company</h4>
+              <h4 className="font-semibold mb-4">Resources</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="#" className="hover:text-white transition-colors">About Us</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Our Story</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Contact</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
+                <li><a href="/resources-centre" className="hover:text-white transition-colors">Resources Center</a></li>
+                <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
+                <li><a href="/about" className="hover:text-white transition-colors">Our Story</a></li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-4">Get Started</h4>
+              <ul className="space-y-2 text-slate-400 text-sm">
+                <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
+                <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
+                <li><a href="mailto:contact@pivotal-b2b.com" className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2024 DemandGentic.ai by Pivotal B2B. All rights reserved.
+              © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
-              <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-              <a href="#" className="hover:text-white transition-colors">GDPR</a>
+              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
+              <a href="/gdpr" className="hover:text-white transition-colors">GDPR</a>
             </div>
           </div>
         </div>
