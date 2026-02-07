@@ -1099,10 +1099,16 @@ export class TelnyxAiBridge extends EventEmitter {
         
         // Then process disposition through engine (creates leads, updates queue, handles suppression)
         try {
+          // Pass transcript to disposition engine so it can be stored on the lead
+          const cleanTranscript = (typeof transcript === 'string' ? transcript : JSON.stringify(transcript)) || "";
+          
           const dispositionResult = await processDisposition(
             call.callAttemptId,
             canonicalDisposition,
-            'telnyx_ai_bridge'
+            'telnyx_ai_bridge',
+            {
+                transcript: cleanTranscript
+            }
           );
           
           if (dispositionResult.success) {
@@ -1351,9 +1357,14 @@ export class TelnyxAiBridge extends EventEmitter {
     const d = disposition.toLowerCase();
 
     // Qualified outcomes - create lead
-    if (d === "qualified" || d === "handoff" || d === "meeting_booked" || d === "callback_requested" || d === "callback") {
+    if (d === "qualified" || d === "qualified_lead" || d === "handoff" || d === "meeting_booked") {
       console.log(`[TelnyxAiBridge] ✅ Mapping "${disposition}" to qualified_lead`);
       return "qualified_lead";
+    }
+
+    // Callback requested - schedule retry (needs review or standard retry)
+    if (d === "callback_requested" || d === "callback") {
+      return "needs_review"; 
     }
 
     // Voicemail - schedule retry

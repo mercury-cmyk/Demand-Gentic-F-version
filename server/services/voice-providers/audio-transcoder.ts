@@ -122,9 +122,23 @@ export type AudioFormatType = 'g711_ulaw' | 'g711_alaw' | 'pcm_8k' | 'pcm_16k' |
 
 /**
  * Detect G.711 format from phone number or raw string
+ * 
+ * UPDATED: Prioritizes UK/EU country codes as 'alaw' because Telnyx/carriers 
+ * sometimes report 'PCMU' default but the actual line requires A-law to avoid noise.
  */
 export function detectG711Format(phoneNumber?: string, rawFormat?: string): G711Format {
-  // 1. Explicit format check
+  // 1. PRIORITY: Country-based hard overrides
+  // UK (+44) and Germany (+49) are strictly A-law. 
+  // Even if the signaling says PCMU, sending PCMU leads to static/noise.
+  if (phoneNumber) {
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    if (cleanNumber.startsWith('44')) return 'alaw'; // UK
+    if (cleanNumber.startsWith('49')) return 'alaw'; // Germany
+    if (cleanNumber.startsWith('33')) return 'alaw'; // France
+    if (cleanNumber.startsWith('61')) return 'alaw'; // Australia
+  }
+
+  // 2. Explicit format check (if not overridden by country)
   if (rawFormat) {
     const normalized = rawFormat.toLowerCase();
     if (normalized.includes('alaw') || normalized.includes('pcma') || normalized.includes('g711a')) {
@@ -135,12 +149,10 @@ export function detectG711Format(phoneNumber?: string, rawFormat?: string): G711
     }
   }
 
-  // 2. Phone number based heuristic
-  // UK (+44), Europe (+3, +4), and most of the world use A-law (PCMA)
+  // 3. Fallback phone number based heuristic for other regions
   // North America (+1) and Japan (+81) use mu-law (PCMU)
   if (phoneNumber) {
     const cleanNumber = phoneNumber.replace(/\D/g, '');
-    if (cleanNumber.startsWith('44')) return 'alaw'; // UK
     if (cleanNumber.startsWith('1')) return 'ulaw'; // US/Canada
     
     // Most international calls outside North America use A-law
@@ -354,20 +366,22 @@ function generateLowPassFilter(numTaps: number, cutoffFreq: number): number[] {
 }
 
 // Pre-computed filter for 24kHz → 8kHz (3:1 ratio)
-// Input Nyquist = 12kHz, Output Nyquist = 4kHz
-// Cutoff at 3.2kHz (normalized: 3.2/12 = 0.267)
-// REDUCED to 15 taps to minimize ringing artifacts that cause "noise" on voice
-const FILTER_24K_TO_8K = generateLowPassFilter(15, 0.26); // 15 taps, cutoff at ~3.2kHz
+// Input Nyquist = 12kHz, Target Nyquist = 4kHz
+// Standard filter: Cutoff at 3.4kHz (0.28)
+const FILTER_24K_TO_8K = generateLowPassFilter(21, 0.28); 
 
 // Pre-computed filter for 16kHz → 8kHz (2:1 ratio)
-// Input Nyquist = 8kHz, Output Nyquist = 4kHz
-// Cutoff at 3.5kHz (normalized: 3.5/8 = 0.44)
-const FILTER_16K_TO_8K = generateLowPassFilter(11, 0.42); // 11 taps, cutoff at ~3.4kHz
+// Input Nyquist = 8kHz, Target Nyquist = 4kHz
+// Standard filter: Cutoff at 3.5kHz (0.44)
+const FILTER_16K_TO_8K = generateLowPassFilter(15, 0.44);
 
-// Gentler filter for A-law regions (UK, Europe) - fewer taps = less ringing
-// A-law has different quantization characteristics that make filter ringing more audible
-const FILTER_24K_TO_8K_ALAW = generateLowPassFilter(9, 0.30); // 9 taps, slightly higher cutoff
-const FILTER_16K_TO_8K_ALAW = generateLowPassFilter(7, 0.45); // 7 taps, gentler filtering
+// A-LAW OPTIMIZATION (Fixed for Anti-aliasing):
+// Issue: Previous "gentle" filter (cutoff 0.38 = 4.5kHz) was ABOVE the Nyquist limit (4kHz),
+// causing severe aliasing noise. 
+// Fix: STRICTLY limit bandwidth to 3.2kHz (standard toll quality) to prevent aliasing.
+// Using 13 taps gives a decent compromise between ringing and rollback.
+const FILTER_24K_TO_8K_ALAW = generateLowPassFilter(13, 0.26); // Cutoff ~3.1kHz < 4kHz
+const FILTER_16K_TO_8K_ALAW = generateLowPassFilter(9, 0.40); // Cutoff ~3.2kHz < 4kHz
 
 /**
  * Apply low-pass FIR filter for anti-aliasing before downsampling.
@@ -637,12 +651,14 @@ function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const isAlaw = format === 'alaw';
   
-  // Step 1: Remove DC offset first (prevents clicking/pops at chunk boundaries)
-  const dcCorrected = removeDcOffset(pcmBuffer);
+  // Step 1: Skip DC offset removal for Gemini/AI output
+  // AI synthetic audio has 0 DC offset. Calculating chunk-based mean
+  // introduces discontinuities (clicking/buzzing) at chunk boundaries.
+  // const dcCorrected = removeDcOffset(pcmBuffer); 
 
   // Step 2: For A-law (UK), skip normalization - it can amplify quantization noise
   // For µ-law (US), normalize to prevent clipping
-  const normalized = isAlaw ? dcCorrected : normalizeAudio(dcCorrected, 0.92);
+  const normalized = isAlaw ? pcmBuffer : normalizeAudio(pcmBuffer, 0.92);
 
   // Step 3: Apply anti-aliasing FIR filter before downsampling
   // Use gentler A-law filter for UK calls to reduce ringing/noise artifacts
@@ -660,7 +676,7 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
  * Alternative if Gemini sends 16kHz output
  *
  * AUDIO QUALITY FIXES:
- * 1. Remove DC offset (prevents clicking at chunk boundaries)
+ * 1. Skip DC offset (cause of buzzing/clicking on digital sources)
  * 2. Normalize only if needed to prevent clipping (skip for A-law)
  * 3. Downsample with anti-aliasing filter (gentler for A-law)
  * 4. Encode to G.711
@@ -668,11 +684,11 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const isAlaw = format === 'alaw';
   
-  // Step 1: Remove DC offset
-  const dcCorrected = removeDcOffset(pcmBuffer);
+  // Step 1: Skip DC offset for AI audio
+  // const dcCorrected = removeDcOffset(pcmBuffer);
 
   // Step 2: Skip normalization for A-law (UK) to avoid amplifying quantization noise
-  const normalizedInput = isAlaw ? dcCorrected : normalizeAudio(dcCorrected, 0.9);
+  const normalizedInput = isAlaw ? pcmBuffer : normalizeAudio(pcmBuffer, 0.9);
 
   // Step 3: Downsample 16kHz to 8kHz with anti-aliasing (gentler filter for A-law)
   const pcm8k = resamplePcmWithFormat(normalizedInput, 16000, 8000, isAlaw);

@@ -297,22 +297,33 @@ export function determineSmartDisposition(
     return result;
   }
 
-  // 2. Check for explicit negative signals
-  if (analysis.negativeSignals.length > 0) {
-    result.suggestedDisposition = 'not_interested';
-    result.confidence = 0.85;
-    result.reasoning = `User expressed disinterest: ${analysis.negativeSignals.join(', ')}`;
-    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail';
+  // 2. Check for MIXED signals (both positive and negative)
+  // This handles complex cases like "I'm interested but busy" or "Send info but stop calling"
+  if (analysis.positiveSignals.length > 0 && analysis.negativeSignals.length > 0) {
+    result.suggestedDisposition = 'needs_review';
+    result.confidence = 0.6;
+    result.reasoning = `Mixed signals detected: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - needs human review`;
+    result.shouldOverride = currentDisposition !== 'needs_review';
     return result;
   }
 
   // 3. Check for positive signals - potential qualified lead
+  // MOVED UP: Positive signals should take precedence over simple negative keywords if no conflict
   if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
     result.suggestedDisposition = 'qualified_lead';
     result.confidence = 0.75 + (analysis.positiveSignals.length * 0.05);
     result.reasoning = `Positive signals detected: ${analysis.positiveSignals.join(', ')}`;
     result.metSuccessIndicators = analysis.positiveSignals;
     result.shouldOverride = currentDisposition !== 'qualified_lead';
+    return result;
+  }
+
+  // 4. Check for explicit negative signals
+  if (analysis.negativeSignals.length > 0) {
+    result.suggestedDisposition = 'not_interested';
+    result.confidence = 0.85;
+    result.reasoning = `User expressed disinterest: ${analysis.negativeSignals.join(', ')}`;
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
     return result;
   }
 

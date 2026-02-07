@@ -26,6 +26,9 @@ const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
 const DEEPGRAM_MODEL = process.env.DEEPGRAM_MODEL || 'nova-2-phonecall'; // Optimized for phone calls
 const DEEPGRAM_LANGUAGE = process.env.DEEPGRAM_LANGUAGE || 'en-US';
 
+// Keepalive interval (Deepgram times out after ~10 seconds of silence)
+const KEEPALIVE_INTERVAL_MS = 8000; // Send keepalive every 8 seconds
+
 // Log startup status
 console.log(`${LOG_PREFIX} ============================================`);
 console.log(`${LOG_PREFIX} Deepgram Real-Time Transcription Service`);
@@ -71,6 +74,10 @@ export interface DeepgramTranscriptionSession {
   isActive: boolean;
   startedAt: number;
   lastActivityAt: number;
+
+  // Keepalive timers to prevent Deepgram timeout during silence
+  inboundKeepaliveTimer?: NodeJS.Timeout;
+  outboundKeepaliveTimer?: NodeJS.Timeout;
 
   // Callbacks
   onTranscript?: (segment: TranscriptSegment) => void;
@@ -128,6 +135,25 @@ function createDeepgramConnection(
 
   ws.on('open', () => {
     console.log(`${LOG_PREFIX} [${session.callId}] ${channel} channel connected`);
+
+    // Start keepalive timer to prevent timeout during silence
+    const keepaliveTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          // Send KeepAlive message per Deepgram docs
+          ws.send(JSON.stringify({ type: 'KeepAlive' }));
+        } catch (e) {
+          // Ignore send errors
+        }
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+
+    // Store timer reference for cleanup
+    if (channel === 'inbound') {
+      session.inboundKeepaliveTimer = keepaliveTimer;
+    } else {
+      session.outboundKeepaliveTimer = keepaliveTimer;
+    }
   });
 
   ws.on('message', (data: Buffer) => {
@@ -322,6 +348,16 @@ export function stopTranscriptionSession(callId: string): {
   }
 
   session.isActive = false;
+
+  // Clear keepalive timers
+  if (session.inboundKeepaliveTimer) {
+    clearInterval(session.inboundKeepaliveTimer);
+    session.inboundKeepaliveTimer = undefined;
+  }
+  if (session.outboundKeepaliveTimer) {
+    clearInterval(session.outboundKeepaliveTimer);
+    session.outboundKeepaliveTimer = undefined;
+  }
 
   // Close WebSocket connections gracefully
   if (session.inboundWs) {

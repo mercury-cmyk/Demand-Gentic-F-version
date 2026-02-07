@@ -255,8 +255,12 @@ function mapToCanonicalDisposition(aiDisposition: string): CanonicalDisposition 
   if (normalized === 'wrong_number' || normalized === 'invalid_number' || normalized === 'disconnected' || normalized === 'invalid_data') {
     return 'invalid_data';
   }
-  // Callback requested and gatekeeper block - treat as no_answer for retry
-  if (normalized === 'callback_requested' || normalized === 'call_back' || normalized === 'gatekeeper_block' || normalized === 'gatekeeper' || normalized === 'needs_review') {
+  // Callback requested - preserve as canonical disposition (prospect wants specific callback)
+  if (normalized === 'callback_requested' || normalized === 'call_back' || normalized === 'callback') {
+    return 'callback_requested'; // Will schedule callback at requested time
+  }
+  // Gatekeeper block and needs_review - treat as no_answer for retry
+  if (normalized === 'gatekeeper_block' || normalized === 'gatekeeper' || normalized === 'needs_review') {
     return 'no_answer'; // Will be re-queued for retry
   }
 

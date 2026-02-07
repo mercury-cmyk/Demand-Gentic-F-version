@@ -71,6 +71,13 @@ interface DispositionResult {
   queueState?: CampaignContactState;
 }
 
+// Optional call data from source system
+export interface DispositionCallData {
+  transcript?: string;
+  recordingUrl?: string;
+  structuredTranscript?: any;
+}
+
 /**
  * Process a disposition for a call attempt
  * This is the SINGLE entry point for all disposition processing
@@ -78,7 +85,8 @@ interface DispositionResult {
 export async function processDisposition(
   callAttemptId: string,
   disposition: CanonicalDisposition,
-  processedBy: string = 'system'
+  processedBy: string = 'system',
+  callData?: DispositionCallData
 ): Promise<DispositionResult> {
   const result: DispositionResult = {
     success: false,
@@ -123,7 +131,7 @@ export async function processDisposition(
     // Process based on disposition type
     switch (disposition) {
       case 'qualified_lead':
-        await processQualifiedLead(callAttempt, rules, result);
+        await processQualifiedLead(callAttempt, rules, result, callData);
         break;
       case 'not_interested':
         await processNotInterested(callAttempt, result);
@@ -142,6 +150,9 @@ export async function processDisposition(
         break;
       case 'needs_review':
         await processNeedsReview(callAttempt, rules, result);
+        break;
+      case 'callback_requested':
+        await processCallbackRequested(callAttempt, rules, result);
         break;
       default:
         result.errors.push(`Unknown disposition: ${disposition}`);
@@ -227,7 +238,8 @@ export async function processDisposition(
 async function processQualifiedLead(
   callAttempt: typeof dialerCallAttempts.$inferSelect,
   rules: CampaignRules,
-  result: DispositionResult
+  result: DispositionResult,
+  callData?: DispositionCallData
 ): Promise<void> {
   // QUALITY GATE: Flag short calls for review but don't prevent lead creation
   // All qualified dispositions should create leads regardless of duration.
@@ -286,6 +298,11 @@ async function processQualifiedLead(
   const agentSource = callAttempt.agentType === 'ai' 
     ? `Source: ai_agent | Virtual Agent: ${callAttempt.virtualAgentId || 'unknown'}`
     : `Source: human_agent | Agent: ${callAttempt.humanAgentId || 'unknown'}`;
+    
+  // Use passed data or fallback to callAttempt data
+  const recordingUrl = callData?.recordingUrl || callAttempt.recordingUrl;
+  const transcript = callData?.transcript || undefined;
+  const structuredTranscript = callData?.structuredTranscript || undefined;
 
   // Create lead record with contact info and source tracking
   const [newLead] = await db
@@ -301,8 +318,11 @@ async function processQualifiedLead(
       qaDecision: qaDecision,
       agentId: callAttempt.humanAgentId,
       dialedNumber: callAttempt.phoneDialed,
-      recordingUrl: callAttempt.recordingUrl,
+      recordingUrl: recordingUrl,
       callDuration: callAttempt.callDurationSeconds,
+      transcript: transcript,
+      structuredTranscript: structuredTranscript,
+      telnyxCallId: callAttempt.telnyxCallControlId, // This might be needed for recording lookups
       notes: agentSource, // Track agent type and ID for full auditability
     })
     .returning({ id: leads.id });
@@ -329,7 +349,7 @@ async function processQualifiedLead(
           callDuration: callDuration,
           qaStatus: qaStatus,
           isShortDuration: isShortDurationCall,
-          recordingUrl: callAttempt.recordingUrl,
+          recordingUrl: recordingUrl,
           phoneDialed: callAttempt.phoneDialed,
         },
         createdBy: callAttempt.humanAgentId || null,
@@ -354,15 +374,16 @@ async function processQualifiedLead(
 
   // AUTO-TRIGGER: GCS Storage, Transcription and Quality Analysis
   // Run in background (non-blocking) to not delay disposition processing
-  if (result.leadId && callAttempt.recordingUrl) {
+  if (result.leadId) {
     const leadIdForAsync = result.leadId;
-    const recordingUrlForAsync = callAttempt.recordingUrl;
+    // Prefer the passed recording URL, fall back to callAttempt
+    const recordingUrlForAsync = recordingUrl;
 
     setImmediate(async () => {
       try {
         // Step 1: Download recording to GCS IMMEDIATELY to prevent URL expiration
         // Telnyx presigned URLs expire in ~10 minutes
-        if (isRecordingStorageEnabled()) {
+        if (isRecordingStorageEnabled() && recordingUrlForAsync) {
           console.log(`[DispositionEngine] 📥 Downloading recording to GCS for lead ${leadIdForAsync}...`);
           const s3Key = await downloadAndStoreRecording(recordingUrlForAsync, leadIdForAsync);
 
@@ -376,14 +397,25 @@ async function processQualifiedLead(
           }
         }
 
-        // Step 2: Transcribe the call
-        console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
-        const transcribed = await transcribeLeadCall(leadIdForAsync);
-
-        if (transcribed) {
-          console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
-          await analyzeCall(leadIdForAsync);
-          console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
+        // Step 2: Transcribe the call IF NOT PROVIDED
+        // If we already have the transcript from the live session, we might want to skip this
+        // or regenerate it for higher quality?
+        // Let's rely on the live transcript if available, otherwise transcribe
+        if (!transcript) {
+            console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
+            const transcribed = await transcribeLeadCall(leadIdForAsync);
+            
+            if (transcribed) {
+                console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
+                await analyzeCall(leadIdForAsync);
+                console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
+            }
+        } else {
+            // If we have transcript, we can still run analysis
+            console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using live transcript)`);
+            // We need to ensure analyzeCall can work with existing transcript
+            // calling analyzeCall will likely re-read the lead and find the transcript
+            await analyzeCall(leadIdForAsync);
         }
       } catch (err) {
         console.error(`[DispositionEngine] Failed to auto-process lead ${leadIdForAsync}:`, err);
@@ -831,6 +863,120 @@ async function processNeedsReview(
 }
 
 /**
+ * CALLBACK_REQUESTED processing
+ * - Create a lead record (callback requests indicate interest!)
+ * - Schedule callback at the requested time if provided
+ * - Flag for human agent follow-up
+ * - Route to QA queue for callback scheduling verification
+ */
+async function processCallbackRequested(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult
+): Promise<void> {
+  const callDuration = callAttempt.callDurationSeconds || 0;
+
+  console.log(`[DispositionEngine] 📞 CALLBACK REQUESTED: Contact ${callAttempt.contactId} | Duration: ${callDuration}s | Campaign: ${callAttempt.campaignId}`);
+
+  // Update campaign queue state - mark as done but flag for callback
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'done',
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push('Updated queue item to done (callback requested)');
+  }
+
+  // Fetch contact info for lead record
+  const [contact] = await db
+    .select({
+      fullName: contacts.fullName,
+      firstName: contacts.firstName,
+      lastName: contacts.lastName,
+      email: contacts.email,
+      companyName: accounts.name,
+    })
+    .from(contacts)
+    .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+    .where(eq(contacts.id, callAttempt.contactId))
+    .limit(1);
+
+  const contactName = contact?.fullName ||
+    (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` :
+     contact?.firstName || contact?.lastName || 'Unknown');
+
+  // Create lead record - callback requests indicate interest!
+  const agentSource = callAttempt.agentType === 'ai'
+    ? `Source: ai_agent | Virtual Agent: ${callAttempt.virtualAgentId || 'unknown'}`
+    : `Source: human_agent | Agent: ${callAttempt.humanAgentId || 'unknown'}`;
+
+  const [newLead] = await db
+    .insert(leads)
+    .values({
+      campaignId: callAttempt.campaignId,
+      contactId: callAttempt.contactId,
+      callAttemptId: callAttempt.id,
+      contactName: contactName,
+      contactEmail: contact?.email || undefined,
+      companyName: contact?.companyName || undefined,
+      qaStatus: 'new',
+      qaDecision: '📞 CALLBACK REQUESTED: Prospect asked to be called back. Schedule and confirm callback time.',
+      agentId: callAttempt.humanAgentId,
+      dialedNumber: callAttempt.phoneDialed,
+      recordingUrl: callAttempt.recordingUrl,
+      callDuration: callAttempt.callDurationSeconds,
+      notes: `${agentSource} | Callback requested`,
+    })
+    .returning({ id: leads.id });
+
+  if (newLead) {
+    result.leadId = newLead.id;
+    result.actions.push(`Created lead ${newLead.id} (callback requested)`);
+    console.log(`[DispositionEngine] ✅ CALLBACK LEAD CREATED: ${newLead.id} | Contact: ${contactName}`);
+
+    // Insert activity log entry
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'lead',
+        entityId: newLead.id,
+        eventType: 'lead_created',
+        payload: {
+          callAttemptId: callAttempt.id,
+          contactId: callAttempt.contactId,
+          campaignId: callAttempt.campaignId,
+          contactName: contactName,
+          callDuration: callDuration,
+          disposition: 'callback_requested',
+          recordingUrl: callAttempt.recordingUrl,
+        },
+        createdBy: callAttempt.humanAgentId || null,
+      });
+    } catch (logErr) {
+      console.error('[DispositionEngine] Failed to log callback lead_created activity:', logErr);
+    }
+  }
+
+  // Add to QC queue with high priority - callbacks need quick follow-up
+  await db.insert(qcWorkQueue).values({
+    callSessionId: callAttempt.callSessionId,
+    leadId: result.leadId,
+    campaignId: callAttempt.campaignId,
+    producerType: callAttempt.agentType,
+    status: 'pending',
+    priority: -1 // High priority - callbacks need immediate attention
+  });
+  result.actions.push('Added to QC queue (high priority - callback requested)');
+
+  result.queueState = 'qualified';
+}
+
+/**
  * Update dialer run statistics based on disposition
  */
 async function updateDialerRunStats(
@@ -860,7 +1006,8 @@ function dispositionToStatField(disposition: CanonicalDisposition): string {
     'voicemail': 'voicemails',
     'no_answer': 'no_answers',
     'invalid_data': 'invalid_data',
-    'needs_review': 'needs_review' // Track separately for reporting
+    'needs_review': 'needs_review',
+    'callback_requested': 'qualified_leads' // Callbacks count as qualified - they showed interest!
   };
   return mapping[disposition];
 }
@@ -876,7 +1023,8 @@ function dispositionToActionType(disposition: CanonicalDisposition): 'qc_review'
     'voicemail': 'recycle',
     'no_answer': 'recycle',
     'invalid_data': 'data_quality_flag',
-    'needs_review': 'recycle' // Quick retry for ambiguous calls
+    'needs_review': 'recycle',
+    'callback_requested': 'qc_review' // Route to QA for callback scheduling
   };
   return mapping[disposition];
 }
@@ -907,7 +1055,7 @@ async function logGovernanceAction(data: {
  * Validate that a disposition is one of the canonical values (includes needs_review)
  */
 export function isValidCanonicalDisposition(value: string): value is CanonicalDisposition {
-  return ['qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data', 'needs_review'].includes(value);
+  return ['qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data', 'needs_review', 'callback_requested'].includes(value);
 }
 
 /**
@@ -920,7 +1068,9 @@ export function getDispositionDescription(disposition: CanonicalDisposition): st
     'do_not_call': 'DNC request - adds to global DNC list',
     'voicemail': 'Left voicemail - schedules retry in 3-7 days',
     'no_answer': 'No answer - schedules retry in 3-7 days',
-    'invalid_data': 'Invalid data - marks phone as invalid'
+    'invalid_data': 'Invalid data - marks phone as invalid',
+    'needs_review': 'Needs human review - schedules quick retry',
+    'callback_requested': 'Callback requested - routes to QA for scheduling'
   };
   return descriptions[disposition];
 }
@@ -970,6 +1120,8 @@ function mapDispositionToDisconnectReason(disposition: string): 'completed' | 'h
   switch (disposition) {
     case 'qualified_lead':
     case 'not_interested':
+    case 'callback_requested': // Callback requests are successful calls
+    case 'needs_review':
       return 'completed';
     case 'do_not_call':
       return 'hangup';

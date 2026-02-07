@@ -7,14 +7,15 @@
  * Canonical values: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data, needs_review
  */
 
-export type CanonicalDisposition = 
+export type CanonicalDisposition =
   | 'qualified_lead'
   | 'not_interested'
   | 'do_not_call'
   | 'voicemail'
   | 'no_answer'
   | 'invalid_data'
-  | 'needs_review';
+  | 'needs_review'
+  | 'callback_requested';
 
 const CANONICAL_DISPOSITIONS = new Set<CanonicalDisposition>([
   'qualified_lead',
@@ -24,6 +25,7 @@ const CANONICAL_DISPOSITIONS = new Set<CanonicalDisposition>([
   'no_answer',
   'invalid_data',
   'needs_review',
+  'callback_requested',  // Prospect asked for specific callback time
 ]);
 
 /**
@@ -44,9 +46,15 @@ export function normalizeDisposition(rawDisposition: string | null | undefined):
     return d as CanonicalDisposition;
   }
   
+  // Callback requested - prospect wants to be called at a specific time
+  // Keep this separate from qualified_lead to preserve callback scheduling context
+  if (['callback', 'callback_requested', 'call_back', 'call_me_back'].includes(d)) {
+    return 'callback_requested';
+  }
+
   // Qualified outcomes - creates a lead
   if ([
-    'qualified', 'lead', 'meeting_booked', 'callback', 'callback_requested',
+    'qualified', 'lead', 'meeting_booked',
     'transfer_to_human', 'transferred', 'positive_intent', 'expressed_interest',
     'handoff', 'demo_scheduled', 'appointment_set'
   ].includes(d)) {

@@ -95,7 +95,7 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
     // Get recordings for this call (with retry)
     // We try both call_control_id and call_leg_id filters as they can be interchangeable depending on context
     let recordingsResponse = await fetchWithRetry(
-      `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${callControlId}`,
+      `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${encodeURIComponent(callControlId)}`,
       { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
     );
     
@@ -105,7 +105,7 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
         if (!recordingsResponse.ok || !dataClone.data || dataClone.data.length === 0) {
             console.log(`[Telnyx] No recordings found with call_control_id, trying call_leg_id: ${callControlId}`);
             recordingsResponse = await fetchWithRetry(
-                `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${callControlId}`,
+                `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${encodeURIComponent(callControlId)}`,
                 { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
             );
         }
