@@ -280,17 +280,15 @@ Be polite. Ask to connect. No details. Max 2 attempts. If refused, thank and end
 - "Mailbox is full" or "Cannot accept messages"
 - Any automated IVR without human transfer option
 
-### AI CALL SCREENING DETECTION (CRITICAL - TREAT AS VOICEMAIL):
-When you hear phrases like these, you are talking to an AI screening bot, NOT a human:
-- "Call Assist by Google" or "Google Call Screen" or "I'm screening calls"
-- "Before I try to connect you, can I ask what you're calling about?"
-- "Recording this call for the person you're trying to reach"
-- "The person you're calling cannot take your call right now"
-- Any AI assistant or bot screening the call
+### AI CALL SCREENING DETECTION (ENGAGE):
+When you check for AI screening bots (Google Call Screen, etc):
+- If the screener asks for your name/reason ("State your name and reason for calling"):
+  1. State your Name and Company clearly.
+  2. State a ONE SENTENCE reason for the call (e.g. "Calling regarding [Project/Context]").
+  3. Wait for the human to answer.
+- Do NOT hang up. Treat this as a gatekeeper that you must satisfy to reach the human.
 
-**DO NOT pitch or have a conversation with AI call screening.** Say "I'll call back later, thank you" and call detect_voicemail_and_hangup. The actual person never answered.
-
-**DO NOT attempt to leave a message.** Call detect_voicemail_and_hangup immediately and hangup.
+**EXCEPTION**: Only call detect_voicemail_and_hangup if the screener explicitly rejects you or asks you to stop calling.
 
 ### Call Concluded Detection - End gracefully when:
 - Prospect says "goodbye", "thanks, bye", "have a good day"

@@ -16,7 +16,8 @@ import {
   dialerRuns,
   virtualAgents
 } from "@shared/schema";
-import { eq, and, gte, lte, inArray, sql, desc, isNotNull, or } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, sql, desc, isNotNull, or, count } from "drizzle-orm";
+import { unionAll } from "drizzle-orm/pg-core";
 import { requireAuth, requireRole } from "../auth";
 
 /**
@@ -771,7 +772,20 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       ) : null
     ].filter(Boolean);
 
-    const legacyCalls = await db
+    // Count legacy
+    const legacyCountPromise = db
+      .select({ count: count() })
+      .from(callSessions)
+      .innerJoin(callJobs, eq(callSessions.callJobId, callJobs.id))
+      .innerJoin(campaigns, eq(callJobs.campaignId, campaigns.id))
+      .innerJoin(contacts, eq(callJobs.contactId, contacts.id))
+      .innerJoin(accounts, eq(callJobs.accountId, accounts.id))
+      .leftJoin(users, eq(callJobs.agentId, users.id))
+      .leftJoin(callDispositions, eq(callSessions.id, callDispositions.callSessionId))
+      .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
+      .where(legacyConditions.length > 0 ? and(...legacyConditions) : undefined);
+
+    const legacyQuery = db
       .select({
         id: callSessions.id,
         source: sql<string>`'legacy'`,
@@ -801,8 +815,7 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       .leftJoin(users, eq(callJobs.agentId, users.id))
       .leftJoin(callDispositions, eq(callSessions.id, callDispositions.callSessionId))
       .leftJoin(dispositions, eq(callDispositions.dispositionId, dispositions.id))
-      .where(legacyConditions.length > 0 ? and(...legacyConditions) : undefined)
-      .orderBy(desc(callSessions.startedAt));
+      .where(legacyConditions.length > 0 ? and(...legacyConditions) : undefined);
 
     // ========== DIALER CALL ATTEMPTS ==========
     const dialerConditions: any[] = [];
@@ -826,7 +839,18 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       dialerConditions.push(inArray(dialerCallAttempts.disposition, canonicalDispositions));
     }
 
-    const dialerCalls = await db
+    // Count dialer
+    const dialerCountPromise = db
+      .select({ count: count() })
+      .from(dialerCallAttempts)
+      .innerJoin(campaigns, eq(dialerCallAttempts.campaignId, campaigns.id))
+      .innerJoin(contacts, eq(dialerCallAttempts.contactId, contacts.id))
+      .innerJoin(accounts, eq(contacts.accountId, accounts.id))
+      .leftJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
+      .leftJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
+      .where(dialerConditions.length > 0 ? and(...dialerConditions) : undefined);
+
+    const dialerQuery = db
       .select({
         id: dialerCallAttempts.id,
         source: sql<string>`'dialer'`,
@@ -854,25 +878,26 @@ router.get('/details', requireAuth, async (req: Request, res: Response) => {
       .innerJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(users, eq(dialerCallAttempts.humanAgentId, users.id))
       .leftJoin(virtualAgents, eq(dialerCallAttempts.virtualAgentId, virtualAgents.id))
-      .where(dialerConditions.length > 0 ? and(...dialerConditions) : undefined)
-      .orderBy(desc(dialerCallAttempts.createdAt));
+      .where(dialerConditions.length > 0 ? and(...dialerConditions) : undefined);
 
-    // ========== MERGE AND SORT ==========
-    const allCalls = [...legacyCalls, ...dialerCalls]
-      .map(call => ({
-        ...call,
-        // Normalize disposition display
-        disposition: DISPOSITION_DISPLAY_MAP[call.disposition || '']?.label || call.disposition || 'Unknown',
-      }))
-      .sort((a, b) => {
-        const dateA = new Date(a.startTime || 0).getTime();
-        const dateB = new Date(b.startTime || 0).getTime();
-        return dateB - dateA;
-      });
+    // Perform queries
+    // Use unionAll to combine without fetching all, then order and paginate in DB
+    const [legacyCount, dialerCount, allCalls] = await Promise.all([
+      legacyCountPromise,
+      dialerCountPromise,
+      unionAll(legacyQuery, dialerQuery)
+        .orderBy(desc(sql`"startTime"`)) // Must match the property name in select object, quoted for case sensitivity
+        .limit(limitNum)
+        .offset(offsetNum)
+    ]);
 
-    // Apply pagination to merged results
-    const total = allCalls.length;
-    const paginatedCalls = allCalls.slice(offsetNum, offsetNum + limitNum);
+    const paginatedCalls = allCalls.map(call => ({
+      ...call,
+      // Normalize disposition display
+      disposition: DISPOSITION_DISPLAY_MAP[call.disposition || '']?.label || call.disposition || 'Unknown',
+    }));
+
+    const total = (legacyCount[0]?.count || 0) + (dialerCount[0]?.count || 0);
 
     res.json({
       calls: paginatedCalls,

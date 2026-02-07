@@ -313,6 +313,18 @@ export const pipelineOpportunityStatusEnum = pgEnum('pipeline_opportunity_status
   'on_hold'
 ]);
 
+// Pipeline Account Buyer Journey Stages
+export const pipelineAccountStageEnum = pgEnum('pipeline_account_stage', [
+  'unassigned',      // Not yet assigned to AE
+  'assigned',        // Assigned to AE, awaiting outreach
+  'outreach',        // AE initiating contact
+  'engaged',         // Prospect responding/meeting scheduled
+  'qualifying',      // In active qualification
+  'qualified',       // Qualified, ready for opportunity creation
+  'disqualified',    // Not a fit
+  'on_hold'          // Paused for later
+]);
+
 // Intelligent Sales System Enums
 export const dealActivityTypeEnum = pgEnum('deal_activity_type', [
   'email_received',
@@ -8161,6 +8173,103 @@ export const pipelineOpportunities = pgTable("pipeline_opportunities", {
 // export const pipelineOpportunitiesPipelineIdx = index("pipeline_opportunities_pipeline_idx").on(pipelineOpportunities.pipelineId);
 // export const pipelineOpportunitiesAccountIdx = index("pipeline_opportunities_account_idx").on(pipelineOpportunities.accountId);
 // export const pipelineOpportunitiesOwnerIdx = index("pipeline_opportunities_owner_idx").on(pipelineOpportunities.ownerId);
+
+// ============================================================================
+// PIPELINE ACCOUNTS - TOP OF FUNNEL MANAGEMENT
+// ============================================================================
+
+/**
+ * Pipeline Accounts - Links accounts to pipelines for top-of-funnel management
+ * Enables batch assignment to AEs and buyer journey tracking before opportunity creation
+ */
+export const pipelineAccounts = pgTable("pipeline_accounts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }),
+  pipelineId: varchar("pipeline_id", { length: 36 })
+    .notNull()
+    .references(() => pipelines.id, { onDelete: 'cascade' }),
+  accountId: varchar("account_id", { length: 36 })
+    .notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+
+  // AE Assignment
+  assignedAeId: varchar("assigned_ae_id", { length: 36 })
+    .references(() => users.id, { onDelete: 'set null' }),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }),
+  assignedBy: varchar("assigned_by", { length: 36 })
+    .references(() => users.id, { onDelete: 'set null' }),
+
+  // Buyer Journey Stage
+  journeyStage: pipelineAccountStageEnum("journey_stage").default('unassigned').notNull(),
+  stageChangedAt: timestamp("stage_changed_at", { withTimezone: true }),
+
+  // AI Scoring (Human-Led, AI-Powered)
+  priorityScore: integer("priority_score").default(0), // 0-100, AI-calculated priority
+  readinessScore: integer("readiness_score").default(0), // 0-100, AI-calculated readiness
+  aiRecommendation: text("ai_recommendation"), // AI suggestion for next action
+  aiRecommendedAeId: varchar("ai_recommended_ae_id", { length: 36 })
+    .references(() => users.id, { onDelete: 'set null' }),
+  aiRecommendationReason: text("ai_recommendation_reason"),
+
+  // Qualification Notes
+  qualificationNotes: text("qualification_notes"),
+  disqualificationReason: text("disqualification_reason"),
+
+  // Tracking
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  touchpointCount: integer("touchpoint_count").default(0),
+
+  // Converted opportunity reference
+  convertedOpportunityId: varchar("converted_opportunity_id", { length: 36 })
+    .references(() => pipelineOpportunities.id, { onDelete: 'set null' }),
+  convertedAt: timestamp("converted_at", { withTimezone: true }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pipelineIdx: index("pipeline_accounts_pipeline_idx").on(table.pipelineId),
+  accountIdx: index("pipeline_accounts_account_idx").on(table.accountId),
+  aeIdx: index("pipeline_accounts_ae_idx").on(table.assignedAeId),
+  stageIdx: index("pipeline_accounts_stage_idx").on(table.journeyStage),
+  priorityIdx: index("pipeline_accounts_priority_idx").on(table.priorityScore.desc()),
+  // Unique constraint: one account per pipeline
+  uniqueAccountPipeline: uniqueIndex("pipeline_accounts_unique_idx").on(table.pipelineId, table.accountId),
+}));
+
+/**
+ * AE Assignment Batches - Track batch assignments for audit and analytics
+ * Records who assigned which accounts to which AEs and the method used
+ */
+export const aeAssignmentBatches = pgTable("ae_assignment_batches", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }),
+  pipelineId: varchar("pipeline_id", { length: 36 })
+    .notNull()
+    .references(() => pipelines.id, { onDelete: 'cascade' }),
+
+  // Who assigned
+  assignedBy: varchar("assigned_by", { length: 36 })
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }).defaultNow().notNull(),
+
+  // Assignment details
+  assignmentMethod: varchar("assignment_method", { length: 50 }).notNull(), // 'manual', 'ai_recommended', 'round_robin'
+  accountCount: integer("account_count").notNull(),
+  aeAssignments: jsonb("ae_assignments")
+    .$type<Array<{ aeId: string; aeName?: string; accountIds: string[]; count: number }>>()
+    .notNull(),
+
+  // AI context (if AI-assisted)
+  aiAssisted: boolean("ai_assisted").default(false).notNull(),
+  aiReasoningSummary: text("ai_reasoning_summary"),
+
+  notes: text("notes"),
+}, (table) => ({
+  pipelineIdx: index("ae_assignment_batches_pipeline_idx").on(table.pipelineId),
+  assignedByIdx: index("ae_assignment_batches_assigned_by_idx").on(table.assignedBy),
+  assignedAtIdx: index("ae_assignment_batches_assigned_at_idx").on(table.assignedAt.desc()),
+}));
 
 // ============================================================================
 // INTELLIGENT SALES SYSTEM TABLES

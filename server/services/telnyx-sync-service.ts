@@ -353,7 +353,9 @@ export async function getTelnyxRecordingsForDashboard(options: {
   pagination: { total: number; page: number; limit: number; totalPages: number };
 }> {
   const {
-    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Default: last 30 days
+    // Default: last 1 hour - Telnyx presigned URLs expire after 10 minutes
+    // so older recordings won't have valid download URLs anyway
+    startDate = new Date(Date.now() - 60 * 60 * 1000), // Default: last 1 hour
     endDate = new Date(),
     phoneNumber,
     callId,

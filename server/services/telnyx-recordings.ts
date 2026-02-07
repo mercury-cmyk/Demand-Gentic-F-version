@@ -261,9 +261,9 @@ export async function syncMissingLeadRecordings(limit: number = 50): Promise<{
 
   try {
     // Find leads with call attempts but no recording URL
-    // Created within last 7 days to keep the search window reasonable
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    // Created within last 24 hours to keep the search window reasonable
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
     const leadsWithoutRecordings = await db
       .select({
@@ -277,7 +277,7 @@ export async function syncMissingLeadRecordings(limit: number = 50): Promise<{
       .where(
         and(
           isNull(leads.recordingUrl),
-          gte(leads.createdAt, sevenDaysAgo)
+          gte(leads.createdAt, oneDayAgo)
         )
       )
       .limit(limit);

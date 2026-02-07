@@ -21,6 +21,10 @@ import {
   ensureTranscript,
   processMissingTranscripts,
 } from '../services/transcription-reliability';
+import {
+  getTranscriptionHealthMetrics,
+  getRecentFailures,
+} from '../services/transcription-monitor';
 
 const router = Router();
 
@@ -334,6 +338,58 @@ router.get('/full/:callAttemptId', requireAuth, async (req: Request, res: Respon
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get transcript',
+    });
+  }
+});
+
+/**
+ * GET /api/transcription/health
+ * Get transcription health metrics and alerts
+ */
+router.get('/health', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const health = getTranscriptionHealthMetrics();
+    const recentFailures = getRecentFailures(10);
+
+    // Also get overall stats from the last 24 hours
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentStats = await db
+      .select({
+        totalCalls: sql<number>`count(*)`,
+        withTranscript: sql<number>`count(*) filter (where full_transcript is not null or ai_transcript is not null)`,
+        withRecording: sql<number>`count(*) filter (where recording_url is not null)`,
+      })
+      .from(dialerCallAttempts)
+      .where(sql`${dialerCallAttempts.createdAt} > ${oneDayAgo}`);
+
+    const stats24h = recentStats[0] || { totalCalls: 0, withTranscript: 0, withRecording: 0 };
+
+    res.json({
+      success: true,
+      realtimeHealth: {
+        ...health,
+        realtimeSuccessRate: `${(health.realtimeSuccessRate * 100).toFixed(1)}%`,
+        overallSuccessRate: `${(health.overallSuccessRate * 100).toFixed(1)}%`,
+      },
+      last24Hours: {
+        totalCalls: Number(stats24h.totalCalls) || 0,
+        callsWithTranscript: Number(stats24h.withTranscript) || 0,
+        callsWithRecording: Number(stats24h.withRecording) || 0,
+        transcriptionRate: stats24h.totalCalls > 0
+          ? `${((Number(stats24h.withTranscript) / Number(stats24h.totalCalls)) * 100).toFixed(1)}%`
+          : 'N/A',
+      },
+      recentFailures: recentFailures.map(f => ({
+        callId: f.callId,
+        callAttemptId: f.callAttemptId,
+        timestamp: new Date(f.timestamp).toISOString(),
+      })),
+    });
+  } catch (error: any) {
+    console.error('[Transcription API] Error getting health metrics:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to get health metrics',
     });
   }
 });

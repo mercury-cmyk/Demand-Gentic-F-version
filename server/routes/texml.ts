@@ -15,7 +15,13 @@ const router = Router();
  * to avoid URL length limits that can cause ngrok/proxy WebSocket upgrade failures.
  */
 const aiCallHandler = async (req: any, res: any) => {
-  console.log("[TeXML] Received request:", req.method, req.body, req.query);
+  console.log("=".repeat(60));
+  console.log("[TeXML] 🔔 RECEIVED REQUEST - THIS MEANS TELNYX CAN REACH US!");
+  console.log("[TeXML] Method:", req.method);
+  console.log("[TeXML] Headers:", JSON.stringify(req.headers, null, 2));
+  console.log("[TeXML] Body:", JSON.stringify(req.body, null, 2));
+  console.log("[TeXML] Query:", JSON.stringify(req.query, null, 2));
+  console.log("=".repeat(60));
 
   // Extract parameters from either body (POST) or query (GET)
   const params = req.method === 'GET' ? req.query : req.body;
@@ -97,19 +103,22 @@ const aiCallHandler = async (req: any, res: any) => {
   const escapedWsUrl = finalWsUrl.replace(/&/g, '&amp;');
 
   res.set("Content-Type", "application/xml");
-  // CRITICAL FIX for early disconnects:
-  // 1. Remove AMD blocking - it was preventing stream setup
-  // 2. Connect directly to WebSocket stream - let AI handle voicemail detection
-  // 3. For test calls, avoid AMD timeouts that can kill calls before they ring
 
-  // Note: Machine detection can still be done via WebSocket stream data if needed,
-  // but doesn't block the <Stream> connection from establishing
-  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+  // Build the TeXML response
+  const texmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
         <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" />
     </Connect>
-</Response>`);
+</Response>`;
+
+  console.log("[TeXML] ✅ Sending TeXML response to Telnyx:");
+  console.log("[TeXML] Full WebSocket URL:", finalWsUrl);
+  console.log("[TeXML] XML Response:", texmlResponse);
+  console.log("[TeXML] Telnyx should now connect to this WebSocket URL");
+  console.log("=".repeat(60));
+
+  res.send(texmlResponse);
 };
 
 // Register handler for both GET and POST

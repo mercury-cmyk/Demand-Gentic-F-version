@@ -482,8 +482,16 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
     
-    console.log(`[Campaign Test Call] TeXML URL: ${texmlUrl}`);
+    console.log("=".repeat(60));
+    console.log(`[Campaign Test Call] 🔧 CRITICAL CONFIGURATION CHECK:`);
+    console.log(`[Campaign Test Call] NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`[Campaign Test Call] PUBLIC_WEBHOOK_HOST: ${process.env.PUBLIC_WEBHOOK_HOST}`);
+    console.log(`[Campaign Test Call] PUBLIC_TEXML_HOST: ${process.env.PUBLIC_TEXML_HOST}`);
+    console.log(`[Campaign Test Call] webhookHost (resolved): ${webhookHost}`);
+    console.log(`[Campaign Test Call] TeXML URL that Telnyx will fetch: ${texmlUrl}`);
     console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
+    console.log(`[Campaign Test Call] ⚠️ If ngrok is not running, Telnyx cannot reach ${webhookHost}!`);
+    console.log("=".repeat(60));
 
     const payload = {
       texml_application_id: texmlAppId,

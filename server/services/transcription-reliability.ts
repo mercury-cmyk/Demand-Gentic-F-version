@@ -227,12 +227,19 @@ export async function processMissingTranscripts(): Promise<{
         callEndedAt: dialerCallAttempts.callEndedAt,
         campaignId: dialerCallAttempts.campaignId,
         contactId: dialerCallAttempts.contactId,
+        fullTranscript: dialerCallAttempts.fullTranscript,
       })
       .from(dialerCallAttempts)
       .where(
         and(
-          isNull(dialerCallAttempts.fullTranscript),
-          isNull(dialerCallAttempts.aiTranscript),
+          // Find calls with no transcript OR marked for background processing
+          or(
+            and(
+              isNull(dialerCallAttempts.fullTranscript),
+              isNull(dialerCallAttempts.aiTranscript)
+            ),
+            sql`${dialerCallAttempts.fullTranscript} = '[PENDING_FALLBACK_TRANSCRIPTION]'`
+          ),
           isNotNull(dialerCallAttempts.callEndedAt),
           lt(dialerCallAttempts.callEndedAt, cutoffTime),
           or(
@@ -499,6 +506,25 @@ export async function ensureTranscript(
   };
 }
 
+/**
+ * Mark a call attempt for priority background transcription processing
+ * Used when all real-time fallback retries have failed
+ */
+export async function markForBackgroundTranscription(callAttemptId: string): Promise<void> {
+  try {
+    await db.update(dialerCallAttempts)
+      .set({
+        fullTranscript: '[PENDING_FALLBACK_TRANSCRIPTION]',
+        updatedAt: new Date(),
+      })
+      .where(eq(dialerCallAttempts.id, callAttemptId));
+
+    console.log(`${LOG_PREFIX} ⏳ Marked ${callAttemptId} for background transcription`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to mark for background transcription:`, error);
+  }
+}
+
 export default {
   checkTranscriptStatus,
   attemptFallbackTranscription,
@@ -506,4 +532,5 @@ export default {
   verifyTranscriptQuality,
   getTranscriptionStats,
   ensureTranscript,
+  markForBackgroundTranscription,
 };

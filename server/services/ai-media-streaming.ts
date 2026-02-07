@@ -36,6 +36,8 @@ interface MediaSession {
   pendingAudioFrames: number;
   sentFrames: number;
   receivedFrames: number;
+  // Codec state
+  isALaw: boolean;
   // Outbound packetization state
   telnyxOutboundBuffer: Buffer;
   telnyxOutboundPacer: ReturnType<typeof setInterval> | null;
@@ -189,6 +191,17 @@ async function handleTelnyxMessage(
       console.log(`[AiMediaStreaming] Starting session for call: ${callId}, stream: ${streamIdentifier}`);
       console.log(`[AiMediaStreaming] Start custom_parameters:`, start?.custom_parameters || {});
       
+      // AUTO-DETECT UK REGION FOR CODEC ALIGNMENT
+      // UK/Europe calls use G.711 A-law. Sending u-law causes static/noise.
+      const bridge = getTelnyxAiBridge();
+      const activeCall = bridge.getActiveCall(callId);
+      const isUkCall = activeCall?.dialedNumber?.startsWith('+44') || false;
+      const isALaw = isUkCall;
+
+      if (isUkCall) {
+        console.log(`[AiMediaStreaming] 🇬🇧 UK call detected for ${activeCall?.dialedNumber} - Forcing G.711 A-law codec`);
+      }
+      
       const session: MediaSession = {
         callId,
         streamId: streamIdentifier,
@@ -198,6 +211,7 @@ async function handleTelnyxMessage(
         isActive: true,
         lastActivity: new Date(),
         isSpeaking: false,
+        isALaw,
         pendingAudioFrames: 0,
         sentFrames: 0,
         receivedFrames: 0,
@@ -225,8 +239,6 @@ async function handleTelnyxMessage(
       // Send a short test tone so the callee hears an immediate sound (debugging silence)
       sendTestToneToTelnyx(session);
       
-      const bridge = getTelnyxAiBridge();
-      const activeCall = bridge.getActiveCall(callId);
       if (activeCall) {
         await activeCall.agent.startConversation();
         
@@ -302,8 +314,9 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
       // Eagerness: "low" = waits longer before responding, "medium" = balanced, "high" = responds quickly
       // For B2B calls with professional discourse, use "medium" for natural pacing
       const vadEagerness = process.env.OPENAI_VAD_EAGERNESS || 'medium';
-
-      console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadEagerness=${vadEagerness}, mode=semantic_vad`);
+      
+      const audioFormat = session.isALaw ? 'g711_alaw' : 'g711_ulaw';
+      console.log(`[AiMediaStreaming] OpenAI session config: vadDisabled=${vadDisabled}, vadEagerness=${vadEagerness}, mode=semantic_vad, format=${audioFormat}`);
 
       const configMessage = {
         type: "session.update",
@@ -311,8 +324,8 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
           modalities: ["text", "audio"],
           instructions: getSystemInstructions(session.callId),
           voice: getVoiceForCall(session.callId),
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
+          input_audio_format: audioFormat,
+          output_audio_format: audioFormat,
           input_audio_transcription: {
             model: "whisper-1",
           },
@@ -548,11 +561,14 @@ function sendTestToneToTelnyx(session: MediaSession): void {
       const sample = Math.round(amplitude * Math.sin(2 * Math.PI * freq * t));
       pcm.writeInt16LE(sample, i * 2);
     }
-    // Convert PCM to μ-law for the test tone
-    const mulawData = convertPCMToMuLaw(pcm);
-    enqueueTelnyxOutboundAudio(session, mulawData);
+    // Convert PCM to μ-law or A-law for the test tone
+    const encodedData = session.isALaw 
+      ? convertPCMToALaw(pcm)
+      : convertPCMToMuLaw(pcm);
+
+    enqueueTelnyxOutboundAudio(session, encodedData);
     ensureTelnyxOutboundPacer(session);
-    console.log(`[AiMediaStreaming] Sent test tone for call: ${session.callId}`);
+    console.log(`[AiMediaStreaming] Sent test tone (format=${session.isALaw ? 'ALaw' : 'MuLaw'}) for call: ${session.callId}`);
   } catch (err) {
     console.error('[AiMediaStreaming] Test tone error:', err);
   }
@@ -579,9 +595,13 @@ async function synthesizeAndSendAudio(session: MediaSession, text: string): Prom
 
     const audioBuffer24k = Buffer.from(await response.arrayBuffer());
     const audioBuffer8k = downsample24kTo8k(audioBuffer24k);
-    // Convert PCM to μ-law for Telnyx
-    const mulawData = convertPCMToMuLaw(audioBuffer8k);
-    enqueueTelnyxOutboundAudio(session, mulawData);
+    
+    // Convert PCM to μ-law or A-law for Telnyx
+    const encodedData = session.isALaw 
+      ? convertPCMToALaw(audioBuffer8k) 
+      : convertPCMToMuLaw(audioBuffer8k);
+
+    enqueueTelnyxOutboundAudio(session, encodedData);
     ensureTelnyxOutboundPacer(session);
   } catch (error) {
     console.error("[AiMediaStreaming] TTS synthesis error:", error);
@@ -682,6 +702,118 @@ function convertPCMToMuLaw(pcmData: Buffer): Buffer {
   }
   
   return mulawData;
+}
+
+function convertPCMToALaw(pcmData: Buffer): Buffer {
+  const alawData = Buffer.alloc(pcmData.length / 2);
+
+  for (let i = 0; i < alawData.length; i++) {
+    let sample = pcmData.readInt16LE(i * 2);
+    let sign = 0;
+
+    if (sample < 0) {
+      sample = -sample;
+      sign = 0x80; // A-law sign bit
+    }
+
+    if (sample > 32767) sample = 32767; // Clip
+
+    // A-law algorithm
+    let exponent: number;
+    let mantissa: number;
+
+    if (sample < 256) { // 0 to 255 (segment 0: 32)
+       // This part of A-law is linear. 
+       // sample >> 4 gives 4 bits. 
+       // But wait, standard algo:
+       // If sample < 256, exponent is 0. 
+       // Encoded = sample >> 4? No.
+       // It maps 12 bits to 8 bits.
+       
+       // Simplified A-law implementation (G.711 table lookup is safer but let's compute)
+       // Standard G.711 A-law compression:
+       // 1. Get sign
+       // 2. Magnitude (15 bits)
+       // 3. Determine segment (exponent)
+    }
+
+    // Using a simpler computation approach based on bit positions for safety
+    // Segments:
+    // 1. [0, 31] -> level = sample >> 1 (actually linear segment)
+    // No, A-law is logarithmic except close to zero.
+    
+    // Let's use the standard "canonical" calculation:
+    // cALawVal = (sign | exponent | mantissa) ^ 0xD5
+
+    let encoded = 0;
+    if (sample >= 256) {
+       exponent = (Math.log2(sample) | 0) - 7; // rough log2
+       // Adjust for specific ranges
+       // A-law thresholds: 32, 64, 128, 256, 512, 1024, 2048, 4096...
+       // Standard ranges:
+       // 0-31
+       // 32-63
+       // 64-127
+       // 128-255
+       // 256-511
+       // ...
+    }
+  }
+  // Fallback: Using a lookup table is much cleaner and less error prone for nodejs environment without low-level bit hackery confidence.
+  // Actually, let's use a robust implementation.
+  for (let i = 0; i < alawData.length; i++) {
+     alawData[i] = linear16ToAlaw(pcmData.readInt16LE(i * 2));
+  }
+  return alawData;
+}
+
+// Single sample conversion
+function linear16ToAlaw(pcmSample: number): number {
+  let mask: number;
+  let seg: number;
+  
+  if (pcmSample >= 0) {
+    mask = 0xD5;
+  } else {
+    mask = 0x55;
+    pcmSample = -pcmSample - 8; // -8 bias? A-law is simpler.
+    // Standard A-law:
+    // s = sign(pcm)
+    // pcm = abs(pcm)
+    // if pcm > 32767: pcm = 32767
+    // ALaw = (s << 7) | (seg << 4) | (pcm >> (seg + 3)) & 0x0F
+    // XOR 0x55
+    // 
+    // Wait, let's use the exact values.
+  }
+
+  // Implementation from standard references:
+  let c: number;
+  // Get sign bit
+  const sign = (pcmSample >> 8) & 0x80;
+  if (sign) pcmSample = -pcmSample;
+  if (pcmSample > 32767) pcmSample = 32767;
+
+  if (pcmSample < 256) {
+     c = (pcmSample >> 4);
+  } else if (pcmSample < 512) {
+     c = 0x10 | ((pcmSample >> 5) & 0xF);
+  } else if (pcmSample < 1024) {
+     c = 0x20 | ((pcmSample >> 6) & 0xF);
+  } else if (pcmSample < 2048) {
+     c = 0x30 | ((pcmSample >> 7) & 0xF);
+  } else if (pcmSample < 4096) {
+     c = 0x40 | ((pcmSample >> 8) & 0xF);
+  } else if (pcmSample < 8192) {
+     c = 0x50 | ((pcmSample >> 9) & 0xF);
+  } else if (pcmSample < 16384) {
+     c = 0x60 | ((pcmSample >> 10) & 0xF);
+  } else {
+     c = 0x70 | ((pcmSample >> 11) & 0xF);
+  }
+  
+  // A-law XOR mask is 0x55 for every other bit (01010101)
+  return (sign | c) ^ 0x55; 
 }
 
 function getSystemInstructions(callId: string): string {

@@ -719,6 +719,34 @@ router.post("/telnyx", async (req, res) => {
       console.log(`[Telnyx Webhook] Initiated S3 storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)`);
     }
 
+    // TRANSCRIPTION FALLBACK: Trigger transcription for call attempts missing transcripts
+    // This ensures we get transcripts even when Gemini real-time transcription fails
+    if (updatedCallAttempts.length > 0) {
+      const { checkTranscriptStatus, attemptFallbackTranscription } = await import('../services/transcription-reliability');
+
+      for (const attempt of updatedCallAttempts) {
+        // Schedule transcription check after a short delay (5s) to allow DB writes to commit
+        setTimeout(async () => {
+          try {
+            const status = await checkTranscriptStatus(attempt.id);
+            if (!status.hasTranscript) {
+              console.log(`[Telnyx Webhook] 🎤 Call attempt ${attempt.id} missing transcript - triggering fallback`);
+              const result = await attemptFallbackTranscription(attempt.id, recordingUrl, call_control_id);
+              if (result.success) {
+                console.log(`[Telnyx Webhook] ✅ Fallback transcription succeeded for ${attempt.id}`);
+              } else {
+                console.log(`[Telnyx Webhook] ⏳ Fallback transcription queued for ${attempt.id}: ${result.error}`);
+              }
+            } else {
+              console.log(`[Telnyx Webhook] ✅ Call attempt ${attempt.id} already has transcript (source: ${status.transcriptSource})`);
+            }
+          } catch (e) {
+            console.error(`[Telnyx Webhook] ❌ Fallback transcription error for ${attempt.id}:`, e);
+          }
+        }, 5000);
+      }
+    }
+
     return res.json({
       status: "ok",
       updated: totalUpdated,

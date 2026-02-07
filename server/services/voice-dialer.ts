@@ -114,6 +114,15 @@ import {
 import { normalizeDisposition } from "./disposition-normalizer";
 import { detectG711Format } from "./voice-providers/audio-transcoder";
 import { GeminiLiveProvider } from "./voice-providers/gemini-live-provider";
+import {
+  isDeepgramEnabled,
+  startTranscriptionSession,
+  sendInboundAudio,
+  sendOutboundAudio,
+  stopTranscriptionSession,
+  getCurrentTranscript,
+  type TranscriptSegment,
+} from "./deepgram-realtime-transcription";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -2273,6 +2282,15 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       // Record outbound audio for call recording
       recordOutboundAudio(session.callId, event.audioBuffer);
 
+      // Send outbound audio to Deepgram for transcription (agent speaking)
+      // NOTE: This audio is already transcoded to G.711 μ-law for Telnyx
+      if ((session as any).deepgramSession) {
+        const sent = sendOutboundAudio(session.callId, event.audioBuffer);
+        if (!session.audioFrameCount || session.audioFrameCount % 50 === 1) {
+          console.log(`${LOG_PREFIX} [Deepgram] Sent outbound audio frame: ${event.audioBuffer.length} bytes, success=${sent}`);
+        }
+      }
+
       console.log(`${LOG_PREFIX} 🎤 Queuing ${event.audioBuffer.length} bytes for Telnyx (format: ${event.format || 'unknown'})`);
       enqueueTelnyxOutboundAudio(session, event.audioBuffer);
       ensureTelnyxOutboundPacer(session);
@@ -2393,6 +2411,16 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // Store provider for Telnyx audio routing
     (session as any).geminiProvider = provider;
 
+    // Mark session for lazy Deepgram initialization
+    // Deepgram will be started when first audio is received to avoid timeout
+    if (isDeepgramEnabled()) {
+      (session as any).deepgramEnabled = true;
+      (session as any).deepgramSession = null; // Will be initialized on first audio
+      console.log(`${LOG_PREFIX} 🎙️ Deepgram enabled - will start when audio flows`);
+    } else {
+      console.log(`${LOG_PREFIX} ⚠️ Deepgram not configured - transcription will use Gemini fallback`);
+    }
+
     // Start audio health monitoring (enforces max call duration, silence detection, etc.)
     startAudioHealthMonitor(session);
 
@@ -2405,46 +2433,36 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     }
 
     // INTELLIGENT GREETING (Gemini)
-    // Wait for human detection before greeting to avoid speaking over pickup/IVR
-    console.log(`${LOG_PREFIX} Gemini ready - waiting for human detection before greeting...`);
-
-    let greetingCheckInterval: NodeJS.Timeout | null = null;
-    let safetyTimeout: NodeJS.Timeout | null = null;
+    // SIMPLIFIED GREETING LOGIC: Send greeting when first audio frame arrives
+    // This indicates the call is connected and someone picked up
+    console.log(`${LOG_PREFIX} Gemini ready - will send greeting on first audio frame`);
 
     const sendGreetingNow = () => {
-      if (greetingCheckInterval) clearInterval(greetingCheckInterval);
-      if (safetyTimeout) clearTimeout(safetyTimeout);
+      if (session.audioDetection.hasGreetingSent) {
+        return; // Already sent
+      }
 
       if (!session.isActive) {
         console.log(`${LOG_PREFIX} Session no longer active, skipping Gemini greeting`);
         return;
       }
 
-      console.log(`${LOG_PREFIX} Gemini sending greeting: "${openingScript.substring(0, 60)}..."`);
+      console.log(`${LOG_PREFIX} 🎙️ Gemini sending greeting: "${openingScript.substring(0, 60)}..."`);
       session.audioDetection.hasGreetingSent = true;
       provider.sendOpeningMessage(openingScript);
     };
 
-    greetingCheckInterval = setInterval(() => {
-      if (!session.isActive) {
-        if (greetingCheckInterval) clearInterval(greetingCheckInterval);
-        if (safetyTimeout) clearTimeout(safetyTimeout);
-        return;
-      }
+    // Store the greeting function on the session so it can be called when first audio arrives
+    (session as any).sendGreetingOnFirstAudio = sendGreetingNow;
 
-      if (shouldSendGreeting(session)) {
-        console.log(`${LOG_PREFIX} Gemini human detected - sending greeting after ${session.audioDetection.audioPatterns.length} audio patterns analyzed`);
-        sendGreetingNow();
-      }
-    }, 1000);
-
-    // Safety timeout: Send greeting after 30s if no detection
-    safetyTimeout = setTimeout(() => {
+    // Fallback: Send greeting after 3s even if no audio received
+    // This handles edge cases where audio stream is delayed
+    setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.warn(`${LOG_PREFIX} Gemini no human detected after 30s - sending greeting anyway (fallback)`);
+        console.warn(`${LOG_PREFIX} ⚠️ No audio received after 3s - sending greeting anyway`);
         sendGreetingNow();
       }
-    }, 30000);
+    }, 3000);
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
   } catch (error: any) {
@@ -4818,6 +4836,12 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
 
       if (session.telnyxInboundFrames === 1) {
         console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} (Gemini provider)`);
+
+        // CRITICAL: Trigger greeting on first audio frame to avoid silent agent
+        if ((session as any).sendGreetingOnFirstAudio) {
+          console.log(`${LOG_PREFIX} 🎙️ Triggering greeting on first audio frame`);
+          (session as any).sendGreetingOnFirstAudio();
+        }
       } else if (session.telnyxInboundFrames % 25 === 0) {
         console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
       }
@@ -4828,6 +4852,36 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
 
       // Record inbound audio for call recording
       recordInboundAudio(session.callId, audioBuffer);
+
+      // Send inbound audio to Deepgram for transcription (contact speaking)
+      // Lazy initialization: Start Deepgram on first audio to avoid timeout
+      if ((session as any).deepgramEnabled && !(session as any).deepgramSession) {
+        console.log(`${LOG_PREFIX} 🎙️ Starting Deepgram on first audio for call ${session.callId}`);
+        const deepgramSession = startTranscriptionSession(session.callId, {
+          callAttemptId: session.callAttemptId,
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          onTranscript: (segment) => {
+            if (segment.isFinal) {
+              console.log(`${LOG_PREFIX} [Deepgram] ${segment.speaker}: "${segment.text}" (${(segment.confidence * 100).toFixed(0)}%)`);
+            }
+          },
+          onError: (error, channel) => {
+            console.error(`${LOG_PREFIX} [Deepgram] ${channel} error:`, error.message);
+          },
+        });
+        if (deepgramSession) {
+          (session as any).deepgramSession = deepgramSession;
+          console.log(`${LOG_PREFIX} ✅ Deepgram transcription started for call ${session.callId}`);
+        }
+      }
+
+      if ((session as any).deepgramSession) {
+        const sent = sendInboundAudio(session.callId, audioBuffer);
+        if (session.telnyxInboundFrames === 1 || session.telnyxInboundFrames % 100 === 0) {
+          console.log(`${LOG_PREFIX} [Deepgram] Sent inbound audio frame #${session.telnyxInboundFrames}: ${audioBuffer.length} bytes, success=${sent}`);
+        }
+      }
 
       // Track bytes for cost tracking
       const bytes = audioBuffer.length;
@@ -4958,6 +5012,16 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     });
   }
 
+  // Stop Deepgram transcription and collect final transcript
+  let deepgramTranscript: string | null = null;
+  if ((session as any).deepgramSession) {
+    const deepgramResult = stopTranscriptionSession(callId);
+    if (deepgramResult && deepgramResult.transcript) {
+      deepgramTranscript = deepgramResult.transcript;
+      console.log(`${LOG_PREFIX} ✅ Deepgram transcript collected: ${deepgramResult.segments.length} segments, ${deepgramResult.transcript.length} chars`);
+    }
+  }
+
   // Finalize cost tracking and log detailed breakdown
   const costMetrics = finalizeCostTracking(callId);
   if (costMetrics) {
@@ -4987,11 +5051,25 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     session.telnyxWs.close();
   }
 
-  const fullTranscript = session.transcripts.length > 0
+  // Build transcript - prefer Deepgram (more reliable) over Gemini transcripts
+  const geminiTranscript = session.transcripts.length > 0
     ? session.transcripts
         .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
         .join('\n')
     : '';
+
+  // Use Deepgram transcript if available and has content, otherwise fall back to Gemini
+  const fullTranscript = deepgramTranscript && deepgramTranscript.length > 10
+    ? deepgramTranscript
+    : geminiTranscript;
+
+  if (deepgramTranscript && deepgramTranscript.length > 10) {
+    console.log(`${LOG_PREFIX} 🎙️ Using Deepgram transcript (${deepgramTranscript.length} chars)`);
+  } else if (geminiTranscript.length > 0) {
+    console.log(`${LOG_PREFIX} 📝 Using Gemini transcript fallback (${geminiTranscript.length} chars)`);
+  } else {
+    console.warn(`${LOG_PREFIX} ⚠️ No transcript available from either Deepgram or Gemini`);
+  }
 
   let disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome, session);
   let ivrDetected = false;

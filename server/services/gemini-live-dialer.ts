@@ -32,7 +32,16 @@ import {
   recordOutboundAudio,
   stopRecordingAndUpload
 } from "./call-recording-manager";
-import { ensureTranscript } from "./transcription-reliability";
+import { ensureTranscript, checkTranscriptStatus, markForBackgroundTranscription } from "./transcription-reliability";
+import { recordTranscriptionResult } from "./transcription-monitor";
+import {
+  isDeepgramEnabled,
+  startTranscriptionSession,
+  sendInboundAudio,
+  sendOutboundAudio,
+  stopTranscriptionSession,
+  type TranscriptSegment,
+} from "./deepgram-realtime-transcription";
 import { releaseProspectLock } from "./active-call-tracker";
 import { handleCallCompleted } from "./number-pool-integration";
 
@@ -844,6 +853,11 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   }
   const transcriptTurns: TranscriptTurn[] = [];
 
+  // TRANSCRIPTION HEALTH TRACKING: Monitor if Gemini is actually sending transcription data
+  let audioChunksWithoutTranscription = 0;
+  let lastTranscriptionReceivedAt: number | null = null;
+  let transcriptionHealthLogged = false;
+
   // CRITICAL FIX: Parse critical IDs from URL client_state IMMEDIATELY at connection time
   // This ensures we have queueItemId/callAttemptId even if connection closes before 'start' event
   // This prevents queue items from getting stuck in 'in_progress' state
@@ -926,6 +940,13 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let geminiConnected = false;
   let qualityGateTriggered = false;
 
+  // DIAGNOSTIC: Log state to debug silent agent issues
+  let diagnosticTimer: NodeJS.Timeout | null = null;
+  function logDiagnosticState(reason: string) {
+    const elapsed = Math.round((Date.now() - metrics.startTime) / 1000);
+    console.log(`[Gemini Live] 🔍 DIAGNOSTIC (${reason}) @${elapsed}s | setup=${setupComplete} answered=${callAnswered} amd=${amdCheckComplete} humanSpoke=${humanHasSpoken} openingSent=${openingMessageSent} audioIn=${incomingAudioCount} wsOpen=${geminiWs?.readyState === WebSocket.OPEN}`);
+  }
+
   // Cleanup function for graceful shutdown
   function cleanup() {
     if (keepaliveInterval) clearInterval(keepaliveInterval);
@@ -934,6 +955,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (amdWaitTimer) clearTimeout(amdWaitTimer);
     if (humanSpeechWaitTimer) clearTimeout(humanSpeechWaitTimer);
     if (initialQualityCheckTimer) clearTimeout(initialQualityCheckTimer);
+    if (diagnosticTimer) clearInterval(diagnosticTimer);
     if (geminiWs) {
       geminiWs.close();
       geminiWs = null;
@@ -955,16 +977,20 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
 
   // Start the "wait for human speech" timer
   // If human doesn't speak within timeout, AI takes initiative and speaks first
+  // IMPORTANT: This timer is CRITICAL when Gemini's inputTranscription is not working
   function startHumanSpeechWaitTimer() {
     if (humanSpeechWaitTimer) return; // Already started
     if (!waitingForHumanSpeech || humanHasSpoken) return; // Not waiting or already spoke
 
-    console.log(`[Gemini Live] ⏳ Starting human speech wait timer (${WAIT_FOR_HUMAN_SPEECH_MS}ms)`);
+    console.log(`[Gemini Live] ⏳ Starting human speech wait timer (${WAIT_FOR_HUMAN_SPEECH_MS}ms) - will speak even if transcription fails`);
     humanSpeechWaitTimer = setTimeout(() => {
       if (!humanHasSpoken && !openingMessageSent) {
-        console.log(`[Gemini Live] ⏱️ Human speech wait timeout - AI taking initiative`);
+        console.log(`[Gemini Live] ⏱️ Human speech wait timeout (${WAIT_FOR_HUMAN_SPEECH_MS}ms) - AI taking initiative`);
+        console.log(`[Gemini Live] 📊 At timeout: transcriptTurns=${transcriptTurns.length}, audioChunksWithoutTranscription=${audioChunksWithoutTranscription}`);
         humanHasSpoken = true; // Pretend human spoke so AI can respond
         trySendOpeningMessage();
+      } else {
+        console.log(`[Gemini Live] ⏱️ Human speech timer fired but conditions not met: humanHasSpoken=${humanHasSpoken}, openingMessageSent=${openingMessageSent}`);
       }
     }, WAIT_FOR_HUMAN_SPEECH_MS);
   }
@@ -1069,6 +1095,7 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     }
 
     openingMessageSent = true;
+    logDiagnosticState('opening_sent');
 
     // Build the canonical opening message with all contact variables
     // Priority: 1) Custom firstMessage from campaign settings, 2) Canonical format with all variables
@@ -1138,6 +1165,16 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
     }
 
     console.log(`[Gemini Live] 📢 Opening message queued: "${openingText}"`);
+
+    // DIAGNOSTIC: Check if Gemini responds within 10 seconds after opening message
+    const openingMessageSentAt = Date.now();
+    setTimeout(() => {
+      if (metrics.totalBytesReceived === 0 && !voicemailDetected) {
+        console.error(`[Gemini Live] 🚨 CRITICAL: No audio received from Gemini 10s after opening message!`);
+        console.error(`[Gemini Live] 🚨 Debug: geminiWs.readyState=${geminiWs?.readyState}, setupComplete=${setupComplete}`);
+        console.error(`[Gemini Live] 🚨 This explains why the agent appears silent despite the call being answered.`);
+      }
+    }, 10000);
   }
 
   // 1. Handle messages from Telnyx (Inbound from PSTN)
@@ -1307,6 +1344,18 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
           if (!callAnswered && incomingAudioCount >= AUDIO_CHUNKS_BEFORE_SPEAKING) {
             callAnswered = true;
             console.log(`[Gemini Live] 📞 Call answered detected (received ${incomingAudioCount} audio chunks)`);
+            logDiagnosticState('call_answered');
+
+            // DIAGNOSTIC: Start periodic check for silent agent issue
+            // Log state every 3 seconds until opening message is sent
+            diagnosticTimer = setInterval(() => {
+              if (openingMessageSent) {
+                if (diagnosticTimer) clearInterval(diagnosticTimer);
+                diagnosticTimer = null;
+                return;
+              }
+              logDiagnosticState('waiting_for_opening');
+            }, 3000);
 
             scheduleInitialQualityCheck();
 
@@ -1350,6 +1399,43 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 callContext.contactId || null
               );
               console.log(`[Gemini Live] 🎙️ Call recording started for ${callId}`);
+
+              // 🎤 START DEEPGRAM TRANSCRIPTION: Real-time transcription for both sides
+              // Deepgram is more reliable than Gemini's built-in transcription
+              if (isDeepgramEnabled()) {
+                // Pass format (ulaw vs alaw) to ensure Deepgram decodes correctly
+                const deepgramEncoding = g711Format === 'alaw' ? 'alaw' : 'mulaw';
+                
+                const transcriptionSession = startTranscriptionSession(callId, {
+                  callAttemptId: callContext.callAttemptId,
+                  campaignId: callContext.campaignId,
+                  contactId: callContext.contactId,
+                  encoding: deepgramEncoding,
+                  onTranscript: (segment: TranscriptSegment) => {
+                    // Real-time transcript callback - detect when contact speaks
+                    if (segment.isFinal && segment.speaker === 'contact') {
+                      // Contact spoke - this can trigger AI response if waiting
+                      if (!humanHasSpoken && waitingForHumanSpeech) {
+                        humanHasSpoken = true;
+                        if (humanSpeechWaitTimer) {
+                          clearTimeout(humanSpeechWaitTimer);
+                          humanSpeechWaitTimer = null;
+                        }
+                        console.log(`[Gemini Live] 👤 Deepgram detected contact speech: "${segment.text.substring(0, 50)}..."`);
+                        trySendOpeningMessage();
+                      }
+                    }
+                  },
+                  onError: (error, channel) => {
+                    console.error(`[Gemini Live] Deepgram ${channel} error:`, error.message);
+                  },
+                });
+                if (transcriptionSession) {
+                  console.log(`[Gemini Live] 🎤 Deepgram real-time transcription started for ${callId} (format: ${deepgramEncoding})`);
+                }
+              } else {
+                console.log(`[Gemini Live] ⚠️ Deepgram not configured - using Gemini transcription only`);
+              }
             }
 
             // CRITICAL: Wait for AMD (Answering Machine Detection) result before speaking
@@ -1534,6 +1620,8 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
             // 🎙️ RECORD INBOUND: Capture contact audio for call recording
             if (callId) {
               recordInboundAudio(callId, g711Buffer);
+              // 🎤 DEEPGRAM: Send inbound audio for real-time transcription
+              sendInboundAudio(callId, g711Buffer);
             }
             
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, g711Format);
@@ -1581,22 +1669,43 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
             backpressureEvents: metrics.bufferBackpressureEvents,
           });
 
-          // SAVE TRANSCRIPT: Update call attempt with full transcript
-          if (callContext.callAttemptId && transcriptTurns.length > 0) {
-            try {
-              // Build full transcript string from turns
-              const fullTranscript = transcriptTurns
-                .sort((a, b) => a.timestamp - b.timestamp)
-                .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
-                .join('\n');
-              
-              // Also build the AI portion separately for backwards compatibility
-              const aiOnlyTranscript = transcriptTurns
-                .filter(t => t.role === 'agent')
-                .map(t => t.text)
+          // SAVE TRANSCRIPT: Prefer Deepgram transcript, fallback to Gemini transcription
+          // Deepgram provides more reliable dual-channel transcription
+          let fullTranscript = '';
+          let aiOnlyTranscript = '';
+          let transcriptSource = 'none';
+
+          // Try Deepgram first (more reliable)
+          if (callId && isDeepgramEnabled()) {
+            const deepgramResult = stopTranscriptionSession(callId);
+            if (deepgramResult && deepgramResult.transcript.length > 20) {
+              fullTranscript = deepgramResult.transcript;
+              aiOnlyTranscript = deepgramResult.segments
+                .filter(s => s.speaker === 'agent')
+                .map(s => s.text)
                 .join(' ');
-              
-              console.log(`[Gemini Live] 📝 Saving transcript: ${transcriptTurns.length} turns, ${fullTranscript.length} chars`);
+              transcriptSource = 'deepgram';
+              console.log(`[Gemini Live] 🎤 Using Deepgram transcript: ${deepgramResult.segments.length} segments, ${fullTranscript.length} chars`);
+            }
+          }
+
+          // Fallback to Gemini transcription if Deepgram failed
+          if (!fullTranscript && transcriptTurns.length > 0) {
+            fullTranscript = transcriptTurns
+              .sort((a, b) => a.timestamp - b.timestamp)
+              .map(t => `${t.role === 'agent' ? 'Agent' : 'Contact'}: ${t.text}`)
+              .join('\n');
+            aiOnlyTranscript = transcriptTurns
+              .filter(t => t.role === 'agent')
+              .map(t => t.text)
+              .join(' ');
+            transcriptSource = 'gemini';
+            console.log(`[Gemini Live] 📝 Using Gemini transcript: ${transcriptTurns.length} turns, ${fullTranscript.length} chars`);
+          }
+
+          if (callContext.callAttemptId && fullTranscript.length > 0) {
+            try {
+              console.log(`[Gemini Live] 📝 Saving transcript (source: ${transcriptSource}): ${fullTranscript.length} chars`);
               
               // Save directly to dialerCallAttempts (has fullTranscript and aiTranscript fields)
               await db.update(dialerCallAttempts)
@@ -1607,6 +1716,9 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 .where(eq(dialerCallAttempts.id, callContext.callAttemptId));
               
               console.log(`[Gemini Live] ✅ Transcript saved to call attempt ${callContext.callAttemptId}`);
+
+              // Record transcription success in monitor (real-time transcription worked)
+              recordTranscriptionResult(callId || 'unknown', 'realtime', callContext.callAttemptId);
               
               // Get additional call attempt info for creating call session
               const [attemptDetails] = await db.select({
@@ -1730,24 +1842,51 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
             } catch (transcriptError) {
               console.error('[Gemini Live] ❌ Failed to save transcript:', transcriptError);
             }
-          } else if (transcriptTurns.length === 0 && callContext.callAttemptId) {
-            // FALLBACK: No real-time transcript captured - try to transcribe from recording
-            console.log('[Gemini Live] ⚠️ No transcript turns captured - triggering fallback transcription');
+          } else if (!fullTranscript && callContext.callAttemptId) {
+            // FALLBACK: No real-time transcript captured (neither Deepgram nor Gemini)
+            // Stop any running Deepgram session
+            if (callId && isDeepgramEnabled()) {
+              stopTranscriptionSession(callId);
+            }
 
-            // Schedule fallback transcription (non-blocking)
-            // Give recording a chance to upload first (5 second delay)
-            setTimeout(async () => {
-              try {
-                const result = await ensureTranscript(callContext.callAttemptId!);
-                if (result.success) {
-                  console.log(`[Gemini Live] ✅ Fallback transcription succeeded: ${result.wordCount || 0} words`);
-                } else {
-                  console.warn(`[Gemini Live] ⚠️ Fallback transcription failed: ${result.error}`);
+            console.log('[Gemini Live] ⚠️ No transcript from Deepgram or Gemini - scheduling fallback transcription');
+            console.log(`[Gemini Live] 📊 Transcription stats: audioChunksWithoutTranscription=${audioChunksWithoutTranscription}, lastTranscriptionReceivedAt=${lastTranscriptionReceivedAt}`);
+
+            // Graduated retry delays: 15s, 45s, 2min (allows recording to upload)
+            const retryDelays = [15000, 45000, 120000];
+            const attemptId = callContext.callAttemptId;
+
+            for (let i = 0; i < retryDelays.length; i++) {
+              setTimeout(async () => {
+                try {
+                  // Check if transcript already exists (from earlier retry)
+                  const status = await checkTranscriptStatus(attemptId);
+                  if (status.hasTranscript) {
+                    console.log(`[Gemini Live] ✅ Transcript already exists - skipping retry ${i + 1}`);
+                    return;
+                  }
+
+                  console.log(`[Gemini Live] 🔄 Fallback transcription attempt ${i + 1}/${retryDelays.length} (delay: ${retryDelays[i] / 1000}s)`);
+                  const result = await ensureTranscript(attemptId);
+
+                  if (result.success) {
+                    console.log(`[Gemini Live] ✅ Fallback transcription succeeded on attempt ${i + 1}: ${result.wordCount || 0} words`);
+                    // Record fallback success in monitor
+                    recordTranscriptionResult(callId || 'unknown', 'fallback', attemptId);
+                  } else if (i === retryDelays.length - 1) {
+                    // Last retry failed - mark for background processing
+                    console.warn(`[Gemini Live] ⚠️ All fallback retries exhausted for ${attemptId}: ${result.error}`);
+                    await markForBackgroundTranscription(attemptId);
+                    // Record failure in monitor
+                    recordTranscriptionResult(callId || 'unknown', 'none', attemptId);
+                  } else {
+                    console.log(`[Gemini Live] ⏳ Fallback attempt ${i + 1} failed, will retry: ${result.error}`);
+                  }
+                } catch (fallbackError) {
+                  console.error(`[Gemini Live] ❌ Fallback transcription attempt ${i + 1} error:`, fallbackError);
                 }
-              } catch (fallbackError) {
-                console.error('[Gemini Live] ❌ Fallback transcription error:', fallbackError);
-              }
-            }, 5000);
+              }, retryDelays[i]);
+            }
           }
 
           // End quality monitoring
@@ -2118,6 +2257,9 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
       geminiWs?.send(JSON.stringify(setupMessage));
     });
 
+    // Track first audio response from Gemini after opening message
+    let firstGeminiAudioReceived = false;
+
     geminiWs.on('message', async (data: any) => {
       try {
         const response = JSON.parse(data.toString());
@@ -2126,6 +2268,15 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
         if (response.error) {
           console.error('[Gemini Live] ❌ API error:', response.error);
           return;
+        }
+
+        // DIAGNOSTIC: Log when we receive first audio after opening message was sent
+        if (openingMessageSent && !firstGeminiAudioReceived) {
+          const hasAudio = response.serverContent?.modelTurn?.parts?.some((p: any) => p.inlineData?.data || p.inline_data?.data);
+          if (hasAudio) {
+            firstGeminiAudioReceived = true;
+            console.log(`[Gemini Live] 🔊 First audio response from Gemini received after opening message`);
+          }
         }
 
         // CRITICAL: Handle setupComplete - Gemini is now ready to receive audio and respond
@@ -2169,15 +2320,20 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
         // These are sent when outputAudioTranscription/inputAudioTranscription are enabled in setup
         // NOTE: Transcription can be at top level OR inside serverContent depending on Gemini API version
         const serverContentTranscript = response.serverContent || response.server_content;
-        
+
         // AI agent's speech transcription - check ALL possible locations in Gemini response
         // CRITICAL FIX: Gemini may nest transcription in different places depending on API version
-        const outputTranscription = 
-          response.outputTranscription || 
-          response.output_transcription || 
-          serverContentTranscript?.outputTranscription || 
+        // Per Gemini API docs, the correct paths are:
+        // - response.server_content.output_transcription.text (snake_case for Vertex AI)
+        // - response.serverContent.outputTranscription.text (camelCase for Google AI Studio)
+        const outputTranscription =
+          // Direct on server_content (CORRECT PATH per Gemini API spec)
+          serverContentTranscript?.outputTranscription ||
           serverContentTranscript?.output_transcription ||
-          // Also check for transcription nested in modelTurn
+          // Top-level fallback
+          response.outputTranscription ||
+          response.output_transcription ||
+          // Nested in modelTurn (legacy check)
           serverContentTranscript?.modelTurn?.outputTranscription ||
           serverContentTranscript?.model_turn?.output_transcription;
         
@@ -2189,6 +2345,8 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               text: agentText,
               timestamp: Date.now()
             });
+            lastTranscriptionReceivedAt = Date.now();
+            audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Agent transcript captured: "${agentText.substring(0, 100)}${agentText.length > 100 ? '...' : ''}"`);
           }
         } else if (serverContentTranscript?.modelTurn?.parts) {
@@ -2210,12 +2368,17 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
         }
         
         // User/contact's speech transcription - check ALL possible locations
-        const inputTranscription = 
-          response.inputTranscription || 
-          response.input_transcription || 
-          serverContentTranscript?.inputTranscription || 
+        // Per Gemini API docs, correct paths are:
+        // - response.server_content.input_transcription.text (snake_case)
+        // - response.serverContent.inputTranscription.text (camelCase)
+        const inputTranscription =
+          // Direct on server_content (CORRECT PATH per Gemini API spec)
+          serverContentTranscript?.inputTranscription ||
           serverContentTranscript?.input_transcription ||
-          // Also check for transcription nested in userTurn
+          // Top-level fallback
+          response.inputTranscription ||
+          response.input_transcription ||
+          // Nested in userTurn (legacy check)
           serverContentTranscript?.userTurn?.inputTranscription ||
           serverContentTranscript?.user_turn?.input_transcription;
         
@@ -2227,6 +2390,8 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               text: contactText,
               timestamp: Date.now()
             });
+            lastTranscriptionReceivedAt = Date.now();
+            audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
 
             // NATURAL CONVERSATION: Detect when human speaks first
@@ -2244,11 +2409,25 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
           }
         }
         
-        // DIAGNOSTIC: Log when we receive audio but no transcript
+        // DIAGNOSTIC: Enhanced logging when transcription is missing
         // This helps identify when transcription is failing silently
-        const hasAudioOutput = serverContentTranscript?.modelTurn?.parts?.some((p: any) => p.inlineData?.data);
+        const hasAudioOutput = serverContentTranscript?.modelTurn?.parts?.some((p: any) => p.inlineData?.data || p.inline_data?.data);
         if (hasAudioOutput && !outputTranscription?.text) {
-          console.warn(`[Gemini Live] ⚠️ TRANSCRIPT ISSUE: Received AI audio but NO outputTranscription. Check if outputAudioTranscription is enabled.`);
+          audioChunksWithoutTranscription++;
+
+          // Log warning after 5 chunks without transcription
+          if (audioChunksWithoutTranscription === 5) {
+            console.warn(`[Gemini Live] ⚠️ TRANSCRIPT ISSUE: ${audioChunksWithoutTranscription} audio chunks received without transcription`);
+          }
+
+          // Log critical error after 10 chunks without transcription (systemic failure)
+          if (audioChunksWithoutTranscription === 10 && !transcriptionHealthLogged) {
+            transcriptionHealthLogged = true;
+            console.error(`[Gemini Live] 🚨 CRITICAL TRANSCRIPT FAILURE: ${audioChunksWithoutTranscription} audio chunks without ANY transcription`);
+            console.error(`[Gemini Live] 🚨 Debug - serverContent keys:`, serverContentTranscript ? Object.keys(serverContentTranscript) : 'null');
+            console.error(`[Gemini Live] 🚨 Debug - response keys:`, Object.keys(response || {}));
+            console.error(`[Gemini Live] 🚨 Debug - response sample:`, JSON.stringify(response).substring(0, 1000));
+          }
         }
 
         // Handle Audio Output from Gemini
@@ -2322,6 +2501,8 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 // 🎙️ RECORD OUTBOUND: Capture AI audio for call recording
                 if (callId) {
                   recordOutboundAudio(callId, g711Buffer);
+                  // 🎤 DEEPGRAM: Send outbound audio for real-time transcription
+                  sendOutboundAudio(callId, g711Buffer);
                 }
 
                 // DEBUG: Log outgoing audio size

@@ -36,6 +36,7 @@ import linkedinVerificationRouter from './routes/linkedin-verification';
 import agentReportsRouter from './routes/agent-reports';
 import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
+import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
@@ -13491,6 +13492,7 @@ Provide JSON response with:
   // Lead Forms & Pipeline Management
   app.use(leadFormsRouter);
   app.use(pipelineRouter);
+  app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
 
   // AI Project Creation

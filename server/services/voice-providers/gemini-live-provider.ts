@@ -692,8 +692,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * The model must wait for the actual human to respond before saying anything else.
    */
   sendOpeningMessage(text: string): void {
+    console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
-      console.warn(`${LOG_PREFIX} Cannot send opening message - not ready`);
+      console.warn(`${LOG_PREFIX} ❌ Cannot send opening message - not ready (ws=${!!this.ws}, state=${this.ws?.readyState}, setup=${this.setupComplete})`);
       return;
     }
 
