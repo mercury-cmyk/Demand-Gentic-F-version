@@ -149,7 +149,11 @@ export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promis
 
 /**
  * Get a specific secret value by name.
- * Checks: cache → DB (target env) → DB (development fallback) → process.env
+ * Checks: cache → process.env → DB (target env) → DB (development fallback)
+ *
+ * NOTE: process.env is checked BEFORE the DB to avoid unnecessary decryption
+ * attempts when secrets are already provided via GCP Secret Manager or .env.
+ * This prevents noisy decryption error logs when the master key doesn't match.
  */
 export async function getSecret(
   name: string,
@@ -162,6 +166,12 @@ export async function getSecret(
   const cached = secretCache.get(name);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
+  }
+
+  // Check process.env BEFORE DB — if already set (via GCP secrets or .env),
+  // skip DB decryption entirely to avoid "unable to authenticate data" errors
+  if (fallbackToEnv && process.env[name] !== undefined) {
+    return process.env[name];
   }
 
   // Try target environment, then fallback to development
@@ -197,11 +207,6 @@ export async function getSecret(
     } catch (error: any) {
       console.warn(`${LOG_PREFIX} Failed to get secret ${name} from DB (${env}): ${error.message}`);
     }
-  }
-
-  // Fallback to environment variable (.env file)
-  if (fallbackToEnv) {
-    return process.env[name];
   }
 
   return undefined;
