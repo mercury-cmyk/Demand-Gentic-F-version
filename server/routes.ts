@@ -37,6 +37,7 @@ import agentReportsRouter from './routes/agent-reports';
 import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
+import generativeStudioRouter from './routes/generative-studio-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
@@ -79,7 +80,6 @@ import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
-import agentPanelOrdersRouter from './routes/agent-panel-orders';
 import agentDefaultsRouter from './routes/agent-defaults';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
@@ -114,7 +114,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, campaignOrganizations, callQualityRecords, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, campaignOrganizations, type InsertMailboxAccount, type Account } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -4660,8 +4660,9 @@ export function registerRoutes(app: Express) {
         .where(eq(callAttempts.campaignId, campaignId));
 
       // Query AI agent calls from callSessions
-      // CRITICAL: "Calls Connected" means RIGHT PARTY connects (identity confirmed)
-      // Join with callQualityRecords to get identityConfirmed status
+      // AI dispositions are stored in aiDisposition field with similar values
+      const aiConnectedStatuses = ['completed', 'connected'];
+      const aiConnectedDispositions = ['connected', 'qualified', 'callback_requested', 'callback-requested', 'not_interested', 'dnc_request', 'dnc-request', 'meeting_booked', 'interested'];
       const aiQualifiedDispositions = ['qualified', 'meeting_booked', 'interested'];
       const aiDncDispositions = ['dnc_request', 'dnc-request', 'do_not_call'];
       const aiNotInterestedDispositions = ['not_interested', 'not-interested', 'rejected'];
@@ -4670,32 +4671,36 @@ export function registerRoutes(app: Express) {
 
       const [aiCallStats] = await db
         .select({
-          callsMade: sql<number>`COUNT(DISTINCT ${callSessions.id})::int`,
-          // RIGHT PARTY CONNECTS: Count calls where identity was confirmed
-          callsConnected: sql<number>`COUNT(DISTINCT CASE WHEN ${callQualityRecords.identityConfirmed} = true THEN ${callSessions.id} END)::int`,
-          leadsQualified: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+          callsMade: sql<number>`COUNT(*)::int`,
+          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN (${sql.join(
+            aiConnectedStatuses.map((value) => sql`${value}`),
+            sql`, `
+          )}) OR ${callSessions.aiDisposition} IN (${sql.join(
+            aiConnectedDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiQualifiedDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) THEN ${callSessions.id} END)::int`,
-          dncRequests: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+          )}) THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiDncDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) THEN ${callSessions.id} END)::int`,
-          notInterested: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+          )}) THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiNotInterestedDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) THEN ${callSessions.id} END)::int`,
-          noAnswer: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+          )}) THEN 1 END)::int`,
+          noAnswer: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiNoAnswerDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN ${callSessions.id} END)::int`,
-          voicemail: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+          )}) OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiVoicemailDispositions.map((value) => sql`${value}`),
             sql`, `
-          )}) THEN ${callSessions.id} END)::int`,
+          )}) THEN 1 END)::int`,
         })
         .from(callSessions)
-        .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
         .where(eq(callSessions.campaignId, campaignId));
 
       // Combine human + AI stats
@@ -13481,7 +13486,6 @@ Provide JSON response with:
   // Legacy agent prompts routes (deprecated - use /api/prompts instead)
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
-  app.use("/api/agent-panel/orders", agentPanelOrdersRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);
 
   // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================
@@ -13809,6 +13813,7 @@ Provide JSON response with:
   app.use(pipelineRouter);
   app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
+  app.use('/api/generative-studio', generativeStudioRouter);
 
   // AI Project Creation
   app.use('/api/ai', aiProjectRouter);
@@ -14523,7 +14528,7 @@ Provide JSON response with:
           .limit(limitNum);
 
         // ===== HELPER: Transform a single session row into conversation format =====
-        const transformSession = (session: (typeof sessions)[number]) => {
+        function transformSession(session: typeof sessions[0]) {
           const normalized = normalizeTranscript(session.transcript);
 
           // Extract issues from analysis if available
@@ -14587,7 +14592,7 @@ Provide JSON response with:
             createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
             isTestCall: false,
           };
-        };
+        }
 
         // ===== CONSOLIDATE: Deduplicate by contact — one entry per contact (latest call) =====
         // Group sessions by contactId (or by id if no contactId, to avoid merging unrelated unknowns)
@@ -14616,8 +14621,8 @@ Provide JSON response with:
             (conv as any).callHistory = group.map(s => ({
               id: s.id,
               status: s.status,
-              disposition: s.disposition || undefined,
-              duration: s.duration || undefined,
+              disposition: s.aiDisposition || undefined,
+              duration: s.durationSec || undefined,
               hasTranscript: !!(s.transcript),
               hasRecording: !!(s.recordingS3Key || s.recordingUrl),
               hasAnalysis: !!(s.analysis),

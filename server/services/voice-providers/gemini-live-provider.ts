@@ -186,7 +186,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         });
 
         this.ws.on("close", (code, reason) => {
-          console.log(`${LOG_PREFIX} WebSocket closed: ${code} - ${reason}`);
+          const reasonStr = reason ? reason.toString() : 'no reason';
+          console.log(`${LOG_PREFIX} WebSocket closed: code=${code}, reason=${reasonStr}, setupComplete=${this.setupComplete}`);
+          if (!this.setupComplete) {
+            console.error(`${LOG_PREFIX} ❌ WebSocket closed BEFORE setup_complete! This means the setup message was likely rejected.`);
+            console.error(`${LOG_PREFIX} 💡 Common causes: unsupported fields in setup, auth failure, model not available, quota exceeded`);
+          }
           this.setConnected(false);
           this.setupComplete = false;
           this.ws = null;
@@ -244,19 +249,59 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Send setup message and WAIT for setup to complete
     // This ensures the 'connected' event fires AFTER configure() returns
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const SETUP_TIMEOUT_MS = 20000; // 20 seconds - Vertex AI can be slow on cold starts
+
       const timeout = setTimeout(() => {
-        reject(new Error("Gemini setup timeout - no response within 10 seconds"));
-      }, 10000);
+        if (!settled) {
+          settled = true;
+          console.error(`${LOG_PREFIX} ❌ Gemini setup timeout - no setup_complete within ${SETUP_TIMEOUT_MS / 1000}s`);
+          console.error(`${LOG_PREFIX} 💡 This usually means the setup message contains unsupported fields or auth failed silently`);
+          console.error(`${LOG_PREFIX} 💡 WS readyState: ${this.ws?.readyState}, bufferedAmount: ${this.ws?.bufferedAmount}`);
+          this.removeListener('connected', onConnected);
+          reject(new Error(`Gemini setup timeout - no setup_complete within ${SETUP_TIMEOUT_MS / 1000} seconds`));
+        }
+      }, SETUP_TIMEOUT_MS);
 
       // Listen for connected event (fires when setupComplete is received)
       const onConnected = () => {
-        clearTimeout(timeout);
-        console.log(`${LOG_PREFIX} Setup complete, configure() resolving`);
-        resolve();
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          console.log(`${LOG_PREFIX} Setup complete, configure() resolving`);
+          resolve();
+        }
       };
+
+      // Listen for errors that arrive during setup
+      const onError = (err: any) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          console.error(`${LOG_PREFIX} ❌ Error during setup:`, err);
+          this.removeListener('connected', onConnected);
+          reject(new Error(`Gemini setup failed: ${err?.message || err}`));
+        }
+      };
+      this.once('error', onError);
+
+      // Also listen for WS close during setup
+      const onClose = () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          console.error(`${LOG_PREFIX} ❌ WebSocket closed during setup (before setup_complete)`);
+          this.removeListener('connected', onConnected);
+          reject(new Error('Gemini WebSocket closed during setup'));
+        }
+      };
+      if (this.ws) {
+        this.ws.once('close', onClose);
+      }
 
       // Already connected (shouldn't happen but handle it)
       if (this.setupComplete) {
+        settled = true;
         clearTimeout(timeout);
         resolve();
         return;
@@ -266,7 +311,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
       // Send setup message
       this.sendSetupMessage(config);
-      console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete...`);
+      console.log(`${LOG_PREFIX} Setup message sent, waiting for setupComplete... (timeout: ${SETUP_TIMEOUT_MS / 1000}s)`);
     });
   }
 
@@ -297,7 +342,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         voice_config: {
           prebuilt_voice_config: {
             voice_name: voice,
-            speaking_rate: 0.9, // Set to 90% of normal speed for more natural pacing
+            // NOTE: speaking_rate is NOT a supported field in Gemini Live API.
+            // Including unsupported fields causes silent setup rejection (no setup_complete).
           },
         },
       },
@@ -784,17 +830,24 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       } else if (message.tool_call || message.toolCall) {
         console.log(`${LOG_PREFIX} 📬 Message received: TOOL_CALL`);
       } else {
-        console.log(`${LOG_PREFIX} 📬 Message received: ${JSON.stringify(message).substring(0, 100)}`);
+        // Log full unknown message for debugging (especially during setup phase)
+        const msgStr = JSON.stringify(message);
+        console.log(`${LOG_PREFIX} 📬 Message received (${this.setupComplete ? 'post-setup' : 'PRE-SETUP'}): ${msgStr.substring(0, 300)}`);
+        if (!this.setupComplete && msgStr.length > 300) {
+          console.log(`${LOG_PREFIX} 📬 Full pre-setup message: ${msgStr}`);
+        }
       }
 
       // Check for errors
       if (isGeminiError(message)) {
         console.error(`${LOG_PREFIX} 🚨 API error:`, message.error);
+        console.error(`${LOG_PREFIX} 🚨 Full error details:`, JSON.stringify(message.error, null, 2));
         this.emitError(
           message.error.status || 'api_error',
           message.error.message,
           message.error.status !== 'UNAUTHENTICATED'
         );
+        this.emit('error', new Error(message.error.message || 'Gemini API error'));
         return;
       }
 

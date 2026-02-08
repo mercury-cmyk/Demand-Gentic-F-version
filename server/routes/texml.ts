@@ -3,6 +3,9 @@ import { storePendingCallState } from "../services/pending-call-state";
 
 const router = Router();
 
+// Hardcoded production WebSocket host - env vars get overwritten by dev scripts
+const PRODUCTION_WS_HOST = 'wss://demandgentic.ai';
+
 /**
  * Determine the optimal codec for a destination phone number
  *
@@ -113,9 +116,11 @@ const aiCallHandler = async (req: any, res: any) => {
 
   // Determine if we have custom parameters passed from the initiation
   // These might be in ClientState (base64) or directly in the body if we added them to the URL
-  const host = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] ||
-               req.get('host') ||
-               'localhost:8080';
+  // Use PUBLIC_WEBSOCKET_URL if set, otherwise fall back to production constant
+  // This ensures production calls always route to the correct WebSocket host
+  // even if env vars were overwritten by dev scripts
+  const rawWsUrl = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] || '';
+  const host = rawWsUrl || PRODUCTION_WS_HOST;
 
   // CRITICAL FIX: Store full client_state in memory and only pass call_id in URL
   // This avoids URL length limits (~3KB base64 client_state was breaking ngrok WebSocket upgrades)

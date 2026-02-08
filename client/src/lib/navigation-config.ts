@@ -144,6 +144,15 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           },
         ],
       },
+      {
+        id: 'generative-studio',
+        title: 'Generative Studio',
+        url: '/generative-studio',
+        icon: 'Wand2',
+        roles: MANAGEMENT_ROLES,
+        badge: { text: 'New', variant: 'new' as BadgeVariant },
+        description: 'AI-powered content creation hub for images, pages, emails, blogs, and more',
+      },
     ],
   },
 

@@ -14,6 +14,10 @@ const router = Router();
 // Telnyx API base URL
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
 
+// Hardcoded production URL - this must NOT come from env vars since they get
+// overwritten by dev-with-ngrok scripts. Must match switch-to-prod.ts.
+const PRODUCTION_URL = 'https://demandgentic.ai';
+
 interface TexmlApplication {
   id: string;
   friendly_name: string;
@@ -53,7 +57,8 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
 
     // Get current environment URLs
     const currentNgrokUrl = process.env.PUBLIC_WEBHOOK_HOST || '';
-    const productionUrl = env.PUBLIC_TEXML_HOST || env.TELNYX_WEBHOOK_URL || '';
+    // Use hardcoded production URL - env vars get overwritten by dev scripts
+    const productionUrl = PRODUCTION_URL;
     const currentWebsocketUrl = process.env.PUBLIC_WEBSOCKET_URL || '';
 
     // Fetch TeXML application details
@@ -410,15 +415,9 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       });
     }
 
-    // Get production URL from request body or environment
-    let prodUrl = req.body.productionUrl || env.PUBLIC_TEXML_HOST || env.TELNYX_WEBHOOK_URL;
-
-    if (!prodUrl) {
-      return res.status(400).json({
-        success: false,
-        message: 'Production URL not provided and PUBLIC_TEXML_HOST/TELNYX_WEBHOOK_URL not set. Please provide productionUrl in the request body.',
-      });
-    }
+    // Get production URL from request body or hardcoded constant
+    // Don't use env vars as fallback - they get overwritten by dev scripts
+    let prodUrl = req.body.productionUrl || PRODUCTION_URL;
 
     // Clean up URL - remove any existing protocol first, then add https://
     // This prevents double-protocol issues like https://https://...

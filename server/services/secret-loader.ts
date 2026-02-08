@@ -91,15 +91,33 @@ export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promis
       }
     }
 
+    // When not overwriting, filter out secrets that already exist in process.env
+    // This avoids unnecessary decryption attempts (and noisy error logs when
+    // the master key doesn't match what was used during encryption).
+    let needsDecryption: (typeof secretStore.$inferSelect)[] = [];
+    let skipped = 0;
+    for (const [, secret] of resolvedSecrets) {
+      if (!overwrite && process.env[secret.name] !== undefined) {
+        skipped++;
+      } else {
+        needsDecryption.push(secret);
+      }
+    }
+
+    if (skipped > 0) {
+      console.log(`${LOG_PREFIX} Skipped ${skipped} secrets already in env (overwrite=false)`);
+    }
+
+    // If nothing needs decryption, return early — no master key needed
+    if (needsDecryption.length === 0) {
+      console.log(`${LOG_PREFIX} All ${resolvedSecrets.size} secrets already populated from env — skipping DB decryption`);
+      return 0;
+    }
+
     let loaded = 0;
     const masterKey = ensureMasterKey();
 
-    for (const [, secret] of resolvedSecrets) {
-      // Skip if env var already exists and overwrite is false
-      if (!overwrite && process.env[secret.name] !== undefined) {
-        continue;
-      }
-
+    for (const secret of needsDecryption) {
       try {
         const value = decryptJson<string>(secret.encryptedValue, masterKey);
 
@@ -121,7 +139,7 @@ export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promis
       }
     }
 
-    console.log(`${LOG_PREFIX} Loaded ${loaded}/${resolvedSecrets.size} secrets (env: ${environment})`);
+    console.log(`${LOG_PREFIX} Loaded ${loaded}/${needsDecryption.length} secrets from DB, ${skipped} already in env`);
     return loaded;
   } catch (error: any) {
     console.error(`${LOG_PREFIX} Failed to load secrets from DB, falling back to .env: ${error.message}`);

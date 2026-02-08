@@ -53,6 +53,13 @@ import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/age
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
+import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
+import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
+import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
+import { PromptOptimizationView } from '@/components/ai-studio/org-intelligence/prompt-optimization';
+import { OrganizationSelector } from '@/components/ai-studio/org-intelligence/organization-selector';
+import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
+import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
 interface ClientUser {
   id: string;
@@ -345,12 +352,7 @@ export default function ClientPortalDashboard() {
   const [businessProfile, setBusinessProfile] = useState<any>(null);
 
   // Organization Intelligence state
-  const [orgIntelligence, setOrgIntelligence] = useState<any>(null);
-  const [orgIntelligenceExpanded, setOrgIntelligenceExpanded] = useState<string | null>(null);
-  const [showCreateOrgDialog, setShowCreateOrgDialog] = useState(false);
-  const [newOrgName, setNewOrgName] = useState('');
-  const [newOrgDomain, setNewOrgDomain] = useState('');
-  const [newOrgIndustry, setNewOrgIndustry] = useState('');
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
   // CRM state
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false);
@@ -397,9 +399,6 @@ export default function ClientPortalDashboard() {
   const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
   const [bulkUploadType, setBulkUploadType] = useState<'contacts' | 'accounts'>('contacts');
 
-  // Deep analysis state
-  const [deepAnalysisRunning, setDeepAnalysisRunning] = useState(false);
-  const [deepAnalysisResult, setDeepAnalysisResult] = useState<any>(null);
 
   // Feature access state (will be loaded from API)
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>([
@@ -536,28 +535,6 @@ export default function ClientPortalDashboard() {
     }
   }, [businessProfileData]);
 
-  // Organization Intelligence query
-  const { data: orgIntelligenceData, isLoading: orgIntelLoading, refetch: refetchOrgIntel } = useQuery<{
-    organization: any;
-    campaigns: any[];
-    isPrimary: boolean;
-    message?: string;
-  }>({
-    queryKey: ['client-portal-org-intelligence'],
-    queryFn: async () => {
-      const res = await fetch('/api/client-portal/settings/organization-intelligence', authHeaders);
-      if (!res.ok) return { organization: null, campaigns: [], isPrimary: false };
-      return res.json();
-    },
-    enabled: !!user,
-  });
-
-  // Sync org intelligence data to local state for editing
-  useEffect(() => {
-    if (orgIntelligenceData?.organization) {
-      setOrgIntelligence(orgIntelligenceData.organization);
-    }
-  }, [orgIntelligenceData]);
 
   // CRM Accounts query
   const { data: crmAccountsData, isLoading: crmAccountsLoading, refetch: refetchCrmAccounts } = useQuery<{
@@ -785,83 +762,6 @@ export default function ClientPortalDashboard() {
     },
   });
 
-  // Save organization intelligence mutation
-  const saveOrgIntelMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await fetch('/api/client-portal/settings/organization-intelligence', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to save organization intelligence');
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['client-portal-org-intelligence'] });
-      toast({ title: 'Organization intelligence saved successfully' });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Failed to save organization intelligence', description: error.message, variant: 'destructive' });
-    },
-  });
-
-  // Handler for saving organization intelligence
-  const handleSaveOrgIntelligence = () => {
-    if (!orgIntelligence) return;
-    saveOrgIntelMutation.mutate({
-      identity: orgIntelligence.identity,
-      offerings: orgIntelligence.offerings,
-      icp: orgIntelligence.icp,
-      positioning: orgIntelligence.positioning,
-      outreach: orgIntelligence.outreach,
-    });
-  };
-
-  // Create organization mutation
-  const createOrgMutation = useMutation({
-    mutationFn: async (data: { name: string; domain?: string; industry?: string }) => {
-      const res = await fetch('/api/client-portal/settings/organization-intelligence', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to create organization');
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['client-portal-org-intelligence'] });
-      setShowCreateOrgDialog(false);
-      setNewOrgName('');
-      setNewOrgDomain('');
-      setNewOrgIndustry('');
-      toast({ title: 'Organization created successfully', description: 'You can now fill in your organization intelligence.' });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Failed to create organization', description: error.message, variant: 'destructive' });
-    },
-  });
-
-  // Handler for creating organization
-  const handleCreateOrganization = () => {
-    if (!newOrgName.trim()) return;
-    createOrgMutation.mutate({
-      name: newOrgName.trim(),
-      domain: newOrgDomain.trim() || undefined,
-      industry: newOrgIndustry.trim() || undefined,
-    });
-  };
 
   // CRM: Add/Edit Contact mutation
   const addContactMutation = useMutation({
@@ -995,27 +895,6 @@ export default function ClientPortalDashboard() {
     bulkImportMutation.mutate(fd);
   };
 
-  // Deep Analysis handler
-  const handleDeepAnalysis = async () => {
-    if (!orgIntelligence) return;
-    setDeepAnalysisRunning(true);
-    try {
-      const res = await fetch('/api/client-portal/settings/organization-intelligence/analyze-deep', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ organizationId: orgIntelligence.id }),
-      });
-      if (!res.ok) throw new Error('Deep analysis failed');
-      const data = await res.json();
-      setDeepAnalysisResult(data);
-      refetchOrgIntel();
-      toast({ title: 'Deep analysis complete', description: 'Organization intelligence has been enriched with AI insights.' });
-    } catch (err: any) {
-      toast({ title: 'Analysis failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeepAnalysisRunning(false);
-    }
-  };
 
   // CRM: View detail
   const handleViewCrmDetail = (item: any, type: 'account' | 'contact') => {
@@ -3038,217 +2917,52 @@ export default function ClientPortalDashboard() {
 
         {/* ==================== INTELLIGENCE TAB ==================== */}
         {activeTab === 'intelligence' && (
-          <div className="space-y-6 max-w-5xl mx-auto">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
-              <div className="space-y-1">
-                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
-                  Organization <span className="font-semibold">Intelligence</span>
-                </h2>
-                <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Your business context powers AI agents, campaign targeting, and personalized outreach
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight">Organization Intelligence</h2>
+                <p className="text-muted-foreground mt-2">
+                  The foundation layer for all AI behavior - teaching the AI how your organization thinks and operates.
                 </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {orgIntelligence && (
-                  <>
-                    <Button variant="outline" size="sm" onClick={handleDeepAnalysis} disabled={deepAnalysisRunning}>
-                      {deepAnalysisRunning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2 text-amber-500" />}
-                      {deepAnalysisRunning ? 'Analyzing...' : 'AI Deep Analysis'}
-                    </Button>
-                    <Button size="sm" onClick={handleSaveOrgIntelligence} disabled={saveOrgIntelMutation.isPending}>
-                      {saveOrgIntelMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                      Save Changes
-                    </Button>
-                  </>
-                )}
               </div>
             </div>
 
-            {orgIntelLoading ? (
-              <div className="flex items-center justify-center py-16"><Loader2 className="h-10 w-10 animate-spin text-muted-foreground" /></div>
-            ) : !orgIntelligence ? (
-              <Card className="border-dashed">
-                <CardContent className="py-16 text-center">
-                  <Brain className="h-16 w-16 mx-auto mb-4 text-violet-400/50" />
-                  <h3 className="text-xl font-semibold mb-2">No Organization Connected</h3>
-                  <p className="text-muted-foreground mb-6 max-w-md mx-auto">Create your organization profile to power AI agents with your business context. This data shapes how your AI sounds, what it says, and who it targets.</p>
-                  <Button size="lg" onClick={() => setShowCreateOrgDialog(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Organization
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-5">
-                {/* Org Header Card */}
-                <Card className="shadow-sm border-violet-200/50 dark:border-violet-800/50 bg-gradient-to-r from-violet-50/50 to-white dark:from-violet-950/20 dark:to-slate-900">
-                  <CardContent className="p-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
-                        <Brain className="h-7 w-7 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-semibold">{orgIntelligence.name}</h3>
-                        <div className="flex items-center gap-3 mt-1">
-                          {orgIntelligence.domain && <span className="text-sm text-muted-foreground flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{orgIntelligence.domain}</span>}
-                          {orgIntelligence.industry && <Badge variant="outline">{orgIntelligence.industry}</Badge>}
-                          {(orgIntelligenceData?.campaigns?.length ?? 0) > 0 && <Badge variant="secondary">{orgIntelligenceData!.campaigns!.length} campaign{orgIntelligenceData!.campaigns!.length !== 1 ? 's' : ''}</Badge>}
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+            <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
 
-                {/* Deep Analysis Result */}
-                {deepAnalysisResult && (
-                  <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-5 w-5 text-amber-500" />AI Analysis Insights</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{typeof deepAnalysisResult === 'object' ? JSON.stringify(deepAnalysisResult.insights || deepAnalysisResult, null, 2) : deepAnalysisResult}</p>
-                    </CardContent>
-                  </Card>
-                )}
+            <Tabs defaultValue="organization-profile" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-6 lg:w-auto">
+                <TabsTrigger value="organization-profile">Organization Profile</TabsTrigger>
+                <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
+                <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
+                <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
+                <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
+                <TabsTrigger value="prompt-optimization">Prompt & Training</TabsTrigger>
+              </TabsList>
 
-                {/* Intelligence Sections Grid */}
-                <div className="grid md:grid-cols-2 gap-5">
-                  {/* Identity */}
-                  <Card className="shadow-sm">
-                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'identity' ? null : 'identity')}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><Building className="h-5 w-5 text-blue-500" /><CardTitle className="text-base">Company Identity</CardTitle></div>
-                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'identity' ? 'rotate-180' : ''}`} />
-                      </div>
-                      <CardDescription>Legal name, description, industry, and company size</CardDescription>
-                    </CardHeader>
-                    {orgIntelligenceExpanded === 'identity' && (
-                      <CardContent className="space-y-4">
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div className="space-y-2"><Label>Legal Name</Label><Input value={orgIntelligence.identity?.legalName || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, legalName: e.target.value } }))} /></div>
-                          <div className="space-y-2"><Label>Industry</Label><Input value={orgIntelligence.identity?.industry || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, industry: e.target.value } }))} /></div>
-                        </div>
-                        <div className="space-y-2"><Label>Description</Label><Textarea rows={3} value={orgIntelligence.identity?.description || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, description: e.target.value } }))} placeholder="Brief description of your organization..." /></div>
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div className="space-y-2"><Label>Employees</Label><Input value={orgIntelligence.identity?.employees || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, employees: e.target.value } }))} placeholder="e.g., 50-100" /></div>
-                          <div className="space-y-2"><Label>Founded Year</Label><Input type="number" value={orgIntelligence.identity?.foundedYear || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, foundedYear: parseInt(e.target.value) || null } }))} /></div>
-                        </div>
-                      </CardContent>
-                    )}
-                    {orgIntelligenceExpanded !== 'identity' && orgIntelligence.identity?.description && (
-                      <CardContent className="pt-0"><p className="text-sm text-muted-foreground line-clamp-2">{orgIntelligence.identity.description}</p></CardContent>
-                    )}
-                  </Card>
+              <TabsContent value="organization-profile" className="space-y-4">
+                <AccountIntelligenceView />
+              </TabsContent>
 
-                  {/* Offerings */}
-                  <Card className="shadow-sm">
-                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'offerings' ? null : 'offerings')}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><Package className="h-5 w-5 text-green-500" /><CardTitle className="text-base">Products & Services</CardTitle></div>
-                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'offerings' ? 'rotate-180' : ''}`} />
-                      </div>
-                      <CardDescription>Core products, problems solved, differentiators</CardDescription>
-                    </CardHeader>
-                    {orgIntelligenceExpanded === 'offerings' && (
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2"><Label>Core Products/Services (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.coreProducts || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, coreProducts: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                        <div className="space-y-2"><Label>Problems We Solve (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.problemsSolved || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, problemsSolved: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                        <div className="space-y-2"><Label>Key Differentiators (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.differentiators || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, differentiators: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                      </CardContent>
-                    )}
-                    {orgIntelligenceExpanded !== 'offerings' && orgIntelligence.offerings?.coreProducts?.length > 0 && (
-                      <CardContent className="pt-0"><div className="flex flex-wrap gap-1">{orgIntelligence.offerings.coreProducts.slice(0, 3).map((p: string, i: number) => <Badge key={i} variant="secondary" className="text-xs">{p}</Badge>)}{orgIntelligence.offerings.coreProducts.length > 3 && <Badge variant="outline" className="text-xs">+{orgIntelligence.offerings.coreProducts.length - 3}</Badge>}</div></CardContent>
-                    )}
-                  </Card>
+              <TabsContent value="service-catalog" className="space-y-4">
+                <ServiceCatalogTab organizationId={selectedOrgId} />
+              </TabsContent>
 
-                  {/* ICP */}
-                  <Card className="shadow-sm">
-                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'icp' ? null : 'icp')}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><Target className="h-5 w-5 text-purple-500" /><CardTitle className="text-base">Ideal Customer Profile</CardTitle></div>
-                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'icp' ? 'rotate-180' : ''}`} />
-                      </div>
-                      <CardDescription>Target industries, company size, and objections</CardDescription>
-                    </CardHeader>
-                    {orgIntelligenceExpanded === 'icp' && (
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2"><Label>Target Industries (one per line)</Label><Textarea rows={3} value={(orgIntelligence.icp?.industries || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, industries: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                        <div className="space-y-2"><Label>Target Company Size</Label><Input value={orgIntelligence.icp?.companySize || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, companySize: e.target.value } }))} placeholder="e.g., 100-500 employees" /></div>
-                        <div className="space-y-2"><Label>Common Objections (one per line)</Label><Textarea rows={3} value={(orgIntelligence.icp?.objections || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, objections: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                      </CardContent>
-                    )}
-                    {orgIntelligenceExpanded !== 'icp' && orgIntelligence.icp?.industries?.length > 0 && (
-                      <CardContent className="pt-0"><div className="flex flex-wrap gap-1">{orgIntelligence.icp.industries.slice(0, 4).map((ind: string, i: number) => <Badge key={i} variant="outline" className="text-xs">{ind}</Badge>)}</div></CardContent>
-                    )}
-                  </Card>
+              <TabsContent value="problem-framework" className="space-y-4">
+                <ProblemFrameworkTab organizationId={selectedOrgId} />
+              </TabsContent>
 
-                  {/* Positioning */}
-                  <Card className="shadow-sm">
-                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'positioning' ? null : 'positioning')}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2"><Megaphone className="h-5 w-5 text-orange-500" /><CardTitle className="text-base">Positioning & Messaging</CardTitle></div>
-                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'positioning' ? 'rotate-180' : ''}`} />
-                      </div>
-                      <CardDescription>Value proposition, elevator pitch, competitors</CardDescription>
-                    </CardHeader>
-                    {orgIntelligenceExpanded === 'positioning' && (
-                      <CardContent className="space-y-4">
-                        <div className="space-y-2"><Label>One-Liner / Elevator Pitch</Label><Input value={orgIntelligence.positioning?.oneLiner || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, oneLiner: e.target.value } }))} placeholder="We help [target] achieve [outcome] by [method]" /></div>
-                        <div className="space-y-2"><Label>Value Proposition</Label><Textarea rows={3} value={orgIntelligence.positioning?.valueProposition || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, valueProposition: e.target.value } }))} /></div>
-                        <div className="space-y-2"><Label>Competitors (one per line)</Label><Textarea rows={2} value={(orgIntelligence.positioning?.competitors || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, competitors: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                        <div className="space-y-2"><Label>Why Choose Us (one per line)</Label><Textarea rows={3} value={(orgIntelligence.positioning?.whyUs || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, whyUs: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                      </CardContent>
-                    )}
-                    {orgIntelligenceExpanded !== 'positioning' && orgIntelligence.positioning?.oneLiner && (
-                      <CardContent className="pt-0"><p className="text-sm text-muted-foreground italic line-clamp-2">"{orgIntelligence.positioning.oneLiner}"</p></CardContent>
-                    )}
-                  </Card>
-                </div>
+              <TabsContent value="icp-positioning" className="space-y-4">
+                <ICPPositioningTab />
+              </TabsContent>
 
-                {/* Outreach - Full Width */}
-                <Card className="shadow-sm">
-                  <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'outreach' ? null : 'outreach')}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2"><PhoneCall className="h-5 w-5 text-cyan-500" /><CardTitle className="text-base">Outreach Guidance</CardTitle></div>
-                      <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'outreach' ? 'rotate-180' : ''}`} />
-                    </div>
-                    <CardDescription>Email angles, call openers, and objection handling strategies</CardDescription>
-                  </CardHeader>
-                  {orgIntelligenceExpanded === 'outreach' && (
-                    <CardContent className="space-y-4">
-                      <div className="grid md:grid-cols-2 gap-4">
-                        <div className="space-y-2"><Label>Email Angles / Hooks (one per line)</Label><Textarea rows={4} value={(orgIntelligence.outreach?.emailAngles || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, outreach: { ...prev.outreach, emailAngles: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                        <div className="space-y-2"><Label>Call Openers (one per line)</Label><Textarea rows={4} value={(orgIntelligence.outreach?.callOpeners || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, outreach: { ...prev.outreach, callOpeners: e.target.value.split('\n').filter(Boolean) } }))} /></div>
-                      </div>
-                    </CardContent>
-                  )}
-                  {orgIntelligenceExpanded !== 'outreach' && (orgIntelligence.outreach?.emailAngles?.length > 0 || orgIntelligence.outreach?.callOpeners?.length > 0) && (
-                    <CardContent className="pt-0 flex gap-4 text-sm text-muted-foreground">
-                      {orgIntelligence.outreach?.emailAngles?.length > 0 && <span>{orgIntelligence.outreach.emailAngles.length} email angles</span>}
-                      {orgIntelligence.outreach?.callOpeners?.length > 0 && <span>{orgIntelligence.outreach.callOpeners.length} call openers</span>}
-                    </CardContent>
-                  )}
-                </Card>
+              <TabsContent value="messaging-proof" className="space-y-4">
+                <MessagingProofTab />
+              </TabsContent>
 
-                {/* Context Generation Info */}
-                <Card className="border-indigo-200/50 dark:border-indigo-800/50 bg-indigo-50/30 dark:bg-indigo-950/10 shadow-sm">
-                  <CardContent className="p-5">
-                    <div className="flex items-start gap-3">
-                      <Zap className="h-5 w-5 text-indigo-500 mt-0.5" />
-                      <div>
-                        <h4 className="font-medium text-sm mb-1">How Intelligence Powers Your Campaigns</h4>
-                        <p className="text-xs text-muted-foreground">
-                          When you create campaigns via the Campaign Wizard, your organization intelligence is automatically injected into AI context layers:
-                          <br /><span className="font-semibold">Identity → ICP → Positioning → Outreach Guidance</span>
-                          <br />This ensures your AI agents speak with your brand voice, target the right prospects, and handle objections using your competitive positioning.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
+              <TabsContent value="prompt-optimization" className="space-y-4">
+                <PromptOptimizationView />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 
@@ -3575,377 +3289,45 @@ export default function ClientPortalDashboard() {
                 </Card>
               </TabsContent>
 
-              {/* Organization Intelligence Tab */}
+              {/* Organization Intelligence Tab - Uses the same components as the main app */}
               <TabsContent value="organization-intelligence" className="mt-4">
-                <div className="space-y-4">
-                  {/* Header with organization info */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Brain className="h-5 w-5" />
-                        Organization Intelligence
-                      </CardTitle>
-                      <CardDescription>
-                        Define your organization's context to power AI agents in campaigns. This information helps AI understand your business.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {orgIntelLoading ? (
-                        <div className="flex items-center justify-center py-8">
-                          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                        </div>
-                      ) : !orgIntelligence ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                          <p>No organization linked to your account.</p>
-                          <p className="text-sm mt-1 mb-4">Create your organization to power AI agents with your business context.</p>
-                          <Button onClick={() => setShowCreateOrgDialog(true)}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Create Organization
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
-                            <Building2 className="h-8 w-8 text-primary" />
-                            <div>
-                              <h3 className="font-semibold">{orgIntelligence.name}</h3>
-                              <p className="text-sm text-muted-foreground">
-                                {orgIntelligence.domain && <span className="mr-2">{orgIntelligence.domain}</span>}
-                                {orgIntelligence.industry && <Badge variant="outline" className="text-xs">{orgIntelligence.industry}</Badge>}
-                              </p>
-                            </div>
-                          </div>
-                          {orgIntelligenceData?.campaigns && orgIntelligenceData.campaigns.length > 0 && (
-                            <div className="text-sm text-muted-foreground">
-                              <span className="font-medium">{orgIntelligenceData.campaigns.length}</span> campaign{orgIntelligenceData.campaigns.length !== 1 ? 's' : ''} using this organization
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                <div className="space-y-6">
+                  <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
 
-                  {orgIntelligence && (
-                    <>
-                      {/* Identity Section */}
-                      <Card>
-                        <CardHeader 
-                          className="cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'identity' ? null : 'identity')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Building className="h-5 w-5 text-blue-500" />
-                              <CardTitle className="text-base">Company Identity</CardTitle>
-                            </div>
-                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'identity' ? 'rotate-180' : ''}`} />
-                          </div>
-                          <CardDescription>Legal name, description, industry, and company size</CardDescription>
-                        </CardHeader>
-                        {orgIntelligenceExpanded === 'identity' && (
-                          <CardContent className="space-y-4">
-                            <div className="grid sm:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label>Legal Name</Label>
-                                <Input
-                                  value={orgIntelligence.identity?.legalName || ''}
-                                  onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                    ...prev,
-                                    identity: { ...prev.identity, legalName: e.target.value }
-                                  }))}
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Industry</Label>
-                                <Input
-                                  value={orgIntelligence.identity?.industry || ''}
-                                  onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                    ...prev,
-                                    identity: { ...prev.identity, industry: e.target.value }
-                                  }))}
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Description</Label>
-                              <Textarea
-                                rows={3}
-                                value={orgIntelligence.identity?.description || ''}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  identity: { ...prev.identity, description: e.target.value }
-                                }))}
-                                placeholder="Brief description of your organization..."
-                              />
-                            </div>
-                            <div className="grid sm:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label>Number of Employees</Label>
-                                <Input
-                                  value={orgIntelligence.identity?.employees || ''}
-                                  onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                    ...prev,
-                                    identity: { ...prev.identity, employees: e.target.value }
-                                  }))}
-                                  placeholder="e.g., 50-100"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Founded Year</Label>
-                                <Input
-                                  type="number"
-                                  value={orgIntelligence.identity?.foundedYear || ''}
-                                  onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                    ...prev,
-                                    identity: { ...prev.identity, foundedYear: parseInt(e.target.value) || null }
-                                  }))}
-                                />
-                              </div>
-                            </div>
-                          </CardContent>
-                        )}
-                      </Card>
+                  <Tabs defaultValue="organization-profile" className="space-y-6">
+                    <TabsList className="grid w-full grid-cols-6 lg:w-auto">
+                      <TabsTrigger value="organization-profile">Organization Profile</TabsTrigger>
+                      <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
+                      <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
+                      <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
+                      <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
+                      <TabsTrigger value="prompt-optimization">Prompt & Training</TabsTrigger>
+                    </TabsList>
 
-                      {/* Offerings Section */}
-                      <Card>
-                        <CardHeader 
-                          className="cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'offerings' ? null : 'offerings')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Package className="h-5 w-5 text-green-500" />
-                              <CardTitle className="text-base">Products & Services</CardTitle>
-                            </div>
-                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'offerings' ? 'rotate-180' : ''}`} />
-                          </div>
-                          <CardDescription>Core products, use cases, problems solved, and differentiators</CardDescription>
-                        </CardHeader>
-                        {orgIntelligenceExpanded === 'offerings' && (
-                          <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>Core Products/Services (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.offerings?.coreProducts || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  offerings: { ...prev.offerings, coreProducts: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="Enter each product or service on a new line..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Problems We Solve (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.offerings?.problemsSolved || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  offerings: { ...prev.offerings, problemsSolved: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="List the problems your products/services solve..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Key Differentiators (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.offerings?.differentiators || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  offerings: { ...prev.offerings, differentiators: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="What makes you different from competitors..."
-                              />
-                            </div>
-                          </CardContent>
-                        )}
-                      </Card>
+                    <TabsContent value="organization-profile" className="space-y-4">
+                      <AccountIntelligenceView />
+                    </TabsContent>
 
-                      {/* ICP Section */}
-                      <Card>
-                        <CardHeader 
-                          className="cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'icp' ? null : 'icp')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Target className="h-5 w-5 text-purple-500" />
-                              <CardTitle className="text-base">Ideal Customer Profile (ICP)</CardTitle>
-                            </div>
-                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'icp' ? 'rotate-180' : ''}`} />
-                          </div>
-                          <CardDescription>Target industries, company size, and buyer personas</CardDescription>
-                        </CardHeader>
-                        {orgIntelligenceExpanded === 'icp' && (
-                          <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>Target Industries (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.icp?.industries || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  icp: { ...prev.icp, industries: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="e.g., Healthcare, Financial Services, Manufacturing..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Target Company Size</Label>
-                              <Input
-                                value={orgIntelligence.icp?.companySize || ''}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  icp: { ...prev.icp, companySize: e.target.value }
-                                }))}
-                                placeholder="e.g., 100-500 employees, Enterprise 1000+"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Common Objections We Hear (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.icp?.objections || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  icp: { ...prev.icp, objections: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="e.g., Too expensive, We already have a solution..."
-                              />
-                            </div>
-                          </CardContent>
-                        )}
-                      </Card>
+                    <TabsContent value="service-catalog" className="space-y-4">
+                      <ServiceCatalogTab organizationId={selectedOrgId} />
+                    </TabsContent>
 
-                      {/* Positioning Section */}
-                      <Card>
-                        <CardHeader 
-                          className="cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'positioning' ? null : 'positioning')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Megaphone className="h-5 w-5 text-orange-500" />
-                              <CardTitle className="text-base">Positioning & Messaging</CardTitle>
-                            </div>
-                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'positioning' ? 'rotate-180' : ''}`} />
-                          </div>
-                          <CardDescription>Value proposition, one-liner, and competitive positioning</CardDescription>
-                        </CardHeader>
-                        {orgIntelligenceExpanded === 'positioning' && (
-                          <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>One-Liner / Elevator Pitch</Label>
-                              <Input
-                                value={orgIntelligence.positioning?.oneLiner || ''}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  positioning: { ...prev.positioning, oneLiner: e.target.value }
-                                }))}
-                                placeholder="We help [target] achieve [outcome] by [method]"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Value Proposition</Label>
-                              <Textarea
-                                rows={3}
-                                value={orgIntelligence.positioning?.valueProposition || ''}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  positioning: { ...prev.positioning, valueProposition: e.target.value }
-                                }))}
-                                placeholder="Detailed value proposition statement..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Competitors (one per line)</Label>
-                              <Textarea
-                                rows={2}
-                                value={(orgIntelligence.positioning?.competitors || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  positioning: { ...prev.positioning, competitors: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="List main competitors..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Why Choose Us (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.positioning?.whyUs || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  positioning: { ...prev.positioning, whyUs: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="Reasons customers should choose you over competitors..."
-                              />
-                            </div>
-                          </CardContent>
-                        )}
-                      </Card>
+                    <TabsContent value="problem-framework" className="space-y-4">
+                      <ProblemFrameworkTab organizationId={selectedOrgId} />
+                    </TabsContent>
 
-                      {/* Outreach Section */}
-                      <Card>
-                        <CardHeader 
-                          className="cursor-pointer hover:bg-muted/30 transition-colors"
-                          onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'outreach' ? null : 'outreach')}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <PhoneCall className="h-5 w-5 text-cyan-500" />
-                              <CardTitle className="text-base">Outreach Guidance</CardTitle>
-                            </div>
-                            <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'outreach' ? 'rotate-180' : ''}`} />
-                          </div>
-                          <CardDescription>Email angles, call openers, and objection handling</CardDescription>
-                        </CardHeader>
-                        {orgIntelligenceExpanded === 'outreach' && (
-                          <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                              <Label>Email Angles / Hooks (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.outreach?.emailAngles || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  outreach: { ...prev.outreach, emailAngles: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="Effective email subject lines and opening hooks..."
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Call Openers (one per line)</Label>
-                              <Textarea
-                                rows={3}
-                                value={(orgIntelligence.outreach?.callOpeners || []).join('\n')}
-                                onChange={(e) => setOrgIntelligence((prev: any) => ({
-                                  ...prev,
-                                  outreach: { ...prev.outreach, callOpeners: e.target.value.split('\n').filter(Boolean) }
-                                }))}
-                                placeholder="Effective ways to open sales calls..."
-                              />
-                            </div>
-                          </CardContent>
-                        )}
-                      </Card>
+                    <TabsContent value="icp-positioning" className="space-y-4">
+                      <ICPPositioningTab />
+                    </TabsContent>
 
-                      {/* Save Button */}
-                      <div className="flex justify-end">
-                        <Button 
-                          onClick={handleSaveOrgIntelligence}
-                          disabled={saveOrgIntelMutation.isPending}
-                          size="lg"
-                        >
-                          {saveOrgIntelMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                          Save Organization Intelligence
-                        </Button>
-                      </div>
-                    </>
-                  )}
+                    <TabsContent value="messaging-proof" className="space-y-4">
+                      <MessagingProofTab />
+                    </TabsContent>
+
+                    <TabsContent value="prompt-optimization" className="space-y-4">
+                      <PromptOptimizationView />
+                    </TabsContent>
+                  </Tabs>
                 </div>
               </TabsContent>
 
@@ -5106,59 +4488,6 @@ export default function ClientPortalDashboard() {
       {/* AI Agent Button - Floating assistant */}
       <ClientAgentButton onNavigate={setActiveTab} />
 
-      {/* Create Organization Dialog */}
-      <Dialog open={showCreateOrgDialog} onOpenChange={setShowCreateOrgDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5" />
-              Create Organization
-            </DialogTitle>
-            <DialogDescription>
-              Set up your organization to power AI agents with your business context.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="org-name">Organization Name *</Label>
-              <Input
-                id="org-name"
-                placeholder="Your Company Name"
-                value={newOrgName}
-                onChange={(e) => setNewOrgName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="org-domain">Website Domain</Label>
-              <Input
-                id="org-domain"
-                placeholder="yourcompany.com"
-                value={newOrgDomain}
-                onChange={(e) => setNewOrgDomain(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="org-industry">Industry</Label>
-              <Input
-                id="org-industry"
-                placeholder="e.g., Technology, Healthcare, Finance"
-                value={newOrgIndustry}
-                onChange={(e) => setNewOrgIndustry(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateOrgDialog(false)}>Cancel</Button>
-            <Button
-              onClick={handleCreateOrganization}
-              disabled={createOrgMutation.isPending || !newOrgName.trim()}
-            >
-              {createOrgMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Create Organization
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ==================== TEST AI AGENT DIALOG ==================== */}
       <Dialog open={showClientTestAgent} onOpenChange={setShowClientTestAgent}>

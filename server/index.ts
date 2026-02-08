@@ -163,10 +163,10 @@ app.use((req, res, next) => {
   }
 
   // Load secrets from database into process.env
-  // DB secrets take priority; .env acts as fallback if DB is unavailable
+  // Cloud Run/Env vars take priority; DB acts as dynamic override/fallback
   try {
     const { initializeSecrets } = await import("./services/secret-loader");
-    await initializeSecrets({ overwriteEnv: true });
+    await initializeSecrets({ overwriteEnv: false });
   } catch (err) {
     console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
     console.log('[STARTUP] Continuing with .env values as fallback...');
