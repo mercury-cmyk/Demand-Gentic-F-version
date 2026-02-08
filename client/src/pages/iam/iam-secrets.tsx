@@ -470,14 +470,14 @@ export default function IamSecrets() {
                 Environment
               </label>
               <Select
-                value={environmentFilter}
-                onValueChange={(value) => setEnvironmentFilter(value)}
+                value={environmentFilter || "all"}
+                onValueChange={(value) => setEnvironmentFilter(value === "all" ? "" : value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All environments" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All environments</SelectItem>
+                  <SelectItem value="all">All environments</SelectItem>
                   {allowedEnvironments.map((env) => (
                     <SelectItem key={env} value={env}>
                       {env}
