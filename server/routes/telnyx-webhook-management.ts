@@ -54,6 +54,7 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
     // Get current environment URLs
     const currentNgrokUrl = process.env.PUBLIC_WEBHOOK_HOST || '';
     const productionUrl = env.PUBLIC_TEXML_HOST || env.TELNYX_WEBHOOK_URL || '';
+    const currentWebsocketUrl = process.env.PUBLIC_WEBSOCKET_URL || '';
 
     // Fetch TeXML application details
     let texmlApp: any = null;
@@ -171,6 +172,7 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
       environment: {
         ngrokUrl: currentNgrokUrl,
         productionUrl: productionUrl,
+        websocketUrl: currentWebsocketUrl,
         isDevMode: process.env.NODE_ENV !== 'production',
       },
       updatedAt: texmlApp?.updated_at,
@@ -294,18 +296,19 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
       });
     }
 
-    // Ensure URL has https protocol
-    if (!ngrokUrl.startsWith('http://') && !ngrokUrl.startsWith('https://')) {
-      ngrokUrl = `https://${ngrokUrl}`;
-    }
+    // Clean up URL - remove any existing protocol first, then add https://
+    // This prevents double-protocol issues like https://https://...
+    ngrokUrl = ngrokUrl.replace(/^https?:\/\//, '').replace(/^["']|["']$/g, '').trim();
+    ngrokUrl = `https://${ngrokUrl}`;
 
     // Remove trailing slash
     ngrokUrl = ngrokUrl.replace(/\/$/, '');
 
     const voiceUrl = `${ngrokUrl}/api/texml/ai-call`;
     const statusCallbackUrl = `${ngrokUrl}/api/webhooks/telnyx`;
+    const websocketUrl = `wss://${ngrokUrl.replace(/^https?:\/\//, '')}/voice-dialer`;
 
-    console.log(`[Telnyx Webhook] Switching ALL apps to dev mode:`, { voiceUrl, statusCallbackUrl });
+    console.log(`[Telnyx Webhook] Switching ALL apps to dev mode:`, { voiceUrl, statusCallbackUrl, websocketUrl });
 
     const results: any = {
       texml: null,
@@ -376,6 +379,7 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
       config: {
         voiceUrl,
         statusCallbackUrl,
+        websocketUrl,
         baseUrl: ngrokUrl,
       },
       results,
@@ -416,18 +420,19 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       });
     }
 
-    // Ensure URL has https protocol
-    if (!prodUrl.startsWith('http://') && !prodUrl.startsWith('https://')) {
-      prodUrl = `https://${prodUrl}`;
-    }
+    // Clean up URL - remove any existing protocol first, then add https://
+    // This prevents double-protocol issues like https://https://...
+    prodUrl = prodUrl.replace(/^https?:\/\//, '').replace(/^["']|["']$/g, '').trim();
+    prodUrl = `https://${prodUrl}`;
 
     // Remove trailing slash
     prodUrl = prodUrl.replace(/\/$/, '');
 
     const voiceUrl = `${prodUrl}/api/texml/ai-call`;
     const statusCallbackUrl = `${prodUrl}/api/webhooks/telnyx`;
+    const websocketUrl = `wss://${prodUrl.replace(/^https?:\/\//, '')}/voice-dialer`;
 
-    console.log(`[Telnyx Webhook] Switching ALL apps to production mode:`, { voiceUrl, statusCallbackUrl });
+    console.log(`[Telnyx Webhook] Switching ALL apps to production mode:`, { voiceUrl, statusCallbackUrl, websocketUrl });
 
     const results: any = {
       texml: null,
@@ -498,6 +503,7 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       config: {
         voiceUrl,
         statusCallbackUrl,
+        websocketUrl,
         baseUrl: prodUrl,
       },
       results,

@@ -976,6 +976,18 @@ function TelnyxWebhookManagement() {
                 </Button>
               )}
             </div>
+
+            <div className="flex items-center justify-between p-2 bg-muted/30 rounded border">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">WebSocket URL (Voice Dialer)</p>
+                <p className="text-sm font-mono truncate">{webhookData.environment?.websocketUrl || 'Not set'}</p>
+              </div>
+              {webhookData.environment?.websocketUrl && (
+                <Button variant="ghost" size="sm" onClick={() => copyToClipboard(webhookData.environment!.websocketUrl)}>
+                  <Copy className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Current Mode Indicator */}
