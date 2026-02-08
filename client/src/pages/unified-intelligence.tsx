@@ -13,7 +13,7 @@
  * Route: /unified-intelligence
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
@@ -225,39 +225,51 @@ export default function UnifiedIntelligencePage() {
   });
 
   // Transform and filter conversations
-  const allConversations = (conversationsData?.conversations || []).map(adaptConversationToListItem);
+  const allConversations = useMemo(
+    () => (conversationsData?.conversations || []).map(adaptConversationToListItem),
+    [conversationsData]
+  );
 
   // Apply client-side filters
-  let conversations = allConversations;
+  const conversations = useMemo(() => {
+    let filtered = allConversations;
 
-  if (filters.type !== 'all') {
-    conversations = conversations.filter(c => c.type === filters.type);
-  }
+    if (filters.type !== 'all') {
+      filtered = filtered.filter(c => c.type === filters.type);
+    }
 
-  if (filters.disposition !== 'all') {
-    conversations = conversations.filter(c =>
-      c.disposition?.toLowerCase().includes(filters.disposition.toLowerCase())
-    );
-  }
+    if (filters.disposition !== 'all') {
+      filtered = filtered.filter(c =>
+        c.disposition?.toLowerCase().includes(filters.disposition.toLowerCase())
+      );
+    }
 
-  if (filters.hasTranscript === true) {
-    conversations = conversations.filter(c => c.hasTranscript);
-  }
+    if (filters.hasTranscript === true) {
+      filtered = filtered.filter(c => c.hasTranscript);
+    }
+
+    return filtered;
+  }, [allConversations, filters]);
 
   // Calculate stats
-  const stats = {
+  const stats = useMemo(() => ({
     total: conversations.length,
     calls: conversations.filter(c => c.interactionType === 'call' && c.type !== 'test').length,
     emails: conversations.filter(c => c.interactionType === 'email').length,
     testCalls: conversations.filter(c => c.type === 'test').length,
     withTranscripts: conversations.filter(c => c.hasTranscript).length,
-  };
+  }), [conversations]);
 
   // Find selected conversation for detail panel
-  const selectedRaw = selectedId
-    ? conversationsData?.conversations?.find((c: any) => c.id === selectedId)
-    : null;
-  const selectedConversation = selectedRaw ? adaptConversationToDetail(selectedRaw) : null;
+  const selectedRaw = useMemo(() => (
+    selectedId
+      ? conversationsData?.conversations?.find((c: any) => c.id === selectedId)
+      : null
+  ), [selectedId, conversationsData]);
+  const selectedConversation = useMemo(
+    () => (selectedRaw ? adaptConversationToDetail(selectedRaw) : null),
+    [selectedRaw]
+  );
 
   // Top challenges from server-aggregated data
   const topChallenges = conversationsData?.topChallenges || [];
@@ -333,35 +345,37 @@ export default function UnifiedIntelligencePage() {
   }, [refetchConversations, selectedId, queryClient]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-muted/30">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="h-6 w-6 text-primary" />
-            Unified Intelligence
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Complete conversation analysis: recordings, transcripts, and quality insights
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isPolling && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <RefreshCw className="h-3 w-3 animate-spin" />
-              Live updating
-            </span>
-          )}
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
+      <div className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+        <div className="flex items-center justify-between p-4">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Brain className="h-6 w-6 text-primary" />
+              Unified Intelligence
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Complete conversation analysis: recordings, transcripts, and quality insights
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isPolling && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Live updating
+              </span>
+            )}
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Main Content - Resizable Panels */}
-      <div className="flex-1 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
+      <div className="flex-1 overflow-hidden p-4 pt-3">
+        <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border bg-background shadow-sm">
           {/* Left Panel - List + Challenges */}
           <ResizablePanel defaultSize={40} minSize={30} maxSize={50}>
             <div className="h-full overflow-auto p-4 space-y-4">

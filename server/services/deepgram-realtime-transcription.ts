@@ -53,6 +53,7 @@ export interface DeepgramSessionOptions {
   contactId?: string;
   encoding?: 'mulaw' | 'alaw'; // Support dynamic encoding (UK/EU calls)
   onTranscript?: (segment: TranscriptSegment) => void;
+  onSpeechStarted?: (channel: 'inbound' | 'outbound') => void;
   onError?: (error: Error, channel: 'inbound' | 'outbound') => void;
 }
 
@@ -81,6 +82,7 @@ export interface DeepgramTranscriptionSession {
 
   // Callbacks
   onTranscript?: (segment: TranscriptSegment) => void;
+  onSpeechStarted?: (channel: 'inbound' | 'outbound') => void;
   onError?: (error: Error, channel: 'inbound' | 'outbound') => void;
 }
 
@@ -196,6 +198,9 @@ function createDeepgramConnection(
       // Handle speech started event (VAD)
       if (response.type === 'SpeechStarted') {
         console.log(`${LOG_PREFIX} [${session.callId}] ${channel} speech started`);
+        if (session.onSpeechStarted) {
+          session.onSpeechStarted(channel);
+        }
       }
 
       // Handle utterance end
@@ -277,6 +282,7 @@ export function startTranscriptionSession(
     startedAt: Date.now(),
     lastActivityAt: Date.now(),
     onTranscript: options?.onTranscript,
+    onSpeechStarted: options?.onSpeechStarted,
     onError: options?.onError,
   };
 

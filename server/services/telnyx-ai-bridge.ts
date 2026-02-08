@@ -728,8 +728,66 @@ export class TelnyxAiBridge extends EventEmitter {
         console.log(`[TelnyxAiBridge] Media streaming stopped for ${callId}`);
         break;
 
+      case "call.transcription":
+        // Handle real-time transcription from Telnyx
+        await this.handleTranscriptionEvent(callId!, activeCall, data);
+        break;
+
+      case "call.transcription.stopped":
+        console.log(`[TelnyxAiBridge] Transcription stopped for ${callId}`);
+        break;
+
       default:
         console.log(`[TelnyxAiBridge] Unhandled event type: ${event_type}`);
+    }
+  }
+
+  private async handleTranscriptionEvent(callId: string, call: ActiveAiCall, data: any): Promise<void> {
+    const transcriptionData = data.transcription_data;
+    if (!transcriptionData) return;
+
+    const { transcript, is_final, confidence } = transcriptionData;
+    if (!is_final || !transcript?.trim()) return;
+
+    console.log(`[TelnyxAiBridge] 📝 Telnyx transcription for ${callId}: "${transcript.substring(0, 50)}..." (confidence: ${(confidence * 100).toFixed(0)}%)`);
+
+    // Store in Telnyx transcription accumulator
+    try {
+      const { addTranscriptSegment, handleTranscriptionWebhook } = await import('./telnyx-transcription');
+      handleTranscriptionWebhook('call.transcription', {
+        call_control_id: call.callControlId,
+        transcription_data: transcriptionData,
+      });
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Error handling transcription:`, err);
+    }
+
+    // CRITICAL: Feed transcript to Gemini so AI can respond
+    // This is the backup path when Deepgram isn't catching the audio
+    try {
+      const { getVoiceDialerSession, feedTranscriptToGemini } = await import('./voice-dialer');
+      const session = getVoiceDialerSession(callId);
+      if (session) {
+        // Only feed if this isn't a duplicate of what Deepgram already sent
+        const recentUserTexts = session.transcripts
+          .filter((t: any) => t.role === 'user')
+          .slice(-3)
+          .map((t: any) => t.text.toLowerCase().trim());
+
+        const normalizedTranscript = transcript.toLowerCase().trim();
+        const isDuplicate = recentUserTexts.some((t: string) =>
+          t === normalizedTranscript || t.includes(normalizedTranscript) || normalizedTranscript.includes(t)
+        );
+
+        if (!isDuplicate) {
+          feedTranscriptToGemini(callId, transcript, 'telnyx');
+          console.log(`[TelnyxAiBridge] 🎯 Fed Telnyx transcript to Gemini for ${callId}`);
+        } else {
+          console.log(`[TelnyxAiBridge] ⏭️ Skipping duplicate transcript for ${callId}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Error feeding transcript to Gemini:`, err);
     }
   }
 
@@ -741,13 +799,31 @@ export class TelnyxAiBridge extends EventEmitter {
     // The opening message will be sent through the Gemini Live WebSocket connection
     // No need to call startMediaStreaming() or speakText() here
 
+    // Enable Telnyx real-time transcription for backup/redundancy
+    // This supplements Deepgram transcription and provides two-way transcription
+    try {
+      const { enableCallTranscription, initializeCallTranscription } = await import('./telnyx-transcription');
+      initializeCallTranscription(call.callControlId, call.campaignId, call.callAttemptId || '');
+      const transcriptionEnabled = await enableCallTranscription(call.callControlId, {
+        language: 'en',
+        interimResults: true,
+      });
+      if (transcriptionEnabled) {
+        console.log(`[TelnyxAiBridge] ✅ Telnyx real-time transcription enabled for call ${callId}`);
+      }
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Failed to enable Telnyx transcription:`, err);
+      // Don't fail the call - Deepgram is the primary transcription source
+    }
+
     await call.agent.startConversation();
     this.emit("call:answered", { callId });
   }
 
   private async pollCallStatus(callId: string, callControlId: string, agent: AiVoiceAgent): Promise<void> {
     let attempts = 0;
-    const maxAttempts = 20; // Poll for up to 20 seconds
+    const preAnswerMaxAttempts = 60; // Wait up to 60s for call to be answered (ringing can take 30-45s)
+    const postAnswerMaxAttempts = 600; // Track answered calls for up to 10 minutes
     const basePollInterval = 1000; // 1 second
     const mediaPollInterval = 5000; // Reduce polling when media is connected
     const maxPollInterval = 10000;
@@ -772,9 +848,14 @@ export class TelnyxAiBridge extends EventEmitter {
 
     const poll = async () => {
       attempts++;
-      if (attempts > maxAttempts) {
-        console.log(`[TelnyxAiBridge] Call ${callId} polling timeout - cleaning up`);
-        // Set disposition to no_answer for timeout (call never connected)
+      // Use different timeout based on whether call has been answered
+      const activeCall = this.activeCalls.get(callId);
+      const isCallAnswered = activeCall?.isAnswered === true;
+      const effectiveMaxAttempts = isCallAnswered ? postAnswerMaxAttempts : preAnswerMaxAttempts;
+
+      if (attempts > effectiveMaxAttempts) {
+        console.log(`[TelnyxAiBridge] Call ${callId} polling timeout (${isCallAnswered ? 'post-answer' : 'pre-answer'}) - cleaning up`);
+        // Only set no_answer disposition if call was never answered
         const timedOutCall = this.activeCalls.get(callId);
         if (timedOutCall && !timedOutCall.isAnswered) {
           timedOutCall.disposition = "no-answer";
@@ -833,7 +914,11 @@ export class TelnyxAiBridge extends EventEmitter {
         // Check if WebSocket is connected (definitive proof call is alive for TeXML)
         const hasMediaConnection = activeCall?.mediaWs !== null;
 
-        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+        // Log polling status (reduce frequency for answered calls to avoid log spam)
+        const shouldLog = !isAnsweredViaWebhook || attempts % 10 === 0 || attempts <= 5;
+        if (shouldLog) {
+          console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+        }
 
         // Call is alive if: API says so, OR we have a media WebSocket connection
         if (!isAlive && !hasMediaConnection) {
@@ -853,15 +938,22 @@ export class TelnyxAiBridge extends EventEmitter {
         const isAnsweredViaApi = callState === 'answered' || callState === 'bridged' || callState === 'active';
         const isAnswered = isAnsweredViaApi || isAnsweredViaWebhook;
 
-        // Start conversation when call is answered, or after max wait time as fallback
-        if (isAlive && !hasSpoken && (isAnswered || attempts >= 20)) {
+        // Start conversation when call is answered, or after 30s as fallback
+        // (TeXML calls may not report state correctly but Telnyx still bridges them)
+        if (isAlive && !hasSpoken && (isAnswered || attempts >= 30)) {
           hasSpoken = true;
-          if (isAnsweredViaWebhook) {
-            console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
-          } else if (isAnsweredViaApi) {
-            console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
-          } else {
-            console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState})`);
+
+          // CRITICAL: Mark call as answered so polling continues with extended timeout
+          // Without this, the next poll iteration would kill the call as "no-answer"
+          if (activeCall && !activeCall.isAnswered) {
+            activeCall.isAnswered = true;
+            if (isAnsweredViaWebhook) {
+              console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
+            } else if (isAnsweredViaApi) {
+              console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
+            } else {
+              console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState}) — marking isAnswered=true`);
+            }
           }
 
           console.log(`[TelnyxAiBridge] TeXML streaming active - AI audio handled by Gemini Live dialer for ${callId}`);

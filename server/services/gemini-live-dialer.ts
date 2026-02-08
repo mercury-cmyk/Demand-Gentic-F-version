@@ -1001,10 +1001,14 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
           }
 
           // Detect G.711 format from Telnyx message
-          // This ensures UK (+44) calls correctly use A-law
+          // Trust Telnyx-reported codec; if missing, default to PCMU for WebSocket streams
           const telnyxTo = msg.start?.metadata?.to || msg.start?.to;
           const telnyxCodec = msg.start?.media_format?.encoding || msg.start?.media_format?.codec;
-          g711Format = detectG711Format(telnyxTo, telnyxCodec);
+          const hasTelnyxCodec = !!telnyxCodec;
+          g711Format = detectG711Format(hasTelnyxCodec ? telnyxTo : undefined, telnyxCodec);
+          if (!hasTelnyxCodec) {
+            console.warn(`[Gemini Live] 🎧 Telnyx media_format missing; defaulting to µ-law (PCMU) for WebSocket stream${telnyxTo ? ` (To: ${telnyxTo})` : ''}`);
+          }
           console.log(`[Gemini Live] 🎙️ Audio format detected: ${g711Format} (To: ${telnyxTo || 'unknown'})`);
 
           // Extract dynamic configuration from client_state
@@ -1051,10 +1055,14 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 callerNumberId: config.caller_number_id || config.callerNumberId || null,
               };
 
-              // Re-check format if phoneNumber was in client_state but not in start message
+              // If Telnyx didn't provide a codec, we keep the WebSocket default (PCMU)
+              // and do NOT override based on phone number to avoid A-law noise.
               if (!telnyxTo && callContext.phoneNumber) {
-                g711Format = detectG711Format(callContext.phoneNumber);
-                console.log(`[Gemini Live] 🎙️ Audio format refined from client_state: ${g711Format}`);
+                if (!telnyxCodec) {
+                  console.log(`[Gemini Live] 🎧 Telnyx codec missing; keeping µ-law default for WebSocket stream (phone: ${callContext.phoneNumber}).`);
+                } else {
+                  console.log(`[Gemini Live] 🎧 Telnyx codec present (${telnyxCodec}); skipping phone-based format override for ${callContext.phoneNumber}.`);
+                }
               }
 
               console.log(`[Gemini Live] 📋 Extracted call context:`, JSON.stringify(callContext, null, 2));
@@ -1412,14 +1420,19 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
             // Gemini expects LINEAR PCM audio, NOT G.711 encoded.
             // We must decode G.711 to PCM and upsample from 8kHz to 16kHz.
             const g711Buffer = Buffer.from(msg.media.payload, 'base64');
-            
+
+            // 🔊 TELNYX INBOUND DEBUG: Log incoming audio stats periodically
+            if (metrics.audioChunksSent % 100 === 0) {
+              console.log(`[Gemini Live] 🎧 TELNYX INBOUND: chunk=${metrics.audioChunksSent} | G711=${g711Buffer.length}B | format=${g711Format}`);
+            }
+
             // 🎙️ RECORD INBOUND: Capture contact audio for call recording
             if (callId) {
               recordInboundAudio(callId, g711Buffer);
               // 🎤 DEEPGRAM: Send inbound audio for real-time transcription
               sendInboundAudio(callId, g711Buffer);
             }
-            
+
             const pcm16kBuffer = g711ToPcm16k(g711Buffer, g711Format);
             const pcm16kBase64 = pcm16kBuffer.toString('base64');
 
@@ -1471,9 +1484,14 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
           let aiOnlyTranscript = '';
           let transcriptSource = 'none';
 
+          // Log transcript sources for debugging missing transcripts
+          const deepgramEnabled = isDeepgramEnabled();
+          console.log(`[Gemini Live] 📊 Transcript sources check: Deepgram enabled=${deepgramEnabled}, Gemini turns=${transcriptTurns.length}, callId=${callId || 'none'}`);
+
           // Try Deepgram first (more reliable)
-          if (callId && isDeepgramEnabled()) {
+          if (callId && deepgramEnabled) {
             const deepgramResult = stopTranscriptionSession(callId);
+            console.log(`[Gemini Live] 📊 Deepgram result: ${deepgramResult ? `${deepgramResult.segments.length} segments, ${deepgramResult.transcript.length} chars` : 'null/undefined'}`);
             if (deepgramResult && deepgramResult.transcript.length > 20) {
               fullTranscript = deepgramResult.transcript;
               aiOnlyTranscript = deepgramResult.segments
@@ -1497,6 +1515,11 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               .join(' ');
             transcriptSource = 'gemini';
             console.log(`[Gemini Live] 📝 Using Gemini transcript: ${transcriptTurns.length} turns, ${fullTranscript.length} chars`);
+          }
+
+          // Log warning if no transcript was captured from either source
+          if (!fullTranscript) {
+            console.warn(`[Gemini Live] ⚠️ NO TRANSCRIPT CAPTURED - Deepgram: ${deepgramEnabled ? 'enabled but empty' : 'disabled'}, Gemini turns: ${transcriptTurns.length}`);
           }
 
           if (callContext.callAttemptId && fullTranscript.length > 0) {
@@ -1701,10 +1724,10 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               // Determine fallback disposition based on call state and metrics
               // CRITICAL: A call with significant activity should be marked 'done' not re-queued
               // Thresholds for "meaningful conversation":
-              // - Call duration > 60 seconds OR
-              // - Audio chunks received > 500 (indicates real back-and-forth)
+              // - Call duration > 45 seconds (reduced from 60s to catch shorter but real conversations)
+              // - Audio chunks received > 400 (indicates real back-and-forth)
               const callDurationSec = (Date.now() - metrics.startTime) / 1000;
-              const hadMeaningfulConversation = callDurationSec > 60 || metrics.audioChunksSent > 500;
+              const hadMeaningfulConversation = callDurationSec > 45 || metrics.audioChunksSent > 400;
 
               // Default to 'no_answer' which allows retry (valid canonical: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data)
               let fallbackDisposition: CanonicalDisposition = 'no_answer';
@@ -2301,8 +2324,23 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                   sendOutboundAudio(callId, g711Buffer);
                 }
 
-                // DEBUG: Log outgoing audio size
-                console.log(`[Gemini Live] 📤 Sending to Telnyx: ${g711Buffer.length} bytes (G.711 ${g711Format})`);
+                // 🔊 TELNYX AUDIO DEBUG: Log audio quality metrics
+                // Calculate audio stats for debugging noise issues
+                let audioRms = 0;
+                let audioPeak = 0;
+                for (let i = 0; i < g711Buffer.length; i++) {
+                  const sample = g711Buffer[i];
+                  // For G.711, approximate linear value (rough estimate)
+                  const linearApprox = Math.abs(sample - 128) * 256;
+                  audioRms += linearApprox * linearApprox;
+                  if (linearApprox > audioPeak) audioPeak = linearApprox;
+                }
+                audioRms = Math.sqrt(audioRms / g711Buffer.length);
+
+                // Log every 50th chunk to avoid log spam, but always log first chunk
+                if (metrics.audioChunksReceived === 0 || metrics.audioChunksReceived % 50 === 0) {
+                  console.log(`[Gemini Live] 🔊 TELNYX DEBUG: chunk=${metrics.audioChunksReceived} | PCM=${pcmBuffer.length}B→G711=${g711Buffer.length}B | format=${g711Format} | RMS≈${audioRms.toFixed(0)} Peak≈${audioPeak.toFixed(0)}`);
+                }
 
                 ws.send(JSON.stringify({
                   event: 'media',

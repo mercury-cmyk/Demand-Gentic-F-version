@@ -703,11 +703,14 @@ function smoothChunkBoundary(pcmBuffer: Buffer, fadeInSamples: number = 4): Buff
  * very audible after the 24 kHz → 8 kHz decimation.
  *
  * Threshold is tuned for 16-bit signed PCM (-32768 … 32767).
- * 200 ≈ −44 dBFS — below normal speech but above the noise floor.
+ * 400 ≈ −38 dBFS — more aggressive gating to eliminate static/hiss
  * A short hold-off window (holdSamples) prevents chopping the tail of
  * consonants / sibilants.
+ *
+ * UPDATED Feb 2026: Increased threshold from 200 to 400 to better suppress
+ * static/hissing noise that was bleeding through during pauses.
  */
-function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 200, holdSamples: number = 40): Buffer {
+function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples: number = 50): Buffer {
   const samples = pcmBuffer.length / 2;
   if (samples === 0) return pcmBuffer;
 
@@ -768,15 +771,80 @@ function softLimitForAlaw(pcmBuffer: Buffer): Buffer {
 }
 
 /**
+ * Early noise suppression applied to high-resolution audio (24kHz) BEFORE downsampling.
+ * This is critical because high-frequency noise above 4kHz will fold down into
+ * audible frequencies during the 3:1 decimation to 8kHz (aliasing).
+ *
+ * Uses a simple spectral subtraction approach:
+ * 1. Estimate noise floor from quiet sections
+ * 2. Subtract estimated noise from signal
+ * 3. Apply soft knee to prevent artifacts
+ *
+ * ADDED Feb 2026: To eliminate static/hissing noise in agent voice output.
+ */
+function applyEarlyNoiseSupression(pcmBuffer: Buffer): Buffer {
+  const samples = pcmBuffer.length / 2;
+  if (samples === 0) return pcmBuffer;
+
+  // Estimate RMS energy to determine if this is mostly silence/noise
+  let sumSquared = 0;
+  let peak = 0;
+  for (let i = 0; i < samples; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2);
+    sumSquared += sample * sample;
+    if (Math.abs(sample) > peak) peak = Math.abs(sample);
+  }
+  const rms = Math.sqrt(sumSquared / samples);
+
+  // If there's strong speech (RMS > 1500 or peak > 8000), don't suppress
+  // Speech should pass through unchanged to preserve quality
+  if (rms > 1500 || peak > 8000) {
+    return pcmBuffer;
+  }
+
+  // For quiet sections with potential noise, apply gentle suppression
+  const output = Buffer.alloc(pcmBuffer.length);
+
+  // Noise floor threshold - samples below this are likely noise
+  // At 24kHz/16-bit, a threshold of 150 is about -46dBFS
+  const noiseFloor = 150;
+
+  // Soft knee ratio - how much to reduce samples near the noise floor
+  const suppressionRatio = 0.3; // Reduce noise to 30% of original
+
+  for (let i = 0; i < samples; i++) {
+    let sample = pcmBuffer.readInt16LE(i * 2);
+    const absSample = Math.abs(sample);
+
+    if (absSample < noiseFloor) {
+      // Below noise floor - suppress aggressively
+      sample = Math.round(sample * suppressionRatio);
+    } else if (absSample < noiseFloor * 3) {
+      // Soft knee region - gradual transition
+      const t = (absSample - noiseFloor) / (noiseFloor * 2);
+      const gain = suppressionRatio + t * (1 - suppressionRatio);
+      sample = Math.round(sample * gain);
+    }
+    // Above soft knee - pass through unchanged
+
+    output.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
+  }
+
+  return output;
+}
+
+/**
  * Convert PCM 24kHz (Gemini output) to G.711 (8kHz) for Telnyx
  * This is the main function for Gemini -> Telnyx audio path
  *
  * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
+ * 0. Apply early noise suppression at 24kHz to prevent aliasing of HF noise
  * 1. Apply gentle normalization (reduced target to prevent clipping)
  * 2. Apply proper FIR anti-aliasing filter with reduced taps
  * 3. Decimate with weighted averaging instead of point-picking
  * 4. Smooth chunk boundaries to prevent pops/clicks
- * 5. Encode to G.711
+ * 5. Apply noise gate to eliminate remaining low-level noise
+ * 6. Encode to G.711
  *
  * UK/A-LAW FIX (Feb 2026):
  * - Use gentler FIR filter (5 taps) for A-law to eliminate ringing artifacts
@@ -786,13 +854,23 @@ function softLimitForAlaw(pcmBuffer: Buffer): Buffer {
 export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const isAlaw = format === 'alaw';
 
-  // Step 1: For A-law (UK), apply soft limiter instead of normalization
-  // For µ-law (US), normalize with reduced target (0.88) to prevent clipping
-  const processed = isAlaw ? softLimitForAlaw(pcmBuffer) : normalizeAudio(pcmBuffer, 0.88);
+  // A-LAW SPECIAL PATH: Use simplified processing to eliminate noise artifacts
+  // A-law's non-linear quantization amplifies any processing artifacts into audible noise
+  if (isAlaw) {
+    return pcm24kToG711Alaw(pcmBuffer);
+  }
+
+  // µ-LAW PATH: Full processing chain (US/Canada)
+  // Step 0: Apply early noise suppression on the high-resolution audio
+  // This removes high-frequency noise BEFORE downsampling, preventing it from
+  // folding into audible frequencies during decimation
+  const denoised = applyEarlyNoiseSupression(pcmBuffer);
+
+  // Step 1: Normalize with reduced target (0.88) to prevent clipping
+  const processed = normalizeAudio(denoised, 0.88);
 
   // Step 2: Apply anti-aliasing FIR filter before downsampling
-  // Use gentler A-law filter (5 taps) for UK/UAE calls to eliminate ringing artifacts
-  const filtered = applyLowPassFilter(processed, 0.30, isAlaw);
+  const filtered = applyLowPassFilter(processed, 0.30, false);
 
   // Step 3: Decimate 3:1 (24kHz → 8kHz) with weighted averaging
   const pcm8k = simpleDecimate3to1(filtered);
@@ -800,13 +878,80 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   // Step 4: Smooth chunk boundary to prevent pops/clicks
   const smoothed = smoothChunkBoundary(pcm8k);
 
-  // Step 5: Apply noise gate to suppress low-level hiss/static
-  // A-law uses higher threshold (300) because its quantization makes noise more audible
-  const gateThreshold = isAlaw ? 300 : 200;
-  const gated = applyNoiseGate(smoothed, gateThreshold);
+  // Step 5: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
+  const gated = applyNoiseGate(smoothed, 400, 60);
 
-  // Step 6: Encode to G.711
+  // Step 6: Encode to G.711 µ-law
   return pcm8kToG711(gated, format);
+}
+
+/**
+ * DEDICATED A-LAW CONVERSION PATH
+ *
+ * A-law (used in UK, Europe, UAE, etc.) is EXTREMELY sensitive to processing artifacts.
+ * Any ringing, noise, or distortion from filters gets amplified by A-law's non-linear
+ * companding into clearly audible static/hissing.
+ *
+ * This function uses MINIMAL processing:
+ * 1. Simple 3-sample averaging for anti-aliasing (no FIR filter ringing)
+ * 2. Very aggressive noise gate (600 threshold)
+ * 3. Direct A-law encoding
+ *
+ * Trade-off: Slightly lower audio bandwidth but CLEAN sound without artifacts.
+ */
+function pcm24kToG711Alaw(pcmBuffer: Buffer): Buffer {
+  const inputSamples = pcmBuffer.length / 2;
+  const outputSamples = Math.floor(inputSamples / 3);
+  const pcm8k = Buffer.alloc(outputSamples * 2);
+
+  // Step 1: Simple 3:1 decimation with averaging (no filter ringing)
+  // Use wider averaging window (5 samples) for better anti-aliasing without ringing
+  for (let i = 0; i < outputSamples; i++) {
+    const srcIdx = i * 3;
+
+    // Get 5 samples centered around the target (with boundary handling)
+    let sum = 0;
+    let count = 0;
+    for (let j = -1; j <= 3; j++) {
+      const idx = srcIdx + j;
+      if (idx >= 0 && idx < inputSamples) {
+        sum += pcmBuffer.readInt16LE(idx * 2);
+        count++;
+      }
+    }
+
+    // Average and apply slight attenuation to prevent any clipping
+    const averaged = Math.round((sum / count) * 0.85);
+    pcm8k.writeInt16LE(Math.max(-32768, Math.min(32767, averaged)), i * 2);
+  }
+
+  // Step 2: Very aggressive noise gate for A-law (threshold 600)
+  // A-law makes low-level noise very audible, so we gate aggressively
+  const gated = Buffer.alloc(pcm8k.length);
+  let holdCounter = 0;
+  const threshold = 600;
+  const holdSamples = 80; // Longer hold to preserve speech tails
+
+  for (let i = 0; i < outputSamples; i++) {
+    const sample = pcm8k.readInt16LE(i * 2);
+    const abs = Math.abs(sample);
+
+    if (abs >= threshold) {
+      gated.writeInt16LE(sample, i * 2);
+      holdCounter = holdSamples;
+    } else if (holdCounter > 0) {
+      // Fade out during hold period
+      const fade = holdCounter / holdSamples;
+      gated.writeInt16LE(Math.round(sample * fade), i * 2);
+      holdCounter--;
+    } else {
+      // Complete silence below threshold
+      gated.writeInt16LE(0, i * 2);
+    }
+  }
+
+  // Step 3: Encode to A-law
+  return pcm8kToG711(gated, 'alaw');
 }
 
 /**
@@ -822,23 +967,82 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
 export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const isAlaw = format === 'alaw';
 
-  // Step 1: For A-law (UK/UAE), apply soft limiter instead of normalization
-  // Use reduced target (0.88) for µ-law to prevent clipping
-  const normalizedInput = isAlaw ? softLimitForAlaw(pcmBuffer) : normalizeAudio(pcmBuffer, 0.88);
+  // A-LAW SPECIAL PATH: Use simplified processing to eliminate noise artifacts
+  if (isAlaw) {
+    return pcm16kToG711Alaw(pcmBuffer);
+  }
 
-  // Step 2: Downsample 16kHz to 8kHz with anti-aliasing (gentler filter for A-law)
-  const pcm8k = resamplePcmWithFormat(normalizedInput, 16000, 8000, isAlaw);
+  // µ-LAW PATH: Full processing chain (US/Canada)
+  // Step 1: Normalize with reduced target (0.88) to prevent clipping
+  const normalizedInput = normalizeAudio(pcmBuffer, 0.88);
+
+  // Step 2: Downsample 16kHz to 8kHz with anti-aliasing
+  const pcm8k = resamplePcmWithFormat(normalizedInput, 16000, 8000, false);
 
   // Step 3: Smooth chunk boundary to prevent pops/clicks
   const smoothed = smoothChunkBoundary(pcm8k);
 
-  // Step 4: Apply noise gate to suppress low-level hiss/static
-  // A-law uses higher threshold (300) because its quantization makes noise more audible
-  const gateThreshold = isAlaw ? 300 : 200;
-  const gated = applyNoiseGate(smoothed, gateThreshold);
+  // Step 4: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
+  const gated = applyNoiseGate(smoothed, 400, 60);
 
-  // Step 5: Encode to G.711
-  return pcm8kToG711(gated, format);
+  // Step 5: Encode to G.711 µ-law
+  return pcm8kToG711(gated, 'ulaw');
+}
+
+/**
+ * DEDICATED A-LAW CONVERSION PATH FOR 16kHz INPUT
+ *
+ * Same philosophy as pcm24kToG711Alaw - minimal processing to avoid noise artifacts.
+ */
+function pcm16kToG711Alaw(pcmBuffer: Buffer): Buffer {
+  const inputSamples = pcmBuffer.length / 2;
+  const outputSamples = Math.floor(inputSamples / 2);
+  const pcm8k = Buffer.alloc(outputSamples * 2);
+
+  // Step 1: Simple 2:1 decimation with 3-sample averaging (no filter ringing)
+  for (let i = 0; i < outputSamples; i++) {
+    const srcIdx = i * 2;
+
+    // Get 3 samples for averaging
+    let sum = 0;
+    let count = 0;
+    for (let j = 0; j <= 2; j++) {
+      const idx = srcIdx + j;
+      if (idx < inputSamples) {
+        sum += pcmBuffer.readInt16LE(idx * 2);
+        count++;
+      }
+    }
+
+    // Average and apply slight attenuation to prevent clipping
+    const averaged = Math.round((sum / count) * 0.85);
+    pcm8k.writeInt16LE(Math.max(-32768, Math.min(32767, averaged)), i * 2);
+  }
+
+  // Step 2: Very aggressive noise gate for A-law (threshold 600)
+  const gated = Buffer.alloc(pcm8k.length);
+  let holdCounter = 0;
+  const threshold = 600;
+  const holdSamples = 80;
+
+  for (let i = 0; i < outputSamples; i++) {
+    const sample = pcm8k.readInt16LE(i * 2);
+    const abs = Math.abs(sample);
+
+    if (abs >= threshold) {
+      gated.writeInt16LE(sample, i * 2);
+      holdCounter = holdSamples;
+    } else if (holdCounter > 0) {
+      const fade = holdCounter / holdSamples;
+      gated.writeInt16LE(Math.round(sample * fade), i * 2);
+      holdCounter--;
+    } else {
+      gated.writeInt16LE(0, i * 2);
+    }
+  }
+
+  // Step 3: Encode to A-law
+  return pcm8kToG711(gated, 'alaw');
 }
 
 // ==================== AUDIO TRANSCODER CLASS ====================

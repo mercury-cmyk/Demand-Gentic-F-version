@@ -287,7 +287,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // CRITICAL: Native audio models (gemini-live-2.5-flash-native-audio) only allow
     // a SINGLE response modality. Use ['AUDIO'] only, and enable transcription via
     // output_audio_transcription / input_audio_transcription at the setup level.
-    const generationConfig: GeminiGenerationConfig = {
+    const generationConfig: Record<string, unknown> = {
       response_modalities: ['AUDIO'],
       speech_config: {
         voice_config: {
@@ -296,33 +296,56 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           },
         },
       },
-      temperature: config.temperature ?? 0.7,
-      max_output_tokens: config.maxResponseTokens ?? 4096,
+      // Google recommends temperature 1.0 for Gemini 2.5 models.
+      // Sub-1.0 values can cause looping and degraded performance.
+      temperature: config.temperature ?? 1.0,
+      // NOTE: max_output_tokens and thinking_config are NOT supported by native audio
+      // models in the Live API. Including them causes "The request is not supported
+      // by this model" endpoint selection failure. Omit them entirely.
     };
 
     // Build tools config - convert to Gemini format
-    const tools = config.tools.length > 0
-      ? [convertToolsToGemini(config.tools) as unknown as GeminiToolConfig]
-      : [] as GeminiToolConfig[];
+    // IMPORTANT: The Live API expects tools as a SINGLE OBJECT { function_declarations: [...] },
+    // NOT an array. This matches Google's official demo (geminilive.js).
+    const functionDeclarations = config.tools.length > 0
+      ? convertToolsToGemini(config.tools).function_declarations
+      : [];
 
-    // Build setup message
-    const setupMessage: BidiGenerateContentSetup = {
-      setup: {
-        model: useVertexAI
-          ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
-          : `models/${model}`,
-        generation_config: generationConfig,
-        system_instruction: {
-          parts: [{ text: config.systemPrompt }],
+    const modelResourceName = useVertexAI
+      ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
+      : `models/${model}`;
+
+    // Build setup message - match Google's official WebSocket demo format exactly
+    const setup: Record<string, unknown> = {
+      model: modelResourceName,
+      generation_config: generationConfig,
+      system_instruction: {
+        parts: [{ text: config.systemPrompt }],
+      },
+      // Tools as single object (NOT array) per Google demo format
+      tools: { function_declarations: functionDeclarations },
+      // VAD / realtime input configuration
+      realtime_input_config: {
+        automatic_activity_detection: {
+          disabled: false,
+          ...(config.turnDetection?.silenceDurationMs ? {
+            silence_duration_ms: config.turnDetection.silenceDurationMs,
+          } : {}),
         },
-        tools,
-        // Enable transcription at setup level (required for native-audio single-modality models)
-        ...(config.transcriptionEnabled !== false ? {
-          output_audio_transcription: {},
-          input_audio_transcription: {},
-        } : {}),
       },
     };
+
+    // Enable transcription at setup level (supported by native-audio models)
+    if (config.transcriptionEnabled !== false) {
+      setup.output_audio_transcription = {};
+      setup.input_audio_transcription = {};
+    }
+
+    const setupMessage = { setup };
+
+    // Log the exact message for debugging
+    const debugSetup = { ...setup, system_instruction: { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] } };
+    console.log(`${LOG_PREFIX} Setup message (debug):`, JSON.stringify(debugSetup, null, 2));
 
     this.ws.send(JSON.stringify(setupMessage));
     console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}`);
@@ -699,10 +722,15 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * It must NOT predict, assume, or continue with any follow-up like "okay, great".
    * The model must wait for the actual human to respond before saying anything else.
    *
-   * FIX (Feb 2026): Previously sent instruction as role:"user" content which could
-   * confuse Gemini's conversation state. Now uses a clearer [SYSTEM] prefix to
-   * distinguish instructions from actual caller speech, and explicitly states
-   * that no user has spoken yet.
+   * FIX (Feb 2026): Using turn_complete: false to prevent Gemini from treating this
+   * as a complete conversation turn. The greeting is just a prompt to speak, and
+   * then Gemini should listen for actual audio input from the caller.
+   *
+   * CRITICAL FIX (Feb 2026): The issue was that sending turn_complete: true after
+   * the greeting instruction caused Gemini to think the "user" was done talking,
+   * and then Gemini would respond AND assume what the caller said. By NOT marking
+   * turn_complete, we tell Gemini "the caller is still talking" so it will listen
+   * to the actual audio stream for their real response.
    */
   sendOpeningMessage(text: string): void {
     console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
@@ -711,37 +739,30 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // Send as a user turn with clear [SYSTEM] instruction prefix
-    // This tells Gemini to speak the greeting, while making it clear that:
-    // 1. This is a system instruction, NOT something the caller said
-    // 2. The caller has NOT spoken yet - identity is NOT confirmed
-    // 3. After speaking the greeting, wait for the caller's first words
+    // MINIMAL TRIGGER APPROACH:
+    // The system prompt already contains the greeting instructions and conversation rules.
+    // We send a short trigger as a completed user turn so Gemini knows to start speaking.
+    //
+    // Key: turn_complete MUST be true here. This tells Gemini:
+    //   "The user's turn is done — now it's YOUR turn to speak."
+    // After Gemini speaks and its turn completes, it enters listening mode.
+    // The VAD (automatic_activity_detection) then handles detecting caller speech.
+    //
+    // IMPORTANT: The trigger text must be minimal. Long instructions in client_content
+    // confuse the turn state and cause Gemini to monologue (generate multiple
+    // consecutive responses without waiting for audio input).
     const message = {
       client_content: {
         turns: [{
           role: 'user',
-          parts: [{ text: `[SYSTEM INSTRUCTION - NOT CALLER SPEECH]
-The phone call has connected. We waited 2 seconds to let the prospect speak first.
-Now speak ONLY this exact greeting: "${text}"
-
-CRITICAL:
-- This is your FIRST message to begin the conversation
-- Identity is NOT confirmed - you still need to verify who you're speaking with
-- After speaking, STOP and WAIT in complete silence for their response
-- Do NOT say "okay, great" or acknowledge anything - just wait for their actual response
-- Do NOT assume anything about what they will say
-
-CALL CLOSING REMINDER:
-- When ending the call, you MUST say a proper farewell like "Thank you so much for your time today! Have a great day!"
-- WAIT for their response before calling end_call
-- NEVER hang up immediately after confirming appointment details` }],
+          parts: [{ text: `[CALL CONNECTED] The phone line is now live. Say your greeting: "${text}" — then STOP and LISTEN.` }],
         }],
         turn_complete: true,
       },
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Opening message sent with system instruction: "${text.substring(0, 50)}..."`);
+    console.log(`${LOG_PREFIX} Opening message sent (turn_complete=true, minimal trigger): "${text.substring(0, 50)}..."`);
   }
 
   private handleMessage(data: string): void {
@@ -861,7 +882,41 @@ CALL CLOSING REMINDER:
         });
       }
     } else {
-      console.log(`${LOG_PREFIX} ⚠️ Server content has no model_turn`);
+      // Log what this server_content actually contains (for debugging)
+      const contentKeys = Object.keys(content).filter(k => k !== 'model_turn' && k !== 'modelTurn');
+      if (contentKeys.length > 0) {
+        console.log(`${LOG_PREFIX} 📋 Server content (no model_turn), keys: ${contentKeys.join(', ')}`);
+      }
+    }
+
+    // Handle INPUT transcription - what Gemini heard from the caller
+    // This is critical for detecting prospect speech via Gemini's own ASR
+    if (content.input_transcription || content.inputTranscription) {
+      const inputTranscription = content.input_transcription || content.inputTranscription;
+      const text = inputTranscription.text || inputTranscription.transcript || '';
+      if (text.trim()) {
+        console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${text}"`);
+        // Emit as user transcript so voice-dialer can detect human speech
+        this.emit('transcript:user', {
+          text: text.trim(),
+          isFinal: true,
+          timestamp: new Date(),
+        });
+      }
+    }
+
+    // Handle OUTPUT transcription - what Gemini said (text version of its audio)
+    if (content.output_transcription || content.outputTranscription) {
+      const outputTranscription = content.output_transcription || content.outputTranscription;
+      const text = outputTranscription.text || outputTranscription.transcript || '';
+      if (text.trim()) {
+        console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
+        this.emit('transcript:agent', {
+          text: text.trim(),
+          isFinal: true,
+          timestamp: new Date(),
+        });
+      }
     }
 
     // Turn complete

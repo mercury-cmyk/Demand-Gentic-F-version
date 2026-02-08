@@ -162,6 +162,16 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Database initialization failed (non-blocking):', err);
   }
 
+  // Load secrets from database into process.env
+  // This allows secrets stored in Secret Manager to override .env values
+  try {
+    const { initializeSecrets } = await import("./services/secret-loader");
+    await initializeSecrets({ overwriteEnv: false }); // Don't overwrite existing env vars
+  } catch (err) {
+    console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
+    console.log('[STARTUP] Continuing with .env values...');
+  }
+
   // Auto-sync prompt definitions to database (ensures prompts are available)
   try {
     const { syncPromptDefinitions } = await import("./services/prompt-management-service");

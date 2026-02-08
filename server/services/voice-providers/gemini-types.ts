@@ -49,8 +49,42 @@ export interface BidiGenerateContentSetup {
      * Pass empty object {} to enable with defaults.
      */
     input_audio_transcription?: Record<string, never>;
+
+    /**
+     * Safety settings to control content filtering thresholds.
+     * Each entry specifies a harm category and the blocking threshold.
+     */
+    safety_settings?: GeminiSafetySetting[];
+
+    /**
+     * Enable affective dialog for natural emotional adaptation.
+     * When true, the model adapts its tone/emotion to match conversational context.
+     */
+    enable_affective_dialog?: boolean;
   };
 }
+
+/**
+ * Safety setting for a single harm category.
+ * See: https://ai.google.dev/gemini-api/docs/safety-settings
+ */
+export interface GeminiSafetySetting {
+  category: GeminiHarmCategory;
+  threshold: GeminiHarmBlockThreshold;
+}
+
+export type GeminiHarmCategory =
+  | 'HARM_CATEGORY_HARASSMENT'
+  | 'HARM_CATEGORY_HATE_SPEECH'
+  | 'HARM_CATEGORY_SEXUALLY_EXPLICIT'
+  | 'HARM_CATEGORY_DANGEROUS_CONTENT'
+  | 'HARM_CATEGORY_CIVIC_INTEGRITY';
+
+export type GeminiHarmBlockThreshold =
+  | 'BLOCK_NONE'
+  | 'BLOCK_ONLY_HIGH'
+  | 'BLOCK_MEDIUM_AND_ABOVE'
+  | 'BLOCK_LOW_AND_ABOVE';
 
 export interface GeminiGenerationConfig {
   /**
@@ -96,6 +130,15 @@ export interface GeminiGenerationConfig {
    * Stop sequences
    */
   stop_sequences?: string[];
+
+  /**
+   * Thinking configuration for enhanced reasoning.
+   * thinking_budget controls how many tokens the model can use for internal reasoning.
+   * Higher budgets allow deeper analysis of complex objections/scenarios.
+   */
+  thinking_config?: {
+    thinking_budget?: number;
+  };
 }
 
 export interface GeminiToolConfig {
