@@ -121,7 +121,17 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   // Context management
   const [contextUrls, setContextUrls] = useState<string[]>([]);
   const [newUrl, setNewUrl] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
+  
+  // Per-category upload states for better UX (no shared loading state confusion)
+  type UploadCategory = 'context' | 'target_accounts' | 'suppression' | 'template';
+  const [uploadingCategories, setUploadingCategories] = useState<Record<UploadCategory, boolean>>({
+    context: false,
+    target_accounts: false,
+    suppression: false,
+    template: false,
+  });
+  // Backward compat: derive global isUploading from any category uploading
+  const isUploading = Object.values(uploadingCategories).some(Boolean);
   
   // File states
   const [uploadedFiles, setUploadedFiles] = useState<{name: string, key: string, type: string}[]>([]);
@@ -188,20 +198,47 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: 'context' | 'target_accounts' | 'suppression' | 'template') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, category: UploadCategory) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setIsUploading(true);
+    // Generate correlation ID for tracking this upload batch
+    const correlationId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    console.log(`[Upload:${correlationId}] Starting upload for category="${category}", fileCount=${files.length}`);
+
+    // Set per-category loading state
+    setUploadingCategories(prev => ({ ...prev, [category]: true }));
     const newUploadedFiles: {name: string, key: string, type: string}[] = [];
+
+    // Upload timeout (60s per file)
+    const UPLOAD_TIMEOUT_MS = 60000;
+
+    // Helper to create timeout-enabled fetch
+    const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: number): Promise<Response> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(timeoutId);
+        return response;
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          throw new Error(`Request timed out after ${timeoutMs / 1000}s`);
+        }
+        throw err;
+      }
+    };
 
     // Process each file (sequentially for simplicity)
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        console.log(`[Upload:${correlationId}] Processing file ${i + 1}/${files.length}: "${file.name}" (${file.type}, ${(file.size / 1024).toFixed(1)}KB)`);
         
         // 1. Get presigned URL
-        const res = await fetch('/api/s3/upload-url', {
+        console.log(`[Upload:${correlationId}] Requesting presigned URL...`);
+        const res = await fetchWithTimeout('/api/s3/upload-url', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -209,30 +246,48 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           },
           body: JSON.stringify({
             filename: file.name,
-            contentType: file.type,
+            contentType: file.type || 'application/octet-stream',
             folder: category === 'context' ? 'campaign-orders' : `campaign-orders/${category}`
           }),
-        });
+        }, 15000); // 15s timeout for presigned URL request
 
-        if (!res.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
-        const { url, key } = await res.json();
+        if (!res.ok) {
+          const errorBody = await res.text();
+          console.error(`[Upload:${correlationId}] Presigned URL request failed: ${res.status} - ${errorBody}`);
+          throw new Error(`Failed to get upload URL for "${file.name}": ${res.status} ${res.statusText}`);
+        }
 
-        // 2. Upload to S3
-        const uploadRes = await fetch(url, {
+        const presignedData = await res.json();
+        const { uploadUrl, key } = presignedData;
+        
+        if (!uploadUrl || !key) {
+          console.error(`[Upload:${correlationId}] Invalid presigned response:`, presignedData);
+          throw new Error(`Server returned invalid upload URL for "${file.name}"`);
+        }
+        console.log(`[Upload:${correlationId}] Got presigned URL, key="${key}"`);
+
+        // 2. Upload to GCS/S3
+        console.log(`[Upload:${correlationId}] Uploading file to storage...`);
+        const uploadRes = await fetchWithTimeout(uploadUrl, {
           method: 'PUT',
-          headers: { 'Content-Type': file.type },
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
           body: file,
-        });
+        }, UPLOAD_TIMEOUT_MS);
 
-        if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+        if (!uploadRes.ok) {
+          console.error(`[Upload:${correlationId}] Storage upload failed: ${uploadRes.status}`);
+          throw new Error(`Failed to upload "${file.name}": ${uploadRes.status} ${uploadRes.statusText}`);
+        }
+        console.log(`[Upload:${correlationId}] File uploaded successfully: "${file.name}"`);
 
         newUploadedFiles.push({
           name: file.name,
           key: key,
-          type: file.type
+          type: file.type || 'application/octet-stream'
         });
       }
       
+      // Update category-specific file state
       if (category === 'context') {
         setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
       } else if (category === 'target_accounts') {
@@ -243,12 +298,22 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
         setTemplateFiles(prev => [...prev, ...newUploadedFiles]);
       }
 
-      toast({ title: 'Files uploaded successfully' });
+      console.log(`[Upload:${correlationId}] All files uploaded successfully. Count=${newUploadedFiles.length}`);
+      toast({ 
+        title: 'Files uploaded successfully',
+        description: `${newUploadedFiles.length} file(s) attached`
+      });
     } catch (error) {
-      console.error(error);
-      toast({ title: 'Upload failed', description: (error as Error).message, variant: 'destructive' });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+      console.error(`[Upload:${correlationId}] Upload failed:`, errorMessage, error);
+      toast({ 
+        title: 'Upload failed', 
+        description: errorMessage,
+        variant: 'destructive' 
+      });
     } finally {
-      setIsUploading(false);
+      // Clear this category's loading state
+      setUploadingCategories(prev => ({ ...prev, [category]: false }));
       // Reset inputs
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (targetAccountsInputRef.current) targetAccountsInputRef.current.value = '';
@@ -828,15 +893,15 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                       <Button
                         variant="outline"
                         className="w-full h-12 justify-start text-slate-500 border-2 border-dashed border-slate-300 rounded-xl hover:border-emerald-400 hover:bg-emerald-50/50 transition-all"
-                        disabled={isUploading}
+                        disabled={uploadingCategories.context}
                         onClick={() => fileInputRef.current?.click()}
                       >
-                        {isUploading ? (
+                        {uploadingCategories.context ? (
                           <Loader2 className="h-5 w-5 mr-3 animate-spin text-emerald-600" />
                         ) : (
                           <Upload className="h-5 w-5 mr-3 text-emerald-600" />
                         )}
-                        <span className="text-base">{isUploading ? 'Uploading...' : 'Upload PDF, DOCX, CSV'}</span>
+                        <span className="text-base">{uploadingCategories.context ? 'Uploading...' : 'Upload PDF, DOCX, CSV'}</span>
                       </Button>
                       <input
                         type="file"
@@ -881,15 +946,15 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                       <Button
                         variant="outline"
                         className="w-full h-12 justify-start text-slate-500 border-2 border-dashed border-slate-300 rounded-xl hover:border-blue-400 hover:bg-blue-50/50 transition-all"
-                        disabled={isUploading}
+                        disabled={uploadingCategories.target_accounts}
                         onClick={() => targetAccountsInputRef.current?.click()}
                       >
-                        {isUploading ? (
+                        {uploadingCategories.target_accounts ? (
                           <Loader2 className="h-5 w-5 mr-3 animate-spin text-blue-600" />
                         ) : (
                           <Target className="h-5 w-5 mr-3 text-blue-600" />
                         )}
-                        <span className="text-base">{isUploading ? 'Uploading...' : 'Upload Target List'}</span>
+                        <span className="text-base">{uploadingCategories.target_accounts ? 'Uploading...' : 'Upload Target List'}</span>
                       </Button>
                       <input
                         type="file"
@@ -930,15 +995,15 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                       <Button
                         variant="outline"
                         className="w-full h-12 justify-start text-slate-500 border-2 border-dashed border-slate-300 rounded-xl hover:border-red-400 hover:bg-red-50/50 transition-all"
-                        disabled={isUploading}
+                        disabled={uploadingCategories.suppression}
                         onClick={() => suppressionInputRef.current?.click()}
                       >
-                        {isUploading ? (
+                        {uploadingCategories.suppression ? (
                           <Loader2 className="h-5 w-5 mr-3 animate-spin text-red-600" />
                         ) : (
                           <AlertCircle className="h-5 w-5 mr-3 text-red-500" />
                         )}
-                        <span className="text-base">{isUploading ? 'Uploading...' : 'Upload Do Not Contact'}</span>
+                        <span className="text-base">{uploadingCategories.suppression ? 'Uploading...' : 'Upload Do Not Contact'}</span>
                       </Button>
                       <input
                         type="file"
@@ -1015,15 +1080,15 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                       <Button
                         variant="outline"
                         className="w-full h-12 justify-start text-slate-500 border-2 border-dashed border-slate-300 rounded-xl hover:border-purple-400 hover:bg-purple-50/50 transition-all"
-                        disabled={isUploading}
+                        disabled={uploadingCategories.template}
                         onClick={() => templateInputRef.current?.click()}
                       >
-                        {isUploading ? (
+                        {uploadingCategories.template ? (
                           <Loader2 className="h-5 w-5 mr-3 animate-spin text-purple-600" />
                         ) : (
                           <FileText className="h-5 w-5 mr-3 text-purple-600" />
                         )}
-                        <span className="text-base">{isUploading ? 'Uploading...' : 'Upload Templates (HTML, TXT, DOCX)'}</span>
+                        <span className="text-base">{uploadingCategories.template ? 'Uploading...' : 'Upload Templates (HTML, TXT, DOCX)'}</span>
                       </Button>
                       <input
                         type="file"
