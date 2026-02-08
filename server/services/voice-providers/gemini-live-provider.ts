@@ -315,6 +315,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     });
   }
 
+  // Whether we're connected to Vertex AI (camelCase) vs Google AI Studio (snake_case)
+  private useVertexAI: boolean = false;
+
   private sendSetupMessage(config: VoiceProviderConfig): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn(`${LOG_PREFIX} sendSetupMessage failed: WS not open`);
@@ -327,81 +330,112 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Note: Model name format differs between Google AI and Vertex AI
     const model = process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
     // Prefer Vertex AI when project ID is available (required for native audio models)
-    const useVertexAI = !!projectId;
+    this.useVertexAI = !!projectId;
 
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');
 
-    // Build generation config for audio output.
-    // CRITICAL: Native audio models (gemini-live-2.5-flash-native-audio) only allow
-    // a SINGLE response modality. Use ['AUDIO'] only, and enable transcription via
-    // output_audio_transcription / input_audio_transcription at the setup level.
-    const generationConfig: Record<string, unknown> = {
-      response_modalities: ['AUDIO'],
-      speech_config: {
-        voice_config: {
-          prebuilt_voice_config: {
-            voice_name: voice,
-            // NOTE: speaking_rate is NOT a supported field in Gemini Live API.
-            // Including unsupported fields causes silent setup rejection (no setup_complete).
-          },
-        },
-      },
-      // Google recommends temperature 1.0 for Gemini 2.5 models.
-      // Sub-1.0 values can cause looping and degraded performance.
-      // UPDATE FEB 2026: High temperature is causing script deviation.
-      // Lowering to 0.5 to improve focus and script adherence.
-      temperature: config.temperature ?? 0.5,
-      // NOTE: max_output_tokens and thinking_config are NOT supported by native audio
-      // models in the Live API. Including them causes "The request is not supported
-      // by this model" endpoint selection failure. Omit them entirely.
-    };
+    const modelResourceName = this.useVertexAI
+      ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
+      : `models/${model}`;
 
-    // Build tools config - convert to Gemini format
-    // IMPORTANT: The Live API expects tools as a SINGLE OBJECT { function_declarations: [...] },
-    // NOT an array. This matches Google's official demo (geminilive.js).
+    // Build tools - convert to Gemini format
     const functionDeclarations = config.tools.length > 0
       ? convertToolsToGemini(config.tools).function_declarations
       : [];
 
-    const modelResourceName = useVertexAI
-      ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
-      : `models/${model}`;
+    // CRITICAL: Vertex AI (aiplatform.googleapis.com) uses camelCase JSON field names
+    // while Google AI Studio (generativelanguage.googleapis.com) uses snake_case.
+    // Sending the wrong casing causes silent setup rejection (no setup_complete).
+    let setup: Record<string, unknown>;
 
-    // Build setup message - match Google's official WebSocket demo format exactly
-    const setup: Record<string, unknown> = {
-      model: modelResourceName,
-      generation_config: generationConfig,
-      system_instruction: {
-        parts: [{ text: config.systemPrompt }],
-      },
-      // Tools as single object (NOT array) per Google demo format
-      tools: { function_declarations: functionDeclarations },
-      // VAD / realtime input configuration
-      realtime_input_config: {
-        automatic_activity_detection: {
-          disabled: false,
-          ...(config.turnDetection?.silenceDurationMs ? {
-            silence_duration_ms: config.turnDetection.silenceDurationMs,
-          } : {}),
+    if (this.useVertexAI) {
+      // ===== VERTEX AI FORMAT (camelCase) =====
+      setup = {
+        model: modelResourceName,
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice,
+              },
+            },
+          },
+          temperature: config.temperature ?? 0.5,
         },
-      },
-    };
+        systemInstruction: {
+          parts: [{ text: config.systemPrompt }],
+        },
+        // Tools as array for Vertex AI
+        tools: [{ functionDeclarations }],
+        // VAD / realtime input configuration
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            ...(config.turnDetection?.silenceDurationMs ? {
+              silenceDurationMs: config.turnDetection.silenceDurationMs,
+            } : {}),
+          },
+        },
+      };
 
-    // Enable transcription at setup level (supported by native-audio models)
-    if (config.transcriptionEnabled !== false) {
-      setup.output_audio_transcription = {};
-      setup.input_audio_transcription = {};
+      // Enable transcription at setup level (supported by native-audio models)
+      if (config.transcriptionEnabled !== false) {
+        setup.outputAudioTranscription = {};
+        setup.inputAudioTranscription = {};
+      }
+    } else {
+      // ===== GOOGLE AI STUDIO FORMAT (snake_case) =====
+      setup = {
+        model: modelResourceName,
+        generation_config: {
+          response_modalities: ['AUDIO'],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: {
+                voice_name: voice,
+              },
+            },
+          },
+          temperature: config.temperature ?? 0.5,
+        },
+        system_instruction: {
+          parts: [{ text: config.systemPrompt }],
+        },
+        // Tools as single object for Google AI Studio
+        tools: { function_declarations: functionDeclarations },
+        // VAD / realtime input configuration
+        realtime_input_config: {
+          automatic_activity_detection: {
+            disabled: false,
+            ...(config.turnDetection?.silenceDurationMs ? {
+              silence_duration_ms: config.turnDetection.silenceDurationMs,
+            } : {}),
+          },
+        },
+      };
+
+      // Enable transcription at setup level (supported by native-audio models)
+      if (config.transcriptionEnabled !== false) {
+        setup.output_audio_transcription = {};
+        setup.input_audio_transcription = {};
+      }
     }
 
     const setupMessage = { setup };
 
-    // Log the exact message for debugging
-    const debugSetup = { ...setup, system_instruction: { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] } };
-    console.log(`${LOG_PREFIX} Setup message (debug):`, JSON.stringify(debugSetup, null, 2));
+    // Log the exact message for debugging (redact system prompt)
+    const debugSetup = { ...setup };
+    if (this.useVertexAI) {
+      debugSetup.systemInstruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+    } else {
+      debugSetup.system_instruction = { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] };
+    }
+    console.log(`${LOG_PREFIX} Setup message (${this.useVertexAI ? 'Vertex AI/camelCase' : 'Google AI/snake_case'}):`, JSON.stringify(debugSetup, null, 2));
 
     this.ws.send(JSON.stringify(setupMessage));
-    console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}`);
+    console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}, format: ${this.useVertexAI ? 'camelCase' : 'snake_case'}`);
   }
 
   // Track inbound audio frames for periodic logging
@@ -435,7 +469,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     const base64Audio = pcmBuffer.toString('base64');
 
     // Build message with fast string concatenation instead of JSON.stringify
-    const msg = `{"realtime_input":{"media_chunks":[{"mime_type":"audio/pcm","data":"${base64Audio}"}]}}`;
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const msg = this.useVertexAI
+      ? `{"realtimeInput":{"mediaChunks":[{"mimeType":"audio/pcm","data":"${base64Audio}"}]}}`
+      : `{"realtime_input":{"media_chunks":[{"mime_type":"audio/pcm","data":"${base64Audio}"}]}}`;
 
     try {
         this.ws.send(msg);
@@ -687,15 +724,20 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Send text as client content
-    const message = {
-      client_content: {
-        turns: [{
-          role: 'user',
-          parts: [{ text }],
-        }],
-        turn_complete: true,
-      },
-    };
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const message = this.useVertexAI
+      ? {
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text }] }],
+            turnComplete: true,
+          },
+        }
+      : {
+          client_content: {
+            turns: [{ role: 'user', parts: [{ text }] }],
+            turn_complete: true,
+          },
+        };
 
     this.ws.send(JSON.stringify(message));
   }
@@ -707,11 +749,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Signal that we're interrupting
-    const message = {
-      client_content: {
-        turn_complete: true,
-      },
-    };
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const message = this.useVertexAI
+      ? { clientContent: { turnComplete: true } }
+      : { client_content: { turn_complete: true } };
 
     this.ws.send(JSON.stringify(message));
 
@@ -737,17 +778,26 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    const message: BidiGenerateContentToolResponse = {
-      tool_response: {
-        function_responses: [{
-          id: callId,
-          name: pendingCall.name,
-          response: {
-            output: result,
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const message = this.useVertexAI
+      ? {
+          toolResponse: {
+            functionResponses: [{
+              id: callId,
+              name: pendingCall.name,
+              response: { output: result },
+            }],
           },
-        }],
-      },
-    };
+        }
+      : {
+          tool_response: {
+            function_responses: [{
+              id: callId,
+              name: pendingCall.name,
+              response: { output: result },
+            }],
+          },
+        };
 
     this.ws.send(JSON.stringify(message));
     this.pendingFunctionCalls.delete(callId);
@@ -759,11 +809,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Signal that the user turn is complete to trigger model response
-    const message = {
-      client_content: {
-        turn_complete: true,
-      },
-    };
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const message = this.useVertexAI
+      ? { clientContent: { turnComplete: true } }
+      : { client_content: { turn_complete: true } };
 
     this.ws.send(JSON.stringify(message));
   }
@@ -804,18 +853,25 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // IMPORTANT: The trigger text must be minimal. Long instructions in client_content
     // confuse the turn state and cause Gemini to monologue (generate multiple
     // consecutive responses without waiting for audio input).
-    const message = {
-      client_content: {
-        turns: [{
-          role: 'user',
-          parts: [{ text: `[CALL CONNECTED] The phone line is now live. Say your greeting: "${text}" — then STOP and LISTEN.` }],
-        }],
-        turn_complete: true,
-      },
-    };
+    const triggerText = `[CALL CONNECTED] The phone line is now live. Say your greeting: "${text}" — then STOP and LISTEN.`;
+
+    // Vertex AI uses camelCase, Google AI Studio uses snake_case
+    const message = this.useVertexAI
+      ? {
+          clientContent: {
+            turns: [{ role: 'user', parts: [{ text: triggerText }] }],
+            turnComplete: true,
+          },
+        }
+      : {
+          client_content: {
+            turns: [{ role: 'user', parts: [{ text: triggerText }] }],
+            turn_complete: true,
+          },
+        };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Opening message sent (turn_complete=true, minimal trigger): "${text.substring(0, 50)}..."`);
+    console.log(`${LOG_PREFIX} Opening message sent (turnComplete=true, minimal trigger): "${text.substring(0, 50)}..."`);
   }
 
   private handleMessage(data: string): void {

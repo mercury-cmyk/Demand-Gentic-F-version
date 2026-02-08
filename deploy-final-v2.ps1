@@ -64,6 +64,6 @@ gcloud run deploy demandgentic-api `
   --region us-central1 `
   --allow-unauthenticated `
   --vpc-connector pivotal-connector `
-  --vpc-egress private-ranges-only `
+  --vpc-egress all-traffic `
   --set-secrets=$secrets `
   --set-env-vars=$env_vars
