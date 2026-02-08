@@ -215,7 +215,7 @@ router.post('/webhook-config', requireAuth, requireRole(['admin']), async (req: 
     };
 
     if (statusCallbackUrl) {
-      updatePayload.status_callback_url = statusCallbackUrl;
+      updatePayload.status_callback = statusCallbackUrl;
     }
 
     if (voiceFallbackUrl) {
@@ -255,7 +255,7 @@ router.post('/webhook-config', requireAuth, requireRole(['admin']), async (req: 
       currentConfig: {
         voiceUrl: updatedApp.voice_url,
         voiceFallbackUrl: updatedApp.voice_fallback_url,
-        statusCallbackUrl: updatedApp.status_callback_url,
+        statusCallbackUrl: updatedApp.status_callback || updatedApp.status_callback_url,
       },
     });
   } catch (error: any) {
@@ -323,7 +323,7 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
           },
           body: JSON.stringify({
             voice_url: voiceUrl,
-            status_callback_url: statusCallbackUrl,
+            status_callback: statusCallbackUrl,
           }),
         });
 
@@ -445,7 +445,7 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
           },
           body: JSON.stringify({
             voice_url: voiceUrl,
-            status_callback_url: statusCallbackUrl,
+            status_callback: statusCallbackUrl,
           }),
         });
 
@@ -608,7 +608,7 @@ router.get('/texml-applications', requireAuth, requireRole(['admin']), async (re
         id: app.id,
         name: app.friendly_name,
         voiceUrl: app.voice_url,
-        statusCallbackUrl: app.status_callback_url,
+        statusCallbackUrl: app.status_callback || app.status_callback_url,
         active: app.active,
         inbound: app.inbound,
         outbound: app.outbound,

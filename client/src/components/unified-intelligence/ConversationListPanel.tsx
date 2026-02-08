@@ -285,6 +285,11 @@ function ConversationCard({
             {conversation.agentType === 'ai' && (
               <Badge variant="secondary" className="text-[10px] px-1">AI</Badge>
             )}
+            {conversation.callCount && conversation.callCount > 1 && (
+              <Badge variant="outline" className="text-[10px] px-1 bg-blue-50 text-blue-700 border-blue-300">
+                {conversation.callCount} calls
+              </Badge>
+            )}
           </div>
           {/* Company */}
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

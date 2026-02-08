@@ -64,10 +64,10 @@ interface FilterResult {
 
 // ==================== CONSTANTS ====================
 
-const MAX_CALLS_PER_HOUR_DEFAULT = 20;
-const MAX_CALLS_PER_DAY_DEFAULT = 100;
-const JITTER_MIN_MS = 80_000;  // 80 seconds
-const JITTER_MAX_MS = 160_000; // 160 seconds
+const MAX_CALLS_PER_HOUR_DEFAULT = 50;
+const MAX_CALLS_PER_DAY_DEFAULT = 250;
+const JITTER_MIN_MS = 45_000;  // 45 seconds (base for unknown/new numbers)
+const JITTER_MAX_MS = 90_000;  // 90 seconds
 
 // In-memory tracking for concurrent calls (should be Redis in production)
 const numbersInUse = new Set<string>();
@@ -288,7 +288,7 @@ async function filterNumbers(
       continue;
     }
 
-    // Check warmup limits (new numbers have reduced caps)
+    // Check warmup limits (new numbers have reduced caps, mature numbers get reputation bonus)
     const warmupCheck = canMakeCallDuringWarmup({
       id: num.id,
       phoneNumberE164: num.phoneNumberE164,
@@ -297,6 +297,8 @@ async function filterNumbers(
       maxCallsPerDay: num.maxCallsPerDay,
       callsThisHour: num.callsThisHour,
       callsToday: num.callsToday,
+      reputationScore: num.reputation?.score ?? null,
+      reputationBand: num.reputation?.band ?? null,
     });
 
     if (!warmupCheck.canCall) {
@@ -424,14 +426,21 @@ function rankCandidates(
  * Calculate jitter delay for carrier-safe pacing
  */
 function calculateJitter(number: EligibleNumber): number {
-  // Base jitter: random between 80-160 seconds
+  // Base jitter: random between 45-90 seconds
   let jitter = JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS);
 
-  // Reputation-based adjustment
+  // Reputation-based adjustment — reward good numbers, penalize bad
   const rep = number.reputation?.score ?? 70;
-  
-  if (rep < 40) {
-    // Burned: 3x delay (but we shouldn't be using burned numbers)
+  const band = number.reputation?.band ?? 'healthy';
+
+  if (band === 'excellent' || rep >= 85) {
+    // Excellent: 50% jitter reduction — proven safe number
+    jitter *= 0.5;
+  } else if (band === 'healthy' || rep >= 70) {
+    // Healthy: 30% jitter reduction
+    jitter *= 0.7;
+  } else if (rep < 40) {
+    // Burned: 3x delay (shouldn't be using burned numbers)
     jitter *= 3.0;
   } else if (rep < 50) {
     // Risk: 2x delay
@@ -441,12 +450,27 @@ function calculateJitter(number: EligibleNumber): number {
     jitter *= 1.5;
   }
 
-  // High volume adjustment
-  if ((number.callsThisHour ?? 0) > 15) {
+  // Age-based trust bonus — numbers over 14 days get additional reduction
+  const daysSinceAcquired = number.acquiredAt
+    ? Math.floor((Date.now() - number.acquiredAt.getTime()) / (24 * 60 * 60 * 1000)) + 1
+    : 1;
+
+  if (daysSinceAcquired >= 30 && rep >= 70) {
+    // Established + healthy: additional 20% reduction
+    jitter *= 0.8;
+  } else if (daysSinceAcquired >= 14 && rep >= 70) {
+    // Mature + healthy: additional 10% reduction
+    jitter *= 0.9;
+  }
+
+  // High volume adjustment — scale with total hourly cap, not fixed threshold
+  const effectiveHourlyCap = number.maxCallsPerHour ?? 50;
+  if ((number.callsThisHour ?? 0) > effectiveHourlyCap * 0.75) {
     jitter *= 1.25;
   }
 
-  return Math.floor(jitter);
+  // Floor: never go below 15 seconds (carrier safety)
+  return Math.max(15_000, Math.floor(jitter));
 }
 
 /**

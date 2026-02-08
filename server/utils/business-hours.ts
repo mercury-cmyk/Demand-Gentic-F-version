@@ -340,21 +340,8 @@ export function isWithinBusinessHours(
 
   // Convert current time to target timezone
   const zonedTime = toZonedTime(checkTime, targetTimezone);
-  
-  // TEMP OVERRIDE: Allow UK calls on Saturday Feb 7, 2026
-  if (targetTimezone === 'Europe/London') {
-    const dateString = format(zonedTime, 'yyyy-MM-dd', { timeZone: targetTimezone });
-    // Only apply for today Feb 7
-    if (dateString === '2026-02-07') {
-         // Still enforce reasonable calling hours (9am-6pm) to avoid calling at night
-         const currentTimeStr = format(zonedTime, 'HH:mm', { timeZone: targetTimezone });
-         if (currentTimeStr >= '09:00' && currentTimeStr <= '18:00') {
-             return true; 
-         }
-    }
-  }
 
-  // Check if it's a weekend
+  // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE', { timeZone: targetTimezone }).toLowerCase();
   if (!config.operatingDays.includes(dayOfWeek)) {
     return false; // Not an operating day

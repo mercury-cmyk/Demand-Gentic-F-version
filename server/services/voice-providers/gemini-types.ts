@@ -36,6 +36,19 @@ export interface BidiGenerateContentSetup {
      * Tools available to the model
      */
     tools?: GeminiToolConfig[];
+
+    /**
+     * Enable transcription of AI audio output (agent speech → text).
+     * Pass empty object {} to enable with defaults.
+     * Required for native-audio models that only allow a single response modality.
+     */
+    output_audio_transcription?: Record<string, never>;
+
+    /**
+     * Enable transcription of user audio input (caller speech → text).
+     * Pass empty object {} to enable with defaults.
+     */
+    input_audio_transcription?: Record<string, never>;
   };
 }
 

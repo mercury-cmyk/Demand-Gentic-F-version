@@ -191,15 +191,21 @@ async function handleTelnyxMessage(
       console.log(`[AiMediaStreaming] Starting session for call: ${callId}, stream: ${streamIdentifier}`);
       console.log(`[AiMediaStreaming] Start custom_parameters:`, start?.custom_parameters || {});
       
-      // AUTO-DETECT UK REGION FOR CODEC ALIGNMENT
-      // UK/Europe calls use G.711 A-law. Sending u-law causes static/noise.
+      // AUTO-DETECT CODEC FROM TELNYX START MESSAGE
+      // CRITICAL: Telnyx WebSocket <Stream> defaults to PCMU (µ-law) regardless of SIP leg codec.
+      // Trust the start message media_format.encoding over phone number heuristics.
       const bridge = getTelnyxAiBridge();
       const activeCall = bridge.getActiveCall(callId);
-      const isUkCall = activeCall?.dialedNumber?.startsWith('+44') || false;
-      const isALaw = isUkCall;
-
-      if (isUkCall) {
-        console.log(`[AiMediaStreaming] 🇬🇧 UK call detected for ${activeCall?.dialedNumber} - Forcing G.711 A-law codec`);
+      const startEncoding = start?.media_format?.encoding?.toString()?.toUpperCase() || '';
+      const isALaw = startEncoding.includes('PCMA') || startEncoding.includes('ALAW');
+      
+      if (startEncoding) {
+        console.log(`[AiMediaStreaming] 🎧 Telnyx reported encoding: ${startEncoding} → using ${isALaw ? 'A-law' : 'µ-law'}`);
+      } else {
+        console.log(`[AiMediaStreaming] ⚠️ No encoding in start message, defaulting to µ-law (Telnyx default)`);
+      }
+      if (activeCall?.dialedNumber?.startsWith('+44')) {
+        console.log(`[AiMediaStreaming] 🇬🇧 UK number detected (${activeCall.dialedNumber}) - WebSocket codec: ${isALaw ? 'A-law' : 'µ-law (Telnyx handles SIP↔WS transcoding)'}`);
       }
       
       const session: MediaSession = {

@@ -8,10 +8,10 @@ import { validatePreflight, generatePreflightErrorResponse } from "../services/p
 import { z } from "zod";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "../db";
-import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions } from "@shared/schema";
+import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions, callQualityRecords } from "@shared/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 // Gemini is used for script generation; OpenAI runtime is disabled
-import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025 } from "../utils/business-hours";
+import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025, getBusinessHoursForCountry } from "../utils/business-hours";
 import { checkSuppressionBulk, getSuppressionReason } from "../lib/suppression.service";
 import { getBestPhoneForContact } from "../lib/phone-utils";
 import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
@@ -200,12 +200,18 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
     // Check business hours before initiating call
     const businessHoursSettings = (aiSettings as any).businessHours;
     if (businessHoursSettings?.enabled !== false) {
+      // Get country-specific business hours (handles Middle East Sun-Thu work week)
+      const contactCountry = (contact as any).country;
+      const countryHours = getBusinessHoursForCountry(contactCountry);
+      
       const businessHoursConfig: BusinessHoursConfig = {
         enabled: true,
         timezone: businessHoursSettings?.timezone || DEFAULT_BUSINESS_HOURS.timezone,
-        operatingDays: businessHoursSettings?.operatingDays || DEFAULT_BUSINESS_HOURS.operatingDays,
-        startTime: businessHoursSettings?.startTime || DEFAULT_BUSINESS_HOURS.startTime,
-        endTime: businessHoursSettings?.endTime || DEFAULT_BUSINESS_HOURS.endTime,
+        // Use country-specific operating days (e.g., Sun-Thu for Middle East)
+        // Campaign-level override takes precedence if explicitly set
+        operatingDays: businessHoursSettings?.operatingDays || countryHours.operatingDays,
+        startTime: businessHoursSettings?.startTime || countryHours.startTime,
+        endTime: businessHoursSettings?.endTime || countryHours.endTime,
         respectContactTimezone: businessHoursSettings?.respectContactTimezone ?? true,
         excludedDates: US_FEDERAL_HOLIDAYS_2024_2025,
       };
@@ -214,7 +220,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         timezone: (contact as any).timezone,
         city: (contact as any).city || (contact as any).contactCity,
         state: (contact as any).state || (contact as any).contactState,
-        country: (contact as any).country,
+        country: contactCountry,
       };
 
       if (!isWithinBusinessHours(businessHoursConfig, contactTimezoneInfo)) {
@@ -941,18 +947,22 @@ router.get("/campaign/:campaignId/stats", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Campaign is not in AI agent mode" });
     }
 
-    // Query call_sessions directly for accurate AI call stats
+    // Query call_sessions with quality records to get identity confirmation status
+    // "Connected" should mean RIGHT PARTY connects (identity confirmed), not just any answered call
     const aiCallSessions = await db.select({
       id: callSessions.id,
       status: callSessions.status,
       aiDisposition: callSessions.aiDisposition,
       aiAnalysis: callSessions.aiAnalysis,
-    }).from(callSessions).where(
-      and(
-        eq(callSessions.campaignId, campaignId),
-        eq(callSessions.agentType, 'ai')
-      )
-    );
+      identityConfirmed: callQualityRecords.identityConfirmed,
+    }).from(callSessions)
+      .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
+      .where(
+        and(
+          eq(callSessions.campaignId, campaignId),
+          eq(callSessions.agentType, 'ai')
+        )
+      );
 
     const stats = {
       totalAiCalls: aiCallSessions.length,
@@ -976,10 +986,23 @@ router.get("/campaign/:campaignId/stats", requireAuth, async (req, res) => {
         const disposition = s.aiDisposition?.toLowerCase() || '';
         return disposition.includes('no_answer') || disposition.includes('no answer');
       }).length,
+      // CRITICAL: "Connected" means RIGHT PARTY connects (identity confirmed)
+      // This counts calls where we confirmed we're speaking with the target contact
       connected: aiCallSessions.filter((s) => {
-        const disposition = s.aiDisposition?.toLowerCase() || '';
-        return disposition.includes('completed') || disposition.includes('connected') || 
-               disposition.includes('not_interested') || disposition.includes('callback');
+        // Primary: Check identityConfirmed from call quality records
+        if (s.identityConfirmed === true) {
+          return true;
+        }
+        // Fallback: Check aiAnalysis for identity confirmation
+        const analysis = s.aiAnalysis as Record<string, any> | null;
+        if (analysis?.identityConfirmed === true || analysis?.rightPartyContact === true) {
+          return true;
+        }
+        // Also check performanceMetrics if available
+        if (analysis?.performanceMetrics?.identityConfirmed === true) {
+          return true;
+        }
+        return false;
       }).length,
     };
 

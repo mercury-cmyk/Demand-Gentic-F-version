@@ -5,7 +5,6 @@ import { CampaignWizard, type CampaignWizardStep } from "@/components/campaign-b
 import { Step1AudienceSelection } from "@/components/campaign-builder/step1-audience-selection";
 import { Step0CampaignType } from "@/components/campaign-builder/step0-campaign-type";
 import { StepClientProject } from "@/components/campaign-builder/step-client-project";
-import { StepCallFlow } from "@/components/campaign-builder/step-call-flow";
 import { StepAIVoice } from "@/components/campaign-builder/step-ai-voice";
 import { Step3Scheduling } from "@/components/campaign-builder/step3-scheduling";
 import { Step4Compliance } from "@/components/campaign-builder/step4-compliance";
@@ -27,7 +26,8 @@ import { Button } from "@/components/ui/button";
 
 export default function TelemarketingCreatePage() {
   const [, setLocation] = useLocation();
-  const params = useParams<{ id?: string }>();
+  // Support multiple route patterns: /phone-campaigns/:id/edit, /campaigns/telemarketing/:id/edit, /campaigns/:campaignType/edit/:id
+  const params = useParams<{ id?: string; campaignType?: string }>();
   const campaignId = params?.id;
   const isEditMode = !!campaignId;
   const { toast } = useToast();
@@ -74,11 +74,6 @@ export default function TelemarketingCreatePage() {
       targetAudienceDescription: existingCampaign.targetAudienceDescription,
       successCriteria: existingCampaign.successCriteria,
       campaignObjections: existingCampaign.campaignObjections,
-      // Call flow
-      callFlow: existingCampaign.callFlow ? {
-        useDefault: false,
-        customFlow: existingCampaign.callFlow,
-      } : { useDefault: true },
       // Scheduling
       scheduling: {
         type: existingCampaign.scheduleJson?.type || 'immediate',
@@ -159,12 +154,6 @@ export default function TelemarketingCreatePage() {
       title: "Audience",
       description: "Select your target audience for calling",
       component: Step1AudienceSelection,
-    },
-    {
-      id: "call-flow",
-      title: "Call Flow",
-      description: "Select pre-configured call flow or customize",
-      component: StepCallFlow,
     },
     {
       id: "ai-voice",
@@ -267,12 +256,6 @@ export default function TelemarketingCreatePage() {
         targetAudienceDescription: data.targetAudienceDescription || null,
         successCriteria: data.successCriteria || null,
         campaignObjections: data.campaignObjections?.length > 0 ? data.campaignObjections : null,
-        // Call Flow Layer (Layer 3.5) - Deterministic conversation flow
-        // Pass the selected flow ID so the system knows which flow to use
-        callFlowId: data.callFlow?.flowId || null,
-        callFlow: data.callFlow?.useDefault !== false
-          ? (data.callFlow?.selectedFlow || null) // Use selected flow (could be system or custom)
-          : data.callFlow?.customFlow || null, // Custom modified flow from wizard
       };
 
       let result;

@@ -311,30 +311,52 @@ export function CSVImportDialog({
         try {
           if (isUnifiedFormat) {
             // Unified format with account data
-            // Create a map from CSV column name to its index
+            // Create a map from CSV column name to its index (case-insensitive, trimmed)
             const csvColumnIndexMap = new Map<string, number>();
             headers.forEach((header, idx) => {
-              csvColumnIndexMap.set(header, idx);
+              csvColumnIndexMap.set(header.trim().toLowerCase(), idx);
             });
-            
+
             const mappedHeaders = fieldMappings.map(m => {
               if (!m.targetField || !m.targetEntity) return "";
               return m.targetEntity === "account" ? `account_${m.targetField}` : m.targetField;
             });
+
+            // Debug: Log first row mapping
+            if (batchIndex === 0) {
+              console.log('[CSV-IMPORT] Field mappings:', fieldMappings.map(m => ({ csv: m.csvColumn, target: m.targetField, entity: m.targetEntity })));
+              console.log('[CSV-IMPORT] Mapped headers:', mappedHeaders);
+              console.log('[CSV-IMPORT] CSV column index map:', Array.from(csvColumnIndexMap.entries()));
+              console.log('[CSV-IMPORT] First row raw:', batchRows[0]);
+            }
 
             const records = batchRows
               .map((row, idx) => {
                 // Map row data by getting values from correct CSV column positions
                 const mappedRow = fieldMappings.map(mapping => {
                   if (!mapping.csvColumn) return "";
-                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn);
+                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn.trim().toLowerCase());
                   return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
                 });
-                
+
+                // Debug: Log first row mapping details
+                if (batchIndex === 0 && idx === 0) {
+                  console.log('[CSV-IMPORT] First mapped row:', mappedRow);
+                  // Find email mapping
+                  const emailMappingIdx = mappedHeaders.findIndex(h => h === 'email');
+                  console.log('[CSV-IMPORT] Email mapping index:', emailMappingIdx, 'value:', mappedRow[emailMappingIdx]);
+                }
+
                 const contactData = csvRowToContactFromUnified(mappedRow, mappedHeaders);
                 const accountData = csvRowToAccountFromUnified(mappedRow, mappedHeaders);
-                return { 
-                  contact: contactData, 
+
+                // Debug: Log first contact
+                if (batchIndex === 0 && idx === 0) {
+                  console.log('[CSV-IMPORT] First contact data:', contactData);
+                }
+
+                return {
+                  contact: contactData,
                   account: accountData,
                   rowIndex: start + idx + 2
                 };
@@ -387,20 +409,40 @@ export function CSVImportDialog({
             // Contacts-only format with mapping - use batch import for efficiency
             const csvColumnIndexMap = new Map<string, number>();
             headers.forEach((header, idx) => {
-              csvColumnIndexMap.set(header, idx);
+              csvColumnIndexMap.set(header.trim().toLowerCase(), idx);
             });
-            
+
             const mappedHeaders = fieldMappings.map(m => m.targetField || "");
+
+            // Debug: Log first row mapping
+            if (batchIndex === 0) {
+              console.log('[CSV-IMPORT] Contacts-only - Field mappings:', fieldMappings.map(m => ({ csv: m.csvColumn, target: m.targetField })));
+              console.log('[CSV-IMPORT] Contacts-only - Mapped headers:', mappedHeaders);
+              console.log('[CSV-IMPORT] Contacts-only - CSV column index map:', Array.from(csvColumnIndexMap.entries()));
+            }
+
             const records = batchRows
               .map((row, idx) => {
                 const mappedRow = fieldMappings.map(mapping => {
                   if (!mapping.csvColumn) return "";
-                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn);
+                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn.trim().toLowerCase());
                   return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
                 });
-                
+
+                // Debug: Log first row
+                if (batchIndex === 0 && idx === 0) {
+                  console.log('[CSV-IMPORT] Contacts-only - First mapped row:', mappedRow);
+                  const emailIdx = mappedHeaders.findIndex(h => h === 'email');
+                  console.log('[CSV-IMPORT] Contacts-only - Email index:', emailIdx, 'value:', mappedRow[emailIdx]);
+                }
+
                 const contactData = csvRowToContact(mappedRow, mappedHeaders);
-                return { 
+
+                if (batchIndex === 0 && idx === 0) {
+                  console.log('[CSV-IMPORT] Contacts-only - First contact:', contactData);
+                }
+
+                return {
                   contact: contactData,
                   account: null,
                   rowIndex: start + idx + 2

@@ -543,6 +543,29 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
   });
 
+  // Bookings query
+  const [bookingsFilter, setBookingsFilter] = useState<'upcoming' | 'past' | 'all'>('upcoming');
+  const { data: clientBookings = [], isLoading: bookingsLoading, refetch: refetchBookings } = useQuery<any[]>({
+    queryKey: ['client-portal-bookings', bookingsFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/client-portal/bookings?filter=${bookingsFilter}`, authHeaders);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user && enabledFeatures.includes('calendar_booking'),
+  });
+
+  // Booking types query
+  const { data: clientBookingTypes = [], isLoading: bookingTypesLoading, refetch: refetchBookingTypes } = useQuery<any[]>({
+    queryKey: ['client-portal-booking-types'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/bookings/types', authHeaders);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user && enabledFeatures.includes('calendar_booking'),
+  });
+
   // Preview Studio - Campaign audience query
   const { data: previewAudienceData, isLoading: previewAudienceLoading, refetch: refetchPreviewAudience } = useQuery<{
     campaign: { id: string; name: string; status: string; type: string };
@@ -1013,6 +1036,7 @@ export default function ClientPortalDashboard() {
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
     { id: 'studio', label: 'Simulations', icon: Eye, color: 'from-cyan-500 to-blue-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
+    { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
     { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
@@ -2676,6 +2700,216 @@ export default function ClientPortalDashboard() {
                 </Card>
               </TabsContent>
             </Tabs>
+          </div>
+        )}
+
+        {/* ==================== BOOKINGS TAB ==================== */}
+        {activeTab === 'bookings' && hasFeature('calendar_booking') && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Bookings</h2>
+                <p className="text-muted-foreground">Manage meetings, booking types, and availability</p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant={bookingsFilter === 'upcoming' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setBookingsFilter('upcoming')}
+                >
+                  Upcoming
+                </Button>
+                <Button
+                  variant={bookingsFilter === 'past' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setBookingsFilter('past')}
+                >
+                  Past
+                </Button>
+                <Button
+                  variant={bookingsFilter === 'all' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setBookingsFilter('all')}
+                >
+                  All
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => refetchBookings()}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            {/* Booking Types Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(clientBookingTypes || []).filter((t: any) => t.isActive).map((type: any) => (
+                <Card key={type.id} className="border-l-4" style={{ borderLeftColor: type.color || '#3b82f6' }}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base">{type.name}</CardTitle>
+                      <Badge variant="secondary">{type.duration}m</Badge>
+                    </div>
+                    {type.description && (
+                      <CardDescription className="text-xs">{type.description}</CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <LinkIcon className="h-3 w-3" />
+                      <span className="truncate font-mono">/{type.slug}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-2 h-7 text-xs"
+                      onClick={() => {
+                        const url = `${window.location.origin}/book/${user?.email?.split('@')[0] || 'user'}/${type.slug}`;
+                        navigator.clipboard.writeText(url);
+                        toast({ title: 'Link copied!', description: 'Booking link copied to clipboard' });
+                      }}
+                    >
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      Copy Link
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+              {(clientBookingTypes || []).filter((t: any) => t.isActive).length === 0 && (
+                <Card className="col-span-3 border-dashed">
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    <Calendar className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-medium">No booking types yet</p>
+                    <p className="text-xs mt-1">Create a booking type to start accepting meetings</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Bookings Table */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg">
+                      {bookingsFilter === 'upcoming' ? 'Upcoming' : bookingsFilter === 'past' ? 'Past' : 'All'} Bookings
+                    </CardTitle>
+                    <CardDescription>{clientBookings.length} booking{clientBookings.length !== 1 ? 's' : ''}</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {bookingsLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : clientBookings.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Calendar className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                    <p className="font-medium">No {bookingsFilter !== 'all' ? bookingsFilter : ''} bookings</p>
+                    <p className="text-sm mt-1">Bookings will appear here when meetings are scheduled</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date & Time</TableHead>
+                          <TableHead>Guest</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Meeting Link</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientBookings.map((booking: any) => {
+                          const startDate = new Date(booking.startTime);
+                          const endDate = new Date(booking.endTime);
+                          const isPast = startDate < new Date();
+                          return (
+                            <TableRow key={booking.id} className={isPast ? 'opacity-60' : ''}>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                                  <div>
+                                    <div className="font-medium text-sm">
+                                      {startDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – {endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div>
+                                  <div className="font-medium text-sm">{booking.guestName}</div>
+                                  <div className="text-xs text-muted-foreground">{booking.guestEmail}</div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-xs">{booking.bookingTypeName || 'Meeting'}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-1 text-sm">
+                                  <Clock className="h-3 w-3 text-muted-foreground" />
+                                  {booking.bookingTypeDuration || 30}m
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={booking.status === 'confirmed' ? 'default' : booking.status === 'cancelled' ? 'destructive' : 'secondary'}
+                                  className="text-xs"
+                                >
+                                  {booking.status === 'confirmed' && <CheckCircle className="h-3 w-3 mr-1" />}
+                                  {booking.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {booking.meetingUrl ? (
+                                  <a href={booking.meetingUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                    <ExternalLink className="h-3 w-3" />
+                                    Join
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {!isPast && booking.status === 'confirmed' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`/api/client-portal/bookings/${booking.id}/cancel`, {
+                                          method: 'PUT',
+                                          ...authHeaders,
+                                        });
+                                        if (res.ok) {
+                                          toast({ title: 'Booking cancelled' });
+                                          refetchBookings();
+                                        }
+                                      } catch {
+                                        toast({ title: 'Failed to cancel', variant: 'destructive' });
+                                      }
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
 

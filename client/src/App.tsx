@@ -132,7 +132,6 @@ import UsersSettingsPage from "@/pages/settings/users";
 import TelephonySettingsPage from "@/pages/settings/telephony";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
-import CallFlowManagementPage from "@/pages/call-flow-management";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
 import PromptManagementPage from "@/pages/prompt-management";
 import PromptInspectorPage from "@/pages/prompt-inspector";
@@ -331,7 +330,8 @@ function AuthenticatedApp() {
                 {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
               <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
-              <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Use the full wizard for editing phone campaigns (with voice selection) */}
+              <Route path="/phone-campaigns/:id/edit" component={TelemarketingCreatePage} />
               {/* Unified 12-step wizard for creating AND editing telemarketing campaigns */}
               <Route path="/campaigns/telemarketing/:id/edit" component={TelemarketingCreatePage} />
               {/* Legacy redirects for /campaigns/telemarketing */}
@@ -347,17 +347,11 @@ function AuthenticatedApp() {
               <Route path="/campaigns/phone">
                 {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
-              <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Use the full wizard for editing phone campaigns (with voice selection) */}
+              <Route path="/campaigns/phone/:id/edit" component={TelemarketingCreatePage} />
               <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />
-              {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern */}
-              <Route path="/campaigns/appointment_generation/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/lead_qualification/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/survey/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/follow_up/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/event_registration/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/reactivation/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/sql/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/webinar_invite/edit/:id" component={PhoneCampaignEditPage} />
+              {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern - use wizard */}
+              <Route path="/campaigns/:campaignType/edit/:id" component={TelemarketingCreatePage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
               <Route path="/number-pool" component={NumberPoolPage} />
@@ -404,7 +398,6 @@ function AuthenticatedApp() {
               <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
-              <Route path="/settings/call-flows" component={CallFlowManagementPage} />
               <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
               <Route path="/settings/prompts" component={PromptManagementPage} />
               <Route path="/settings/prompt-inspector" component={PromptInspectorPage} />

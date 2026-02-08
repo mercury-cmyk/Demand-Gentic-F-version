@@ -224,6 +224,8 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "qualified_lead",
   "not_interested",
   "do_not_call",
+  "callback_requested",
+  "needs_review",
 ]);
 
 const activeSessions = new Map<string, OpenAIRealtimeSession>();
@@ -239,8 +241,8 @@ const DISPOSITION_FUNCTION_TOOLS = [
       properties: {
         disposition: {
           type: "string",
-          enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data"],
-          description: "The disposition code for this call. qualified_lead: prospect expressed interest and qualifies. not_interested: prospect declined. do_not_call: prospect requested to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
+          enum: ["qualified_lead", "not_interested", "do_not_call", "voicemail", "no_answer", "invalid_data", "callback_requested", "needs_review"],
+          description: "The disposition code for this call. qualified_lead: prospect expressed interest and qualifies. callback_requested: prospect asked for a callback / better time. needs_review: ambiguous outcome or incomplete flow (e.g., interest detected but email/time not confirmed). not_interested: prospect declined. do_not_call: prospect requested to be removed from calling list. voicemail: reached voicemail. no_answer: call connected but no human response. invalid_data: wrong number or disconnected."
         },
         confidence: {
           type: "number",
@@ -1461,7 +1463,11 @@ async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any)
 
         // Check for identity confirmation in user response
         // This prevents the agent from re-asking identity mid-conversation
-        if (!session.conversationState.identityConfirmed) {
+        // IMPORTANT: Only check for identity confirmation AFTER the agent has spoken.
+        // The contact's initial "Hello?" is NOT identity confirmation - that happens
+        // only after the agent asks "Am I speaking with [Name]?" and the contact confirms.
+        const agentHasSpoken = session.transcripts.some(t => t.role === 'assistant');
+        if (!session.conversationState.identityConfirmed && agentHasSpoken) {
           const identityConfirmed = detectIdentityConfirmation(message.transcript);
           if (identityConfirmed) {
             session.conversationState.identityConfirmed = true;
@@ -1750,14 +1756,15 @@ function detectIdentityConfirmation(transcript: string): boolean {
     }
   }
 
-  // Check for name confirmation patterns (user says their own name)
-  // e.g., "Yes, this is John", "John here", "This is John Smith"
-  if (normalizedText.includes('yes') || normalizedText.includes('hi') || normalizedText.includes('hello')) {
-    // If they're responding with yes/hi and it's short, likely confirmation
-    if (normalizedText.length < 50) {
-      return true;
-    }
-  }
+  // NOTE: We explicitly DO NOT treat bare "hello", "hi", or greetings as identity confirmation.
+  // The contact saying "Hello?" when answering the phone is NOT confirming their identity.
+  // Identity confirmation only happens AFTER the agent asks "Am I speaking with [Name]?"
+  // and the contact responds with an affirmative like "yes", "speaking", "this is me", etc.
+  //
+  // The patterns above already cover cases like:
+  // - "Yes, this is John" (matches: /this is \w+/)
+  // - "Hi, yes speaking" (matches: /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/)
+  // - "Hello, John speaking" (matches: /\w+ speaking$/)
 
   return false;
 }

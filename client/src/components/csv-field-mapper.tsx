@@ -128,9 +128,12 @@ export function CSVFieldMapper({
   });
 
   // Fetch CSV mapping templates
-  const { data: templates = [] } = useQuery<CsvMappingTemplate[]>({
+  const { data: templates = [], isLoading: templatesLoading } = useQuery<CsvMappingTemplate[]>({
     queryKey: ['/api/csv-mapping-templates'],
   });
+
+  // Debug log for templates
+  console.log('[CSVFieldMapper] Templates loaded:', templates.length, 'templates:', templates.map(t => t.name), 'loading:', templatesLoading);
 
   // Auto-match best template for current CSV headers
   const { data: bestMatch } = useQuery<{ template: CsvMappingTemplate | null; matchScore: number }>({
@@ -339,8 +342,10 @@ export function CSVFieldMapper({
       
       // Apply template mappings
       const templateMappings = csvHeaders.map(csvColumn => {
+        // Normalize column name for matching (case-insensitive, trimmed)
+        const normalizedCsvColumn = csvColumn.trim().toLowerCase();
         const templateMapping = (template.mappings as any[]).find(
-          (m: any) => m.csvColumn === csvColumn
+          (m: any) => m.csvColumn.trim().toLowerCase() === normalizedCsvColumn
         );
         if (templateMapping) {
           return {
@@ -391,6 +396,33 @@ export function CSVFieldMapper({
           : m
       )
     );
+  };
+
+  // Manually apply a saved template
+  const applyTemplate = (template: CsvMappingTemplate) => {
+    const templateMappings = csvHeaders.map(csvColumn => {
+      const normalizedCsvColumn = csvColumn.trim().toLowerCase();
+      const templateMapping = (template.mappings as any[]).find(
+        (m: any) => m.csvColumn.trim().toLowerCase() === normalizedCsvColumn
+      );
+      if (templateMapping) {
+        return {
+          csvColumn,
+          targetField: templateMapping.targetField,
+          targetEntity: templateMapping.targetEntity,
+        };
+      }
+      return autoMapColumn(csvColumn);
+    });
+
+    setMappings(templateMappings);
+    setAutoMatchedTemplate(template);
+    recordTemplateMutation.mutate(template.id);
+
+    toast({
+      title: "Template applied",
+      description: `Applied mapping template "${template.name}"`,
+    });
   };
 
   const handleApplyMapping = () => {
@@ -497,6 +529,32 @@ export function CSVFieldMapper({
             <p className="mt-2 text-xs">Map them above or select "Skip Column" to dismiss this warning.</p>
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Template selector */}
+      {templates.length > 0 && (
+        <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/30">
+          <BookmarkCheck className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Apply saved template:</span>
+          <Select
+            value=""
+            onValueChange={(templateId) => {
+              const template = templates.find(t => t.id === templateId);
+              if (template) applyTemplate(template);
+            }}
+          >
+            <SelectTrigger className="w-[250px]" data-testid="select-template">
+              <SelectValue placeholder="Select a template..." />
+            </SelectTrigger>
+            <SelectContent position="popper" sideOffset={4}>
+              {templates.map((template) => (
+                <SelectItem key={template.id} value={template.id}>
+                  {template.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
       <div className="flex items-center justify-between">

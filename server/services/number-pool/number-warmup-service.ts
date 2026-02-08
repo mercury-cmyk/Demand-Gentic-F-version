@@ -1,22 +1,29 @@
 /**
  * Number Warmup Service
- * 
+ *
  * Implements gradual ramp-up for new phone numbers to avoid carrier flagging.
- * New numbers start with reduced call limits that increase over 3-5 days.
- * 
- * Warmup Phases:
- * - Day 1: 3 calls/hour, 15 calls/day (15%)
- * - Day 2: 6 calls/hour, 30 calls/day (30%)
- * - Day 3: 10 calls/hour, 50 calls/day (50%)
- * - Day 4: 15 calls/hour, 75 calls/day (75%)
- * - Day 5+: Full limits (20/hour, 100/day)
- * 
+ * New numbers start with reduced call limits that increase daily over 14 days.
+ *
+ * Warmup Phases (aggressive ramp-up to 500 calls/day max):
+ * - Day 1:  10 calls/hour,  50 calls/day (10%)
+ * - Day 2:  15 calls/hour,  75 calls/day (15%)
+ * - Day 3:  20 calls/hour, 100 calls/day (20%)
+ * - Day 4:  30 calls/hour, 150 calls/day (30%)
+ * - Day 5:  40 calls/hour, 200 calls/day (40%)
+ * - Day 6:  50 calls/hour, 250 calls/day (50%)
+ * - Day 7:  60 calls/hour, 300 calls/day (60%)
+ * - Day 8:  70 calls/hour, 350 calls/day (70%)
+ * - Day 9:  80 calls/hour, 400 calls/day (80%)
+ * - Day 10: 90 calls/hour, 450 calls/day (90%)
+ * - Day 11-14: Gradual increase to max
+ * - Day 14+: Full limits (100/hour, 500/day)
+ *
  * @see docs/NUMBER_POOL_MANAGEMENT_SYSTEM.md
  */
 
 import { db } from "../../db";
 import { eq, and, lt, sql } from "drizzle-orm";
-import { telnyxNumbers } from "@shared/number-pool-schema";
+import { telnyxNumbers, numberReputation } from "@shared/number-pool-schema";
 
 // ==================== TYPES ====================
 
@@ -41,19 +48,30 @@ export interface NumberWarmupStatus {
 // ==================== CONSTANTS ====================
 
 /**
- * Warmup schedule: gradual increase over 5 days
- * These limits are MUCH more conservative than carriers expect,
- * making the number look like a legitimate business line.
+ * Warmup schedule: gradual increase over 14 days
+ * Aggressive ramp-up to reach 500 calls/day max capacity
+ * Day 1-7: Initial ramp to build carrier trust
+ * Day 8-13: Accelerated growth phase
+ * Day 14+: Fully warmed up — reputation-based bonus kicks in
  */
 const WARMUP_SCHEDULE: WarmupPhase[] = [
-  { day: 1, maxCallsPerHour: 3,  maxCallsPerDay: 15,  percentOfMax: 15 },
-  { day: 2, maxCallsPerHour: 6,  maxCallsPerDay: 30,  percentOfMax: 30 },
-  { day: 3, maxCallsPerHour: 10, maxCallsPerDay: 50,  percentOfMax: 50 },
-  { day: 4, maxCallsPerHour: 15, maxCallsPerDay: 75,  percentOfMax: 75 },
-  { day: 5, maxCallsPerHour: 20, maxCallsPerDay: 100, percentOfMax: 100 },
+  { day: 1,  maxCallsPerHour: 10,  maxCallsPerDay: 50,   percentOfMax: 10 },
+  { day: 2,  maxCallsPerHour: 15,  maxCallsPerDay: 75,   percentOfMax: 15 },
+  { day: 3,  maxCallsPerHour: 20,  maxCallsPerDay: 100,  percentOfMax: 20 },
+  { day: 4,  maxCallsPerHour: 30,  maxCallsPerDay: 150,  percentOfMax: 30 },
+  { day: 5,  maxCallsPerHour: 40,  maxCallsPerDay: 200,  percentOfMax: 40 },
+  { day: 6,  maxCallsPerHour: 50,  maxCallsPerDay: 250,  percentOfMax: 50 },
+  { day: 7,  maxCallsPerHour: 60,  maxCallsPerDay: 300,  percentOfMax: 60 },
+  { day: 8,  maxCallsPerHour: 70,  maxCallsPerDay: 350,  percentOfMax: 70 },
+  { day: 9,  maxCallsPerHour: 80,  maxCallsPerDay: 400,  percentOfMax: 80 },
+  { day: 10, maxCallsPerHour: 85,  maxCallsPerDay: 425,  percentOfMax: 85 },
+  { day: 11, maxCallsPerHour: 90,  maxCallsPerDay: 450,  percentOfMax: 90 },
+  { day: 12, maxCallsPerHour: 95,  maxCallsPerDay: 475,  percentOfMax: 95 },
+  { day: 13, maxCallsPerHour: 98,  maxCallsPerDay: 490,  percentOfMax: 98 },
+  { day: 14, maxCallsPerHour: 100, maxCallsPerDay: 500,  percentOfMax: 100 },
 ];
 
-const WARMUP_DAYS = 5;
+const WARMUP_DAYS = 14;
 
 // ==================== MAIN SERVICE ====================
 
@@ -67,6 +85,8 @@ export function getNumberWarmupStatus(
     acquiredAt: Date | null;
     maxCallsPerHour: number | null;
     maxCallsPerDay: number | null;
+    reputationScore?: number | null;
+    reputationBand?: string | null;
   }
 ): NumberWarmupStatus {
   const acquiredAt = number.acquiredAt || new Date();
@@ -77,16 +97,25 @@ export function getNumberWarmupStatus(
   const currentPhase = getWarmupPhase(daysSinceAcquisition);
   const isWarmedUp = daysSinceAcquisition >= WARMUP_DAYS;
 
-  // Calculate effective limits (use warmup limits if still in warmup)
-  const configuredMaxHour = number.maxCallsPerHour ?? 20;
-  const configuredMaxDay = number.maxCallsPerDay ?? 100;
+  // Base configured limits (higher defaults for mature numbers)
+  // Max capacity: 100 calls/hour, 500 calls/day after full warmup
+  const configuredMaxHour = number.maxCallsPerHour ?? 100;
+  const configuredMaxDay = number.maxCallsPerDay ?? 500;
+
+  // Calculate reputation + age bonus multiplier
+  // Numbers with proven track records earn higher limits
+  const reputationMultiplier = getReputationMultiplier(
+    number.reputationScore ?? null,
+    number.reputationBand ?? null,
+    daysSinceAcquisition
+  );
 
   const effectiveMaxCallsPerHour = isWarmedUp
-    ? configuredMaxHour
+    ? Math.round(configuredMaxHour * reputationMultiplier)
     : Math.min(currentPhase.maxCallsPerHour, configuredMaxHour);
 
   const effectiveMaxCallsPerDay = isWarmedUp
-    ? configuredMaxDay
+    ? Math.round(configuredMaxDay * reputationMultiplier)
     : Math.min(currentPhase.maxCallsPerDay, configuredMaxDay);
 
   return {
@@ -99,6 +128,53 @@ export function getNumberWarmupStatus(
     effectiveMaxCallsPerHour,
     effectiveMaxCallsPerDay,
   };
+}
+
+/**
+ * Reputation + Age multiplier for call limits.
+ *
+ * After 14-day warmup, reputation and age combine for bonus capacity:
+ * - Excellent numbers with 60+ days can reach 750 calls/day (500 * 1.5)
+ *
+ * Reputation Band │ Days 14-29 │ Days 30-59 │ Days 60+
+ * ────────────────┼────────────┼────────────┼─────────
+ * excellent (≥85) │    1.0     │    1.3     │   1.5
+ * healthy  (≥70)  │    1.0     │    1.2     │   1.3
+ * warning  (≥50)  │    0.85    │    0.9     │   0.95
+ * risk     (≥40)  │    0.5     │    0.5     │   0.5
+ * burned   (<40)  │    0.25    │    0.25    │   0.25
+ * no data         │    0.9     │    1.0     │   1.0
+ */
+function getReputationMultiplier(
+  score: number | null,
+  band: string | null,
+  daysSinceAcquisition: number
+): number {
+  // Age tiers (adjusted for 14-day warmup)
+  const isVeteran = daysSinceAcquisition >= 60;
+  const isEstablished = daysSinceAcquisition >= 30;
+  const isMature = daysSinceAcquisition >= 14;
+  // const isFresh = daysSinceAcquisition < 14;  // still in warmup
+
+  // No reputation data yet — be slightly conservative
+  if (score === null || score === undefined) {
+    return isEstablished ? 1.0 : isMature ? 0.9 : 0.8;
+  }
+
+  switch (band) {
+    case 'excellent': // ≥ 85
+      return isVeteran ? 1.5 : isEstablished ? 1.3 : 1.0;
+    case 'healthy':   // ≥ 70
+      return isVeteran ? 1.3 : isEstablished ? 1.2 : 1.0;
+    case 'warning':   // ≥ 50
+      return isVeteran ? 0.95 : isEstablished ? 0.9 : 0.85;
+    case 'risk':      // ≥ 40
+      return 0.5;
+    case 'burned':    // < 40
+      return 0.25;
+    default:
+      return isEstablished ? 1.0 : 0.9;
+  }
 }
 
 /**
@@ -123,6 +199,8 @@ export function canMakeCallDuringWarmup(
     maxCallsPerDay: number | null;
     callsThisHour: number | null;
     callsToday: number | null;
+    reputationScore?: number | null;
+    reputationBand?: string | null;
   }
 ): { canCall: boolean; reason?: string; warmupStatus: NumberWarmupStatus } {
   const status = getNumberWarmupStatus(number);
@@ -157,8 +235,17 @@ export async function getNumbersInWarmup(): Promise<NumberWarmupStatus[]> {
   warmupCutoff.setDate(warmupCutoff.getDate() - WARMUP_DAYS);
 
   const numbers = await db
-    .select()
+    .select({
+      id: telnyxNumbers.id,
+      phoneNumberE164: telnyxNumbers.phoneNumberE164,
+      acquiredAt: telnyxNumbers.acquiredAt,
+      maxCallsPerHour: telnyxNumbers.maxCallsPerHour,
+      maxCallsPerDay: telnyxNumbers.maxCallsPerDay,
+      reputationScore: numberReputation.score,
+      reputationBand: numberReputation.band,
+    })
     .from(telnyxNumbers)
+    .leftJoin(numberReputation, eq(telnyxNumbers.id, numberReputation.numberId))
     .where(
       and(
         eq(telnyxNumbers.status, 'active'),
@@ -172,15 +259,17 @@ export async function getNumbersInWarmup(): Promise<NumberWarmupStatus[]> {
     acquiredAt: num.acquiredAt,
     maxCallsPerHour: num.maxCallsPerHour,
     maxCallsPerDay: num.maxCallsPerDay,
+    reputationScore: num.reputationScore,
+    reputationBand: num.reputationBand,
   }));
 }
 
 /**
  * Get recommended number pool size for a given call volume
- * Rule: 1 DID per 8-12 calls/hour, with warmup consideration
- * 
+ * Rule: 1 DID per 50-100 calls/hour after warmup
+ *
  * @param targetCallsPerHour - Desired calls per hour across all agents
- * @param includeWarmupBuffer - Add 20% buffer for numbers in warmup
+ * @param includeWarmupBuffer - Add 25% buffer for numbers in warmup
  */
 export function calculateRequiredPoolSize(
   targetCallsPerHour: number,
@@ -190,15 +279,16 @@ export function calculateRequiredPoolSize(
   recommendedNumbers: number;
   withWarmupBuffer: number;
 } {
-  // Conservative: 1 number per 8-12 calls/hour
-  const callsPerNumberPerHour = 10; // Middle of 8-12 range
-  
-  const minimumNumbers = Math.ceil(targetCallsPerHour / 20); // Max 20/hr per number
+  // With reputation-based limits: excellent numbers can do up to 150/hr (100 * 1.5)
+  // Conservative estimate uses 50/hr per number for planning
+  const callsPerNumberPerHour = 50;
+
+  const minimumNumbers = Math.ceil(targetCallsPerHour / 100); // Max 100/hr per fully warmed number
   const recommendedNumbers = Math.ceil(targetCallsPerHour / callsPerNumberPerHour);
-  
-  // Add 20% buffer for numbers that are in warmup (reduced capacity)
+
+  // Add 25% buffer for numbers that are in warmup (reduced capacity during 14-day ramp)
   const withWarmupBuffer = includeWarmupBuffer
-    ? Math.ceil(recommendedNumbers * 1.2)
+    ? Math.ceil(recommendedNumbers * 1.25)
     : recommendedNumbers;
 
   return {
@@ -221,8 +311,17 @@ export async function estimatePoolCapacity(): Promise<{
   effectiveDailyCapacity: number;
 }> {
   const activeNumbers = await db
-    .select()
+    .select({
+      id: telnyxNumbers.id,
+      phoneNumberE164: telnyxNumbers.phoneNumberE164,
+      acquiredAt: telnyxNumbers.acquiredAt,
+      maxCallsPerHour: telnyxNumbers.maxCallsPerHour,
+      maxCallsPerDay: telnyxNumbers.maxCallsPerDay,
+      reputationScore: numberReputation.score,
+      reputationBand: numberReputation.band,
+    })
     .from(telnyxNumbers)
+    .leftJoin(numberReputation, eq(telnyxNumbers.id, numberReputation.numberId))
     .where(eq(telnyxNumbers.status, 'active'));
 
   let warmedUpNumbers = 0;
@@ -239,6 +338,8 @@ export async function estimatePoolCapacity(): Promise<{
       acquiredAt: num.acquiredAt,
       maxCallsPerHour: num.maxCallsPerHour,
       maxCallsPerDay: num.maxCallsPerDay,
+      reputationScore: num.reputationScore,
+      reputationBand: num.reputationBand,
     });
 
     if (status.isWarmedUp) {
@@ -247,8 +348,8 @@ export async function estimatePoolCapacity(): Promise<{
       warmingNumbers++;
     }
 
-    totalHourlyCapacity += num.maxCallsPerHour ?? 20;
-    totalDailyCapacity += num.maxCallsPerDay ?? 100;
+    totalHourlyCapacity += num.maxCallsPerHour ?? 100;
+    totalDailyCapacity += num.maxCallsPerDay ?? 500;
     effectiveHourlyCapacity += status.effectiveMaxCallsPerHour;
     effectiveDailyCapacity += status.effectiveMaxCallsPerDay;
   }

@@ -283,7 +283,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');
 
-    // Build generation config for audio output
+    // Build generation config for audio output.
+    // CRITICAL: Native audio models (gemini-live-2.5-flash-native-audio) only allow
+    // a SINGLE response modality. Use ['AUDIO'] only, and enable transcription via
+    // output_audio_transcription / input_audio_transcription at the setup level.
     const generationConfig: GeminiGenerationConfig = {
       response_modalities: ['AUDIO'],
       speech_config: {
@@ -313,12 +316,21 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
           parts: [{ text: config.systemPrompt }],
         },
         tools,
+        // Enable transcription at setup level (required for native-audio single-modality models)
+        ...(config.transcriptionEnabled !== false ? {
+          output_audio_transcription: {},
+          input_audio_transcription: {},
+        } : {}),
       },
     };
 
     this.ws.send(JSON.stringify(setupMessage));
     console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}`);
   }
+
+  // Track inbound audio frames for periodic logging
+  private audioInboundChunks: number = 0;
+  private lastBackpressureWarnAt: number = 0;
 
   sendAudio(audioBuffer: Buffer): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
@@ -330,44 +342,40 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // Check for backpressure before sending
+    // Check for backpressure before sending (rate-limit the warning)
     const bufferSize = this.ws.bufferedAmount;
     const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB
     if (bufferSize > MAX_BUFFER_SIZE) {
-      console.warn(`${LOG_PREFIX} ⚠️ Audio backpressure detected (${bufferSize} bytes). Dropping frame to prevent buffer overflow.`);
-      return; // Drop frame to prevent audio quality degradation
+      const now = Date.now();
+      if (now - this.lastBackpressureWarnAt > 2000) {
+        console.warn(`${LOG_PREFIX} ⚠️ Gemini WS backpressure: ${bufferSize}B buffered, dropping frame`);
+        this.lastBackpressureWarnAt = now;
+      }
+      return;
     }
 
     // Transcode G.711 to PCM 16kHz for Gemini
     const pcmBuffer = this.transcoder.telnyxToGemini(audioBuffer);
     const base64Audio = pcmBuffer.toString('base64');
 
-    const message: BidiGenerateContentRealtimeInput = {
-      realtime_input: {
-        media_chunks: [{
-          mime_type: 'audio/pcm',
-          data: base64Audio,
-        }],
-      },
-    };
+    // Build message with fast string concatenation instead of JSON.stringify
+    const msg = `{"realtime_input":{"media_chunks":[{"mime_type":"audio/pcm","data":"${base64Audio}"}]}}`;
 
     try {
-        this.ws.send(JSON.stringify(message));
+        this.ws.send(msg);
         this.audioBytesSent += audioBuffer.length;
+        this.audioInboundChunks++;
 
         // Track when audio was received for STT idle detection
         this.lastAudioReceivedTime = Date.now();
 
         // Also stream to Speech-to-Text for user transcription
-        // Note: The streaming recognize stream expects raw PCM audio bytes
         if (this.sttEnabled) {
-          // Activate STT on demand when audio arrives
           if (!this.sttActive) {
             this.sttActive = true;
             this.startRecognizeStream().catch(() => {});
           }
 
-          // Only write if stream exists and is writable (not destroyed)
           if (this.recognizeStream && !this.recognizeStream.destroyed && this.recognizeStream.writable) {
             try {
               this.recognizeStream.write(pcmBuffer);
@@ -690,6 +698,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * CRITICAL: The model must ONLY say the exact greeting and then STOP.
    * It must NOT predict, assume, or continue with any follow-up like "okay, great".
    * The model must wait for the actual human to respond before saying anything else.
+   *
+   * FIX (Feb 2026): Previously sent instruction as role:"user" content which could
+   * confuse Gemini's conversation state. Now uses a clearer [SYSTEM] prefix to
+   * distinguish instructions from actual caller speech, and explicitly states
+   * that no user has spoken yet.
    */
   sendOpeningMessage(text: string): void {
     console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
@@ -698,27 +711,37 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // In Gemini Live, we send a text prompt and the model generates audio
-    // Include essential instructions for proper conversation flow
+    // Send as a user turn with clear [SYSTEM] instruction prefix
+    // This tells Gemini to speak the greeting, while making it clear that:
+    // 1. This is a system instruction, NOT something the caller said
+    // 2. The caller has NOT spoken yet - identity is NOT confirmed
+    // 3. After speaking the greeting, wait for the caller's first words
     const message = {
       client_content: {
         turns: [{
           role: 'user',
-          parts: [{ text: `Say ONLY this exact message now: "${text}"
+          parts: [{ text: `[SYSTEM INSTRUCTION - NOT CALLER SPEECH]
+The phone call has connected. We waited 2 seconds to let the prospect speak first.
+Now speak ONLY this exact greeting: "${text}"
 
-CRITICAL RULES:
-- Do NOT add anything before or after this message
-- After speaking, STOP and WAIT in silence for their response
-- Do NOT assume they confirmed identity - wait for explicit "yes" or name confirmation
-- Do NOT proceed to pitch until you HEAR explicit confirmation
-- Listen carefully - the next words must come from THEM` }],
+CRITICAL:
+- This is your FIRST message to begin the conversation
+- Identity is NOT confirmed - you still need to verify who you're speaking with
+- After speaking, STOP and WAIT in complete silence for their response
+- Do NOT say "okay, great" or acknowledge anything - just wait for their actual response
+- Do NOT assume anything about what they will say
+
+CALL CLOSING REMINDER:
+- When ending the call, you MUST say a proper farewell like "Thank you so much for your time today! Have a great day!"
+- WAIT for their response before calling end_call
+- NEVER hang up immediately after confirming appointment details` }],
         }],
         turn_complete: true,
       },
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Opening message sent: "${text.substring(0, 50)}..."`);
+    console.log(`${LOG_PREFIX} Opening message sent with system instruction: "${text.substring(0, 50)}..."`);
   }
 
   private handleMessage(data: string): void {
@@ -793,29 +816,20 @@ CRITICAL RULES:
   private handleServerContent(message: any): void {
     const content = message.server_content || message.serverContent;
 
-    console.log(`${LOG_PREFIX} 📨 handleServerContent - processing server message`);
-
     // Check for model turn with content
     if (content.model_turn?.parts || content.modelTurn?.parts) {
       const parts = content.model_turn?.parts || content.modelTurn?.parts;
-      console.log(`${LOG_PREFIX} 📦 Model turn received with ${parts.length} parts`);
 
       // Handle audio output
       if (hasAudioPart(parts)) {
-        console.log(`${LOG_PREFIX} 🎵 AUDIO PART DETECTED! Processing...`);
         const audioData = extractAudioData(parts);
         if (audioData) {
-          console.log(`${LOG_PREFIX} ✅ Audio data extracted: ${audioData.length} chars (base64)`);
-          // DEBUG: Log first few audio chunks to verify Gemini is sending data
-          if (this.audioPlaybackMs === 0) {
-              console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO RECEIVED from Gemini. Chunk size: ${audioData.length} chars (base64)`);
-          }
           this.handleAudioOutput(audioData);
         } else {
              console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
         }
       } else {
-        console.log(`${LOG_PREFIX} ⚠️ No audio part detected in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
+        console.log(`${LOG_PREFIX} ⚠️ No audio part in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
       }
 
       // Handle text output (for transcription)
@@ -897,13 +911,14 @@ CRITICAL RULES:
     }
   }
 
+  // Track audio chunks for periodic logging
+  private audioChunkCount: number = 0;
+
   private handleAudioOutput(base64Audio: string): void {
     if (!this.transcoder) {
       console.warn(`${LOG_PREFIX} Transcoder not initialized`);
       return;
     }
-
-    console.log(`${LOG_PREFIX} 🎵 handleAudioOutput called with ${base64Audio.length} chars of base64 audio`);
 
     // Start response if not already
     if (!this._isResponding) {
@@ -914,25 +929,22 @@ CRITICAL RULES:
 
     // Decode PCM audio from Gemini (24kHz)
     const pcmBuffer = Buffer.from(base64Audio, 'base64');
-    console.log(`${LOG_PREFIX} 📦 Decoded PCM buffer: ${pcmBuffer.length} bytes (24kHz)`);
 
     // Transcode to G.711 for Telnyx
     const g711Buffer = this.transcoder.geminiToTelnyx(pcmBuffer, 24000);
-    console.log(`${LOG_PREFIX} 🔄 Transcoded to G.711: ${g711Buffer.length} bytes`);
-
-    // DEBUG: Log audio output from Gemini with quality metrics
-    if (this.audioPlaybackMs === 0 || this.audioPlaybackMs % 1000 < 50) {
-      const compressionRatio = ((pcmBuffer.length / g711Buffer.length) * 100).toFixed(1);
-      const avgChunkSize = g711Buffer.length;
-      console.log(`${LOG_PREFIX} 📊 Audio: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${compressionRatio}% compression, avg chunk ${avgChunkSize}B)`);
-    }
 
     // Calculate duration (G.711: 8 bytes per ms at 8kHz)
     const durationMs = g711Buffer.length / 8;
     this.audioPlaybackMs += durationMs;
-    console.log(`${LOG_PREFIX} ⏱️  Audio duration: ${durationMs.toFixed(0)}ms, total: ${this.audioPlaybackMs.toFixed(0)}ms`);
+    this.audioChunkCount++;
 
-    console.log(`${LOG_PREFIX} 📤 Emitting audio:delta event with ${g711Buffer.length} bytes`);
+    // Log only first chunk and then periodically (every 100 chunks / ~2s)
+    if (this.audioChunkCount === 1) {
+      console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO chunk: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${durationMs.toFixed(0)}ms)`);
+    } else if (this.audioChunkCount % 100 === 0) {
+      console.log(`${LOG_PREFIX} 📊 Audio stats: ${this.audioChunkCount} chunks, ${this.audioPlaybackMs.toFixed(0)}ms total playback`);
+    }
+
     this.emit('audio:delta', {
       audioBuffer: g711Buffer,
       format: this.config?.outputAudioFormat || 'g711_ulaw',

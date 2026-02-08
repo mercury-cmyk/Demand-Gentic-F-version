@@ -642,6 +642,19 @@ router.post("/telnyx", async (req, res) => {
     // Import recording storage service for permanent S3 storage
     const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
 
+    // DE-DUPLICATION: Check if recording already exists for this call
+    // This prevents duplicate recordings when both recording.completed and call.recording.saved fire
+    const existingSession = await db
+      .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+      .from(callSessions)
+      .where(eq(callSessions.telnyxCallId, call_control_id))
+      .limit(1);
+
+    if (existingSession.length > 0 && existingSession[0].recordingUrl) {
+      console.log(`[Telnyx Webhook] ⏭️ Recording already exists for call ${call_control_id}, skipping duplicate`);
+      return res.json({ status: "ok", message: "Recording already exists", skipped: true });
+    }
+
     // Update leads table
     // Set recordingStatus to 'pending' - storeRecordingFromWebhook() will update to 'stored' or 'failed'
     const updatedLeads = await db

@@ -138,10 +138,6 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
                     <Zap className="mr-2 h-4 w-4" />
                     Integrations & APIs
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/call-flows')} data-testid="menu-call-flows">
-                    <GitBranch className="mr-2 h-4 w-4" />
-                    Call Flows
-                  </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
 

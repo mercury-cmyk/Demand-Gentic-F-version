@@ -1085,10 +1085,16 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const batch = eligibleItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
     
     const batchPromises = batch.map(async (item) => {
+      // Declare variables used in both try and catch blocks at function scope
+      // (let inside try {} is block-scoped and invisible to catch {})
+      let prospectLockAcquired = false;
+      let callInitiated = false;
+      let callerIdResult: CallerIdResult | null = null;
+      let phoneNumber = '';
       try {
         // Use resolved phone from compliance check
         const rawPhoneNumber = item._resolvedPhone || item.dialedNumber || item.phone || item.phoneNumber || "";
-        let phoneNumber = rawPhoneNumber ? normalizeToE164(rawPhoneNumber) : "";
+        phoneNumber = rawPhoneNumber ? normalizeToE164(rawPhoneNumber) : "";
         if (!phoneNumber || !isValidE164(phoneNumber)) {
           console.warn(`[AI Orchestrator] Invalid phone number for queue item ${item.id}: raw="${rawPhoneNumber}" normalized="${phoneNumber}"`);
           try {
@@ -1138,7 +1144,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Contact data comes from the SQL query (snake_case)
         // Use virtual agent name if available, fall back to aiSettings persona
         // NOTE: Default must be a real name, not "your representative" which is in PLACEHOLDER_VALUES blocklist
-        const agentName = virtualAgent?.name || aiSettings.persona?.name || "Alex";
+        // Check both agentName and name since wizard stores in agentName field
+        const agentName = virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
         
         // Create call attempt record for proper tracking
@@ -1216,7 +1223,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Select caller ID from number pool for spam prevention
         // Use campaign-level number pool config if available
         const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
-        let callerIdResult: CallerIdResult | null = null;
+        // callerIdResult already declared at outer scope for catch-block visibility
         try {
           callerIdResult = await getCallerIdForCall({
             campaignId,
@@ -1307,11 +1314,10 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         }
 
         // Track that we acquired the lock for cleanup on error
-        let prospectLockAcquired = true;
+        prospectLockAcquired = true;
 
         // Initiate call via SIP or Telnyx API based on configuration
         let callResult: any;
-        let callInitiated = false;
         let conversationId: string;
 
         if (useSip) {

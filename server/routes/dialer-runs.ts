@@ -709,7 +709,7 @@ router.post("/call-attempts/:id/disposition", async (req, res) => {
     // Validate disposition is one of the canonical values
     if (!disposition || !isValidCanonicalDisposition(disposition)) {
       return res.status(400).json({ 
-        error: "Invalid disposition. Must be one of: qualified_lead, not_interested, do_not_call, voicemail, no_answer, invalid_data, needs_review"
+        error: "Invalid disposition. Must be one of: qualified_lead, callback_requested, needs_review, not_interested, do_not_call, voicemail, no_answer, invalid_data"
       });
     }
 

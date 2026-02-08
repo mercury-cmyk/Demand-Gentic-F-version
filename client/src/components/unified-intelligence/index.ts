@@ -12,3 +12,4 @@ export { CallAnalysisSummary } from './CallAnalysisSummary';
 export { QualityAnalysisPanel } from './QualityAnalysisPanel';
 export { ConversationListPanel } from './ConversationListPanel';
 export { UnifiedDetailPanel } from './UnifiedDetailPanel';
+export { TopChallengesPanel } from './TopChallengesPanel';

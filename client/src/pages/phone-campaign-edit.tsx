@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus, Layers, Sparkles } from "lucide-react";
+import { ArrowLeft, Save, Phone, Users, Shield, Settings, Brain, Bot, Target, Package, ListChecks, X, Plus, Layers, Sparkles, Mic, Volume2, Play, Square, User, Building, Loader2 } from "lucide-react";
+import { ALL_VOICES } from '@/lib/voice-constants';
+import { cn } from "@/lib/utils";
 import { HybridAgentAssignment } from "@/components/hybrid-agent-assignment";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
 import { CampaignContextRegenerate } from "@/components/campaigns/campaign-context-regenerate";
@@ -75,6 +77,28 @@ export default function PhoneCampaignEditPage() {
 
   // AI Agent Concurrency state (for ai_agent dial mode)
   const [maxConcurrentCalls, setMaxConcurrentCalls] = useState<number>(50);
+
+  // AI Voice/Persona state
+  const [selectedVoice, setSelectedVoice] = useState<string>('Fenrir');
+  const [aiPersonaName, setAiPersonaName] = useState<string>('');
+  const [aiRole, setAiRole] = useState<string>('Sales Representative');
+  const [genderFilter, setGenderFilter] = useState<'all' | 'male' | 'female'>('all');
+  const [providerFilter, setProviderFilter] = useState<'all' | 'gemini' | 'openai'>('all');
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [loadingVoice, setLoadingVoice] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Build voice list from constants
+  const AI_VOICES = ALL_VOICES.map(v => ({
+    value: v.id,
+    label: v.name,
+    description: v.description,
+    gender: v.gender,
+    provider: v.provider,
+    tone: v.tone,
+    bestFor: v.bestFor,
+    color: v.color,
+  }));
 
   // Fetch campaign data - always refetch to ensure we have latest context fields
   const { data: campaign, isLoading: campaignLoading } = useQuery<any>({
@@ -154,6 +178,13 @@ export default function PhoneCampaignEditPage() {
       // Initialize AI Agent settings
       if (campaign.aiAgentSettings?.maxConcurrentCalls) {
         setMaxConcurrentCalls(campaign.aiAgentSettings.maxConcurrentCalls);
+      }
+
+      // Initialize AI Voice/Persona settings
+      if (campaign.aiAgentSettings?.persona) {
+        setSelectedVoice(campaign.aiAgentSettings.persona.voice || 'Fenrir');
+        setAiPersonaName(campaign.aiAgentSettings.persona.name || '');
+        setAiRole(campaign.aiAgentSettings.persona.role || 'Sales Representative');
       }
     }
   }, [campaign]);
@@ -242,6 +273,13 @@ export default function PhoneCampaignEditPage() {
     const aiAgentSettings = {
       ...(campaign?.aiAgentSettings || {}),
       maxConcurrentCalls,
+      persona: {
+        ...(campaign?.aiAgentSettings?.persona || {}),
+        name: aiPersonaName,
+        role: aiRole,
+        voice: selectedVoice,
+        companyName: organizationsData?.organizations?.find(o => o.id === problemIntelligenceOrgId)?.name || campaign?.aiAgentSettings?.persona?.companyName || '',
+      },
     };
 
     updateMutation.mutate({
@@ -334,7 +372,7 @@ export default function PhoneCampaignEditPage() {
 
       {/* Tabs for different sections */}
       <Tabs defaultValue="basic" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="basic" data-testid="tab-basic">
             <Phone className="w-4 h-4 mr-2" />
             Basic Info
@@ -342,6 +380,10 @@ export default function PhoneCampaignEditPage() {
           <TabsTrigger value="audience" data-testid="tab-audience">
             <Users className="w-4 h-4 mr-2" />
             Audience
+          </TabsTrigger>
+          <TabsTrigger value="voice" data-testid="tab-voice">
+            <Mic className="w-4 h-4 mr-2" />
+            AI Voice
           </TabsTrigger>
           <TabsTrigger value="agents" data-testid="tab-agents">
             <Bot className="w-4 h-4 mr-2" />
@@ -490,6 +532,223 @@ export default function PhoneCampaignEditPage() {
                 }}
                 hideSummary={false}
               />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* AI Voice Tab */}
+        <TabsContent value="voice" className="space-y-4">
+          {/* AI Persona Configuration */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <User className="w-5 h-5" />
+                <CardTitle className="text-base">AI Persona</CardTitle>
+              </div>
+              <CardDescription>
+                Configure how your AI agent introduces itself
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ai-persona-name">Agent Name</Label>
+                  <Input
+                    id="ai-persona-name"
+                    placeholder="e.g., Sarah, Michael"
+                    value={aiPersonaName}
+                    onChange={(e) => setAiPersonaName(e.target.value)}
+                    data-testid="input-ai-persona-name"
+                  />
+                  <p className="text-xs text-muted-foreground">Name used in introductions</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-company-name">Company Name</Label>
+                  <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50">
+                    <Building className="w-4 h-4 text-muted-foreground" />
+                    <span className={problemIntelligenceOrgId ? "text-foreground" : "text-muted-foreground"}>
+                      {organizationsData?.organizations?.find(o => o.id === problemIntelligenceOrgId)?.name || "Select organization in Basic Info tab"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">From selected organization</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="ai-role">Agent Role</Label>
+                  <Input
+                    id="ai-role"
+                    placeholder="e.g., Sales Representative"
+                    value={aiRole}
+                    onChange={(e) => setAiRole(e.target.value)}
+                    data-testid="input-ai-role"
+                  />
+                  <p className="text-xs text-muted-foreground">Role/title for the agent</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Voice Filters */}
+          <div className="flex flex-wrap gap-4">
+            <div className="space-y-2">
+              <Label className="text-sm">Gender</Label>
+              <div className="flex gap-2">
+                {(['all', 'male', 'female'] as const).map((g) => (
+                  <Button
+                    key={g}
+                    variant={genderFilter === g ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setGenderFilter(g)}
+                    data-testid={`filter-gender-${g}`}
+                  >
+                    {g === 'all' ? 'All' : g.charAt(0).toUpperCase() + g.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">Provider</Label>
+              <div className="flex gap-2">
+                {(['all', 'gemini', 'openai'] as const).map((p) => (
+                  <Button
+                    key={p}
+                    variant={providerFilter === p ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setProviderFilter(p)}
+                    data-testid={`filter-provider-${p}`}
+                  >
+                    {p === 'all' ? 'All' : p.charAt(0).toUpperCase() + p.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Voice Grid */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Volume2 className="w-5 h-5" />
+                Select AI Voice
+              </CardTitle>
+              <CardDescription>
+                Choose the voice that will represent your brand on calls
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {AI_VOICES
+                  .filter(voice => {
+                    if (genderFilter !== 'all' && voice.gender !== genderFilter) return false;
+                    if (providerFilter !== 'all' && voice.provider !== providerFilter) return false;
+                    return true;
+                  })
+                  .map((voice) => (
+                    <div
+                      key={voice.value}
+                      className={cn(
+                        "relative p-4 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md",
+                        selectedVoice === voice.value
+                          ? "border-primary bg-primary/5"
+                          : "border-muted hover:border-muted-foreground/50"
+                      )}
+                      onClick={() => setSelectedVoice(voice.value)}
+                      data-testid={`voice-${voice.value}`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{voice.label}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {voice.provider}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">{voice.description}</p>
+                          <div className="flex gap-1 mt-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {voice.gender}
+                            </Badge>
+                            {voice.tone && (
+                              <Badge variant="secondary" className="text-xs">
+                                {voice.tone}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (playingVoice === voice.value) {
+                              if (audioRef.current) {
+                                audioRef.current.pause();
+                                audioRef.current.currentTime = 0;
+                              }
+                              setPlayingVoice(null);
+                              setLoadingVoice(null);
+                              return;
+                            }
+                            if (audioRef.current) {
+                              audioRef.current.pause();
+                              audioRef.current.currentTime = 0;
+                            }
+                            setLoadingVoice(voice.value);
+                            try {
+                              const response = await fetch('/api/voice-providers/preview', {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  ...getAuthHeaders(),
+                                },
+                                credentials: 'include',
+                                body: JSON.stringify({
+                                  voiceId: voice.value,
+                                  provider: voice.provider,
+                                }),
+                              });
+                              if (!response.ok) throw new Error('Failed to load preview');
+                              const audioBlob = await response.blob();
+                              const audioUrl = URL.createObjectURL(audioBlob);
+                              audioRef.current = new Audio(audioUrl);
+                              audioRef.current.onended = () => {
+                                setPlayingVoice(null);
+                                setLoadingVoice(null);
+                                URL.revokeObjectURL(audioUrl);
+                              };
+                              setPlayingVoice(voice.value);
+                              setLoadingVoice(null);
+                              await audioRef.current.play();
+                            } catch (error) {
+                              setLoadingVoice(null);
+                              toast({
+                                title: "Preview Unavailable",
+                                description: "Could not load voice preview",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                          data-testid={`play-voice-${voice.value}`}
+                        >
+                          {loadingVoice === voice.value ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : playingVoice === voice.value ? (
+                            <Square className="h-4 w-4" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      {selectedVoice === voice.value && (
+                        <div className="absolute top-2 right-2">
+                          <div className="w-2 h-2 rounded-full bg-primary" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

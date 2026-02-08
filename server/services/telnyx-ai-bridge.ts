@@ -359,8 +359,8 @@ export class TelnyxAiBridge extends EventEmitter {
         .trim();
 
       const preflight = await preflightVoiceVariableContract({
-        agentName: context.agentFullName || settings.persona?.name || "",
-        orgName: settings.persona?.companyName || "",
+        agentName: context.agentFullName || (settings.persona as any)?.agentName || settings.persona?.name || "",
+        orgName: context.organizationName || settings.persona?.companyName || "",
         account: { name: context.companyName },
         contact: {
           fullName: contactFullName,
@@ -500,7 +500,7 @@ export class TelnyxAiBridge extends EventEmitter {
         // system_prompt is built by Gemini Live Dialer from agent_settings
         first_message: settings.scripts?.opening || '',
         voice: settings.persona?.voice || 'Puck', // Default to Gemini 2.5 compatible voice
-        agent_name: settings.persona?.name || '',
+        agent_name: (settings.persona as any)?.agentName || settings.persona?.name || '',
         agent_settings: settings,
         // CRITICAL: Field names must match what gemini-live-dialer.ts expects
         // gemini-live-dialer looks for: contact_name, contact_first_name, contact_job_title, account_name, organization_name
@@ -529,6 +529,45 @@ export class TelnyxAiBridge extends EventEmitter {
         'account.name': context.companyName || '',
       };
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+
+      // CRITICAL: Store session data in Redis - same as test calls
+      // This ensures queue calls have identical session data available in voice-dialer
+      try {
+        const { callSessionStore } = await import('./call-session-store');
+        await callSessionStore.setSession(callId, {
+          call_id: callId,
+          run_id: metadata.runId || customParams.run_id,
+          campaign_id: metadata.campaignId,
+          queue_item_id: metadata.queueItemId,
+          call_attempt_id: fallbackCallAttemptId,
+          contact_id: metadata.contactId,
+          called_number: phoneNumber,
+          from_number: fromNumber,
+          caller_number_id: (context as any).callerNumberId || null,
+          caller_number_decision_id: (context as any).callerNumberDecisionId || null,
+          virtual_agent_id: metadata.virtualAgentId,
+          is_test_call: false,
+          first_message: settings.scripts?.opening || '',
+          voice: settings.persona?.voice || 'Puck',
+          agent_name: (settings.persona as any)?.agentName || settings.persona?.name || '',
+          organization_name: context.organizationName || settings.persona?.companyName || '',
+          provider: 'google',
+          // Campaign context for unified behavior
+          campaign_objective: (context as any).campaignObjective || '',
+          success_criteria: (context as any).successCriteria || '',
+          target_audience_description: (context as any).targetAudienceDescription || '',
+          product_service_info: (context as any).productServiceInfo || '',
+          talking_points: (context as any).talkingPoints || [],
+          // Contact context
+          contact_name: contactFullName,
+          contact_first_name: context.contactFirstName || '',
+          contact_job_title: context.contactTitle || '',
+          account_name: context.companyName || '',
+        });
+        console.log(`[TelnyxAiBridge] ✅ Stored session ${callId} in Redis (unified with test calls)`);
+      } catch (storeErr) {
+        console.warn(`[TelnyxAiBridge] Failed to store session in Redis:`, storeErr);
+      }
 
       let response: Response | undefined;
       const useTexml = !!texmlAppId;
@@ -1147,11 +1186,11 @@ export class TelnyxAiBridge extends EventEmitter {
           numberId: call.callerNumberId,
           callSessionId: call.callSessionId,
           dialerAttemptId: call.callAttemptId,
-          answered: call.isAnswered,
+          answered: call.isAnswered ?? false,
           durationSec,
           disposition: canonicalDisposition,
           failed: false,
-          prospectNumber: call.dialedNumber,
+          prospectNumber: call.dialedNumber || '',
           campaignId: call.campaignId,
         });
         console.log(`[TelnyxAiBridge] 📊 Number pool stats updated for ${call.callerNumberId}`);
@@ -1353,7 +1392,7 @@ export class TelnyxAiBridge extends EventEmitter {
 
   // Map internal disposition to canonical disposition enum values
   // Canonical values: 'qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data'
-  private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' {
+  private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' | 'needs_review' {
     const d = disposition.toLowerCase();
 
     // Qualified outcomes - create lead

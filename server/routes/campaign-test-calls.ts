@@ -17,7 +17,16 @@ import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { env } from "../env";
 import { getOrganizationById } from "../services/problem-intelligence/organization-service";
-import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
+// number-pool-integration only needed for production calls; test calls bypass it
+import { releaseNumberWithoutOutcome } from "../services/number-pool-integration";
+// CRITICAL: Use unified call context builder to ensure test and queue calls are identical
+import {
+  buildUnifiedCallContext,
+  contextToClientStateParams,
+  storeCallSession,
+  resolveAgentAssignment,
+  type UnifiedCallContext,
+} from "../services/unified-call-context";
 
 
 const router = Router();
@@ -264,34 +273,19 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       }
     }
 
-    // Use number pool for phone number rotation (same as production calls)
-    // This ensures test calls also use the proper caller ID rotation strategy
-    let fromNumber: string;
+    // TEST CALLS: Skip number pool enforcement entirely for immediate execution.
+    // No pool DB lookups, no jitter delays, no rotation strategy needed.
+    // Use TELNYX_FROM_NUMBER directly so test calls fire instantly.
+    let fromNumber: string = env.TELNYX_FROM_NUMBER || '';
     let callerNumberId: string | undefined;
     let callerNumberDecisionId: string | undefined;
-    try {
-      const callerIdResult = await getCallerIdForCall({
-        campaignId,
-        prospectNumber: normalizedPhone,
-        virtualAgentId: assignment.virtualAgentId || undefined,
-        callType: 'campaign_test_call',
+
+    if (!fromNumber) {
+      return res.status(500).json({
+        message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file."
       });
-      fromNumber = callerIdResult.callerId;
-      callerNumberId = callerIdResult.numberId;
-      callerNumberDecisionId = callerIdResult.decisionId || undefined;
-      if (callerIdResult.jitterDelayMs > 0) {
-        await numberPoolSleep(callerIdResult.jitterDelayMs);
-      }
-      console.log(`[Campaign Test Call] Using number pool: ${fromNumber} (number ID: ${callerNumberId || 'N/A'})`);
-    } catch (poolError) {
-      console.warn(`[Campaign Test Call] Number pool failed, using fallback:`, poolError);
-      fromNumber = env.TELNYX_FROM_NUMBER || '';
-      if (!fromNumber) {
-        return res.status(500).json({
-          message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file or configure a number pool."
-        });
-      }
     }
+    console.log(`[Campaign Test Call] ⚡ Using direct number (no pool): ${fromNumber}`);
 
     // Create test call record in database
     const testCallId = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -430,6 +424,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     };
 
     // Store full session data in Redis for retrieval by WebSocket handler
+    // CRITICAL: Must include ALL fields that queue calls include for unified behavior
     const { callSessionStore } = await import("../services/call-session-store");
     await callSessionStore.setSession(testCallId, {
       call_id: testCallId,
@@ -448,9 +443,22 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       first_message: assignment.firstMessage || undefined,
       voice,
       agent_name: assignment.agentName || undefined,
+      // CRITICAL: Include organization_name for unified template interpolation
+      organization_name: customParams.organization_name,
       test_contact: customParams.test_contact,
       provider: providerForSession,
       system_prompt: systemPrompt, // Store full prompt in Redis
+      // Campaign context for unified behavior (same as queue calls)
+      campaign_objective: customParams.campaign_objective,
+      success_criteria: customParams.success_criteria,
+      target_audience_description: customParams.target_audience_description,
+      product_service_info: customParams.product_service_info,
+      talking_points: customParams.talking_points,
+      // Contact context for unified interpolation
+      contact_name: customParams.contact_name,
+      contact_first_name: customParams.contact_first_name,
+      contact_job_title: customParams.contact_job_title,
+      account_name: customParams.account_name,
     });
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');

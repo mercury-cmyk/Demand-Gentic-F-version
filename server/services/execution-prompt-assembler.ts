@@ -26,9 +26,8 @@ import type {
   AssembledPromptComponents,
   CampaignExecutionPrompt,
   ResolvedTemplates,
+  EmailSequenceFlow,
 } from '@shared/multi-channel-types';
-import type { CallFlowConfig } from '../../client/src/lib/campaign-types';
-import type { EmailSequenceFlow } from '@shared/multi-channel-types';
 import {
   resolveAndSubstituteTemplates,
   buildVariablesFromContext,
@@ -162,10 +161,8 @@ async function buildPromptComponents(
     complianceRules,
   };
 
-  // Add channel-specific flow
-  if (channelType === 'voice') {
-    components.callFlow = flow as CallFlowConfig;
-  } else {
+  // Add email sequence flow if email channel
+  if (channelType === 'email') {
     components.emailSequence = flow as EmailSequenceFlow;
   }
 
@@ -311,11 +308,6 @@ function buildComplianceRules(campaign: any, channelType: ChannelType): string {
 - No Deception: Subject line must accurately reflect content`);
   }
 
-  // Add campaign-specific compliance notes if present
-  if (campaign.callFlow?.complianceNotes) {
-    parts.push(`\nCAMPAIGN-SPECIFIC COMPLIANCE:\n${campaign.callFlow.complianceNotes}`);
-  }
-
   return parts.join('\n');
 }
 
@@ -364,24 +356,6 @@ function assembleFinalPrompt(
     }
   }
   sections.push('');
-
-  // Call Flow (Voice only)
-  if (channelType === 'voice' && components.callFlow) {
-    sections.push(`--- CALL FLOW ---`);
-    sections.push(`Strict Order: ${components.callFlow.strictOrder ? 'Yes' : 'No'}`);
-    sections.push(`Steps:`);
-    for (const step of components.callFlow.steps) {
-      sections.push(`\n[${step.id}] ${step.name}${step.required ? ' (Required)' : ''}`);
-      sections.push(`Description: ${step.description}`);
-      if (step.allowedUtterances && step.allowedUtterances.length > 0) {
-        sections.push(`Example phrases:\n${step.allowedUtterances.slice(0, 3).map(u => `  - "${u}"`).join('\n')}`);
-      }
-      if (step.nextSteps && step.nextSteps.length > 0) {
-        sections.push(`Next steps: ${step.nextSteps.map(n => `${n.condition} → ${n.stepId}`).join(', ')}`);
-      }
-    }
-    sections.push('');
-  }
 
   // Email Sequence (Email only)
   if (channelType === 'email' && components.emailSequence) {
@@ -438,7 +412,7 @@ async function getCachedPrompt(
     components: {
       baseContext: record.basePrompt,
       channelInstructions: record.channelAdditions || '',
-      resolvedTemplates: (record.templateInsertions as ResolvedTemplates) || { resolutionLog: [] },
+      resolvedTemplates: (record.templateInsertions as unknown as ResolvedTemplates) || { resolutionLog: [] },
       complianceRules: record.complianceAdditions || '',
     },
     promptHash: record.promptHash,
@@ -474,7 +448,7 @@ async function getExistingPromptRecord(
     )
     .limit(1);
 
-  return record as CampaignExecutionPrompt | null;
+  return (record as unknown) as CampaignExecutionPrompt | null;
 }
 
 /**

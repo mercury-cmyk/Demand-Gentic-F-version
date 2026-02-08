@@ -42,6 +42,7 @@ import clientPortalSimulationRouter from './client-portal-simulation';
 import clientPortalSettingsRouter from './client-portal-settings';
 import clientPortalCrmRouter from './client-portal-crm';
 import clientPortalCampaignsRouter from './client-portal-campaigns';
+import clientPortalBookingsRouter from './client-portal-bookings';
 
 const router = Router();
 
@@ -180,6 +181,7 @@ router.use('/agentic', requireClientAuth, clientPortalAgenticRouter);
 router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
 router.use('/settings', requireClientAuth, clientPortalSettingsRouter);
 router.use('/crm', requireClientAuth, clientPortalCrmRouter);
+router.use('/bookings', requireClientAuth, clientPortalBookingsRouter);
 
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);

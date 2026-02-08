@@ -384,7 +384,7 @@ export async function createNumber(
       displayName: input.displayName,
       region: input.region,
       areaCode,
-      maxCallsPerHour: input.maxCallsPerHour ?? 20,
+      maxCallsPerHour: input.maxCallsPerHour ?? 50,
       maxCallsPerDay: input.maxCallsPerDay ?? 100,
       tags: input.tags,
       status: 'active',

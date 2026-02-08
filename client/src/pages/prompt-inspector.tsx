@@ -42,11 +42,9 @@ import {
   Check,
   Eye,
   Shield,
-  Workflow,
   RefreshCw,
   FileText,
   Hash,
-  Zap,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -96,18 +94,6 @@ interface UnifiedKnowledge {
   updatedAt: string;
 }
 
-interface CallFlow {
-  id: string;
-  name: string;
-  description?: string;
-  version: string;
-  steps: {
-    stepNumber: number;
-    name: string;
-    goal: string;
-  }[];
-}
-
 // Layer configuration
 const LAYER_INFO = {
   layer_1_universal: {
@@ -123,13 +109,6 @@ const LAYER_INFO = {
     description: "Org-level defaults, standards, and customizations",
     color: "bg-green-500/10 text-green-700 border-green-200",
     badgeColor: "bg-green-100 text-green-800",
-  },
-  "layer_3.5_call_flow": {
-    icon: Workflow,
-    label: "Layer 3.5: Call Flow",
-    description: "Deterministic conversation orchestration (8-step flow)",
-    color: "bg-orange-500/10 text-orange-700 border-orange-200",
-    badgeColor: "bg-orange-100 text-orange-800",
   },
   layer_3_campaign: {
     icon: Target,
@@ -183,31 +162,6 @@ export default function PromptInspectorPage() {
   }>({
     queryKey: [`/api/knowledge-blocks/campaigns/${selectedCampaignId}/preview-prompt?provider=openai`],
     enabled: !!selectedCampaignId,
-  });
-
-  // Fetch call flow defaults
-  const { data: callFlowData } = useQuery<{ callFlow: CallFlow }>({
-    queryKey: ["/api/call-flow/default"],
-    queryFn: async () => {
-      // If no specific API exists, we'll just show placeholder
-      return {
-        callFlow: {
-          id: "default-b2b-appointment",
-          name: "B2B Appointment Setting",
-          version: "1.0",
-          steps: [
-            { stepNumber: 1, name: "Permission & Presence", goal: "Get permission, confirm right person" },
-            { stepNumber: 2, name: "Role Confirmation", goal: "Verify role matches target" },
-            { stepNumber: 3, name: "Curiosity Trigger", goal: "Create interest with insight" },
-            { stepNumber: 4, name: "Discovery Lite", goal: "Understand current situation" },
-            { stepNumber: 5, name: "Insight Drop", goal: "Share valuable insight" },
-            { stepNumber: 6, name: "Soft Meeting Ask", goal: "Propose low-commitment meeting" },
-            { stepNumber: 7, name: "Calendar Lock", goal: "Get date/time commitment" },
-            { stepNumber: 8, name: "Exit with Goodwill", goal: "Confirm and end professionally" },
-          ],
-        },
-      };
-    },
   });
 
   const campaigns = campaignsData?.campaigns || [];
@@ -336,10 +290,6 @@ export default function PromptInspectorPage() {
             <FileText className="h-4 w-4" />
             Full Assembled Prompt
           </TabsTrigger>
-          <TabsTrigger value="call-flow" className="flex items-center gap-2">
-            <Workflow className="h-4 w-4" />
-            Call Flow (Layer 3.5)
-          </TabsTrigger>
         </TabsList>
 
         {/* By Layer View */}
@@ -356,64 +306,6 @@ export default function PromptInspectorPage() {
               const layerBlocks = blocksByLayer[layerKey] || [];
               const isExpanded = expandedLayers.has(layerKey);
               const totalTokens = layerBlocks.reduce((sum, b) => sum + (b.tokenEstimate || 0), 0);
-
-              // For Layer 3.5, show call flow info
-              if (layerKey === "layer_3.5_call_flow") {
-                return (
-                  <Card key={layerKey} className={`border-2 ${layerInfo.color.split(" ")[0]}`}>
-                    <Collapsible open={isExpanded} onOpenChange={() => toggleLayer(layerKey)}>
-                      <CollapsibleTrigger asChild>
-                        <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              {isExpanded ? (
-                                <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                              )}
-                              <Icon className="h-5 w-5" />
-                              <div>
-                                <CardTitle className="text-base">{layerInfo.label}</CardTitle>
-                                <CardDescription className="text-sm">
-                                  {layerInfo.description}
-                                </CardDescription>
-                              </div>
-                            </div>
-                            <Badge className={layerInfo.badgeColor}>
-                              8 Steps
-                            </Badge>
-                          </div>
-                        </CardHeader>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <CardContent className="pt-0">
-                          <div className="space-y-2">
-                            {callFlowData?.callFlow?.steps.map((step) => (
-                              <div
-                                key={step.stepNumber}
-                                className="flex items-center justify-between p-3 rounded-lg bg-muted/30"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Badge variant="outline" className="w-8 h-8 rounded-full flex items-center justify-center">
-                                    {step.stepNumber}
-                                  </Badge>
-                                  <div>
-                                    <p className="font-medium text-sm">{step.name}</p>
-                                    <p className="text-xs text-muted-foreground">{step.goal}</p>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-4 italic">
-                            Call flow is injected at runtime. View details in the Call Flow tab.
-                          </p>
-                        </CardContent>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </Card>
-                );
-              }
 
               return (
                 <Card key={layerKey} className={`border-2 ${layerInfo.color.split(" ")[0]}`}>
@@ -570,73 +462,6 @@ export default function PromptInspectorPage() {
               </CardContent>
             </Card>
           )}
-        </TabsContent>
-
-        {/* Call Flow Details */}
-        <TabsContent value="call-flow">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Workflow className="h-5 w-5" />
-                Call Flow: {callFlowData?.callFlow?.name || "B2B Appointment Setting"}
-              </CardTitle>
-              <CardDescription>
-                Deterministic 8-step conversation orchestration. The agent MUST follow these steps in order.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {callFlowData?.callFlow?.steps.map((step, index) => (
-                  <div
-                    key={step.stepNumber}
-                    className="relative flex items-start gap-4 p-4 rounded-lg border bg-muted/30"
-                  >
-                    {/* Step connector line */}
-                    {index < (callFlowData?.callFlow?.steps.length || 0) - 1 && (
-                      <div className="absolute left-[26px] top-[60px] w-0.5 h-[calc(100%-40px)] bg-border" />
-                    )}
-                    
-                    {/* Step number */}
-                    <div className="relative z-10 flex-shrink-0 w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold">
-                      {step.stepNumber}
-                    </div>
-                    
-                    {/* Step details */}
-                    <div className="flex-1">
-                      <h4 className="font-semibold">{step.name}</h4>
-                      <p className="text-sm text-muted-foreground mt-1">{step.goal}</p>
-                      
-                      {/* Placeholder for step details - would come from actual call flow data */}
-                      <div className="mt-3 flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-xs">
-                          Max Turns: 2-3
-                        </Badge>
-                        <Badge variant="outline" className="text-xs text-green-600 border-green-200">
-                          Allowed: acknowledge, ask_question
-                        </Badge>
-                        <Badge variant="outline" className="text-xs text-red-600 border-red-200">
-                          Forbidden: propose_meeting
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              <div className="mt-6 p-4 rounded-lg bg-orange-50 border border-orange-200">
-                <div className="flex items-start gap-3">
-                  <Zap className="h-5 w-5 text-orange-600 mt-0.5" />
-                  <div>
-                    <h4 className="font-medium text-orange-900">Authority Model</h4>
-                    <p className="text-sm text-orange-800 mt-1">
-                      The Call Flow is <strong>authoritative</strong> — the agent cannot skip steps, use forbidden intents, 
-                      or proceed without meeting exit criteria. This ensures consistent, deterministic conversations.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
 

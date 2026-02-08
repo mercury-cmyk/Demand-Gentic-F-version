@@ -580,13 +580,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [USER_ROLES.ADMIN],
           },
           {
-            id: 'settings-call-flows',
-            title: 'Call Flows',
-            url: '/settings/call-flows',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Configure pre-set call flows for AI campaigns',
-          },
-          {
             id: 'settings-agent-defaults',
             title: 'Agent Defaults',
             url: '/settings/agent-defaults',

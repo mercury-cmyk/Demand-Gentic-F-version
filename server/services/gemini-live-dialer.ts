@@ -165,6 +165,7 @@ interface CallContext {
   organizationName?: string;
   campaignName?: string;
   campaignPurpose?: string;
+  campaignType?: string;
   // Custom opening message from campaign settings
   firstMessage?: string;
   // Campaign context for AI agent behavior
@@ -173,8 +174,6 @@ interface CallContext {
   targetAudienceDescription?: string;
   productServiceInfo?: string;
   talkingPoints?: string[];
-  // Call flow configuration - defines the state machine for call execution
-  callFlow?: CallFlowConfig;
   // Max call duration in seconds - auto-hangup after this time
   maxCallDurationSeconds?: number;
   // IDs for disposition processing and call tracking
@@ -189,28 +188,6 @@ interface CallContext {
   isTestCall?: boolean;
   // Number pool tracking
   callerNumberId?: string | null;
-}
-
-// Call Flow Types (matching client-side definitions)
-interface CallFlowStep {
-  id: string;
-  name: string;
-  description: string;
-  entryConditions: string[];
-  allowedUtterances: string[];
-  exitConditions: string[];
-  objectionHandling: { objection: string; response: string }[];
-  nextSteps: { condition: string; stepId: string }[];
-  required: boolean;
-  maxDuration?: number;
-}
-
-interface CallFlowConfig {
-  version: '1.0';
-  steps: CallFlowStep[];
-  defaultBehavior: 'continue_to_next' | 'end_call' | 'transfer';
-  strictOrder: boolean;
-  complianceNotes?: string;
 }
 
 /**
@@ -346,188 +323,6 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
 }
 
 /**
- * Build call flow instructions from CallFlowConfig for the AI agent
- * This creates a strict state machine instruction that the agent must follow
- */
-function buildCallFlowInstructions(callFlow: CallFlowConfig, context: CallContext): string {
-  if (!callFlow || !callFlow.steps || callFlow.steps.length === 0) {
-    return '';
-  }
-
-  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
-
-  const contactName = context.contactName || context.contactFirstName || 'there';
-
-  let instructions = `
-## CALL FLOW GUIDANCE (SUPPLEMENTARY - DOES NOT OVERRIDE CORE RULES)
-
-**⚠️ IMPORTANT HIERARCHY - What the call flow IS and IS NOT:**
-
-**The call flow below is GUIDANCE for conversation structure. It helps you navigate the call stages.**
-
-**The call flow DOES NOT override:**
-1. ✅ Your IDENTITY rules (who you are, how you introduce yourself)
-2. ✅ Your KNOWLEDGE (product info, talking points, campaign context, company background)
-3. ✅ MANDATORY identity verification before any pitch
-4. ✅ MANDATORY introduction after identity is confirmed
-5. ✅ Objection handling from campaign context
-6. ✅ Gatekeeper vs. right party detection rules
-7. ✅ Compliance rules and professional conduct
-8. ✅ Your natural conversational ability - use your knowledge to have intelligent discussions
-
-**HOW TO USE THE CALL FLOW:**
-- The steps below provide a STRUCTURE for the conversation
-- Use your campaign knowledge and product info to ENRICH each step
-- The "allowed utterances" are EXAMPLES - adapt them using your actual knowledge
-- If the prospect asks questions, ANSWER them using your knowledge, then return to the flow
-- Never say "I don't have that information" if it's in your campaign context above
-
-${callFlow.complianceNotes ? `**Compliance Requirements:** ${callFlow.complianceNotes}\n` : ''}
-**Flow Mode:** ${callFlow.strictOrder ? 'STRICT ORDER - Follow steps sequentially' : 'FLEXIBLE - Steps can be reordered based on conversation'}
-**Default Behavior:** ${callFlow.defaultBehavior === 'continue_to_next' ? 'Continue to next step' : callFlow.defaultBehavior === 'end_call' ? 'End call' : 'Transfer call'}
-
-### CALL FLOW STEPS (USE AS GUIDANCE, ENRICH WITH YOUR KNOWLEDGE):
-
-## ⚠️ MANDATORY PRE-STEP: IDENTITY VERIFICATION (CANNOT BE SKIPPED)
-
-**BEFORE ANY OTHER STEP, you MUST verify you are speaking with the right person.**
-
-This is NON-NEGOTIABLE and applies to ALL call flows. You MUST:
-
-1. **Ask for the contact by name:** "Hello, may I please speak with ${contactName}?"
-2. **WAIT for their response** - they may say "speaking", "yes", "that's me", or transfer you
-3. **ONLY AFTER they confirm identity** proceed to introduce yourself
-
-**Identity Confirmation Signals:**
-- "Yes" / "Yeah" / "That's me" / "Speaking" / "This is [name]" / "Go ahead"
-
-**Gatekeeper Signals (NOT the right person):**
-- "Who's calling?" / "What's this about?" / "May I ask what company?"
-- "Let me transfer you" / "Hold please" / "They're not available"
-
-**IF GATEKEEPER:** Be brief, professional, ask to be transferred or when to call back. Do NOT pitch to gatekeepers.
-
-**IF RIGHT PARTY CONFIRMED:** ONLY THEN proceed to Step 1 below.
-
----
-
-## MANDATORY INTRO & PURPOSE GATE (REQUIRED - AFTER IDENTITY CONFIRMED)
-Before you proceed beyond the opening and into any discovery or value steps, you MUST complete:
-1) A brief introduction (who you are and your organization): "I'm calling from ${orgRef}."
-2) A clear purpose statement (why you're calling, in one concise sentence)
-
-You may NOT ask discovery questions, pitch, or advance steps until both are completed.
-
-`;
-
-  for (let i = 0; i < callFlow.steps.length; i++) {
-    const step = callFlow.steps[i];
-    const stepNum = i + 1;
-
-    // Substitute placeholders in utterances
-    const substitutedUtterances = step.allowedUtterances.map(u => {
-      return u
-        .replace(/\[Contact Name\]/g, context.contactName || context.contactFirstName || 'there')
-        .replace(/\[Job Title\]/g, context.contactJobTitle || 'your role')
-        .replace(/\[Company\]/g, context.accountName || 'your company')
-        .replace(/\[Organization\]/g, orgRef)
-        .replace(/\[email\]/g, '[their email address]')
-        .replace(/\[asset type\]/g, 'resource')
-        .replace(/\[asset\]/g, 'resource')
-        .replace(/\[value proposition\]/g, context.productServiceInfo?.substring(0, 100) || 'something relevant to your role')
-        .replace(/\[brief context\]/g, context.productServiceInfo?.substring(0, 50) || 'a relevant opportunity')
-        .replace(/\[key topics\]/g, context.talkingPoints?.[0] || 'important industry insights')
-        .replace(/\[relevance\]/g, 'it directly addresses challenges in your area')
-        .replace(/\[specific challenge\]/g, 'key challenges')
-        .replace(/\[role\/industry\]/g, context.contactJobTitle || 'industry')
-        .replace(/\[topic\]/g, 'this area')
-        .replace(/\[Job Titles\]/g, context.contactJobTitle ? `${context.contactJobTitle}s` : 'professionals')
-        .replace(/\[URL\]/g, 'our website');
-    });
-
-    // Substitute placeholders in objection handling
-    const substitutedObjections = step.objectionHandling.map(oh => ({
-      objection: oh.objection,
-      response: oh.response
-        .replace(/\[Contact Name\]/g, context.contactName || context.contactFirstName || 'there')
-        .replace(/\[Job Title\]/g, context.contactJobTitle || 'your role')
-        .replace(/\[Company\]/g, context.accountName || 'your company')
-        .replace(/\[Organization\]/g, orgRef)
-        .replace(/\[value proposition\]/g, context.productServiceInfo?.substring(0, 100) || 'something relevant')
-        .replace(/\[complementary benefit or insight\]/g, 'providing additional insights and benchmarks')
-        .replace(/\[Job Titles\]/g, context.contactJobTitle ? `${context.contactJobTitle}s` : 'professionals')
-        .replace(/\[topic\]/g, 'this area'),
-    }));
-
-    instructions += `
----
-**STEP ${stepNum}: ${step.name}** ${step.required ? '(REQUIRED)' : '(OPTIONAL)'}
-*${step.description}*
-
-**When to enter this step:**
-${step.entryConditions.map(c => `- ${c}`).join('\n')}
-
-**What to say (use these phrases naturally):**
-${substitutedUtterances.map(u => `- "${u}"`).join('\n')}
-
-**When this step is complete:**
-${step.exitConditions.map(c => `- ${c}`).join('\n')}
-
-${substitutedObjections.length > 0 ? `**How to handle objections in this step:**
-${substitutedObjections.map(o => `- If they say: "${o.objection}"
-  → Respond: "${o.response}"`).join('\n')}
-` : ''}
-${step.nextSteps.length > 0 ? `**Next step based on outcome:**
-${step.nextSteps.map(n => `- ${n.condition} → Go to: ${n.stepId.replace(/_/g, ' ').toUpperCase()}`).join('\n')}
-` : (i === callFlow.steps.length - 1 ? '**This is the FINAL step - end the call gracefully after completing this step.**' : '**After completing this step, continue the natural conversation.**')}
-`;
-  }
-
-  instructions += `
----
-
-## HOW TO EXECUTE THE CALL
-
-**⚠️ CRITICAL ORDER: Identity Verification → Introduction → Flow Steps**
-
-**Step 0: VERIFY IDENTITY (MANDATORY - NEVER SKIP)**
-- Ask "May I speak with [Name]?" and WAIT for their response
-- Distinguish gatekeeper from right party (see rules above)
-
-**Step 1: INTRODUCE YOURSELF (MANDATORY - AFTER IDENTITY CONFIRMED)**
-- Say who you are and your organization
-- Use your campaign context to explain why you're calling
-
-**Step 2+: FOLLOW THE FLOW STEPS BELOW**
-- Use the steps as STRUCTURE, but enrich with your knowledge
-- The example phrases are starting points - personalize using campaign context
-
-## CRITICAL REMINDERS
-
-**USE YOUR KNOWLEDGE:**
-- You have detailed product/service information - USE IT when explaining value
-- You have talking points - WEAVE them naturally into the conversation
-- You have campaign objectives - let them GUIDE your discovery questions
-- You have objection handling - USE those responses when objections arise
-
-**DON'T BE ROBOTIC:**
-- The flow steps are a GUIDE, not a rigid script
-- Answer prospect questions intelligently using your knowledge
-- Have a natural conversation while hitting the key points
-- If prospect engages deeply on a topic, explore it using your knowledge
-
-**NEVER SAY:**
-- "I don't have information about that" (if it's in your context)
-- "Let me stick to the script"
-- "That's not in my call flow"
-- Generic responses when you have specific knowledge
-
-`;
-
-  return instructions;
-}
-
-/**
  * Build DemandGentic.ai By Pivotal B2B identity preamble for the system prompt
  */
 function buildDemandGenticIdentityPreamble(context: CallContext): string {
@@ -538,9 +333,6 @@ function buildDemandGenticIdentityPreamble(context: CallContext): string {
   if (context.talkingPoints && Array.isArray(context.talkingPoints) && context.talkingPoints.length > 0) {
     talkingPointsStr = context.talkingPoints.map((p, i) => `${i + 1}. ${p}`).join('\n');
   }
-
-  // Build call flow instructions if available
-  const callFlowInstructions = context.callFlow ? buildCallFlowInstructions(context.callFlow, context) : '';
 
   // Build a prospect-appropriate reason for calling (NOT the internal campaign objective)
   // Use product/service info or talking points to craft an appropriate message
@@ -641,20 +433,28 @@ When explaining what you do, say something like:
 These are the main points to cover during the call:
 ${talkingPointsStr}
 
-` : ''}## CRITICAL: IDENTITY CONFIRMATION RESPONSE (MUST FOLLOW WITHOUT PAUSE)
+` : ''}## CRITICAL: YOUR FIRST RESPONSE (ABSOLUTE RULE)
 
-When the contact confirms their identity with ANY of these phrases:
-- "Yes", "Yeah", "That's me", "Speaking", "This is [name]", "I'm [name]", "Yes I am", "I am", "Go ahead"
+When you hear ANY human voice — including "Hello?", "Hi", "Yeah?", "Good morning" — your FIRST and ONLY response MUST be to ask for the contact by name:
+- "Hi, am I speaking with [Contact Name]?"
+- Or: "Hello, may I speak with [Contact Name]?"
 
-You MUST IMMEDIATELY respond WITHOUT ANY PAUSE. Never wait silently. The very next words out of your mouth should be:
+**"Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.**
 
-1. First: Thank them - "Great, thanks for confirming!"
+## IDENTITY CONFIRMATION RESPONSE (AFTER THEY CONFIRM)
+
+Identity is confirmed ONLY when they explicitly say:
+- "Yes", "Yeah", "That's me", "Speaking", "This is [name]", "I'm [name]", "Yes I am", "Go ahead"
+
+After receiving explicit confirmation, respond promptly:
+
+1. First: Acknowledge - "Thanks for confirming!"
 2. Then: Introduce yourself - "I'm calling from ${orgRef}."
 3. Then: Set expectations - "I'll keep this brief."
 4. Then: State why you're calling (VALUE TO THEM, not your internal goal): "${reasonForCalling}"
 5. Then: Ask an open-ended question to start the conversation.
 
-**NEVER GO SILENT after identity confirmation.** If you're not sure what to say, default to:
+If you're not sure what to say after confirmation, default to:
 "Thanks for confirming! I'm calling from ${orgRef}. ${reasonForCalling}. Would you have a quick moment to chat?"
 
 **COMPLIANCE GATE:** You MUST complete BOTH the introduction and the purpose statement BEFORE asking any discovery questions or proceeding to subsequent steps.
@@ -710,7 +510,7 @@ Everything you've learned above (identity rules, product info, talking points, c
 
 ---
 
-${callFlowInstructions ? callFlowInstructions : `## CALL FLOW (HOW THE CONVERSATION SHOULD PROGRESS)
+## CALL FLOW (HOW THE CONVERSATION SHOULD PROGRESS)
 
 1. **Opening**: Confirm you're speaking with the right person
 2. **Introduction**: Brief intro of who you are and why you're calling (VALUE TO THEM)
@@ -722,7 +522,7 @@ ${callFlowInstructions ? callFlowInstructions : `## CALL FLOW (HOW THE CONVERSAT
 ${talkingPointsStr ? `
 **Use your talking points naturally throughout the conversation:**
 ${talkingPointsStr}
-` : ''}`}
+` : ''}
 
 ## RECORDING CALL OUTCOME (CRITICAL)
 
@@ -1237,8 +1037,6 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 targetAudienceDescription: config.target_audience_description || config.targetAudienceDescription,
                 productServiceInfo: config.product_service_info || config.productServiceInfo,
                 talkingPoints: config.talking_points || config.talkingPoints,
-                // Call flow configuration - state machine for call execution
-                callFlow: config.call_flow || config.callFlow,
                 // Max call duration in seconds - auto-hangup after this time
                 maxCallDurationSeconds: config.max_call_duration_seconds || config.maxCallDurationSeconds,
                 // IDs for disposition processing and call tracking
@@ -1259,10 +1057,7 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 console.log(`[Gemini Live] 🎙️ Audio format refined from client_state: ${g711Format}`);
               }
 
-              console.log(`[Gemini Live] 📋 Extracted call context:`, JSON.stringify({
-                ...callContext,
-                callFlow: callContext.callFlow ? `[${callContext.callFlow.steps?.length || 0} steps]` : 'not set'
-              }, null, 2));
+              console.log(`[Gemini Live] 📋 Extracted call context:`, JSON.stringify(callContext, null, 2));
 
               // Log IDs for disposition tracking
               if (callContext.queueItemId || callContext.callAttemptId) {
@@ -1275,14 +1070,11 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                   const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, config.campaign_id)).limit(1);
                   if (campaign) {
                     callContext.campaignName = campaign.name;
+                    // Load campaign type for default call flow resolution
+                    callContext.campaignType = (campaign as any).type || undefined;
                     // Get organization name from campaign if available
                     if ((campaign as any).organizationName) {
                       callContext.organizationName = (campaign as any).organizationName;
-                    }
-                    // Get call flow from campaign if not provided in client_state
-                    if (!callContext.callFlow && (campaign as any).callFlow) {
-                      callContext.callFlow = (campaign as any).callFlow as CallFlowConfig;
-                      console.log(`[Gemini Live] 📋 Loaded call flow from campaign: ${callContext.callFlow.steps?.length || 0} steps`);
                     }
                     // Load campaign context fields if not provided (removed from client_state to avoid HTTP 431)
                     if (!callContext.campaignObjective && (campaign as any).campaignObjective) {

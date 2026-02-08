@@ -153,6 +153,7 @@ function analyzeTranscriptForQualification(
   negativeSignals: string[];
   isVoicemail: boolean;
   isIVR: boolean;
+  isGatekeeper: boolean;
   hasRealConversation: boolean;
   userText: string;
   fullText: string;
@@ -172,6 +173,7 @@ function analyzeTranscriptForQualification(
         negativeSignals: context.negativeKeywords.filter(k => fullText.includes(k.toLowerCase())),
         isVoicemail: fullText.includes('voicemail') || fullText.includes('leave a message'),
         isIVR: fullText.includes('press 1') || fullText.includes('press 2'),
+        isGatekeeper: false,
         hasRealConversation: false,
         userText: '',
         fullText,
@@ -187,6 +189,7 @@ function analyzeTranscriptForQualification(
       negativeSignals: [],
       isVoicemail: false,
       isIVR: false,
+      isGatekeeper: false,
       hasRealConversation: false,
       userText: '',
       fullText: '',
@@ -216,10 +219,38 @@ function analyzeTranscriptForQualification(
     'main menu',
     'for sales press',
     'for support press',
+    'please stay on the line',
+    'please hold',
+    'transferring your call',
+    'your call is being transferred',
+    'one moment please',
+    'putting you through',
+    'all our operators',
+    'all agents are busy',
+    'extension number',
+    'dial by name',
+  ];
+
+  // Gatekeeper phrases that should NOT count as user engagement
+  const gatekeeperPatterns = [
+    'who is calling',
+    'who\'s calling',
+    'what is this regarding',
+    'what\'s this regarding',
+    'what company are you from',
+    'they\'re not available',
+    'they\'re in a meeting',
+    'can i take a message',
+    'i\'ll pass on the message',
+    'send an email',
+    'try again later',
+    'not in the office',
+    'not at their desk',
   ];
 
   const isVoicemail = voicemailPatterns.some(p => fullText.includes(p));
   const isIVR = ivrPatterns.some(p => fullText.includes(p));
+  const isGatekeeper = gatekeeperPatterns.some(p => fullText.includes(p));
 
   // Find positive signals
   const positiveSignals: string[] = [];
@@ -244,7 +275,7 @@ function analyzeTranscriptForQualification(
   });
 
   // Determine if there's a real conversation
-  const hasRealConversation = meaningfulUserTurns.length >= 2 && !isVoicemail && !isIVR;
+  const hasRealConversation = meaningfulUserTurns.length >= 2 && !isVoicemail && !isIVR && !isGatekeeper;
 
   return {
     hasUserResponse: userMessages.length > 0,
@@ -253,6 +284,7 @@ function analyzeTranscriptForQualification(
     negativeSignals,
     isVoicemail,
     isIVR,
+    isGatekeeper,
     hasRealConversation,
     userText,
     fullText,
@@ -284,6 +316,10 @@ export function determineSmartDisposition(
     missedIndicators: [],
   };
 
+  // HARD GATE: Very short calls (<60s) with minimal user turns (<3) can NEVER be qualified
+  // This prevents IVR greetings, gatekeepers saying "please hold", etc. from being misclassified
+  const isMinimalCall = callDurationSeconds < 60 && analysis.userTurns < 3;
+
   // 1. Voicemail detection takes priority
   if (analysis.isVoicemail) {
     result.suggestedDisposition = 'voicemail';
@@ -297,24 +333,42 @@ export function determineSmartDisposition(
     return result;
   }
 
+  // CRITICAL RULE: If the AI already set a disposition via submit_disposition,
+  // the smart analyzer should NOT upgrade it to qualified_lead.
+  // The AI's in-call safeguards (booking flow check, agent turns, etc.) are more reliable
+  // than keyword matching. Only DOWNGRADE is allowed (e.g., voicemail override above).
+  // We CAN suggest needs_review for human verification.
+
   // 2. Check for MIXED signals (both positive and negative)
-  // This handles complex cases like "I'm interested but busy" or "Send info but stop calling"
   if (analysis.positiveSignals.length > 0 && analysis.negativeSignals.length > 0) {
     result.suggestedDisposition = 'needs_review';
     result.confidence = 0.6;
     result.reasoning = `Mixed signals detected: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - needs human review`;
-    result.shouldOverride = currentDisposition !== 'needs_review';
+    result.shouldOverride = currentDisposition !== 'needs_review' && currentDisposition !== 'qualified_lead';
     return result;
   }
 
-  // 3. Check for positive signals - potential qualified lead
-  // MOVED UP: Positive signals should take precedence over simple negative keywords if no conflict
+  // 3. Positive signals detected
+  // CHANGED: Never auto-upgrade to qualified_lead. Route to needs_review instead.
+  // Only the AI agent's submit_disposition tool (with its booking flow validation)
+  // should produce a qualified_lead disposition.
   if (analysis.positiveSignals.length > 0 && analysis.hasUserResponse) {
-    result.suggestedDisposition = 'qualified_lead';
+    // If the call is too short/minimal, it's definitely not qualified (likely IVR/gatekeeper)
+    if (isMinimalCall) {
+      result.suggestedDisposition = 'no_answer';
+      result.confidence = 0.7;
+      result.reasoning = `Positive keywords detected but call too short (${callDurationSeconds}s, ${analysis.userTurns} turns) - likely IVR/gatekeeper, not real engagement`;
+      result.shouldOverride = false; // Don't override existing disposition
+      return result;
+    }
+
+    result.suggestedDisposition = 'needs_review';
     result.confidence = 0.75 + (analysis.positiveSignals.length * 0.05);
-    result.reasoning = `Positive signals detected: ${analysis.positiveSignals.join(', ')}`;
+    result.reasoning = `Positive signals detected: ${analysis.positiveSignals.join(', ')} - routed to QA for human verification`;
     result.metSuccessIndicators = analysis.positiveSignals;
-    result.shouldOverride = currentDisposition !== 'qualified_lead';
+    // Only suggest override if current disposition is no_answer/voicemail (under-classification)
+    // Never override an AI-set qualified_lead or not_interested
+    result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
     return result;
   }
 

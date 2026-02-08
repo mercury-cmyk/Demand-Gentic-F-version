@@ -6,9 +6,9 @@ async function switchToProd() {
   const apiKey = env.TELNYX_API_KEY;
   const prodUrl = 'https://demandgentic.ai';
 
-  // Production app IDs
-  const texmlAppIdProd = '2879011868305786305';  // DEmandGentic Production
-  const callControlAppIdProd = '2879013346110080480';  // DemandGentic Production API
+  // Production app IDs (actual Telnyx apps)
+  const texmlAppIdProd = '2870970047591876264';  // Dev Server AI calls
+  const callControlAppIdProd = '2853482451592807572';  // DemandGentic-ai
 
   if (!apiKey) {
     console.error('Missing TELNYX_API_KEY');
@@ -33,6 +33,7 @@ async function switchToProd() {
     },
     body: JSON.stringify({
       voice_url: texmlVoiceUrl,
+      status_callback: texmlStatusUrl,
       status_callback_url: texmlStatusUrl,
     }),
   });
@@ -47,7 +48,7 @@ async function switchToProd() {
 
   // 2. Update Call Control Application (Production)
   console.log('\n2. Updating Call Control Application (Production)...');
-  const callControlWebhookUrl = `${prodUrl}/api/webhooks/telnyx`;
+  const callControlWebhookUrl = `${prodUrl}/api/webhooks/telnyx`;  // https://demandgentic.ai/api/webhooks/telnyx
 
   console.log(`   Webhook URL: ${callControlWebhookUrl}`);
 
@@ -111,6 +112,29 @@ async function switchToProd() {
       console.log(`     Webhook URL: ${app.webhook_event_url}`);
     }
   }
+
+  // 5. Validate WebSocket and Webhook environment variables
+  console.log('\n5. Validating production environment variables...');
+  const expectedEnvVars = {
+    PUBLIC_WEBSOCKET_URL: 'wss://demandgentic.ai',
+    PUBLIC_WEBHOOK_HOST: 'demandgentic.ai',
+    TELNYX_WEBHOOK_URL: 'https://demandgentic.ai/api/webhooks/telnyx',
+  };
+
+  for (const [key, expectedValue] of Object.entries(expectedEnvVars)) {
+    const currentValue = process.env[key];
+    if (!currentValue) {
+      console.warn(`   ⚠️  ${key} is NOT SET — production calls may route WebSocket/webhook to wrong host`);
+    } else if (currentValue.includes('ngrok') || currentValue.includes('localhost')) {
+      console.error(`   ❌ ${key} = ${currentValue} — still pointing to dev! Should be: ${expectedValue}`);
+    } else {
+      console.log(`   ✅ ${key} = ${currentValue}`);
+    }
+  }
+
+  console.log('\n   ℹ️  If env vars above are wrong, update GCP Secret Manager:');
+  console.log('   gcloud secrets versions add PUBLIC_WEBSOCKET_URL --data-file=- <<< "wss://demandgentic.ai"');
+  console.log('   gcloud secrets versions add PUBLIC_WEBHOOK_HOST --data-file=- <<< "demandgentic.ai"');
 
   console.log('\n=== Done! All webhooks switched to PRODUCTION ===');
   process.exit(0);

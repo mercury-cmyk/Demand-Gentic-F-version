@@ -101,14 +101,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     category: 'infrastructure',
   },
   {
-    id: 'call-flows',
-    label: 'Call Flows',
-    href: ROUTES.SETTINGS_CALL_FLOWS,
-    icon: GitBranch,
-    description: 'Pre-set call flows for campaigns',
-    category: 'infrastructure',
-  },
-  {
     id: 'knowledge-hub',
     label: 'Knowledge Hub',
     href: ROUTES.SETTINGS_KNOWLEDGE_HUB,
