@@ -164,13 +164,18 @@ app.use((req, res, next) => {
 
   // Load secrets from database into process.env
   // Cloud Run/Env vars take priority; DB acts as dynamic override/fallback
-  try {
-    const { initializeSecrets } = await import("./services/secret-loader");
-    await initializeSecrets({ overwriteEnv: false });
-  } catch (err) {
-    console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
-    console.log('[STARTUP] Continuing with .env values as fallback...');
+  // DISABLED globally for now to prevent decryption errors (Session Key Mismatch between DB and Cloud Run)
+  /*
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const { initializeSecrets } = await import("./services/secret-loader");
+      await initializeSecrets({ overwriteEnv: false });
+    } catch (err) {
+      console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
+      console.log('[STARTUP] Continuing with .env values as fallback...');
+    }
   }
+  */
 
   // Auto-sync prompt definitions to database (ensures prompts are available)
   try {

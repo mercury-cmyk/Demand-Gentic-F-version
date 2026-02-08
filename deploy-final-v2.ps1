@@ -54,7 +54,9 @@ $secrets = @(
 $env_vars = @(
     "DEEPGRAM_MODEL=nova-2-phonecall",
     "DEEPGRAM_LANGUAGE=en-US",
-    "NODE_ENV=production"
+    "NODE_ENV=production",
+    "GOOGLE_CLOUD_PROJECT=pivotalb2b-2026",
+    "GCP_PROJECT_ID=pivotalb2b-2026"
 ) -join ","
 
 Write-Host "Deploying with FULLY synced secrets (V2)..."
