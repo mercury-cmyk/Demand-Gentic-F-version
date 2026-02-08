@@ -734,6 +734,7 @@ interface TelnyxWebhookData {
     ngrokUrl: string;
     productionUrl: string;
     isDevMode: boolean;
+    websocketUrl: string;
   };
   updatedAt?: string;
   message?: string;
