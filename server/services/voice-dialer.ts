@@ -2591,7 +2591,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
       if (agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] User: "${event.text}"`);
-        session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+
+        // FIXED: Accumulate consecutive user transcripts instead of creating new entries
+        // Gemini may send partial transcriptions, so we merge them
+        const lastTranscript = session.transcripts[session.transcripts.length - 1];
+        if (lastTranscript?.role === 'user') {
+          // Append to existing user transcript with a space
+          lastTranscript.text += ' ' + event.text;
+        } else {
+          // Start new user transcript
+          session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+        }
         scheduleRealtimeQualityAnalysis(session);
 
         // Track when user finished speaking (for response latency calculation)
@@ -2632,7 +2642,17 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     provider.on('transcript:agent', (event: any) => {
       if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true) {
         console.log(`${LOG_PREFIX} [Transcript] AI: "${event.text}"`);
-        session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+
+        // FIXED: Accumulate consecutive assistant transcripts instead of creating new entries
+        // Gemini sends word-by-word transcriptions, so we need to merge them
+        const lastTranscript = session.transcripts[session.transcripts.length - 1];
+        if (lastTranscript?.role === 'assistant') {
+          // Append to existing assistant transcript with a space
+          lastTranscript.text += ' ' + event.text;
+        } else {
+          // Start new assistant transcript
+          session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+        }
         scheduleRealtimeQualityAnalysis(session);
 
         // Calculate response latency if we have a previous user speech end time
@@ -5878,8 +5898,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
               ? "needs_improvement"
               : "failed";
 
+        // FIXED: Don't use `notes` as fallback - it contains the full transcript!
+        // Use AI-generated summary from conversation quality analysis instead.
         const callSummaryText =
-          session.callSummary?.summary || notes || conversationQuality.summary;
+          session.callSummary?.summary || conversationQuality.summary || 'No summary generated';
 
         // Update the test call record with post-call data
         await db.update(campaignTestCalls).set({

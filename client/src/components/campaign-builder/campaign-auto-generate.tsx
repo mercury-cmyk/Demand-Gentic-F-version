@@ -110,9 +110,11 @@ interface CampaignAutoGenerateProps {
     campaignObjections: any[];
     qualificationQuestions: any[];
   }) => void;
+  /** If campaign type was already selected in a previous step, hide it from preview */
+  hideTypeFromPreview?: boolean;
 }
 
-export function CampaignAutoGenerate({ onCampaignGenerated, onApply }: CampaignAutoGenerateProps) {
+export function CampaignAutoGenerate({ onCampaignGenerated, onApply, hideTypeFromPreview = false }: CampaignAutoGenerateProps) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -419,9 +421,12 @@ Goal: Book demo meetings with qualified decision makers who have budget authorit
                 <div>
                   <h3 className="text-lg font-semibold">{generatedCampaign.campaignName}</h3>
                   <div className="flex items-center gap-2 mt-1">
-                    <Badge variant="outline" className="text-xs">
-                      {CAMPAIGN_TYPE_LABELS[generatedCampaign.campaignType] || generatedCampaign.campaignType}
-                    </Badge>
+                    {/* Hide campaign type if already selected in previous step */}
+                    {!hideTypeFromPreview && (
+                      <Badge variant="outline" className="text-xs">
+                        {CAMPAIGN_TYPE_LABELS[generatedCampaign.campaignType] || generatedCampaign.campaignType}
+                      </Badge>
+                    )}
                     <span className="text-sm text-muted-foreground">
                       ~{generatedCampaign.estimatedCallDuration}s call duration
                     </span>

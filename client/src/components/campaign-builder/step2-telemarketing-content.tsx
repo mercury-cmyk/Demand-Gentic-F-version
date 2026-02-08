@@ -48,8 +48,10 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
     campaignObjections: any[];
     qualificationQuestions: any[];
   }) => {
-    // Update campaign type from AI generation (this will override the manual selection)
-    if (generated.campaignType) {
+    // IMPORTANT: Do NOT override campaign type - it was already selected in Step 0
+    // The AI-inferred type is ignored to prevent duplication
+    // If no type was set in Step 0, then use the AI-generated type as fallback
+    if (!data.type && generated.campaignType) {
       setCampaignType(generated.campaignType);
     }
     setCampaignContextBrief(generated.campaignContextBrief || '');
@@ -121,6 +123,7 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
           <CampaignAutoGenerate
             onCampaignGenerated={() => {}}
             onApply={handleAutoGenerateApply}
+            hideTypeFromPreview={!!data.type} // Hide type preview if already selected in Step 0
           />
         </TabsContent>
 

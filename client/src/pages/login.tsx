@@ -25,8 +25,8 @@ export default function LoginPage() {
   // Redirect after successful login once authentication state is updated
   useEffect(() => {
     if (loginSuccess && isAuthenticated) {
-      console.log('[LOGIN] Authentication confirmed, redirecting to /');
-      setLocation("/");
+      console.log('[LOGIN] Authentication confirmed, redirecting to /dashboard');
+      setLocation("/dashboard");
     }
   }, [loginSuccess, isAuthenticated, setLocation]);
 
