@@ -315,142 +315,57 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       suppressionFiles,
       deliveryMethod,
       templateFiles,
+      budget,
     } = req.body;
 
     if (!volumeRequested || volumeRequested < 1) {
       return res.status(400).json({ success: false, message: "Volume must be at least 1" });
     }
 
-    console.log(`[Client Agentic] Creating order for client ${context.clientAccountId}`);
+    console.log(`[Client Agentic] Creating order for client ${context.clientAccountId} via AgentX`);
 
-    // Generate order number
-    const orderNumber = `WO-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+    // Initialize AgentX (Client Agentic Hub)
+    const agentHub = createClientAgenticHub(context);
 
-    // Get client name for project naming
-    const [clientAccount] = await db
-      .select({ name: clientAccounts.name })
-      .from(clientAccounts)
-      .where(eq(clientAccounts.id, context.clientAccountId))
-      .limit(1);
+    // Map timeline to Agent supported values
+    let mappedTimeline: CampaignOrderRequest['deliveryTimeline'] = 'custom';
+    if (deliveryTimeline === 'immediate') mappedTimeline = 'immediate';
+    else if (deliveryTimeline === '1_week') mappedTimeline = '1_week';
+    else if (deliveryTimeline === '2_weeks') mappedTimeline = '2_weeks';
+    else if (deliveryTimeline === 'standard') mappedTimeline = '1_month'; // Standard usually means ~4 weeks
 
-    const clientName = clientAccount?.name || 'Client';
-
-    // Create a project with pending status for admin review
-    const projectName = campaignType
-      ? `${campaignType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} - ${orderNumber}`
-      : `Order Request - ${orderNumber}`;
-
-    // Map frontend campaign types to projectTypeEnum values
-    const mapToProjectType = (type: string | undefined): 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom' => {
-      if (!type) return 'custom';
-      const mapping: Record<string, 'call_campaign' | 'email_campaign' | 'data_enrichment' | 'verification' | 'combo' | 'custom'> = {
-        // Lead Generation Services
-        'high_quality_leads': 'verification',
-        'bant_leads': 'verification',
-        'sql': 'verification',
-
-        // Appointment & Meeting Services
-        'appointment_generation': 'call_campaign',
-        'appointment_setting': 'call_campaign',
-        'lead_qualification': 'call_campaign',
-
-        // Content Syndication
-        'content_syndication': 'email_campaign',
-
-        // Event & Webinar Services
-        'webinar_invite': 'combo',
-        'live_webinar': 'combo',
-        'on_demand_webinar': 'combo',
-        'executive_dinner': 'call_campaign',
-        'leadership_forum': 'call_campaign',
-        'conference': 'combo',
-
-        // Channel-Specific Campaigns
-        'email': 'email_campaign',
-        'call': 'call_campaign',
-        'combo': 'combo',
-
-        // Data Services
-        'data_validation': 'data_enrichment',
-        'data_enrichment': 'data_enrichment',
-
-        // Legacy mappings
-        'call_campaign': 'call_campaign',
-        'email_campaign': 'email_campaign',
-        'combo_campaign': 'combo',
-        'lead_generation': 'verification',
-        'market_research': 'custom',
-        'custom': 'custom',
-      };
-      return mapping[type] || 'custom';
+    // Map request to Agentic Hub format
+    // Note: The Hub expects mapped types, so we construct the request object
+    const agentRequest: CampaignOrderRequest = {
+      campaignType: campaignType || 'custom',
+      volumeRequested: Number(volumeRequested),
+      targetAudience: {
+        industries: typeof industries === 'string' ? industries.split(',').map((s: string) => s.trim()) : (Array.isArray(industries) ? industries : []),
+        jobTitles: typeof jobTitles === 'string' ? jobTitles.split(',').map((s: string) => s.trim()) : (Array.isArray(jobTitles) ? jobTitles : []),
+        companySizeMin: companySizeMin ? Number(companySizeMin) : undefined,
+        companySizeMax: companySizeMax ? Number(companySizeMax) : undefined,
+        geographies: typeof geographies === 'string' ? geographies.split(',').map((s: string) => s.trim()) : (Array.isArray(geographies) ? geographies : []),
+        additionalCriteria: specialRequirements,
+      },
+      deliveryTimeline: mappedTimeline,
+      customTimeline: mappedTimeline === 'custom' ? deliveryTimeline : undefined,
+      channels: Array.isArray(channels) ? channels : [],
+      specialRequirements,
+      contextUrls,
+      contextFiles,
+      targetAccountFiles,
+      suppressionFiles,
+      budget: budget ? Number(budget) : undefined,
     };
 
-    const [newProject] = await db
-      .insert(clientProjects)
-      .values({
-        clientAccountId: context.clientAccountId,
-        name: projectName,
-        description: `Campaign order request from ${clientName}.
-Type: ${campaignType || 'Custom'}
-Volume: ${volumeRequested} leads
-Industries: ${industries?.join(', ') || 'Not specified'}
-Job Titles: ${jobTitles?.join(', ') || 'Not specified'}
-Geographies: ${geographies?.join(', ') || 'Not specified'}
-Timeline: ${deliveryTimeline || 'Standard'}
-Channels: ${channels?.join(', ') || 'Not specified'}
-${specialRequirements ? `\nSpecial Requirements: ${specialRequirements}` : ''}`,
-        status: 'pending',
-        requestedLeadCount: volumeRequested,
-        projectType: mapToProjectType(campaignType),
-      })
-      .returning();
+    // Execute order creation via AgentX
+    const result = await agentHub.createCampaignOrder(agentRequest);
 
-    console.log(`[Client Agentic] Project ${newProject.id} created for order ${orderNumber}`);
+    if (!result.success) {
+        return res.status(400).json(result);
+    }
 
-    // Insert order into database (linked to project via metadata)
-    const [newOrder] = await db
-      .insert(clientPortalOrders)
-      .values({
-        clientAccountId: context.clientAccountId,
-        orderNumber,
-        status: "submitted",
-        requestedQuantity: volumeRequested,
-        approvedQuantity: null,
-        deliveredQuantity: 0,
-        orderMonth: new Date().getMonth() + 1,
-        orderYear: new Date().getFullYear(),
-        metadata: {
-          projectId: newProject.id,
-          campaignType,
-          industries,
-          jobTitles,
-          companySizeMin,
-          companySizeMax,
-          geographies,
-          deliveryTimeline,
-          channels,
-          specialRequirements,
-          contextUrls,
-          contextFiles,
-          targetAccountFiles,
-          suppressionFiles,
-          deliveryMethod,
-          templateFiles,
-        },
-      })
-      .returning();
-
-    console.log(`[Client Agentic] Order ${orderNumber} created successfully (Project: ${newProject.id})`);
-
-    res.json({
-      success: true,
-      data: {
-        orderId: newOrder.id,
-        orderNumber: newOrder.orderNumber,
-        status: newOrder.status,
-        projectId: newProject.id,
-      },
-    });
+    res.json(result);
   } catch (error: any) {
     console.error("[Client Agentic] Order creation error:", error);
     res.status(500).json({ success: false, message: error.message });

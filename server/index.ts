@@ -163,13 +163,13 @@ app.use((req, res, next) => {
   }
 
   // Load secrets from database into process.env
-  // This allows secrets stored in Secret Manager to override .env values
+  // DB secrets take priority; .env acts as fallback if DB is unavailable
   try {
     const { initializeSecrets } = await import("./services/secret-loader");
-    await initializeSecrets({ overwriteEnv: false }); // Don't overwrite existing env vars
+    await initializeSecrets({ overwriteEnv: true });
   } catch (err) {
     console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
-    console.log('[STARTUP] Continuing with .env values...');
+    console.log('[STARTUP] Continuing with .env values as fallback...');
   }
 
   // Auto-sync prompt definitions to database (ensures prompts are available)

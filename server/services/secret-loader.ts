@@ -18,7 +18,7 @@
 import { db } from '../db';
 import { secretStore, SecretEnvironment } from '@shared/schema';
 import { decryptJson } from '../lib/encryption';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 const LOG_PREFIX = '[SecretLoader]';
 
@@ -48,7 +48,11 @@ export interface LoadSecretsOptions {
 }
 
 /**
- * Load secrets from the database and set them as environment variables
+ * Load secrets from the database and set them as environment variables.
+ * Tries the target environment first, then falls back to 'development' if
+ * the target is 'production' and a secret was not found there.
+ * Any secret that cannot be resolved from the DB keeps whatever value
+ * was already present in process.env (i.e. from .env file).
  */
 export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promise<number> {
   const environment = options.environment || getRuntimeEnvironment();
@@ -56,29 +60,43 @@ export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promis
 
   console.log(`${LOG_PREFIX} Loading secrets for environment: ${environment}`);
 
-  const conditions = [eq(secretStore.environment, environment), eq(secretStore.isActive, true)];
+  const baseConditions: any[] = [eq(secretStore.isActive, true)];
 
   if (options.service) {
-    conditions.push(eq(secretStore.service, options.service));
+    baseConditions.push(eq(secretStore.service, options.service));
   }
 
   if (options.usageContext) {
-    conditions.push(eq(secretStore.usageContext, options.usageContext));
+    baseConditions.push(eq(secretStore.usageContext, options.usageContext));
   }
 
   try {
-    const secrets = await db
-      .select()
-      .from(secretStore)
-      .where(and(...conditions));
+    // Load secrets from both environments so we can fall back from prod → dev
+    const envsToLoad: ('production' | 'development')[] =
+      environment === 'production' ? ['production', 'development'] : ['development'];
+
+    // Keyed by secret name → first match wins (target env takes priority)
+    const resolvedSecrets = new Map<string, typeof secretStore.$inferSelect>();
+
+    for (const env of envsToLoad) {
+      const rows = await db
+        .select()
+        .from(secretStore)
+        .where(and(...baseConditions, eq(secretStore.environment, env)));
+
+      for (const secret of rows) {
+        if (!resolvedSecrets.has(secret.name)) {
+          resolvedSecrets.set(secret.name, secret);
+        }
+      }
+    }
 
     let loaded = 0;
     const masterKey = ensureMasterKey();
 
-    for (const secret of secrets) {
+    for (const [, secret] of resolvedSecrets) {
       // Skip if env var already exists and overwrite is false
       if (!overwrite && process.env[secret.name] !== undefined) {
-        console.log(`${LOG_PREFIX}   SKIP: ${secret.name} (already set)`);
         continue;
       }
 
@@ -97,23 +115,23 @@ export async function loadSecretsToEnv(options: LoadSecretsOptions = {}): Promis
           expiresAt: Date.now() + CACHE_TTL_MS,
         });
 
-        console.log(`${LOG_PREFIX}   LOADED: ${secret.name} (${secret.service}/${secret.usageContext})`);
+        console.log(`${LOG_PREFIX}   LOADED: ${secret.name} (${secret.service}/${secret.usageContext}) [${secret.environment}]`);
       } catch (decryptError: any) {
         console.error(`${LOG_PREFIX}   ERROR decrypting ${secret.name}: ${decryptError.message}`);
       }
     }
 
-    console.log(`${LOG_PREFIX} Loaded ${loaded}/${secrets.length} secrets`);
+    console.log(`${LOG_PREFIX} Loaded ${loaded}/${resolvedSecrets.size} secrets (env: ${environment})`);
     return loaded;
   } catch (error: any) {
-    console.error(`${LOG_PREFIX} Failed to load secrets: ${error.message}`);
-    throw error;
+    console.error(`${LOG_PREFIX} Failed to load secrets from DB, falling back to .env: ${error.message}`);
+    return 0;
   }
 }
 
 /**
- * Get a specific secret value by name
- * First checks cache, then database, then falls back to process.env
+ * Get a specific secret value by name.
+ * Checks: cache → DB (target env) → DB (development fallback) → process.env
  */
 export async function getSecret(
   name: string,
@@ -128,37 +146,42 @@ export async function getSecret(
     return cached.value;
   }
 
-  // Query database
-  try {
-    const result = await db
-      .select()
-      .from(secretStore)
-      .where(
-        and(
-          eq(secretStore.name, name),
-          eq(secretStore.environment, environment),
-          eq(secretStore.isActive, true)
+  // Try target environment, then fallback to development
+  const envsToTry: SecretEnvironment[] =
+    environment === 'production' ? ['production', 'development'] : ['development'];
+
+  for (const env of envsToTry) {
+    try {
+      const result = await db
+        .select()
+        .from(secretStore)
+        .where(
+          and(
+            eq(secretStore.name, name),
+            eq(secretStore.environment, env),
+            eq(secretStore.isActive, true)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (result.length > 0) {
-      const value = decryptJson<string>(result[0].encryptedValue, ensureMasterKey());
-      const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
+      if (result.length > 0) {
+        const value = decryptJson<string>(result[0].encryptedValue, ensureMasterKey());
+        const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
 
-      // Update cache
-      secretCache.set(name, {
-        value: stringValue,
-        expiresAt: Date.now() + CACHE_TTL_MS,
-      });
+        // Update cache
+        secretCache.set(name, {
+          value: stringValue,
+          expiresAt: Date.now() + CACHE_TTL_MS,
+        });
 
-      return stringValue;
+        return stringValue;
+      }
+    } catch (error: any) {
+      console.warn(`${LOG_PREFIX} Failed to get secret ${name} from DB (${env}): ${error.message}`);
     }
-  } catch (error: any) {
-    console.warn(`${LOG_PREFIX} Failed to get secret ${name} from database: ${error.message}`);
   }
 
-  // Fallback to environment variable
+  // Fallback to environment variable (.env file)
   if (fallbackToEnv) {
     return process.env[name];
   }

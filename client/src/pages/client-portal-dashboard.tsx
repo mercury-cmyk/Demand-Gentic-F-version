@@ -46,6 +46,7 @@ import {
   RequestLeadsDialog,
   CampaignCreationWizard,
   PreviewStudio,
+  CampaignDetailView,
 } from '@/components/client-portal/campaigns';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
@@ -312,6 +313,9 @@ export default function ClientPortalDashboard() {
     recipientEmail: ''
   });
 
+  // Selected campaign state
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+
   // Preview Studio state
   const [testCallCampaign, setTestCallCampaign] = useState('');
   const [testEmailTemplate, setTestEmailTemplate] = useState('');
@@ -353,7 +357,7 @@ export default function ClientPortalDashboard() {
   const [showAddContactDialog, setShowAddContactDialog] = useState(false);
   const [showBulkUploadDialog, setShowBulkUploadDialog] = useState(false);
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
-  const [crmActiveTab, setCrmActiveTab] = useState<'accounts' | 'contacts'>('accounts');
+
   const [crmViewMode, setCrmViewMode] = useState<'table' | 'card'>('table');
   const [crmSelectedItems, setCrmSelectedItems] = useState<string[]>([]);
   const [crmDetailItem, setCrmDetailItem] = useState<any>(null);
@@ -1278,7 +1282,8 @@ export default function ClientPortalDashboard() {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
     { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'crm', label: 'Accounts & Contacts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
+    { id: 'accounts', label: 'Accounts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
+    { id: 'contacts', label: 'Contacts', icon: Users, color: 'from-sky-500 to-cyan-500', featureRequired: 'accounts_contacts' },
     { id: 'intelligence', label: 'Intelligence', icon: Brain, color: 'from-violet-500 to-purple-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
     { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
@@ -2609,7 +2614,216 @@ export default function ClientPortalDashboard() {
         )}
 
         {/* ==================== CRM TAB ==================== */}
-        {activeTab === 'crm' && hasFeature('accounts_contacts') && (() => {
+        {activeTab === 'accounts' && hasFeature('accounts_contacts') && (() => {
+          const accounts = crmAccounts || [];
+          const filteredAccounts = accounts.filter((a: any) => {
+            if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
+            if (crmSearchQuery) {
+              const q = crmSearchQuery.toLowerCase();
+              return [a.name, a.industry, a.website].some(f => f?.toLowerCase()?.includes(q));
+            }
+            return true;
+          });
+          const allIndustries = [...new Set(accounts.map((a: any) => a.industry).filter(Boolean))];
+          const currentItems = filteredAccounts;
+
+          return (
+          <div className="space-y-6 max-w-7xl mx-auto">
+            {/* Header with stats */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  <span className="font-semibold">Accounts</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light">
+                  Manage your company data for campaigns and targeting
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {hasFeature('bulk_upload') && (
+                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => {
+                  const items = filteredAccounts;
+                  const headers = 'Company Name,Industry,Website,Phone';
+                  const rows = items.map((i: any) => `${i.companyName},${i.industry},${i.website},${i.phone}`);
+                  const csv = [headers, ...rows].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = `accounts.csv`; a.click();
+                  toast({ title: 'Exported', description: `${items.length} accounts exported to CSV` });
+                }}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+                <Button size="sm" onClick={() => setShowAddAccountDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Account
+                </Button>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Accounts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? accounts.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Contacts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalContacts ?? 0}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Industries</p>
+                <p className="text-2xl font-semibold">{allIndustries.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Opted Out</p>
+                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+              </CardContent></Card>
+            </div>
+
+            {/* Filters + View Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input placeholder={`Search accounts...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
+                </div>
+                {allIndustries.length > 0 && (
+                  <Select value={crmFilterIndustry} onValueChange={setCrmFilterIndustry}>
+                    <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="All Industries" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All Industries</SelectItem>
+                      {allIndustries.map(ind => <SelectItem key={ind} value={ind as string}>{ind as string}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="flex border rounded-md overflow-hidden">
+                <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+                <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {crmSelectedItems.length > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <Badge variant="secondary">{crmSelectedItems.length} selected</Badge>
+                <Button variant="outline" size="sm" onClick={() => setCrmSelectedItems([])}>Deselect All</Button>
+                <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                  if (!window.confirm(`Delete ${crmSelectedItems.length} accounts?`)) return;
+                  crmSelectedItems.forEach(id => deleteAccountMutation.mutate(id));
+                  setCrmSelectedItems([]);
+                }}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </div>
+            )}
+
+            {/* Content - ACCOUNTS */}
+            {crmAccountsLoading ? (
+              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : filteredAccounts.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                  <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
+                  <div className="flex justify-center gap-3">
+                    <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
+                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : crmViewMode === 'table' ? (
+              <Card className="shadow-sm">
+                <CardContent className="p-0">
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 dark:bg-slate-800">
+                          <TableHead className="w-10">
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredAccounts.length && filteredAccounts.length > 0} onChange={() => toggleSelectAll(filteredAccounts)} />
+                          </TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Industry</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Website</TableHead>
+                          <TableHead>Contacts</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredAccounts.map((account: any) => (
+                          <TableRow key={account.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(account, 'account')}>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={() => toggleCrmSelection(account.id)} />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 text-xs font-bold">{account.name?.[0]}</div>
+                                {account.name}
+                              </div>
+                            </TableCell>
+                            <TableCell>{account.industry && <Badge variant="outline" className="text-xs">{account.industry}</Badge>}</TableCell>
+                            <TableCell><span className="text-xs capitalize text-muted-foreground">{account.accountType || '-'}</span></TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{account.website}</TableCell>
+                            <TableCell><Badge variant="secondary">{account.contactCount || 0}</Badge></TableCell>
+                            <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(account, 'account')}><Eye className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => { setEditingAccount(account); setShowAddAccountDialog(true); }}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete account "${account.name}"?`)) {
+                                  deleteAccountMutation.mutate(account.id);
+                                }
+                              }}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredAccounts.map((account: any) => (
+                  <Card key={account.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(account, 'account')}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold">{account.name?.[0]}</div>
+                          <div>
+                            <CardTitle className="text-base">{account.name}</CardTitle>
+                            {account.industry && <Badge variant="outline" className="text-xs mt-1">{account.industry}</Badge>}
+                          </div>
+                        </div>
+                        <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(account.id); }} />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                      {account.website && <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5" />{account.website}</div>}
+                      {account.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{account.phone}</div>}
+                      <div className="flex items-center gap-2"><Users className="h-3.5 w-3.5" />{account.contactCount || 0} contacts</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
+        {/* ==================== CONTACTS TAB ==================== */}
+        {activeTab === 'contacts' && hasFeature('accounts_contacts') && (() => {
           const contacts = crmContacts || [];
           const accounts = crmAccounts || [];
           const filteredContacts = contacts.filter((c: any) => {
@@ -2620,16 +2834,8 @@ export default function ClientPortalDashboard() {
             }
             return true;
           });
-          const filteredAccounts = accounts.filter((a: any) => {
-            if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
-            if (crmSearchQuery) {
-              const q = crmSearchQuery.toLowerCase();
-              return [a.name, a.industry, a.website].some(f => f?.toLowerCase()?.includes(q));
-            }
-            return true;
-          });
-          const allIndustries = [...new Set([...accounts.map((a: any) => a.industry), ...contacts.map((c: any) => c.industry)].filter(Boolean))];
-          const currentItems = crmActiveTab === 'contacts' ? filteredContacts : filteredAccounts;
+          const allIndustries = [...new Set(contacts.map((c: any) => c.industry).filter(Boolean))];
+          const currentItems = filteredContacts;
 
           return (
           <div className="space-y-6 max-w-7xl mx-auto">
@@ -2637,38 +2843,35 @@ export default function ClientPortalDashboard() {
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
               <div className="space-y-1">
                 <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
-                  Accounts & <span className="font-semibold">Contacts</span>
+                  <span className="font-semibold">Contacts</span>
                 </h2>
                 <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Manage your CRM data for campaigns and targeting
+                  Manage your contact data for campaigns and targeting
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 {hasFeature('bulk_upload') && (
-                  <Button variant="outline" size="sm" onClick={() => setShowBulkUploadDialog(true)}>
+                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
                     <Upload className="h-4 w-4 mr-2" />
                     Import CSV
                   </Button>
                 )}
                 <Button variant="outline" size="sm" onClick={() => {
-                  const items = crmActiveTab === 'contacts' ? filteredContacts : filteredAccounts;
-                  const headers = crmActiveTab === 'contacts' ? 'First Name,Last Name,Email,Phone,Company,Title' : 'Company Name,Industry,Website,Phone';
-                  const rows = items.map((i: any) => crmActiveTab === 'contacts' 
-                    ? `${i.firstName},${i.lastName},${i.email},${i.phone},${i.company},${i.title}`
-                    : `${i.companyName},${i.industry},${i.website},${i.phone}`
-                  );
+                  const items = filteredContacts;
+                  const headers = 'First Name,Last Name,Email,Phone,Company,Title';
+                  const rows = items.map((i: any) => `${i.firstName},${i.lastName},${i.email},${i.phone},${i.company},${i.title}`);
                   const csv = [headers, ...rows].join('\n');
                   const blob = new Blob([csv], { type: 'text/csv' });
                   const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a'); a.href = url; a.download = `${crmActiveTab}.csv`; a.click();
-                  toast({ title: 'Exported', description: `${items.length} ${crmActiveTab} exported to CSV` });
+                  const a = document.createElement('a'); a.href = url; a.download = `contacts.csv`; a.click();
+                  toast({ title: 'Exported', description: `${items.length} contacts exported to CSV` });
                 }}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
                 </Button>
-                <Button size="sm" onClick={() => crmActiveTab === 'contacts' ? setShowAddContactDialog(true) : setShowAddAccountDialog(true)}>
+                <Button size="sm" onClick={() => setShowAddContactDialog(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  {crmActiveTab === 'contacts' ? 'Add Contact' : 'Add Account'}
+                  Add Contact
                 </Button>
               </div>
             </div>
@@ -2677,7 +2880,7 @@ export default function ClientPortalDashboard() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Card className="shadow-sm"><CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Total Accounts</p>
-                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? accounts.length}</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? 0}</p>
               </CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-4">
                 <p className="text-sm text-muted-foreground">Total Contacts</p>
@@ -2693,20 +2896,12 @@ export default function ClientPortalDashboard() {
               </CardContent></Card>
             </div>
 
-            {/* Tabs + Filters + View Toggle */}
+            {/* Filters + View Toggle */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Button variant={crmActiveTab === 'accounts' ? 'default' : 'outline'} size="sm" onClick={() => { setCrmActiveTab('accounts'); setCrmSelectedItems([]); }}>
-                  <Building2 className="h-4 w-4 mr-1" /> Accounts ({accounts.length})
-                </Button>
-                <Button variant={crmActiveTab === 'contacts' ? 'default' : 'outline'} size="sm" onClick={() => { setCrmActiveTab('contacts'); setCrmSelectedItems([]); }}>
-                  <Users className="h-4 w-4 mr-1" /> Contacts ({contacts.length})
-                </Button>
-              </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder={`Search ${crmActiveTab}...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
+                  <Input placeholder={`Search contacts...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
                 </div>
                 {allIndustries.length > 0 && (
                   <Select value={crmFilterIndustry} onValueChange={setCrmFilterIndustry}>
@@ -2717,14 +2912,14 @@ export default function ClientPortalDashboard() {
                     </SelectContent>
                   </Select>
                 )}
-                <div className="flex border rounded-md overflow-hidden">
-                  <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
-                    <FileSpreadsheet className="h-4 w-4" />
-                  </Button>
-                  <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
-                    <LayoutDashboard className="h-4 w-4" />
-                  </Button>
-                </div>
+              </div>
+              <div className="flex border rounded-md overflow-hidden">
+                <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+                <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
@@ -2734,9 +2929,8 @@ export default function ClientPortalDashboard() {
                 <Badge variant="secondary">{crmSelectedItems.length} selected</Badge>
                 <Button variant="outline" size="sm" onClick={() => setCrmSelectedItems([])}>Deselect All</Button>
                 <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
-                  if (!window.confirm(`Delete ${crmSelectedItems.length} ${crmActiveTab}?`)) return;
-                  const deleteMutation = crmActiveTab === 'contacts' ? deleteContactMutation : deleteAccountMutation;
-                  crmSelectedItems.forEach(id => deleteMutation.mutate(id));
+                  if (!window.confirm(`Delete ${crmSelectedItems.length} contacts?`)) return;
+                  crmSelectedItems.forEach(id => deleteContactMutation.mutate(id));
                   setCrmSelectedItems([]);
                 }}>
                   <Trash2 className="h-4 w-4 mr-1" /> Delete
@@ -2744,188 +2938,99 @@ export default function ClientPortalDashboard() {
               </div>
             )}
 
-            {/* Content - ACCOUNTS */}
-            {crmActiveTab === 'accounts' && (
-              <>
-                {crmAccountsLoading ? (
-                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
-                ) : filteredAccounts.length === 0 ? (
-                  <Card className="border-dashed">
-                    <CardContent className="py-16 text-center">
-                      <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                      <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
-                      <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
-                      <div className="flex justify-center gap-3">
-                        <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
-                        {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : crmViewMode === 'table' ? (
-                  <Card className="shadow-sm">
-                    <CardContent className="p-0">
-                      <div className="rounded-lg border overflow-hidden">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-slate-50 dark:bg-slate-800">
-                              <TableHead className="w-10">
-                                <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredAccounts.length && filteredAccounts.length > 0} onChange={() => toggleSelectAll(filteredAccounts)} />
-                              </TableHead>
-                              <TableHead>Company</TableHead>
-                              <TableHead>Industry</TableHead>
-                              <TableHead>Type</TableHead>
-                              <TableHead>Website</TableHead>
-                              <TableHead>Contacts</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredAccounts.map((account: any) => (
-                              <TableRow key={account.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(account, 'account')}>
-                                <TableCell onClick={e => e.stopPropagation()}>
-                                  <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={() => toggleCrmSelection(account.id)} />
-                                </TableCell>
-                                <TableCell className="font-medium">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 text-xs font-bold">{account.name?.[0]}</div>
-                                    {account.name}
-                                  </div>
-                                </TableCell>
-                                <TableCell>{account.industry && <Badge variant="outline" className="text-xs">{account.industry}</Badge>}</TableCell>
-                                <TableCell><span className="text-xs capitalize text-muted-foreground">{account.accountType || '-'}</span></TableCell>
-                                <TableCell className="text-sm text-muted-foreground">{account.website}</TableCell>
-                                <TableCell><Badge variant="secondary">{account.contactCount || 0}</Badge></TableCell>
-                                <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                                  <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(account, 'account')}><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="sm" onClick={() => { setEditingAccount(account); setShowAddAccountDialog(true); }}><Pencil className="h-4 w-4" /></Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredAccounts.map((account: any) => (
-                      <Card key={account.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(account, 'account')}>
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold">{account.name?.[0]}</div>
-                              <div>
-                                <CardTitle className="text-base">{account.name}</CardTitle>
-                                {account.industry && <Badge variant="outline" className="text-xs mt-1">{account.industry}</Badge>}
-                              </div>
-                            </div>
-                            <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(account.id); }} />
-                          </div>
-                        </CardHeader>
-                        <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
-                          {account.website && <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5" />{account.website}</div>}
-                          {account.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{account.phone}</div>}
-                          <div className="flex items-center gap-2"><Users className="h-3.5 w-3.5" />{account.contactCount || 0} contacts</div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
             {/* Content - CONTACTS */}
-            {crmActiveTab === 'contacts' && (
-              <>
-                {crmContactsLoading ? (
-                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
-                ) : filteredContacts.length === 0 ? (
-                  <Card className="border-dashed">
-                    <CardContent className="py-16 text-center">
-                      <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                      <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
-                      <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
-                      <div className="flex justify-center gap-3">
-                        <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                        {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : crmViewMode === 'table' ? (
-                  <Card className="shadow-sm">
-                    <CardContent className="p-0">
-                      <div className="rounded-lg border overflow-hidden">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-slate-50 dark:bg-slate-800">
-                              <TableHead className="w-10">
-                                <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredContacts.length && filteredContacts.length > 0} onChange={() => toggleSelectAll(filteredContacts)} />
-                              </TableHead>
-                              <TableHead>Name</TableHead>
-                              <TableHead>Email</TableHead>
-                              <TableHead>Phone</TableHead>
-                              <TableHead>Company</TableHead>
-                              <TableHead>Title</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredContacts.map((contact: any) => (
-                              <TableRow key={contact.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(contact, 'contact')}>
-                                <TableCell onClick={e => e.stopPropagation()}>
-                                  <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={() => toggleCrmSelection(contact.id)} />
-                                </TableCell>
-                                <TableCell className="font-medium">
-                                  <div className="flex items-center gap-2">
-                                    <Avatar className="h-8 w-8">
-                                      <AvatarFallback className="text-xs bg-primary/10">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
-                                    </Avatar>
-                                    {contact.firstName} {contact.lastName}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-sm">{contact.email}</TableCell>
-                                <TableCell className="text-sm">{contact.phone}</TableCell>
-                                <TableCell className="text-sm">{contact.company}</TableCell>
-                                <TableCell className="text-sm">{contact.title}</TableCell>
-                                <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                                  <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(contact, 'contact')}><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="sm" onClick={() => { setEditingContact(contact); setShowAddContactDialog(true); }}><Pencil className="h-4 w-4" /></Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredContacts.map((contact: any) => (
-                      <Card key={contact.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(contact, 'contact')}>
-                        <CardHeader className="pb-3">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                              <Avatar className="h-10 w-10">
-                                <AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-500 text-white font-bold">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
-                                {contact.title && <p className="text-xs text-muted-foreground mt-0.5">{contact.title}</p>}
-                              </div>
-                            </div>
-                            <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(contact.id); }} />
-                          </div>
-                        </CardHeader>
-                        <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
-                          {contact.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" />{contact.email}</div>}
-                          {contact.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{contact.phone}</div>}
-                          {contact.company && <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />{contact.company}</div>}
-                        </CardContent>
-                      </Card>
-                    ))}
+            {crmContactsLoading ? (
+              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : filteredContacts.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                  <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
+                  <div className="flex justify-center gap-3">
+                    <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
+                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
                   </div>
-                )}
-              </>
+                </CardContent>
+              </Card>
+            ) : crmViewMode === 'table' ? (
+              <Card className="shadow-sm">
+                <CardContent className="p-0">
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 dark:bg-slate-800">
+                          <TableHead className="w-10">
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredContacts.length && filteredContacts.length > 0} onChange={() => toggleSelectAll(filteredContacts)} />
+                          </TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Phone</TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredContacts.map((contact: any) => (
+                          <TableRow key={contact.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={() => toggleCrmSelection(contact.id)} />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs bg-primary/10">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                                </Avatar>
+                                {contact.firstName} {contact.lastName}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-sm">{contact.email}</TableCell>
+                            <TableCell className="text-sm">{contact.phone}</TableCell>
+                            <TableCell className="text-sm">{contact.company}</TableCell>
+                            <TableCell className="text-sm">{contact.title}</TableCell>
+                            <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(contact, 'contact')}><Eye className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => { setEditingContact(contact); setShowAddContactDialog(true); }}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete contact "${contact.firstName} ${contact.lastName}"?`)) {
+                                  deleteContactMutation.mutate(contact.id);
+                                }
+                              }}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredContacts.map((contact: any) => (
+                  <Card key={contact.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-500 text-white font-bold">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
+                            {contact.title && <p className="text-xs text-muted-foreground mt-0.5">{contact.title}</p>}
+                          </div>
+                        </div>
+                        <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(contact.id); }} />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                      {contact.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" />{contact.email}</div>}
+                      {contact.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{contact.phone}</div>}
+                      {contact.company && <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />{contact.company}</div>}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )}
           </div>
           );
@@ -2988,7 +3093,7 @@ export default function ClientPortalDashboard() {
                         <div className="flex items-center gap-3 mt-1">
                           {orgIntelligence.domain && <span className="text-sm text-muted-foreground flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{orgIntelligence.domain}</span>}
                           {orgIntelligence.industry && <Badge variant="outline">{orgIntelligence.industry}</Badge>}
-                          {orgIntelligenceData?.campaigns?.length > 0 && <Badge variant="secondary">{orgIntelligenceData.campaigns.length} campaign{orgIntelligenceData.campaigns.length !== 1 ? 's' : ''}</Badge>}
+                          {(orgIntelligenceData?.campaigns?.length ?? 0) > 0 && <Badge variant="secondary">{orgIntelligenceData!.campaigns!.length} campaign{orgIntelligenceData!.campaigns!.length !== 1 ? 's' : ''}</Badge>}
                         </div>
                       </div>
                     </div>

@@ -85,6 +85,10 @@ export const campaignTypeEnum = pgEnum('campaign_type', [
   'executive_dinner',
   'leadership_forum',
   'conference',
+  // Event registration campaigns
+  'event_registration_digital_ungated',
+  'event_registration_digital_gated',
+  'in_person_event',
   // Lead generation campaigns
   'content_syndication',
   'high_quality_leads',
@@ -7152,6 +7156,7 @@ export const clientBillingConfig = pgTable("client_billing_config", {
   // Auto Invoice Settings
   autoInvoiceEnabled: boolean("auto_invoice_enabled").default(true),
   invoiceDayOfMonth: integer("invoice_day_of_month").default(1),
+  paymentDueDayOfMonth: integer("payment_due_day_of_month"),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

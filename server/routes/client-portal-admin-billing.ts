@@ -47,6 +47,7 @@ router.get('/clients/:clientId/billing', async (req: Request, res: Response) => 
         currency: 'USD',
         autoInvoiceEnabled: true,
         invoiceDayOfMonth: 1,
+        paymentDueDayOfMonth: null,
         taxExempt: false,
         taxRate: '0',
       });
@@ -78,6 +79,7 @@ const billingConfigSchema = z.object({
   taxRate: z.number().min(0).max(1).optional(),
   autoInvoiceEnabled: z.boolean().optional(),
   invoiceDayOfMonth: z.number().int().min(1).max(28).optional(),
+  paymentDueDayOfMonth: z.number().int().min(1).max(28).optional().nullable(),
 });
 
 router.put('/clients/:clientId/billing', async (req: Request, res: Response) => {
@@ -110,6 +112,7 @@ router.put('/clients/:clientId/billing', async (req: Request, res: Response) => 
       ...(data.taxRate !== undefined && { taxRate: data.taxRate.toString() }),
       ...(data.autoInvoiceEnabled !== undefined && { autoInvoiceEnabled: data.autoInvoiceEnabled }),
       ...(data.invoiceDayOfMonth !== undefined && { invoiceDayOfMonth: data.invoiceDayOfMonth }),
+      ...(data.paymentDueDayOfMonth !== undefined && { paymentDueDayOfMonth: data.paymentDueDayOfMonth }),
       updatedAt: new Date(),
     };
 
@@ -297,8 +300,15 @@ router.post('/invoices', async (req: Request, res: Response) => {
     const invoiceNumber = `INV-${year}-${String(seqNum).padStart(4, '0')}`;
 
     const issueDate = new Date();
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + paymentTerms);
+    let dueDate: Date;
+    if (config?.paymentDueDayOfMonth) {
+      const refDate = data.billingPeriodEnd ? new Date(data.billingPeriodEnd) : issueDate;
+      const nextMonth = refDate.getMonth() + 1;
+      dueDate = new Date(refDate.getFullYear(), nextMonth, config.paymentDueDayOfMonth);
+    } else {
+      dueDate = new Date(issueDate);
+      dueDate.setDate(dueDate.getDate() + paymentTerms);
+    }
 
     // Create invoice
     const [invoice] = await db
@@ -545,8 +555,15 @@ router.post('/clients/:clientId/generate-invoice', async (req: Request, res: Res
 
     const paymentTerms = config?.paymentTermsDays || 30;
     const issueDate = new Date();
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + paymentTerms);
+    let dueDate: Date;
+    if (config?.paymentDueDayOfMonth) {
+      const refDate = new Date(periodEnd);
+      const nextMonth = refDate.getMonth() + 1;
+      dueDate = new Date(refDate.getFullYear(), nextMonth, config.paymentDueDayOfMonth);
+    } else {
+      dueDate = new Date(issueDate);
+      dueDate.setDate(dueDate.getDate() + paymentTerms);
+    }
 
     // Create invoice
     const [invoice] = await db
@@ -663,6 +680,9 @@ const CAMPAIGN_TYPES = [
   { value: 'conference', label: 'Conference/Event', defaultPrice: 175 },
   { value: 'email', label: 'Email-Only Campaign', defaultPrice: 50 },
   { value: 'data_validation', label: 'Data Validation & Enrichment', defaultPrice: 25 },
+  { value: 'event_registration_digital_ungated', label: 'Event Registration - Digital (Ungated/Click)', defaultPrice: 10 },
+  { value: 'event_registration_digital_gated', label: 'Event Registration - Digital (Gated)', defaultPrice: 30 },
+  { value: 'in_person_event', label: 'In-Person Events Program', defaultPrice: 80 },
 ];
 
 // Get all campaign pricing for a client

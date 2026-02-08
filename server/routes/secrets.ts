@@ -13,8 +13,9 @@ const RUNTIME_ENVIRONMENT: SecretEnvironment =
   (process.env.SECRET_MANAGER_RUNTIME_ENV || process.env.NODE_ENV || 'development').toLowerCase() === 'production'
     ? 'production'
     : 'development';
-const ALLOWED_ENVIRONMENTS_BY_CONTEXT: SecretEnvironment[] =
-  RUNTIME_ENVIRONMENT === 'production' ? [...ENVIRONMENT_VALUES] : ['development'];
+// Allow viewing/managing both environments from any context
+// (same secrets are used for dev and production)
+const ALLOWED_ENVIRONMENTS_BY_CONTEXT: SecretEnvironment[] = [...ENVIRONMENT_VALUES];
 
 class EnvironmentError extends Error {
   public readonly status: 400 | 403;

@@ -23,6 +23,7 @@ import {
   Loader2,
   Download,
   AlertCircle,
+  Tag,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -76,6 +77,16 @@ const activityTypeLabels: Record<string, string> = {
   setup_fee: 'Setup Fee',
 };
 
+const ordinalSuffix = (day: number): string => {
+  if (day >= 11 && day <= 13) return `${day}th`;
+  switch (day % 10) {
+    case 1: return `${day}st`;
+    case 2: return `${day}nd`;
+    case 3: return `${day}rd`;
+    default: return `${day}th`;
+  }
+};
+
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
   pending: 'bg-yellow-100 text-yellow-800',
@@ -106,6 +117,41 @@ export default function ClientPortalBilling() {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!res.ok) throw new Error('Failed to fetch invoices');
+      return res.json();
+    },
+  });
+
+  const { data: billingConfig } = useQuery<{
+    defaultBillingModel: string;
+    paymentTermsDays: number;
+    currency: string;
+    invoiceDayOfMonth: number;
+    paymentDueDayOfMonth: number | null;
+  }>({
+    queryKey: ['client-portal-billing-config'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/config', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch billing config');
+      return res.json();
+    },
+  });
+
+  const { data: campaignPricingData } = useQuery<{
+    pricing: Record<string, {
+      pricePerLead: number;
+      minimumOrderSize: number;
+      isEnabled: boolean;
+      label: string;
+    }>;
+  }>({
+    queryKey: ['client-portal-campaign-pricing'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/campaign-pricing', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch campaign pricing');
       return res.json();
     },
   });
@@ -223,6 +269,7 @@ export default function ClientPortalBilling() {
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="invoices">Invoices</TabsTrigger>
             <TabsTrigger value="breakdown">Cost Breakdown</TabsTrigger>
+            <TabsTrigger value="pricing">Pricing & Terms</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -468,6 +515,94 @@ export default function ClientPortalBilling() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Pricing & Terms Tab */}
+          <TabsContent value="pricing" className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Your Pricing */}
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Tag className="h-5 w-5" />
+                    Your Pricing
+                  </CardTitle>
+                  <CardDescription>Per-unit rates for each service type</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {campaignPricingData?.pricing ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Service</TableHead>
+                          <TableHead className="text-right">Price Per Lead</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {Object.entries(campaignPricingData.pricing)
+                          .filter(([, config]) => config.isEnabled)
+                          .map(([type, config]) => (
+                            <TableRow key={type}>
+                              <TableCell className="font-medium">{config.label}</TableCell>
+                              <TableCell className="text-right">
+                                {formatCurrency(config.pricePerLead)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                      Loading pricing...
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Billing Terms */}
+              <Card className="md:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Billing Terms
+                  </CardTitle>
+                  <CardDescription>Your billing schedule and payment terms</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Billing Cycle</p>
+                        <p className="font-medium">Monthly (based on previous month's activity)</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Invoice Generated</p>
+                        <p className="font-medium">
+                          {billingConfig?.invoiceDayOfMonth
+                            ? `${ordinalSuffix(billingConfig.invoiceDayOfMonth)} of each month`
+                            : '1st of each month'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Payment Due</p>
+                        <p className="font-medium">
+                          {billingConfig?.paymentDueDayOfMonth
+                            ? `By the ${ordinalSuffix(billingConfig.paymentDueDayOfMonth)} of each month`
+                            : `NET ${billingConfig?.paymentTermsDays || 30} days from invoice date`}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Currency</p>
+                        <p className="font-medium">{billingConfig?.currency || 'USD'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
