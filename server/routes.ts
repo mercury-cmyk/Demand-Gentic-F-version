@@ -79,6 +79,7 @@ import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
+import agentPanelOrdersRouter from './routes/agent-panel-orders';
 import agentDefaultsRouter from './routes/agent-defaults';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
@@ -13480,6 +13481,7 @@ Provide JSON response with:
   // Legacy agent prompts routes (deprecated - use /api/prompts instead)
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
+  app.use("/api/agent-panel/orders", agentPanelOrdersRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);
 
   // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================

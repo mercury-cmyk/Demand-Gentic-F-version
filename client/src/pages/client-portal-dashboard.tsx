@@ -25,14 +25,14 @@ import {
   Building2, LogOut, Package, Plus, FileText, Users, Calendar, ChevronRight,
   LayoutDashboard, Target, BarChart3, Download, CreditCard, MessageSquare,
   Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Brain,
-  FileDown, Eye, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
+  FileDown, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
   Megaphone, UserCheck, DollarSign, Receipt, HelpCircle, Settings, Bell,
   ChevronDown, Filter, Search, RefreshCw, ExternalLink, Zap, Bot, X,
   Link as LinkIcon, Upload, Trash2, Mic, ShoppingCart, FileEdit, TestTube,
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
-  ArrowLeft, ArrowRight
+  ArrowLeft, ArrowRight, Eye
 } from 'lucide-react';
 import { ClientAgentButton, ClientAgentPanel } from '@/components/client-portal/agent/client-agent-chat';
 import {
@@ -47,11 +47,11 @@ import {
   CampaignCreationWizard,
   PreviewStudio,
 } from '@/components/client-portal/campaigns';
-import { SimulationStudioPanel as CampaignSimulationPanel } from '@/components/client-portal/simulation-studio/simulation-studio-panel';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
+import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
 
 interface ClientUser {
   id: string;
@@ -72,6 +72,14 @@ interface Campaign {
   deliveredCount: number;
   type?: string;
   campaignType?: string;
+  dialMode?: string;
+  startDate?: string;
+  endDate?: string;
+  targetQualifiedLeads?: number;
+  costPerLead?: string;
+  orderNumber?: string;
+  estimatedBudget?: string;
+  approvedBudget?: string;
 }
 
 interface Order {
@@ -265,12 +273,18 @@ export default function ClientPortalDashboard() {
   const [selectedCampaignForRequest, setSelectedCampaignForRequest] = useState<string | undefined>(undefined);
 
   // New agentic panels state
-  const [showSimulationPanel, setShowSimulationPanel] = useState(false);
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [showEmailGenerator, setShowEmailGenerator] = useState(false);
-  const [selectedCampaignForSimulation, setSelectedCampaignForSimulation] = useState<string | undefined>(undefined);
   const [showAgentChat, setShowAgentChat] = useState(false);
+
+  // Test AI Agent & Voice Selection state (client-facing)
+  const [showClientTestAgent, setShowClientTestAgent] = useState(false);
+  const [clientTestCampaignId, setClientTestCampaignId] = useState<string>('');
+  const [showClientVoiceSelect, setShowClientVoiceSelect] = useState(false);
+  const [clientVoiceCampaignId, setClientVoiceCampaignId] = useState<string>('');
+  const [clientSelectedVoice, setClientSelectedVoice] = useState<string>('Kore');
+  const [clientSelectedProvider, setClientSelectedProvider] = useState<string>('google');
 
   // Testing panels state
   const [showTestCallPanel, setShowTestCallPanel] = useState(false);
@@ -322,7 +336,6 @@ export default function ClientPortalDashboard() {
   const [previewAudienceContacts, setPreviewAudienceContacts] = useState<any[]>([]);
   const [previewActiveTab, setPreviewActiveTab] = useState<'voice' | 'email'>('voice');
   const [selectedScenario, setSelectedScenario] = useState<string>('cold');
-  const [simulationMode, setSimulationMode] = useState<'text' | 'voice'>('text');
 
   // Business Profile state
   const [businessProfile, setBusinessProfile] = useState<any>(null);
@@ -341,6 +354,48 @@ export default function ClientPortalDashboard() {
   const [showBulkUploadDialog, setShowBulkUploadDialog] = useState(false);
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
   const [crmActiveTab, setCrmActiveTab] = useState<'accounts' | 'contacts'>('accounts');
+  const [crmViewMode, setCrmViewMode] = useState<'table' | 'card'>('table');
+  const [crmSelectedItems, setCrmSelectedItems] = useState<string[]>([]);
+  const [crmDetailItem, setCrmDetailItem] = useState<any>(null);
+  const [crmDetailType, setCrmDetailType] = useState<'account' | 'contact'>('account');
+  const [showCrmDetail, setShowCrmDetail] = useState(false);
+  const [crmFilterIndustry, setCrmFilterIndustry] = useState('');
+  const [editingContact, setEditingContact] = useState<any>(null);
+  const [editingAccount, setEditingAccount] = useState<any>(null);
+  const [newContact, setNewContact] = useState({ 
+    firstName: '', 
+    lastName: '', 
+    email: '', 
+    phone: '', 
+    mobile: '',
+    company: '', 
+    title: '', 
+    department: '',
+    linkedinUrl: '',
+    crmAccountId: '',
+    status: 'active',
+    emailOptOut: false,
+    phoneOptOut: false
+  });
+  const [newAccount, setNewAccount] = useState({ 
+    name: '', // Changed from companyName 
+    industry: '', 
+    website: '', 
+    phone: '', 
+    city: '',
+    state: '',
+    country: '',
+    employees: '',
+    annualRevenue: '',
+    accountType: '',
+    description: '' 
+  });
+  const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
+  const [bulkUploadType, setBulkUploadType] = useState<'contacts' | 'accounts'>('contacts');
+
+  // Deep analysis state
+  const [deepAnalysisRunning, setDeepAnalysisRunning] = useState(false);
+  const [deepAnalysisResult, setDeepAnalysisResult] = useState<any>(null);
 
   // Feature access state (will be loaded from API)
   const [enabledFeatures, setEnabledFeatures] = useState<string[]>([
@@ -527,6 +582,21 @@ export default function ClientPortalDashboard() {
       if (crmSearchQuery) params.set('search', crmSearchQuery);
       const res = await fetch(`/api/client-portal/crm/contacts?${params}`, authHeaders);
       if (!res.ok) return { contacts: [], total: 0 };
+      return res.json();
+    },
+    enabled: !!user && enabledFeatures.includes('accounts_contacts'),
+  });
+
+  // CRM Stats query
+  const { data: crmStatsData } = useQuery<{
+    totalAccounts: number;
+    totalContacts: number;
+    optedOutContacts: number;
+  }>({
+    queryKey: ['client-portal-crm-stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/crm/stats', authHeaders);
+      if (!res.ok) return { totalAccounts: 0, totalContacts: 0, optedOutContacts: 0 };
       return res.json();
     },
     enabled: !!user && enabledFeatures.includes('accounts_contacts'),
@@ -789,6 +859,181 @@ export default function ClientPortalDashboard() {
     });
   };
 
+  // CRM: Add/Edit Contact mutation
+  const addContactMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const isEdit = !!data.id;
+      const url = isEdit ? `/api/client-portal/crm/contacts/${data.id}` : '/api/client-portal/crm/contacts';
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to save contact'); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-stats'] });
+      setShowAddContactDialog(false);
+      setEditingContact(null);
+      setNewContact({ firstName: '', lastName: '', email: '', phone: '', mobile: '', company: '', title: '', department: '', linkedinUrl: '', crmAccountId: '', status: 'active', emailOptOut: false, phoneOptOut: false });
+      toast({ title: editingContact ? 'Contact updated' : 'Contact added successfully' });
+    },
+    onError: (error: Error) => toast({ title: 'Error', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Add/Edit Account mutation
+  const addAccountMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const isEdit = !!data.id;
+      const url = isEdit ? `/api/client-portal/crm/accounts/${data.id}` : '/api/client-portal/crm/accounts';
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to save account'); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-stats'] });
+      setShowAddAccountDialog(false);
+      setEditingAccount(null);
+      setNewAccount({ name: '', industry: '', website: '', phone: '', city: '', state: '', country: '', employees: '', annualRevenue: '', accountType: '', description: '' });
+      toast({ title: editingAccount ? 'Account updated' : 'Account added successfully' });
+    },
+    onError: (error: Error) => toast({ title: 'Error', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Delete Contact mutation
+  const deleteContactMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/client-portal/crm/contacts/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to delete contact'); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-stats'] });
+      toast({ title: 'Contact deleted' });
+    },
+    onError: (error: Error) => toast({ title: 'Error', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Delete Account mutation
+  const deleteAccountMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/client-portal/crm/accounts/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to delete account'); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-stats'] });
+      toast({ title: 'Account deleted' });
+    },
+    onError: (error: Error) => toast({ title: 'Error', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Link contact to account mutation
+  const linkContactMutation = useMutation({
+    mutationFn: async ({ contactId, accountId }: { contactId: string; accountId: string | null }) => {
+      const res = await fetch(`/api/client-portal/crm/contacts/${contactId}/link-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ accountId }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to link contact'); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-contacts'] });
+      toast({ title: data.message || 'Contact linked' });
+    },
+    onError: (error: Error) => toast({ title: 'Error', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Bulk import mutation
+  const bulkImportMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      const res = await fetch('/api/client-portal/crm/bulk-import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: formData,
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to import'); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-contacts'] });
+      queryClient.invalidateQueries({ queryKey: ['client-portal-crm-accounts'] });
+      setShowBulkUploadDialog(false);
+      setBulkUploadFile(null);
+      toast({ title: 'Import complete', description: `${data.imported || 0} records imported` });
+    },
+    onError: (error: Error) => toast({ title: 'Import failed', description: error.message, variant: 'destructive' }),
+  });
+
+  // CRM: Handle bulk CSV upload
+  const handleBulkImport = () => {
+    if (!bulkUploadFile) return;
+    const fd = new FormData();
+    fd.append('file', bulkUploadFile);
+    fd.append('type', bulkUploadType);
+    bulkImportMutation.mutate(fd);
+  };
+
+  // Deep Analysis handler
+  const handleDeepAnalysis = async () => {
+    if (!orgIntelligence) return;
+    setDeepAnalysisRunning(true);
+    try {
+      const res = await fetch('/api/client-portal/settings/organization-intelligence/analyze-deep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ organizationId: orgIntelligence.id }),
+      });
+      if (!res.ok) throw new Error('Deep analysis failed');
+      const data = await res.json();
+      setDeepAnalysisResult(data);
+      refetchOrgIntel();
+      toast({ title: 'Deep analysis complete', description: 'Organization intelligence has been enriched with AI insights.' });
+    } catch (err: any) {
+      toast({ title: 'Analysis failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeepAnalysisRunning(false);
+    }
+  };
+
+  // CRM: View detail
+  const handleViewCrmDetail = (item: any, type: 'account' | 'contact') => {
+    setCrmDetailItem(item);
+    setCrmDetailType(type);
+    setShowCrmDetail(true);
+  };
+
+  // CRM: Toggle selection
+  const toggleCrmSelection = (id: string) => {
+    setCrmSelectedItems(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  // CRM: Select all
+  const toggleSelectAll = (items: any[]) => {
+    if (crmSelectedItems.length === items.length) {
+      setCrmSelectedItems([]);
+    } else {
+      setCrmSelectedItems(items.map(i => i.id));
+    }
+  };
+
   // Handler for saving business profile
   const handleSaveBusinessProfile = () => {
     if (!businessProfile) return;
@@ -1029,12 +1274,12 @@ export default function ClientPortalDashboard() {
 
   // Main navigation items - clean and unique
   // Core navigation modules - available to all clients by default
-  // Note: Accounts & Contacts removed - now accessed via Campaign Context in Preview Studio
   const navItems: { id: string; label: string; icon: any; color: string; action?: () => void; featureRequired?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
     { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
     { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'studio', label: 'Simulations', icon: Eye, color: 'from-cyan-500 to-blue-500' },
+    { id: 'crm', label: 'Accounts & Contacts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
+    { id: 'intelligence', label: 'Intelligence', icon: Brain, color: 'from-violet-500 to-purple-500' },
     { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
     { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
     { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
@@ -1176,10 +1421,6 @@ export default function ClientPortalDashboard() {
                  <Button onClick={() => setShowOrderPanel(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm h-10 px-5">
                     <Plus className="h-4 w-4 mr-2" />
                     New Order
-                  </Button>
-                  <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowSimulationPanel(true)}>
-                    <Mic className="h-4 w-4 mr-2 text-indigo-500" />
-                    Simulate
                   </Button>
                   <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowReportsPanel(true)}>
                     <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
@@ -1330,16 +1571,6 @@ export default function ClientPortalDashboard() {
                     </CardHeader>
                     <CardContent className="p-0 flex-1">
                         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                            <button onClick={() => setShowSimulationPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
-                                <div className="h-10 w-10 rounded-full bg-violet-50 dark:bg-violet-900/20 text-violet-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                                    <Mic className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <p className="font-medium text-sm text-slate-900 dark:text-white">Voice Simulation</p>
-                                    <p className="text-xs text-slate-500">Test your AI agent's voice</p>
-                                </div>
-                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-violet-500 transition-colors" />
-                            </button>
                              <button onClick={() => setShowOrderPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
                                 <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
                                     <ShoppingCart className="h-5 w-5" />
@@ -1759,6 +1990,14 @@ export default function ClientPortalDashboard() {
                     key={campaign.id}
                     campaign={campaign}
                     onRequestMoreLeads={(campaignId) => openRequestLeadsDialog(campaignId)}
+                    onTestAgent={(campaignId) => {
+                      setClientTestCampaignId(campaignId);
+                      setShowClientTestAgent(true);
+                    }}
+                    onSelectVoice={(campaignId) => {
+                      setClientVoiceCampaignId(campaignId);
+                      setShowClientVoiceSelect(true);
+                    }}
                   />
                 ))}
               </div>
@@ -2369,245 +2608,259 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
-        {/* ==================== PREVIEW STUDIO TAB ==================== */}
-        {activeTab === 'studio' && (
-          <div className="space-y-6">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">Simulation Studio</h2>
-                <p className="text-muted-foreground">Test and experience your AI agents in action</p>
-              </div>
-            </div>
-
-            {/* Main Layout - Clean Single Entry Point */}
-            <div className="grid lg:grid-cols-12 gap-6">
-              {/* Left: Campaign Selection */}
-              <div className="lg:col-span-4 space-y-4">
-                <Card className="border-2 border-violet-200 dark:border-violet-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Target className="h-4 w-4 text-violet-600" />
-                      Select Campaign
-                    </CardTitle>
-                    <CardDescription>Choose the campaign to simulate</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Select value={previewCampaignId} onValueChange={setPreviewCampaignId}>
-                      <SelectTrigger className="w-full h-12">
-                        <SelectValue placeholder="Choose a campaign..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {campaigns.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>
-                            <div className="flex items-center justify-between w-full gap-3">
-                              <span className="truncate">{c.name}</span>
-                              <Badge variant="outline" className={`text-xs shrink-0 ${
-                                c.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' :
-                                c.status === 'paused' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                'bg-gray-50 text-gray-600 border-gray-200'
-                              }`}>
-                                {c.status}
-                              </Badge>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </CardContent>
-                </Card>
-
-                {/* Email Template Generation */}
-                <Card className="border-2 border-indigo-200 dark:border-indigo-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-indigo-600" />
-                        Email Templates
-                      </div>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                     <div
-                        onClick={() => setShowEmailGenerator(true)}
-                        className="p-4 rounded-xl cursor-pointer transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                            <Sparkles className="h-5 w-5 text-indigo-600" />
-                          </div>
-                          <div>
-                            <h4 className="font-semibold text-sm">Generate AI Email Sequences</h4>
-                            <p className="text-xs text-muted-foreground">Create personalized outreach</p>
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Right: Simulation Options */}
-              <div className="lg:col-span-8 space-y-4">
-                {/* Voice Simulation Card */}
-                <Card
-                  className={`border-2 cursor-pointer transition-all hover:shadow-lg ${
-                    previewCampaignId
-                      ? 'border-violet-300 hover:border-violet-400'
-                      : 'border-slate-200 opacity-60'
-                  }`}
-                  onClick={() => {
-                    if (previewCampaignId) {
-                      setSelectedCampaignForSimulation(previewCampaignId);
-                      setShowSimulationPanel(true);
-                    }
-                  }}
-                >
-                  <CardContent className="p-6">
-                    <div className="flex items-start gap-6">
-                      <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-200">
-                        <Phone className="h-8 w-8 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-xl font-semibold mb-2">Voice & Text Simulation</h3>
-                        <p className="text-muted-foreground mb-4">
-                          Experience your AI agent with realistic voice conversations or text chat.
-                          Select from multiple voice personas and test different scenarios.
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Voice Call</Badge>
-                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Text Chat</Badge>
-                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Email Preview</Badge>
-                          <Badge variant="secondary" className="bg-violet-100 text-violet-700">Multiple Voices</Badge>
-                        </div>
-                      </div>
-                      <Button
-                        size="lg"
-                        className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
-                        disabled={!previewCampaignId}
-                      >
-                        <Play className="h-5 w-5 mr-2" />
-                        Launch
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* What You'll Experience */}
-                <Card className="bg-gradient-to-br from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30 border-violet-200 dark:border-violet-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-violet-600" />
-                      What you'll experience:
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
-                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                          <Brain className="h-4 w-4 text-violet-600" />
-                        </div>
-                        <span className="text-sm">AI agent with campaign intelligence</span>
-                      </div>
-                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
-                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                          <Volume2 className="h-4 w-4 text-violet-600" />
-                        </div>
-                        <span className="text-sm">Multiple voice personas (male/female)</span>
-                      </div>
-                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
-                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                          <Building className="h-4 w-4 text-violet-600" />
-                        </div>
-                        <span className="text-sm">Account & contact context aware</span>
-                      </div>
-                      <div className="flex items-center gap-3 p-3 rounded-lg bg-white/50 dark:bg-slate-900/50">
-                        <div className="h-8 w-8 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                          <Zap className="h-4 w-4 text-violet-600" />
-                        </div>
-                        <span className="text-sm">Real-time objection handling</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Help Text */}
-                {!previewCampaignId && (
-                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
-                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-amber-800 dark:text-amber-200">Select a Campaign</p>
-                      <p className="text-sm text-amber-700 dark:text-amber-300">Choose a campaign from the dropdown to start simulating your AI agent.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ==================== CRM TAB ==================== */}
-        {activeTab === 'crm' && hasFeature('accounts_contacts') && (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">Accounts & Contacts</h2>
-                <p className="text-muted-foreground">Manage your CRM data for campaigns</p>
+        {activeTab === 'crm' && hasFeature('accounts_contacts') && (() => {
+          const contacts = crmContacts || [];
+          const accounts = crmAccounts || [];
+          const filteredContacts = contacts.filter((c: any) => {
+            if (crmFilterIndustry && c.industry !== crmFilterIndustry) return false;
+            if (crmSearchQuery) {
+              const q = crmSearchQuery.toLowerCase();
+              return [c.firstName, c.lastName, c.email, c.company, c.title, c.phone].some(f => f?.toLowerCase()?.includes(q));
+            }
+            return true;
+          });
+          const filteredAccounts = accounts.filter((a: any) => {
+            if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
+            if (crmSearchQuery) {
+              const q = crmSearchQuery.toLowerCase();
+              return [a.name, a.industry, a.website].some(f => f?.toLowerCase()?.includes(q));
+            }
+            return true;
+          });
+          const allIndustries = [...new Set([...accounts.map((a: any) => a.industry), ...contacts.map((c: any) => c.industry)].filter(Boolean))];
+          const currentItems = crmActiveTab === 'contacts' ? filteredContacts : filteredAccounts;
+
+          return (
+          <div className="space-y-6 max-w-7xl mx-auto">
+            {/* Header with stats */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  Accounts & <span className="font-semibold">Contacts</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light">
+                  Manage your CRM data for campaigns and targeting
+                </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-3">
                 {hasFeature('bulk_upload') && (
-                  <Button variant="outline">
+                  <Button variant="outline" size="sm" onClick={() => setShowBulkUploadDialog(true)}>
                     <Upload className="h-4 w-4 mr-2" />
-                    Bulk Import
+                    Import CSV
                   </Button>
                 )}
-                <Button>
+                <Button variant="outline" size="sm" onClick={() => {
+                  const items = crmActiveTab === 'contacts' ? filteredContacts : filteredAccounts;
+                  const headers = crmActiveTab === 'contacts' ? 'First Name,Last Name,Email,Phone,Company,Title' : 'Company Name,Industry,Website,Phone';
+                  const rows = items.map((i: any) => crmActiveTab === 'contacts' 
+                    ? `${i.firstName},${i.lastName},${i.email},${i.phone},${i.company},${i.title}`
+                    : `${i.companyName},${i.industry},${i.website},${i.phone}`
+                  );
+                  const csv = [headers, ...rows].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = `${crmActiveTab}.csv`; a.click();
+                  toast({ title: 'Exported', description: `${items.length} ${crmActiveTab} exported to CSV` });
+                }}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+                <Button size="sm" onClick={() => crmActiveTab === 'contacts' ? setShowAddContactDialog(true) : setShowAddAccountDialog(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Add Contact
+                  {crmActiveTab === 'contacts' ? 'Add Contact' : 'Add Account'}
                 </Button>
               </div>
             </div>
 
-            <Tabs defaultValue="contacts" className="w-full">
-              <TabsList>
-                <TabsTrigger value="contacts">Contacts</TabsTrigger>
-                <TabsTrigger value="accounts">Accounts</TabsTrigger>
-              </TabsList>
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Accounts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? accounts.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Contacts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalContacts ?? contacts.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Industries</p>
+                <p className="text-2xl font-semibold">{allIndustries.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Opted Out</p>
+                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+              </CardContent></Card>
+            </div>
 
-              <TabsContent value="contacts" className="mt-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle>Contacts</CardTitle>
-                      <div className="flex items-center gap-2">
-                        <Input placeholder="Search contacts..." className="w-[250px]" />
+            {/* Tabs + Filters + View Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Button variant={crmActiveTab === 'accounts' ? 'default' : 'outline'} size="sm" onClick={() => { setCrmActiveTab('accounts'); setCrmSelectedItems([]); }}>
+                  <Building2 className="h-4 w-4 mr-1" /> Accounts ({accounts.length})
+                </Button>
+                <Button variant={crmActiveTab === 'contacts' ? 'default' : 'outline'} size="sm" onClick={() => { setCrmActiveTab('contacts'); setCrmSelectedItems([]); }}>
+                  <Users className="h-4 w-4 mr-1" /> Contacts ({contacts.length})
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input placeholder={`Search ${crmActiveTab}...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
+                </div>
+                {allIndustries.length > 0 && (
+                  <Select value={crmFilterIndustry} onValueChange={setCrmFilterIndustry}>
+                    <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="All Industries" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All Industries</SelectItem>
+                      {allIndustries.map(ind => <SelectItem key={ind} value={ind as string}>{ind as string}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                <div className="flex border rounded-md overflow-hidden">
+                  <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
+                    <FileSpreadsheet className="h-4 w-4" />
+                  </Button>
+                  <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
+                    <LayoutDashboard className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {crmSelectedItems.length > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <Badge variant="secondary">{crmSelectedItems.length} selected</Badge>
+                <Button variant="outline" size="sm" onClick={() => setCrmSelectedItems([])}>Deselect All</Button>
+                <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                  if (!window.confirm(`Delete ${crmSelectedItems.length} ${crmActiveTab}?`)) return;
+                  const deleteMutation = crmActiveTab === 'contacts' ? deleteContactMutation : deleteAccountMutation;
+                  crmSelectedItems.forEach(id => deleteMutation.mutate(id));
+                  setCrmSelectedItems([]);
+                }}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </div>
+            )}
+
+            {/* Content - ACCOUNTS */}
+            {crmActiveTab === 'accounts' && (
+              <>
+                {crmAccountsLoading ? (
+                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                ) : filteredAccounts.length === 0 ? (
+                  <Card className="border-dashed">
+                    <CardContent className="py-16 text-center">
+                      <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                      <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
+                      <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
+                      <div className="flex justify-center gap-3">
+                        <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
+                        {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
                       </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {(crmContacts || []).length === 0 ? (
-                      <div className="text-center py-12">
-                        <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <h3 className="font-semibold mb-2">No Contacts Yet</h3>
-                        <p className="text-muted-foreground mb-4">Add contacts manually or import from a file</p>
-                        <div className="flex justify-center gap-2">
-                          <Button>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Contact
-                          </Button>
-                          {hasFeature('bulk_upload') && (
-                            <Button variant="outline">
-                              <Upload className="h-4 w-4 mr-2" />
-                              Import CSV
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
+                    </CardContent>
+                  </Card>
+                ) : crmViewMode === 'table' ? (
+                  <Card className="shadow-sm">
+                    <CardContent className="p-0">
                       <div className="rounded-lg border overflow-hidden">
                         <Table>
                           <TableHeader>
-                            <TableRow>
+                            <TableRow className="bg-slate-50 dark:bg-slate-800">
+                              <TableHead className="w-10">
+                                <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredAccounts.length && filteredAccounts.length > 0} onChange={() => toggleSelectAll(filteredAccounts)} />
+                              </TableHead>
+                              <TableHead>Company</TableHead>
+                              <TableHead>Industry</TableHead>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Website</TableHead>
+                              <TableHead>Contacts</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredAccounts.map((account: any) => (
+                              <TableRow key={account.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(account, 'account')}>
+                                <TableCell onClick={e => e.stopPropagation()}>
+                                  <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={() => toggleCrmSelection(account.id)} />
+                                </TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 text-xs font-bold">{account.name?.[0]}</div>
+                                    {account.name}
+                                  </div>
+                                </TableCell>
+                                <TableCell>{account.industry && <Badge variant="outline" className="text-xs">{account.industry}</Badge>}</TableCell>
+                                <TableCell><span className="text-xs capitalize text-muted-foreground">{account.accountType || '-'}</span></TableCell>
+                                <TableCell className="text-sm text-muted-foreground">{account.website}</TableCell>
+                                <TableCell><Badge variant="secondary">{account.contactCount || 0}</Badge></TableCell>
+                                <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                                  <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(account, 'account')}><Eye className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="sm" onClick={() => { setEditingAccount(account); setShowAddAccountDialog(true); }}><Pencil className="h-4 w-4" /></Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredAccounts.map((account: any) => (
+                      <Card key={account.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(account, 'account')}>
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold">{account.name?.[0]}</div>
+                              <div>
+                                <CardTitle className="text-base">{account.name}</CardTitle>
+                                {account.industry && <Badge variant="outline" className="text-xs mt-1">{account.industry}</Badge>}
+                              </div>
+                            </div>
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(account.id); }} />
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                          {account.website && <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5" />{account.website}</div>}
+                          {account.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{account.phone}</div>}
+                          <div className="flex items-center gap-2"><Users className="h-3.5 w-3.5" />{account.contactCount || 0} contacts</div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Content - CONTACTS */}
+            {crmActiveTab === 'contacts' && (
+              <>
+                {crmContactsLoading ? (
+                  <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                ) : filteredContacts.length === 0 ? (
+                  <Card className="border-dashed">
+                    <CardContent className="py-16 text-center">
+                      <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                      <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
+                      <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
+                      <div className="flex justify-center gap-3">
+                        <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
+                        {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : crmViewMode === 'table' ? (
+                  <Card className="shadow-sm">
+                    <CardContent className="p-0">
+                      <div className="rounded-lg border overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-slate-50 dark:bg-slate-800">
+                              <TableHead className="w-10">
+                                <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredContacts.length && filteredContacts.length > 0} onChange={() => toggleSelectAll(filteredContacts)} />
+                              </TableHead>
                               <TableHead>Name</TableHead>
                               <TableHead>Email</TableHead>
                               <TableHead>Phone</TableHead>
@@ -2617,89 +2870,280 @@ export default function ClientPortalDashboard() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {(crmContacts || []).map((contact: any) => (
-                              <TableRow key={contact.id}>
-                                <TableCell className="font-medium">
-                                  {contact.firstName} {contact.lastName}
+                            {filteredContacts.map((contact: any) => (
+                              <TableRow key={contact.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                                <TableCell onClick={e => e.stopPropagation()}>
+                                  <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={() => toggleCrmSelection(contact.id)} />
                                 </TableCell>
-                                <TableCell>{contact.email}</TableCell>
-                                <TableCell>{contact.phone}</TableCell>
-                                <TableCell>{contact.company}</TableCell>
-                                <TableCell>{contact.title}</TableCell>
-                                <TableCell className="text-right">
-                                  <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="sm"><Pencil className="h-4 w-4" /></Button>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    <Avatar className="h-8 w-8">
+                                      <AvatarFallback className="text-xs bg-primary/10">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                                    </Avatar>
+                                    {contact.firstName} {contact.lastName}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm">{contact.email}</TableCell>
+                                <TableCell className="text-sm">{contact.phone}</TableCell>
+                                <TableCell className="text-sm">{contact.company}</TableCell>
+                                <TableCell className="text-sm">{contact.title}</TableCell>
+                                <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                                  <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(contact, 'contact')}><Eye className="h-4 w-4" /></Button>
+                                  <Button variant="ghost" size="sm" onClick={() => { setEditingContact(contact); setShowAddContactDialog(true); }}><Pencil className="h-4 w-4" /></Button>
                                 </TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
                         </Table>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredContacts.map((contact: any) => (
+                      <Card key={contact.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10">
+                                <AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-500 text-white font-bold">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
+                                {contact.title && <p className="text-xs text-muted-foreground mt-0.5">{contact.title}</p>}
+                              </div>
+                            </div>
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(contact.id); }} />
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                          {contact.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" />{contact.email}</div>}
+                          {contact.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{contact.phone}</div>}
+                          {contact.company && <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />{contact.company}</div>}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          );
+        })()}
 
-              <TabsContent value="accounts" className="mt-4">
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle>Accounts</CardTitle>
-                      <div className="flex items-center gap-2">
-                        <Input placeholder="Search accounts..." className="w-[250px]" />
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add Account
-                        </Button>
+        {/* ==================== INTELLIGENCE TAB ==================== */}
+        {activeTab === 'intelligence' && (
+          <div className="space-y-6 max-w-5xl mx-auto">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  Organization <span className="font-semibold">Intelligence</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light">
+                  Your business context powers AI agents, campaign targeting, and personalized outreach
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {orgIntelligence && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={handleDeepAnalysis} disabled={deepAnalysisRunning}>
+                      {deepAnalysisRunning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2 text-amber-500" />}
+                      {deepAnalysisRunning ? 'Analyzing...' : 'AI Deep Analysis'}
+                    </Button>
+                    <Button size="sm" onClick={handleSaveOrgIntelligence} disabled={saveOrgIntelMutation.isPending}>
+                      {saveOrgIntelMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      Save Changes
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {orgIntelLoading ? (
+              <div className="flex items-center justify-center py-16"><Loader2 className="h-10 w-10 animate-spin text-muted-foreground" /></div>
+            ) : !orgIntelligence ? (
+              <Card className="border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Brain className="h-16 w-16 mx-auto mb-4 text-violet-400/50" />
+                  <h3 className="text-xl font-semibold mb-2">No Organization Connected</h3>
+                  <p className="text-muted-foreground mb-6 max-w-md mx-auto">Create your organization profile to power AI agents with your business context. This data shapes how your AI sounds, what it says, and who it targets.</p>
+                  <Button size="lg" onClick={() => setShowCreateOrgDialog(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Organization
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-5">
+                {/* Org Header Card */}
+                <Card className="shadow-sm border-violet-200/50 dark:border-violet-800/50 bg-gradient-to-r from-violet-50/50 to-white dark:from-violet-950/20 dark:to-slate-900">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-4">
+                      <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                        <Brain className="h-7 w-7 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-xl font-semibold">{orgIntelligence.name}</h3>
+                        <div className="flex items-center gap-3 mt-1">
+                          {orgIntelligence.domain && <span className="text-sm text-muted-foreground flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{orgIntelligence.domain}</span>}
+                          {orgIntelligence.industry && <Badge variant="outline">{orgIntelligence.industry}</Badge>}
+                          {orgIntelligenceData?.campaigns?.length > 0 && <Badge variant="secondary">{orgIntelligenceData.campaigns.length} campaign{orgIntelligenceData.campaigns.length !== 1 ? 's' : ''}</Badge>}
+                        </div>
                       </div>
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    {(crmAccounts || []).length === 0 ? (
-                      <div className="text-center py-12">
-                        <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                        <h3 className="font-semibold mb-2">No Accounts Yet</h3>
-                        <p className="text-muted-foreground mb-4">Create accounts to organize your contacts</p>
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add Account
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border overflow-hidden">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Company Name</TableHead>
-                              <TableHead>Industry</TableHead>
-                              <TableHead>Website</TableHead>
-                              <TableHead>Contacts</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {(crmAccounts || []).map((account: any) => (
-                              <TableRow key={account.id}>
-                                <TableCell className="font-medium">{account.companyName}</TableCell>
-                                <TableCell>{account.industry}</TableCell>
-                                <TableCell>{account.website}</TableCell>
-                                <TableCell>
-                                  <Badge variant="secondary">{account.contactCount || 0}</Badge>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="sm"><Pencil className="h-4 w-4" /></Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
-              </TabsContent>
-            </Tabs>
+
+                {/* Deep Analysis Result */}
+                {deepAnalysisResult && (
+                  <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-5 w-5 text-amber-500" />AI Analysis Insights</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{typeof deepAnalysisResult === 'object' ? JSON.stringify(deepAnalysisResult.insights || deepAnalysisResult, null, 2) : deepAnalysisResult}</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Intelligence Sections Grid */}
+                <div className="grid md:grid-cols-2 gap-5">
+                  {/* Identity */}
+                  <Card className="shadow-sm">
+                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'identity' ? null : 'identity')}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Building className="h-5 w-5 text-blue-500" /><CardTitle className="text-base">Company Identity</CardTitle></div>
+                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'identity' ? 'rotate-180' : ''}`} />
+                      </div>
+                      <CardDescription>Legal name, description, industry, and company size</CardDescription>
+                    </CardHeader>
+                    {orgIntelligenceExpanded === 'identity' && (
+                      <CardContent className="space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div className="space-y-2"><Label>Legal Name</Label><Input value={orgIntelligence.identity?.legalName || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, legalName: e.target.value } }))} /></div>
+                          <div className="space-y-2"><Label>Industry</Label><Input value={orgIntelligence.identity?.industry || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, industry: e.target.value } }))} /></div>
+                        </div>
+                        <div className="space-y-2"><Label>Description</Label><Textarea rows={3} value={orgIntelligence.identity?.description || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, description: e.target.value } }))} placeholder="Brief description of your organization..." /></div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div className="space-y-2"><Label>Employees</Label><Input value={orgIntelligence.identity?.employees || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, employees: e.target.value } }))} placeholder="e.g., 50-100" /></div>
+                          <div className="space-y-2"><Label>Founded Year</Label><Input type="number" value={orgIntelligence.identity?.foundedYear || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, identity: { ...prev.identity, foundedYear: parseInt(e.target.value) || null } }))} /></div>
+                        </div>
+                      </CardContent>
+                    )}
+                    {orgIntelligenceExpanded !== 'identity' && orgIntelligence.identity?.description && (
+                      <CardContent className="pt-0"><p className="text-sm text-muted-foreground line-clamp-2">{orgIntelligence.identity.description}</p></CardContent>
+                    )}
+                  </Card>
+
+                  {/* Offerings */}
+                  <Card className="shadow-sm">
+                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'offerings' ? null : 'offerings')}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Package className="h-5 w-5 text-green-500" /><CardTitle className="text-base">Products & Services</CardTitle></div>
+                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'offerings' ? 'rotate-180' : ''}`} />
+                      </div>
+                      <CardDescription>Core products, problems solved, differentiators</CardDescription>
+                    </CardHeader>
+                    {orgIntelligenceExpanded === 'offerings' && (
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2"><Label>Core Products/Services (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.coreProducts || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, coreProducts: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                        <div className="space-y-2"><Label>Problems We Solve (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.problemsSolved || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, problemsSolved: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                        <div className="space-y-2"><Label>Key Differentiators (one per line)</Label><Textarea rows={3} value={(orgIntelligence.offerings?.differentiators || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, offerings: { ...prev.offerings, differentiators: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                      </CardContent>
+                    )}
+                    {orgIntelligenceExpanded !== 'offerings' && orgIntelligence.offerings?.coreProducts?.length > 0 && (
+                      <CardContent className="pt-0"><div className="flex flex-wrap gap-1">{orgIntelligence.offerings.coreProducts.slice(0, 3).map((p: string, i: number) => <Badge key={i} variant="secondary" className="text-xs">{p}</Badge>)}{orgIntelligence.offerings.coreProducts.length > 3 && <Badge variant="outline" className="text-xs">+{orgIntelligence.offerings.coreProducts.length - 3}</Badge>}</div></CardContent>
+                    )}
+                  </Card>
+
+                  {/* ICP */}
+                  <Card className="shadow-sm">
+                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'icp' ? null : 'icp')}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Target className="h-5 w-5 text-purple-500" /><CardTitle className="text-base">Ideal Customer Profile</CardTitle></div>
+                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'icp' ? 'rotate-180' : ''}`} />
+                      </div>
+                      <CardDescription>Target industries, company size, and objections</CardDescription>
+                    </CardHeader>
+                    {orgIntelligenceExpanded === 'icp' && (
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2"><Label>Target Industries (one per line)</Label><Textarea rows={3} value={(orgIntelligence.icp?.industries || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, industries: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                        <div className="space-y-2"><Label>Target Company Size</Label><Input value={orgIntelligence.icp?.companySize || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, companySize: e.target.value } }))} placeholder="e.g., 100-500 employees" /></div>
+                        <div className="space-y-2"><Label>Common Objections (one per line)</Label><Textarea rows={3} value={(orgIntelligence.icp?.objections || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, icp: { ...prev.icp, objections: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                      </CardContent>
+                    )}
+                    {orgIntelligenceExpanded !== 'icp' && orgIntelligence.icp?.industries?.length > 0 && (
+                      <CardContent className="pt-0"><div className="flex flex-wrap gap-1">{orgIntelligence.icp.industries.slice(0, 4).map((ind: string, i: number) => <Badge key={i} variant="outline" className="text-xs">{ind}</Badge>)}</div></CardContent>
+                    )}
+                  </Card>
+
+                  {/* Positioning */}
+                  <Card className="shadow-sm">
+                    <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'positioning' ? null : 'positioning')}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2"><Megaphone className="h-5 w-5 text-orange-500" /><CardTitle className="text-base">Positioning & Messaging</CardTitle></div>
+                        <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'positioning' ? 'rotate-180' : ''}`} />
+                      </div>
+                      <CardDescription>Value proposition, elevator pitch, competitors</CardDescription>
+                    </CardHeader>
+                    {orgIntelligenceExpanded === 'positioning' && (
+                      <CardContent className="space-y-4">
+                        <div className="space-y-2"><Label>One-Liner / Elevator Pitch</Label><Input value={orgIntelligence.positioning?.oneLiner || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, oneLiner: e.target.value } }))} placeholder="We help [target] achieve [outcome] by [method]" /></div>
+                        <div className="space-y-2"><Label>Value Proposition</Label><Textarea rows={3} value={orgIntelligence.positioning?.valueProposition || ''} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, valueProposition: e.target.value } }))} /></div>
+                        <div className="space-y-2"><Label>Competitors (one per line)</Label><Textarea rows={2} value={(orgIntelligence.positioning?.competitors || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, competitors: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                        <div className="space-y-2"><Label>Why Choose Us (one per line)</Label><Textarea rows={3} value={(orgIntelligence.positioning?.whyUs || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, positioning: { ...prev.positioning, whyUs: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                      </CardContent>
+                    )}
+                    {orgIntelligenceExpanded !== 'positioning' && orgIntelligence.positioning?.oneLiner && (
+                      <CardContent className="pt-0"><p className="text-sm text-muted-foreground italic line-clamp-2">"{orgIntelligence.positioning.oneLiner}"</p></CardContent>
+                    )}
+                  </Card>
+                </div>
+
+                {/* Outreach - Full Width */}
+                <Card className="shadow-sm">
+                  <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => setOrgIntelligenceExpanded(orgIntelligenceExpanded === 'outreach' ? null : 'outreach')}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2"><PhoneCall className="h-5 w-5 text-cyan-500" /><CardTitle className="text-base">Outreach Guidance</CardTitle></div>
+                      <ChevronDown className={`h-5 w-5 transition-transform ${orgIntelligenceExpanded === 'outreach' ? 'rotate-180' : ''}`} />
+                    </div>
+                    <CardDescription>Email angles, call openers, and objection handling strategies</CardDescription>
+                  </CardHeader>
+                  {orgIntelligenceExpanded === 'outreach' && (
+                    <CardContent className="space-y-4">
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div className="space-y-2"><Label>Email Angles / Hooks (one per line)</Label><Textarea rows={4} value={(orgIntelligence.outreach?.emailAngles || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, outreach: { ...prev.outreach, emailAngles: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                        <div className="space-y-2"><Label>Call Openers (one per line)</Label><Textarea rows={4} value={(orgIntelligence.outreach?.callOpeners || []).join('\n')} onChange={e => setOrgIntelligence((prev: any) => ({ ...prev, outreach: { ...prev.outreach, callOpeners: e.target.value.split('\n').filter(Boolean) } }))} /></div>
+                      </div>
+                    </CardContent>
+                  )}
+                  {orgIntelligenceExpanded !== 'outreach' && (orgIntelligence.outreach?.emailAngles?.length > 0 || orgIntelligence.outreach?.callOpeners?.length > 0) && (
+                    <CardContent className="pt-0 flex gap-4 text-sm text-muted-foreground">
+                      {orgIntelligence.outreach?.emailAngles?.length > 0 && <span>{orgIntelligence.outreach.emailAngles.length} email angles</span>}
+                      {orgIntelligence.outreach?.callOpeners?.length > 0 && <span>{orgIntelligence.outreach.callOpeners.length} call openers</span>}
+                    </CardContent>
+                  )}
+                </Card>
+
+                {/* Context Generation Info */}
+                <Card className="border-indigo-200/50 dark:border-indigo-800/50 bg-indigo-50/30 dark:bg-indigo-950/10 shadow-sm">
+                  <CardContent className="p-5">
+                    <div className="flex items-start gap-3">
+                      <Zap className="h-5 w-5 text-indigo-500 mt-0.5" />
+                      <div>
+                        <h4 className="font-medium text-sm mb-1">How Intelligence Powers Your Campaigns</h4>
+                        <p className="text-xs text-muted-foreground">
+                          When you create campaigns via the Campaign Wizard, your organization intelligence is automatically injected into AI context layers:
+                          <br /><span className="font-semibold">Identity → ICP → Positioning → Outreach Guidance</span>
+                          <br />This ensures your AI agents speak with your brand voice, target the right prospects, and handle objections using your competitive positioning.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
         )}
 
@@ -3478,6 +3922,246 @@ export default function ClientPortalDashboard() {
       {/* End Main Content Area */}
 
       {/* ==================== DIALOGS ==================== */}
+
+      {/* Add Contact Dialog */}
+      <Dialog open={showAddContactDialog} onOpenChange={(open) => { 
+        setShowAddContactDialog(open); 
+        if (!open) { 
+          setEditingContact(null); 
+          setNewContact({ 
+            firstName: '', lastName: '', email: '', phone: '', mobile: '',
+            company: '', title: '', department: '', linkedinUrl: '', 
+            crmAccountId: '', status: 'active', emailOptOut: false, phoneOptOut: false 
+          }); 
+        } 
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingContact ? 'Edit Contact' : 'Add New Contact'}</DialogTitle>
+            <DialogDescription>Fill in the contact details below</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>First Name *</Label><Input value={editingContact?.firstName ?? newContact.firstName} onChange={e => editingContact ? setEditingContact({ ...editingContact, firstName: e.target.value }) : setNewContact(p => ({ ...p, firstName: e.target.value }))} /></div>
+            <div className="space-y-2"><Label>Last Name *</Label><Input value={editingContact?.lastName ?? newContact.lastName} onChange={e => editingContact ? setEditingContact({ ...editingContact, lastName: e.target.value }) : setNewContact(p => ({ ...p, lastName: e.target.value }))} /></div>
+            
+            <div className="space-y-2"><Label>Email</Label><Input type="email" value={editingContact?.email ?? newContact.email} onChange={e => editingContact ? setEditingContact({ ...editingContact, email: e.target.value }) : setNewContact(p => ({ ...p, email: e.target.value }))} /></div>
+            <div className="space-y-2"><Label>Title</Label><Input value={editingContact?.title ?? newContact.title} onChange={e => editingContact ? setEditingContact({ ...editingContact, title: e.target.value }) : setNewContact(p => ({ ...p, title: e.target.value }))} /></div>
+            
+            <div className="space-y-2"><Label>Phone</Label><Input value={editingContact?.phone ?? newContact.phone} onChange={e => editingContact ? setEditingContact({ ...editingContact, phone: e.target.value }) : setNewContact(p => ({ ...p, phone: e.target.value }))} /></div>
+            <div className="space-y-2"><Label>Mobile</Label><Input value={editingContact?.mobile ?? newContact.mobile} onChange={e => editingContact ? setEditingContact({ ...editingContact, mobile: e.target.value }) : setNewContact(p => ({ ...p, mobile: e.target.value }))} /></div>
+            
+            <div className="space-y-2"><Label>Department</Label><Input value={editingContact?.department ?? newContact.department} onChange={e => editingContact ? setEditingContact({ ...editingContact, department: e.target.value }) : setNewContact(p => ({ ...p, department: e.target.value }))} /></div>
+            <div className="space-y-2"><Label>Status</Label>
+              <Select value={editingContact?.status ?? newContact.status} onValueChange={v => editingContact ? setEditingContact({ ...editingContact, status: v }) : setNewContact(p => ({ ...p, status: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="lead">Lead</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2 col-span-2"><Label>LinkedIn URL</Label><Input value={editingContact?.linkedinUrl ?? newContact.linkedinUrl} onChange={e => editingContact ? setEditingContact({ ...editingContact, linkedinUrl: e.target.value }) : setNewContact(p => ({ ...p, linkedinUrl: e.target.value }))} /></div>
+            
+            <div className="space-y-2 col-span-2">
+              <Label>Linked Account</Label>
+              <Select value={editingContact?.crmAccountId ?? newContact.crmAccountId} onValueChange={v => editingContact ? setEditingContact({ ...editingContact, crmAccountId: v }) : setNewContact(p => ({ ...p, crmAccountId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select an account..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Account</SelectItem>
+                  {crmAccounts.map((acc: any) => (
+                    <SelectItem key={acc.id} value={acc.id}>{acc.name || acc.companyName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center space-x-2 pt-2">
+               <input type="checkbox" id="emailOptOut" className="rounded border-gray-300" 
+                 checked={editingContact?.emailOptOut ?? newContact.emailOptOut} 
+                 onChange={e => editingContact ? setEditingContact({ ...editingContact, emailOptOut: e.target.checked }) : setNewContact(p => ({ ...p, emailOptOut: e.target.checked }))} 
+               />
+               <Label htmlFor="emailOptOut">Opt-out of Emails</Label>
+            </div>
+            <div className="flex items-center space-x-2 pt-2">
+               <input type="checkbox" id="phoneOptOut" className="rounded border-gray-300"
+                 checked={editingContact?.phoneOptOut ?? newContact.phoneOptOut}
+                 onChange={e => editingContact ? setEditingContact({ ...editingContact, phoneOptOut: e.target.checked }) : setNewContact(p => ({ ...p, phoneOptOut: e.target.checked }))}
+               />
+               <Label htmlFor="phoneOptOut">Opt-out of Calls</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowAddContactDialog(false); setEditingContact(null); }}>Cancel</Button>
+            <Button onClick={() => addContactMutation.mutate(editingContact || newContact)} disabled={addContactMutation.isPending}>
+              {addContactMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {editingContact ? 'Save Changes' : 'Add Contact'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Account Dialog */}
+      <Dialog open={showAddAccountDialog} onOpenChange={(open) => { 
+        setShowAddAccountDialog(open); 
+        if (!open) { 
+          setEditingAccount(null); 
+          setNewAccount({ 
+            name: '', industry: '', website: '', phone: '', 
+            city: '', state: '', country: '', 
+            employees: '', annualRevenue: '', accountType: '', description: '' 
+          }); 
+        } 
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingAccount ? 'Edit Account' : 'Add New Account'}</DialogTitle>
+            <DialogDescription>Fill in the company details below</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2"><Label>Company Name *</Label><Input value={editingAccount?.name ?? newAccount.name} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, name: e.target.value }) : setNewAccount(p => ({ ...p, name: e.target.value }))} /></div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>Industry</Label><Input value={editingAccount?.industry ?? newAccount.industry} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, industry: e.target.value }) : setNewAccount(p => ({ ...p, industry: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Account Type</Label>
+                 <Select value={editingAccount?.accountType ?? newAccount.accountType} onValueChange={v => editingAccount ? setEditingAccount({ ...editingAccount, accountType: v }) : setNewAccount(p => ({ ...p, accountType: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prospect">Prospect</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
+                    <SelectItem value="partner">Partner</SelectItem>
+                    <SelectItem value="vendor">Vendor</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+               <div className="space-y-2"><Label>Employees</Label><Input value={editingAccount?.employees ?? newAccount.employees} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, employees: e.target.value }) : setNewAccount(p => ({ ...p, employees: e.target.value }))} placeholder="e.g. 100-500" /></div>
+               <div className="space-y-2"><Label>Annual Revenue</Label><Input value={editingAccount?.annualRevenue ?? newAccount.annualRevenue} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, annualRevenue: e.target.value }) : setNewAccount(p => ({ ...p, annualRevenue: e.target.value }))} placeholder="e.g. $1M - $5M" /></div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>Website</Label><Input value={editingAccount?.website ?? newAccount.website} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, website: e.target.value }) : setNewAccount(p => ({ ...p, website: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Phone</Label><Input value={editingAccount?.phone ?? newAccount.phone} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, phone: e.target.value }) : setNewAccount(p => ({ ...p, phone: e.target.value }))} /></div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-2"><Label>City</Label><Input value={editingAccount?.city ?? newAccount.city} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, city: e.target.value }) : setNewAccount(p => ({ ...p, city: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>State</Label><Input value={editingAccount?.state ?? newAccount.state} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, state: e.target.value }) : setNewAccount(p => ({ ...p, state: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Country</Label><Input value={editingAccount?.country ?? newAccount.country} onChange={e => editingAccount ? setEditingAccount({ ...editingAccount, country: e.target.value }) : setNewAccount(p => ({ ...p, country: e.target.value }))} /></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowAddAccountDialog(false); setEditingAccount(null); }}>Cancel</Button>
+            <Button onClick={() => addAccountMutation.mutate(editingAccount || newAccount)} disabled={addAccountMutation.isPending}>
+              {addAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {editingAccount ? 'Save Changes' : 'Add Account'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Import Dialog */}
+      <Dialog open={showBulkUploadDialog} onOpenChange={setShowBulkUploadDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Import CSV</DialogTitle>
+            <DialogDescription>Upload a CSV file to bulk import {bulkUploadType}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button variant={bulkUploadType === 'contacts' ? 'default' : 'outline'} size="sm" onClick={() => setBulkUploadType('contacts')}>Contacts</Button>
+              <Button variant={bulkUploadType === 'accounts' ? 'default' : 'outline'} size="sm" onClick={() => setBulkUploadType('accounts')}>Accounts</Button>
+            </div>
+            <div className="border-2 border-dashed rounded-lg p-6 text-center">
+              <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground mb-2">Choose a CSV file to upload</p>
+              <input type="file" accept=".csv" className="block w-full text-sm" onChange={e => setBulkUploadFile(e.target.files?.[0] || null)} />
+            </div>
+            {bulkUploadFile && <p className="text-sm text-green-600">Selected: {bulkUploadFile.name}</p>}
+            <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+              <p className="font-medium mb-1">Expected columns:</p>
+              <p>{bulkUploadType === 'contacts' ? 'firstName, lastName, email, phone, company, title' : 'companyName, industry, website, phone'}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkUploadDialog(false)}>Cancel</Button>
+            <Button onClick={handleBulkImport} disabled={!bulkUploadFile || bulkImportMutation.isPending}>
+              {bulkImportMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CRM Detail View Dialog */}
+      <Dialog open={showCrmDetail} onOpenChange={setShowCrmDetail}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              {crmDetailType === 'contact' ? (
+                <Avatar className="h-10 w-10"><AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-500 text-white">{crmDetailItem?.firstName?.[0]}{crmDetailItem?.lastName?.[0]}</AvatarFallback></Avatar>
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold">{crmDetailItem?.name?.[0]}</div>
+              )}
+              <div>
+                <span>{crmDetailType === 'contact' ? `${crmDetailItem?.firstName} ${crmDetailItem?.lastName}` : crmDetailItem?.name}</span>
+                {crmDetailType === 'contact' && crmDetailItem?.title && <p className="text-sm text-muted-foreground font-normal">{crmDetailItem.title} {crmDetailItem.department ? `• ${crmDetailItem.department}` : ''}</p>}
+                {crmDetailType === 'account' && crmDetailItem?.industry && <p className="text-sm text-muted-foreground font-normal">{crmDetailItem.industry}</p>}
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          {crmDetailItem && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {crmDetailType === 'contact' ? (
+                  <>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Email</p><p className="text-sm font-medium">{crmDetailItem.email || '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Phone</p><p className="text-sm font-medium">{crmDetailItem.phone || '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Mobile</p><p className="text-sm font-medium">{crmDetailItem.mobile || '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Company</p><p className="text-sm font-medium">{crmDetailItem.company || '—'}</p></div>
+                    
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Status</p><Badge variant={crmDetailItem.status === 'active' ? 'outline' : 'secondary'} className="capitalize">{crmDetailItem.status}</Badge></div>
+                    
+                    {crmDetailItem.linkedinUrl && <div className="space-y-1 col-span-2"><p className="text-xs text-muted-foreground">LinkedIn</p><a href={crmDetailItem.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline">{crmDetailItem.linkedinUrl}</a></div>}
+                    
+                    {(crmDetailItem.emailOptOut || crmDetailItem.phoneOptOut) && (
+                      <div className="col-span-2 flex gap-2 pt-2">
+                        {crmDetailItem.emailOptOut && <Badge variant="destructive" className="text-xs">Email Opt-out</Badge>}
+                        {crmDetailItem.phoneOptOut && <Badge variant="destructive" className="text-xs">Phone Opt-out</Badge>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Website</p><p className="text-sm font-medium">{crmDetailItem.website ? <a href={crmDetailItem.website} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{crmDetailItem.website}</a> : '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Type</p><p className="text-sm font-medium capitalize">{crmDetailItem.accountType || '—'}</p></div>
+                    
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Employees</p><p className="text-sm font-medium">{crmDetailItem.employees || '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Revenue</p><p className="text-sm font-medium">{crmDetailItem.annualRevenue || '—'}</p></div>
+                    
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Phone</p><p className="text-sm font-medium">{crmDetailItem.phone || '—'}</p></div>
+                    <div className="space-y-1"><p className="text-xs text-muted-foreground">Contacts</p><p className="text-sm font-medium">{crmDetailItem.contactCount || 0}</p></div>
+                    
+                    {(crmDetailItem.city || crmDetailItem.state || crmDetailItem.country) && (
+                      <div className="space-y-1 col-span-2"><p className="text-xs text-muted-foreground">Location</p><p className="text-sm font-medium">{[crmDetailItem.city, crmDetailItem.state, crmDetailItem.country].filter(Boolean).join(', ')}</p></div>
+                    )}
+                    
+                    {crmDetailItem.description && <div className="space-y-1 col-span-2"><p className="text-xs text-muted-foreground">Description</p><p className="text-sm">{crmDetailItem.description}</p></div>}
+                  </>
+                )}
+              </div>
+              {crmDetailItem.createdAt && (
+                <div className="pt-2 border-t text-xs text-muted-foreground">
+                  Added {new Date(crmDetailItem.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Campaign creation dialog is handled by showCreateDialog */}
 
@@ -4285,16 +4969,6 @@ export default function ClientPortalDashboard() {
         onClose={() => setShowExportDialog(false)}
       />
 
-      {/* Unified Simulation Studio Panel
-          Single entry point for all simulation: Voice, Text, Email
-          Supports multiple voice personas (male/female) with proper context awareness
-      */}
-      <CampaignSimulationPanel
-        open={showSimulationPanel}
-        onOpenChange={setShowSimulationPanel}
-        campaignId={selectedCampaignForSimulation}
-      />
-
       {/* AI Reports Panel */}
       <AgenticReportsPanel
         open={showReportsPanel}
@@ -4376,6 +5050,192 @@ export default function ClientPortalDashboard() {
             >
               {createOrgMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Create Organization
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== TEST AI AGENT DIALOG ==================== */}
+      <Dialog open={showClientTestAgent} onOpenChange={setShowClientTestAgent}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-violet-600" />
+              Test AI Agent
+            </DialogTitle>
+            <DialogDescription>
+              Make a real test call to validate your AI agent for campaign: {campaigns.find(c => c.id === clientTestCampaignId)?.name || ''}
+            </DialogDescription>
+          </DialogHeader>
+          {clientTestCampaignId && (
+            <CampaignTestPanel
+              campaignId={clientTestCampaignId}
+              campaignName={campaigns.find(c => c.id === clientTestCampaignId)?.name || 'Campaign'}
+              dialMode="ai_agent"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================== VOICE SELECTION DIALOG ==================== */}
+      <Dialog open={showClientVoiceSelect} onOpenChange={setShowClientVoiceSelect}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mic className="h-5 w-5 text-blue-600" />
+              Select Voice
+            </DialogTitle>
+            <DialogDescription>
+              Choose a voice for your AI agent on campaign: {campaigns.find(c => c.id === clientVoiceCampaignId)?.name || ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            {/* Provider Selection */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Voice Provider</Label>
+              <Select value={clientSelectedProvider} onValueChange={setClientSelectedProvider}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="google">Live Voice (Recommended)</SelectItem>
+                  <SelectItem value="openai">OpenAI Realtime</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Voice Grid */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Select Voice</Label>
+              <div className="grid grid-cols-2 gap-2 max-h-[45vh] overflow-y-auto pr-1">
+                {(clientSelectedProvider === 'google' ? [
+                  { value: 'Kore', label: 'Kore', desc: 'Firm & Professional (Default)' },
+                  { value: 'Fenrir', label: 'Fenrir', desc: 'Excitable & Persuasive' },
+                  { value: 'Charon', label: 'Charon', desc: 'Informative & Authoritative' },
+                  { value: 'Aoede', label: 'Aoede', desc: 'Breezy & Friendly' },
+                  { value: 'Puck', label: 'Puck', desc: 'Upbeat & Lively' },
+                  { value: 'Zephyr', label: 'Zephyr', desc: 'Bright & Clear' },
+                  { value: 'Leda', label: 'Leda', desc: 'Youthful & Modern' },
+                  { value: 'Orus', label: 'Orus', desc: 'Firm & Reliable' },
+                  { value: 'Sulafat', label: 'Sulafat', desc: 'Warm & Caring' },
+                  { value: 'Gacrux', label: 'Gacrux', desc: 'Mature & Credible' },
+                  { value: 'Schedar', label: 'Schedar', desc: 'Even & Composed' },
+                  { value: 'Achird', label: 'Achird', desc: 'Friendly & Welcoming' },
+                  { value: 'Pegasus', label: 'Pegasus', desc: 'Calm & Authoritative' },
+                  { value: 'Sadaltager', label: 'Sadaltager', desc: 'Knowledgeable & Expert' },
+                  { value: 'Pulcherrima', label: 'Pulcherrima', desc: 'Forward & Assertive' },
+                  { value: 'Algieba', label: 'Algieba', desc: 'Smooth & Polished' },
+                ] : [
+                  { value: 'alloy', label: 'Alloy', desc: 'Neutral & Balanced' },
+                  { value: 'echo', label: 'Echo', desc: 'Warm & Engaging' },
+                  { value: 'fable', label: 'Fable', desc: 'Expressive & Dynamic' },
+                  { value: 'onyx', label: 'Onyx', desc: 'Deep & Authoritative' },
+                  { value: 'nova', label: 'Nova', desc: 'Friendly & Upbeat' },
+                  { value: 'shimmer', label: 'Shimmer', desc: 'Clear & Professional' },
+                ]).map((voice) => (
+                  <div
+                    key={voice.value}
+                    className={`p-3 rounded-lg border-2 cursor-pointer transition-all hover:shadow-md ${
+                      clientSelectedVoice === voice.value
+                        ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/20 shadow-sm'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-violet-300'
+                    }`}
+                    onClick={() => setClientSelectedVoice(voice.value)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`h-9 w-9 rounded-full flex items-center justify-center ${
+                        clientSelectedVoice === voice.value ? 'bg-violet-100 dark:bg-violet-900/30' : 'bg-slate-100 dark:bg-slate-800'
+                      }`}>
+                        <Volume2 className={`h-4 w-4 ${clientSelectedVoice === voice.value ? 'text-violet-600' : 'text-slate-500'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{voice.label}</p>
+                        <p className="text-xs text-muted-foreground truncate">{voice.desc}</p>
+                      </div>
+                      {clientSelectedVoice === voice.value && (
+                        <CheckCircle className="h-4 w-4 text-violet-600 shrink-0" />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Voice Preview */}
+            {clientSelectedVoice && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={async () => {
+                    try {
+                      const response = await apiRequest('POST', `/api/client-portal/campaigns/voice-preview`, {
+                        voiceId: clientSelectedVoice,
+                        provider: clientSelectedProvider,
+                        text: 'Hello! This is a preview of the voice you selected. I will be making professional B2B outreach calls.',
+                      });
+                      const audioBlob = await response.blob();
+                      const audioUrl = URL.createObjectURL(audioBlob);
+                      const audio = new Audio(audioUrl);
+                      audio.play();
+                      audio.onended = () => URL.revokeObjectURL(audioUrl);
+                    } catch (error) {
+                      toast({
+                        title: 'Preview failed',
+                        description: error instanceof Error ? error.message : 'Could not play voice preview',
+                        variant: 'destructive'
+                      });
+                    }
+                  }}
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Preview Voice
+                </Button>
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  Listen to <strong>{clientSelectedVoice}</strong> before applying
+                </p>
+              </div>
+            )}
+
+            {/* Recommendation */}
+            <div className="rounded-lg border p-3 bg-muted/50">
+              <p className="text-sm font-medium mb-1">💡 Voice Recommendation</p>
+              <p className="text-xs text-muted-foreground">
+                <strong>Kore</strong> (default) — Soft, friendly, professional. Ideal for B2B sales calls.<br/>
+                <strong>Charon</strong> — Calm, authoritative. Good for executive outreach.<br/>
+                <strong>Aoede</strong> — Bright, energetic. Suitable for high-volume prospecting.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowClientVoiceSelect(false)}>Cancel</Button>
+            <Button
+              className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+              onClick={async () => {
+                try {
+                  await apiRequest('PATCH', `/api/client-portal/campaigns/${clientVoiceCampaignId}/voice`, {
+                    voice: clientSelectedVoice,
+                    provider: clientSelectedProvider,
+                  });
+                  toast({
+                    title: 'Voice Updated',
+                    description: `Voice changed to ${clientSelectedVoice} for this campaign.`,
+                  });
+                  setShowClientVoiceSelect(false);
+                  queryClient.invalidateQueries({ queryKey: ['/api/client/campaigns'] });
+                } catch (error) {
+                  toast({
+                    title: 'Update Failed',
+                    description: error instanceof Error ? error.message : 'Could not update voice',
+                    variant: 'destructive'
+                  });
+                }
+              }}
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Apply Voice
             </Button>
           </DialogFooter>
         </DialogContent>

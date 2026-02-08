@@ -10,6 +10,7 @@ import {
   Plus,
   Database,
   ShieldCheck,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -28,6 +29,12 @@ interface AgentQuickActionsProps {
 }
 
 const clientPortalActions: QuickAction[] = [
+  {
+    id: 'new_order',
+    label: 'New Order',
+    icon: Package,
+    prompt: 'I want to create a new campaign order',
+  },
   {
     id: 'campaigns',
     label: 'My Campaigns',

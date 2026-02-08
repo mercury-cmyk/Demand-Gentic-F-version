@@ -448,6 +448,48 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
   const getToken = () => localStorage.getItem('clientPortalToken');
 
+  // Fetch organization intelligence for context injection
+  const { data: wizardOrgIntel } = useQuery<{
+    organization: any;
+    campaigns: any[];
+    isPrimary: boolean;
+  }>({
+    queryKey: ['wizard-org-intelligence'],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) return { organization: null, campaigns: [], isPrimary: false };
+      const res = await fetch('/api/client-portal/settings/organization-intelligence', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { organization: null, campaigns: [], isPrimary: false };
+      return res.json();
+    },
+    enabled: open && mode === 'client',
+    staleTime: 60000,
+  });
+  const orgIntelData = wizardOrgIntel?.organization;
+
+  // Auto-populate wizard fields from org intelligence when available
+  const applyOrgIntelToWizard = () => {
+    if (!orgIntelData) return;
+    setFormData(prev => ({
+      ...prev,
+      targetAudience: prev.targetAudience || orgIntelData.icp?.industries?.join(', ') || '',
+      targetIndustries: prev.targetIndustries.length > 0 ? prev.targetIndustries : (orgIntelData.icp?.industries || []),
+      targetCompanySize: prev.targetCompanySize || orgIntelData.icp?.companySize || '',
+      agentPersona: prev.agentPersona || `You represent ${orgIntelData.name || 'our company'}. ${orgIntelData.positioning?.oneLiner || ''} ${orgIntelData.identity?.description || ''}`.trim(),
+      objective: prev.objective || orgIntelData.positioning?.valueProposition || '',
+      voiceIntent: prev.voiceIntent || orgIntelData.outreach?.callOpeners?.[0] || '',
+      emailIntent: prev.emailIntent || orgIntelData.outreach?.emailAngles?.[0] || '',
+      objections: prev.objections.some(o => o.objection) ? prev.objections : (orgIntelData.icp?.objections || []).map((obj: string) => ({ objection: obj, response: '' })),
+      talkingPoints: prev.talkingPoints.length > 0 ? prev.talkingPoints : [
+        ...(orgIntelData.offerings?.coreProducts?.slice(0, 3) || []),
+        ...(orgIntelData.positioning?.whyUs?.slice(0, 2) || []),
+      ],
+    }));
+    toast({ title: 'Organization context applied', description: 'Fields pre-filled from your Organization Intelligence data.' });
+  };
+
   // Fetch client's accounts for audience selection (client portal mode)
   const { data: clientAccounts = [], isLoading: accountsLoading } = useQuery({
     queryKey: ['client-crm-accounts-for-campaign'],
@@ -626,7 +668,19 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         const res = await fetch('/api/client-portal/campaigns/create', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ ...formData, status: launchStatus }),
+          body: JSON.stringify({
+            ...formData,
+            status: launchStatus,
+            organizationIntelligence: orgIntelData ? {
+              id: orgIntelData.id,
+              name: orgIntelData.name,
+              identity: orgIntelData.identity,
+              offerings: orgIntelData.offerings,
+              icp: orgIntelData.icp,
+              positioning: orgIntelData.positioning,
+              outreach: orgIntelData.outreach,
+            } : undefined,
+          }),
         });
 
         if (!res.ok) {
@@ -1276,13 +1330,70 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                             <br />
                             <span className="font-semibold">1. Foundation Prompt</span> (Global Logic)
                             <ArrowRight className="inline h-3 w-3 mx-1" />
-                            <span className="font-semibold">2. Campaign Prompt</span> (Your inputs below)
+                            <span className="font-semibold">2. Organization Intelligence</span> (Your business context)
                             <ArrowRight className="inline h-3 w-3 mx-1" />
-                            <span className="font-semibold">3. Account Layer</span> (CRM Data)
+                            <span className="font-semibold">3. Campaign Prompt</span> (Your inputs below)
+                            <ArrowRight className="inline h-3 w-3 mx-1" />
+                            <span className="font-semibold">4. Account Layer</span> (CRM Data)
                           </p>
                         </div>
                       </div>
                     </div>
+
+                    {/* Organization Intelligence Context Panel */}
+                    {mode === 'client' && orgIntelData && (
+                      <Card className="border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/10 mb-4">
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Brain className="h-4 w-4 text-violet-500" />
+                              Organization Intelligence Connected
+                            </CardTitle>
+                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyOrgIntelToWizard}>
+                              <Sparkles className="h-3 w-3 mr-1 text-amber-500" />
+                              Auto-Fill from Intelligence
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground font-medium">Company</p>
+                              <p className="font-semibold">{orgIntelData.name}</p>
+                            </div>
+                            {orgIntelData.industry && (
+                              <div className="space-y-1">
+                                <p className="text-muted-foreground font-medium">Industry</p>
+                                <p>{orgIntelData.industry}</p>
+                              </div>
+                            )}
+                            {orgIntelData.offerings?.coreProducts?.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-muted-foreground font-medium">Products</p>
+                                <p>{orgIntelData.offerings.coreProducts.length} defined</p>
+                              </div>
+                            )}
+                            {orgIntelData.icp?.industries?.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-muted-foreground font-medium">Target Industries</p>
+                                <p>{orgIntelData.icp.industries.slice(0, 2).join(', ')}{orgIntelData.icp.industries.length > 2 ? '...' : ''}</p>
+                              </div>
+                            )}
+                          </div>
+                          {orgIntelData.positioning?.oneLiner && (
+                            <p className="text-xs text-muted-foreground italic mt-2 border-t pt-2">"{orgIntelData.positioning.oneLiner}"</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+                    {mode === 'client' && !orgIntelData && (
+                      <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4 flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          <span className="font-medium">No Organization Intelligence set up.</span> Add your business context in the Intelligence tab for AI-powered auto-fill and smarter campaign targeting.
+                        </p>
+                      </div>
+                    )}
 
                     {/* Shared Campaign Objective */}
                     <div className="space-y-2">
@@ -2722,6 +2833,27 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                         </div>
                       </CardContent>
                     </Card>
+
+                    {/* Organization Intelligence Context */}
+                    {mode === 'client' && orgIntelData && (
+                      <Card className="border-violet-200 dark:border-violet-800">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <Brain className="h-4 w-4 text-violet-500" />
+                            Organization Intelligence
+                            <Badge variant="secondary" className="text-xs">Linked</Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-2">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div><span className="text-muted-foreground">Company:</span> <span className="font-medium">{orgIntelData.name}</span></div>
+                            {orgIntelData.positioning?.oneLiner && <div className="col-span-2 italic text-muted-foreground">"{orgIntelData.positioning.oneLiner}"</div>}
+                            {orgIntelData.icp?.industries?.length > 0 && <div className="col-span-2"><span className="text-muted-foreground">ICP Industries:</span> {orgIntelData.icp.industries.join(', ')}</div>}
+                          </div>
+                          <p className="text-xs text-muted-foreground pt-1 border-t">This context will be injected into your AI agent's prompt layers for personalized conversations.</p>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Test & Validation - Enhanced for Combo Campaigns */}
                     <Card>

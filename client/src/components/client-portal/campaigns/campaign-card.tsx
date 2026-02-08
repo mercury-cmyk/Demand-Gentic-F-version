@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
   Target, ChevronRight, Clock, CheckCircle, Truck,
-  AlertCircle, Play, Pause, Users, BarChart3, Plus
+  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic
 } from 'lucide-react';
 
 interface Campaign {
@@ -19,12 +19,26 @@ interface Campaign {
   createdAt?: string;
   startedAt?: string;
   completedAt?: string;
+  // New fields
+  type?: string;
+  campaignType?: string;
+  dialMode?: string;
+  startDate?: string;
+  endDate?: string;
+  targetQualifiedLeads?: number;
+  costPerLead?: string;
+  orderNumber?: string;
+  estimatedBudget?: string;
+  approvedBudget?: string;
+  totalContacts?: number;
 }
 
 interface CampaignCardProps {
   campaign: Campaign;
   onRequestMoreLeads: (campaignId: string) => void;
   onViewDetails?: (campaignId: string) => void;
+  onTestAgent?: (campaignId: string) => void;
+  onSelectVoice?: (campaignId: string) => void;
 }
 
 const statusConfig: Record<string, {
@@ -100,7 +114,7 @@ const statusSteps = [
   { key: 'completed', label: 'Completed' },
 ];
 
-export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails }: CampaignCardProps) {
+export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice }: CampaignCardProps) {
   const status = campaign.status || 'active';
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
@@ -194,6 +208,33 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails }: Ca
           </div>
         </div>
 
+        {/* Detailed Stats */}
+        <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-xs pt-3 border-t border-slate-100 dark:border-slate-800">
+             <div className="flex justify-between items-center">
+                 <span className="text-muted-foreground">Type:</span>
+                 <span className="font-medium capitalize text-right truncate pl-2">{campaign.type || campaign.campaignType || 'N/A'}</span>
+             </div>
+             <div className="flex justify-between items-center">
+                 <span className="text-muted-foreground">Dial Mode:</span>
+                 <span className="font-medium capitalize text-right truncate pl-2">{campaign.dialMode ? campaign.dialMode.replace('_', ' ') : 'Standard'}</span>
+             </div>
+             {campaign.startDate && (
+              <div className="flex justify-between items-center col-span-2">
+                 <span className="text-muted-foreground whitespace-nowrap">Dates:</span>
+                 <span className="font-medium text-right truncate pl-2">
+                  {new Date(campaign.startDate).toLocaleDateString()}
+                  {campaign.endDate ? ` - ${new Date(campaign.endDate).toLocaleDateString()}` : ''}
+                 </span>
+             </div>
+             )}
+              {(campaign.approvedBudget && campaign.approvedBudget !== '0' && campaign.approvedBudget !== '$0') && (
+              <div className="flex justify-between items-center col-span-2">
+                 <span className="text-muted-foreground">Budget:</span>
+                 <span className="font-medium text-right truncate pl-2">{campaign.approvedBudget}</span>
+             </div>
+             )}
+        </div>
+
         {/* Progress Bar */}
         {(status === 'active' || status === 'delivering') && (
           <div className="space-y-1">
@@ -206,24 +247,52 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails }: Ca
         )}
       </CardContent>
 
-      <CardFooter className="pt-3 border-t bg-slate-50/50 dark:bg-slate-900/50 flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 gap-1"
-          onClick={() => onRequestMoreLeads(campaign.id)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Request More Leads
-        </Button>
-        {onViewDetails && (
+      <CardFooter className="pt-3 border-t bg-slate-50/50 dark:bg-slate-900/50 flex flex-col gap-2">
+        <div className="flex gap-2 w-full">
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={() => onViewDetails(campaign.id)}
+            className="flex-1 gap-1"
+            onClick={() => onRequestMoreLeads(campaign.id)}
           >
-            <BarChart3 className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
+            Request Leads
           </Button>
+          {onViewDetails && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onViewDetails(campaign.id)}
+            >
+              <BarChart3 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        {(onTestAgent || onSelectVoice) && (
+          <div className="flex gap-2 w-full">
+            {onTestAgent && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1 border-violet-200 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-400 dark:hover:bg-violet-950/30"
+                onClick={() => onTestAgent(campaign.id)}
+              >
+                <Bot className="h-3.5 w-3.5" />
+                Test AI Agent
+              </Button>
+            )}
+            {onSelectVoice && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                onClick={() => onSelectVoice(campaign.id)}
+              >
+                <Mic className="h-3.5 w-3.5" />
+                Voice
+              </Button>
+            )}
+          </div>
         )}
       </CardFooter>
     </Card>

@@ -53,6 +53,81 @@ async function getAuthenticatedClient(userId: string) {
 }
 
 export class CalendarService {
+
+  /**
+   * Create a new booking for a user
+   */
+  async createBooking(bookingTypeId: number, guest: { name: string, email: string, notes?: string }, startTime: string, callDetails?: { callId: string, campaignId: number, leadId: number }) {
+    const [type] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, bookingTypeId));
+    if (!type) throw new Error("Booking type not found");
+    if (!type.userId) throw new Error("Booking type has no assigned user");
+
+    const hostUserId = type.userId as string;
+    const client = await getAuthenticatedClient(hostUserId);
+    const calendar = google.calendar({ version: 'v3', auth: client });
+
+    const startDate = new Date(startTime);
+    const endDate = new Date(startDate.getTime() + type.duration * 60000);
+
+    const event = {
+      summary: `${type.name} with ${guest.name}`,
+      description: `Guest: ${guest.name} (${guest.email})\n\nNotes:\n${guest.notes || 'N/A'}`,
+      start: {
+        dateTime: startDate.toISOString(),
+        timeZone: 'UTC', // Always store in UTC
+      },
+      end: {
+        dateTime: endDate.toISOString(),
+        timeZone: 'UTC',
+      },
+      attendees: [
+        { email: guest.email },
+        // Add host email later
+      ],
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'email', minutes: 24 * 60 },
+          { method: 'popup', minutes: 60 },
+        ],
+      },
+      conferenceData: {
+        createRequest: {
+          requestId: `dg-meet-${Date.now()}`,
+          conferenceSolutionKey: {
+            type: 'hangoutsMeet'
+          }
+        }
+      }
+    };
+
+    // Get host email
+    const [host] = await db.select({ email: users.email }).from(users).where(eq(users.id, hostUserId));
+    if (host?.email) {
+      event.attendees.push({ email: host.email });
+    }
+
+    const createdEvent = await calendar.events.insert({
+      calendarId: 'primary',
+      requestBody: event,
+      conferenceDataVersion: 1,
+    });
+
+    const [newBooking] = await db.insert(bookings).values({
+      bookingTypeId: type.id,
+      hostUserId: hostUserId,
+      guestName: guest.name,
+      guestEmail: guest.email,
+      guestNotes: guest.notes || (callDetails ? `Call ID: ${callDetails.callId}, Campaign: ${callDetails.campaignId}` : undefined),
+      startTime: startDate,
+      endTime: endDate,
+      status: 'confirmed',
+      meetingUrl: createdEvent.data.hangoutLink || undefined,
+      googleEventId: createdEvent.data.id || undefined,
+    }).returning();
+
+    return newBooking;
+  }
   
   /**
    * List available slots for a User and Booking Type
@@ -159,63 +234,6 @@ export class CalendarService {
     }
 
     return slots;
-  }
-
-  /**
-   * Create a booking event
-   */
-  async createBooking(bookingTypeId: number, guestDetails: { name: string, email: string, notes?: string }, startTime: string) {
-    // 1. Get info
-    const [bookingType] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, bookingTypeId));
-    if (!bookingType) throw new Error("Booking type not found");
-    
-    const userId = bookingType.userId;
-    if (!userId) throw new Error("Booking type has no owner");
-
-    const client = await getAuthenticatedClient(userId);
-    const calendar = google.calendar({ version: 'v3', auth: client });
-
-    const start = new Date(startTime);
-    const end = new Date(start.getTime() + bookingType.duration * 60000);
-
-    // 2. Create Google Calendar Event
-    const event = {
-      summary: `${bookingType.name} with ${guestDetails.name}`,
-      description: `Notes: ${guestDetails.notes}\n\nBooked via DemandGentic AI`,
-      start: { dateTime: start.toISOString() },
-      end: { dateTime: end.toISOString() },
-      attendees: [
-        { email: guestDetails.email } // Sends invite to guest
-      ],
-      conferenceData: {
-        createRequest: { requestId: Math.random().toString(36).substring(7) }
-      }
-    };
-
-    const res = await calendar.events.insert({
-      calendarId: 'primary',
-      requestBody: event,
-      conferenceDataVersion: 1
-    });
-
-    const googleEventId = res.data.id;
-    const meetingUrl = res.data.hangoutLink;
-
-    // 3. Save to DB
-    const [newBooking] = await db.insert(bookings).values({
-      bookingTypeId: bookingTypeId,
-      hostUserId: userId,
-      guestName: guestDetails.name,
-      guestEmail: guestDetails.email,
-      guestNotes: guestDetails.notes,
-      startTime: start,
-      endTime: end,
-      status: 'confirmed',
-      googleEventId: googleEventId || null,
-      meetingUrl: meetingUrl || null
-    }).returning();
-
-    return newBooking;
   }
 }
 
