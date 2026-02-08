@@ -146,6 +146,8 @@ export async function generateTTSAudio(
   // map everything to Google Cloud TTS for consistency and quality
   const voiceConfig = getGoogleVoiceConfig(voiceId);
   const googleVoiceName = voiceConfig.googleVoiceName;
+  
+  console.log(`${LOG_PREFIX} Voice mapping: ${voiceId} -> ${googleVoiceName} (${voiceConfig.displayName}, ${voiceConfig.gender})`);
 
   try {
     const client = getTTSClient();

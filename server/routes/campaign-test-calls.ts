@@ -17,6 +17,16 @@ import { AiAgentSettings, CallContext } from "../services/ai-voice-agent";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { env } from "../env";
 import { getOrganizationById } from "../services/problem-intelligence/organization-service";
+// number-pool-integration only needed for production calls; test calls bypass it
+import { releaseNumberWithoutOutcome } from "../services/number-pool-integration";
+// CRITICAL: Use unified call context builder to ensure test and queue calls are identical
+import {
+  buildUnifiedCallContext,
+  contextToClientStateParams,
+  storeCallSession,
+  resolveAgentAssignment,
+  type UnifiedCallContext,
+} from "../services/unified-call-context";
 
 
 const router = Router();
@@ -42,7 +52,7 @@ const initiateTestCallSchema = z.object({
 router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { campaignId } = req.params;
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     const isWorkOrderSource = req.query.source === 'work_order';
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });
@@ -118,9 +128,26 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
           return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
         }
 
-        // Verify campaign is a call campaign with AI agent mode (ai_agent or hybrid)
-        if (campaign.type !== "call") {
-          return res.status(400).json({ message: "Test calls are only available for call campaigns" });
+        // Verify campaign is a phone-capable campaign with AI agent mode (ai_agent or hybrid)
+        // All campaign types that support voice/phone calls
+        const PHONE_CAPABLE_TYPES = [
+          'call', 'telemarketing', 'sql',
+          'content_syndication', 'appointment_generation', 'high_quality_leads',
+          'live_webinar', 'on_demand_webinar', 'executive_dinner',
+          'leadership_forum', 'conference'
+        ];
+
+        const isPhoneCapable = PHONE_CAPABLE_TYPES.includes(campaign.type) ||
+                              campaign.dialMode === 'ai_agent' ||
+                              campaign.dialMode === 'hybrid';
+
+        if (!isPhoneCapable) {
+          return res.status(400).json({
+            message: "Test calls are only available for phone-capable campaigns",
+            campaignType: campaign.type,
+            dialMode: campaign.dialMode,
+            supportedTypes: PHONE_CAPABLE_TYPES
+          });
         }
 
         if (campaign.dialMode !== "ai_agent" && campaign.dialMode !== "hybrid") {
@@ -145,40 +172,74 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
           }
         }
 
-        // Get the virtual agent assigned to this campaign
-        const [dbAssignment] = await db
-          .select({
-            virtualAgentId: campaignAgentAssignments.virtualAgentId,
-            agentName: virtualAgents.name,
-            systemPrompt: virtualAgents.systemPrompt,
-            firstMessage: virtualAgents.firstMessage,
-            voice: virtualAgents.voice,
-            settings: virtualAgents.settings,
-          })
-          .from(campaignAgentAssignments)
-          .innerJoin(virtualAgents, eq(virtualAgents.id, campaignAgentAssignments.virtualAgentId))
-          .where(
-            and(
-              eq(campaignAgentAssignments.campaignId, campaignId),
-              eq(campaignAgentAssignments.agentType, "ai"),
-              eq(campaignAgentAssignments.isActive, true)
+        // PRIORITY 1: Use aiAgentSettings from campaign (new wizard-based approach)
+        const aiSettings = (campaign as any).aiAgentSettings;
+        if (aiSettings) {
+          console.log("[Campaign Test Call] Using campaign aiAgentSettings (wizard-configured voice)");
+          const persona = aiSettings.persona || {};
+          const systemPromptParts = [];
+
+          // Build system prompt from persona and campaign context
+          if (persona.agentName) systemPromptParts.push(`You are ${persona.agentName}.`);
+          if (persona.companyName || campaignOrganizationName) {
+            systemPromptParts.push(`You represent ${persona.companyName || campaignOrganizationName}.`);
+          }
+          if (persona.role) systemPromptParts.push(`Your role is ${persona.role}.`);
+          if (persona.personality) systemPromptParts.push(`Your personality: ${persona.personality}.`);
+          if (aiSettings.talkingPoints?.length) {
+            systemPromptParts.push(`Key talking points: ${aiSettings.talkingPoints.join('; ')}`);
+          }
+          if (aiSettings.objective || (campaign as any).campaignObjective) {
+            systemPromptParts.push(`Objective: ${aiSettings.objective || (campaign as any).campaignObjective}`);
+          }
+
+          assignment = {
+            virtualAgentId: `campaign-${campaignId}-inline`,
+            agentName: persona.agentName || persona.name || 'AI Sales Agent',
+            systemPrompt: systemPromptParts.join(' ') || 'You are a helpful sales development representative.',
+            firstMessage: aiSettings.openingMessage || aiSettings.firstMessage || `Hello, this is ${persona.agentName || persona.name || 'your sales representative'} calling from ${persona.companyName || campaignOrganizationName || 'our company'}.`,
+            // Voice priority: persona.voice (wizard) > aiSettings.voiceId > aiSettings.voice > fallback
+            voice: persona.voice || aiSettings.voiceId || aiSettings.voice || 'Puck',
+            settings: aiSettings,
+          };
+        }
+
+        // PRIORITY 2: Fallback to legacy virtual agent assignment
+        if (!assignment) {
+          console.log("[Campaign Test Call] No aiAgentSettings, checking legacy virtual agent assignment");
+          const [dbAssignment] = await db
+            .select({
+              virtualAgentId: campaignAgentAssignments.virtualAgentId,
+              agentName: virtualAgents.name,
+              systemPrompt: virtualAgents.systemPrompt,
+              firstMessage: virtualAgents.firstMessage,
+              voice: virtualAgents.voice,
+              settings: virtualAgents.settings,
+            })
+            .from(campaignAgentAssignments)
+            .innerJoin(virtualAgents, eq(virtualAgents.id, campaignAgentAssignments.virtualAgentId))
+            .where(
+              and(
+                eq(campaignAgentAssignments.campaignId, campaignId),
+                eq(campaignAgentAssignments.agentType, "ai"),
+                eq(campaignAgentAssignments.isActive, true)
+              )
             )
-          )
-          .limit(1);
-        
-        assignment = dbAssignment;
+            .limit(1);
+
+          assignment = dbAssignment;
+        }
 
         if (!assignment) {
           return res.status(400).json({
-            message: "No AI agent assigned to this campaign",
-            suggestion: "Please assign a virtual agent to the campaign before testing"
+            message: "No AI voice configuration found for this campaign",
+            suggestion: "Please configure AI voice settings in the campaign wizard before testing"
           });
         }
     }
 
     // Check environment configuration
     const telnyxApiKey = env.TELNYX_API_KEY;
-    const fromNumber = env.TELNYX_FROM_NUMBER;
     const openaiApiKey = env.OPENAI_API_KEY;
     const googleApiKey = env.GOOGLE_AI_API_KEY || env.GEMINI_API_KEY;
     const googleProjectId = env.GOOGLE_CLOUD_PROJECT || env.GCP_PROJECT_ID;
@@ -212,14 +273,33 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       }
     }
 
+    // TEST CALLS: Skip number pool enforcement entirely for immediate execution.
+    // No pool DB lookups, no jitter delays, no rotation strategy needed.
+    // Use TELNYX_FROM_NUMBER directly so test calls fire instantly.
+    let fromNumber: string = env.TELNYX_FROM_NUMBER || '';
+    let callerNumberId: string | undefined;
+    let callerNumberDecisionId: string | undefined;
+
+    if (!fromNumber) {
+      return res.status(500).json({
+        message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file."
+      });
+    }
+    console.log(`[Campaign Test Call] ⚡ Using direct number (no pool): ${fromNumber}`);
+
     // Create test call record in database
     const testCallId = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const runId = `run-test-${Date.now()}`;
 
+    // Determine if we have a real virtual agent ID (not an inline campaign ID)
+    // Inline campaign IDs start with "campaign-" and don't exist in the virtual_agents table
+    const isInlineCampaignAgent = assignment.virtualAgentId?.startsWith('campaign-') && assignment.virtualAgentId?.includes('-inline');
+    const dbVirtualAgentId = isInlineCampaignAgent ? null : assignment.virtualAgentId;
+
     const [testCallRecord] = await db.insert(campaignTestCalls).values({
       id: testCallId,
       campaignId,
-      virtualAgentId: assignment.virtualAgentId,
+      virtualAgentId: dbVirtualAgentId, // null for inline campaign settings, real ID for legacy virtual agents
       testPhoneNumber: normalizedPhone,
       testContactName: validatedData.testContactName,
       testCompanyName: validatedData.testCompanyName || null,
@@ -267,7 +347,19 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     // Custom parameters for the WebSocket connection
     // Support both OpenAI and Gemini voices
     const openaiVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar', 'echo', 'fable', 'nova', 'shimmer', 'onyx']);
-    const geminiVoices = new Set(['aoede', 'charon', 'fenrir', 'kore', 'puck', 'orion', 'vega', 'pegasus', 'ursa', 'dipper', 'capella', 'orbit', 'lyra', 'eclipse']);
+    // All 30 real Gemini Live voices - must match server/services/gemini-live-dialer.ts
+    const geminiVoices = new Set([
+      // Core voices (original 8)
+      'puck', 'charon', 'kore', 'fenrir', 'aoede', 'leda', 'orus', 'zephyr',
+      // Professional voices
+      'sulafat', 'gacrux', 'achird', 'schedar', 'sadaltager', 'pulcherrima',
+      // Specialized voices
+      'algieba', 'despina', 'iapetus', 'erinome', 'vindemiatrix', 'achernar',
+      // Dynamic voices
+      'sadachbia', 'laomedeia', 'autonoe', 'callirrhoe', 'umbriel',
+      // Character voices
+      'enceladus', 'algenib', 'rasalgethi', 'alnilam', 'zubenelgenubi',
+    ]);
 
     const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
 
@@ -296,6 +388,9 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       call_attempt_id: `test-attempt-${testCallId}`,
       contact_id: `test-contact-${testCallId}`,
       called_number: normalizedPhone, // Required for database tracking
+      from_number: fromNumber,
+      caller_number_id: callerNumberId || null,
+      caller_number_decision_id: callerNumberDecisionId || null,
       virtual_agent_id: assignment.virtualAgentId,
       is_test_call: true,
       test_call_id: testCallId,
@@ -329,6 +424,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     };
 
     // Store full session data in Redis for retrieval by WebSocket handler
+    // CRITICAL: Must include ALL fields that queue calls include for unified behavior
     const { callSessionStore } = await import("../services/call-session-store");
     await callSessionStore.setSession(testCallId, {
       call_id: testCallId,
@@ -338,15 +434,31 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       call_attempt_id: customParams.call_attempt_id,
       contact_id: customParams.contact_id,
       called_number: normalizedPhone, // Required for database tracking
+      from_number: fromNumber,
+      caller_number_id: callerNumberId || null,
+      caller_number_decision_id: callerNumberDecisionId || null,
       virtual_agent_id: assignment.virtualAgentId || undefined,
       is_test_call: true,
       test_call_id: testCallId,
       first_message: assignment.firstMessage || undefined,
       voice,
       agent_name: assignment.agentName || undefined,
+      // CRITICAL: Include organization_name for unified template interpolation
+      organization_name: customParams.organization_name,
       test_contact: customParams.test_contact,
       provider: providerForSession,
       system_prompt: systemPrompt, // Store full prompt in Redis
+      // Campaign context for unified behavior (same as queue calls)
+      campaign_objective: customParams.campaign_objective,
+      success_criteria: customParams.success_criteria,
+      target_audience_description: customParams.target_audience_description,
+      product_service_info: customParams.product_service_info,
+      talking_points: customParams.talking_points,
+      // Contact context for unified interpolation
+      contact_name: customParams.contact_name,
+      contact_first_name: customParams.contact_first_name,
+      contact_job_title: customParams.contact_job_title,
+      account_name: customParams.account_name,
     });
 
     const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
@@ -378,8 +490,16 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
     
-    console.log(`[Campaign Test Call] TeXML URL: ${texmlUrl}`);
+    console.log("=".repeat(60));
+    console.log(`[Campaign Test Call] 🔧 CRITICAL CONFIGURATION CHECK:`);
+    console.log(`[Campaign Test Call] NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`[Campaign Test Call] PUBLIC_WEBHOOK_HOST: ${process.env.PUBLIC_WEBHOOK_HOST}`);
+    console.log(`[Campaign Test Call] PUBLIC_TEXML_HOST: ${process.env.PUBLIC_TEXML_HOST}`);
+    console.log(`[Campaign Test Call] webhookHost (resolved): ${webhookHost}`);
+    console.log(`[Campaign Test Call] TeXML URL that Telnyx will fetch: ${texmlUrl}`);
     console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
+    console.log(`[Campaign Test Call] ⚠️ If ngrok is not running, Telnyx cannot reach ${webhookHost}!`);
+    console.log("=".repeat(60));
 
     const payload = {
       texml_application_id: texmlAppId,
@@ -412,6 +532,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
     });
 
     if (!telnyxResponse.ok) {
+      releaseNumberWithoutOutcome(callerNumberId || null);
       const errorText = await telnyxResponse.text();
       console.error(`[Campaign Test Call] Telnyx API error: ${telnyxResponse.status} - ${errorText}`);
 

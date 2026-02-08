@@ -62,6 +62,7 @@ interface CallToTranscribe {
   id: string;
   name: string;
   recordingUrl: string;
+  telnyxCallId: string | null;
   duration: number;
   notes: string | null;
 }
@@ -78,12 +79,31 @@ async function processCall(
   dryRun: boolean,
   verbose: boolean
 ): Promise<{ success: boolean; error?: string }> {
-  const { id, name, recordingUrl, notes: existingNotes } = call;
+  const { id, name, recordingUrl: initialRecordingUrl, telnyxCallId, notes: existingNotes } = call;
 
   if (verbose) console.log(`    Processing ${name} (${id})...`);
 
+  // 1. Refresh the recording URL if we have a Telnyx Call ID
+  // This is crucial because S3 links expire.
+  let activeRecordingUrl = initialRecordingUrl;
+  
+  if (telnyxCallId) {
+    try {
+      if (verbose) console.log(`    Refreshing recording URL for Telnyx Call ID: ${telnyxCallId}...`);
+      const freshUrl = await fetchTelnyxRecording(telnyxCallId);
+      if (freshUrl) {
+        activeRecordingUrl = freshUrl;
+        if (verbose) console.log(`    ✅ Refreshed URL successfully`);
+      } else {
+        console.warn(`    ⚠️ Could not refresh URL for ${telnyxCallId}, trying with stored URL...`);
+      }
+    } catch (err: any) {
+       console.warn(`    ⚠️ Error refreshing URL: ${err.message}. Using stored URL.`);
+    }
+  }
+
   // Download and transcribe
-  const transcript = await transcribeWithGoogleCloud(recordingUrl);
+  const transcript = await transcribeWithGoogleCloud(activeRecordingUrl);
 
   if (!transcript) {
     return { success: false, error: "Transcription failed" };
@@ -196,6 +216,7 @@ async function batchTranscribeJan15() {
       dca.id,
       c."displayName" as name,
       dca."recordingUrl",
+      dca."telnyxCallId",
       EXTRACT(EPOCH FROM (dca."callEndTime" - dca."callStartTime"))::int as duration,
       dca.notes
     FROM dialer_call_attempts dca
@@ -212,6 +233,7 @@ async function batchTranscribeJan15() {
     id: row.id,
     name: row.name || "Unknown",
     recordingUrl: row.recordingUrl,
+    telnyxCallId: row.telnyxCallId,
     duration: row.duration,
     notes: row.notes,
   }));
@@ -224,9 +246,9 @@ async function batchTranscribeJan15() {
   console.log(`Found ${calls.length} calls to process.\n`);
 
   // Show sample
-  console.log("Sample calls:");
+  console.log("Sample calls (first 3):");
   calls.slice(0, 3).forEach((call) => {
-    console.log(`  - ${call.name} (${call.id}): ${call.duration}s`);
+    console.log(`  - ${call.name} (Duration: ${call.duration}s, CallID: ${call.telnyxCallId || "None"})`);
   });
   if (calls.length > 3) {
     console.log(`  ... and ${calls.length - 3} more`);
@@ -269,13 +291,3 @@ batchTranscribeJan15().catch(async (error) => {
 
 // Usage:
 // npx tsx batch-transcribe-jan15.ts [--execute] [--limit N] [--verbose]
-//
-// Examples:
-// - Dry run, show first 50 calls:
-//   npx tsx batch-transcribe-jan15.ts --limit 50 --verbose
-//
-// - Execute, process all calls with limited output:
-//   npx tsx batch-transcribe-jan15.ts --execute
-//
-// - Execute, verbose mode, process 100 calls:
-//   npx tsx batch-transcribe-jan15.ts --execute --limit 100 --verbose

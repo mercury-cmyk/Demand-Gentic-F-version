@@ -49,13 +49,15 @@ export const UNIFIED_AUDIO_CONFIG = {
   // Normalization settings for audio quality
   normalization: {
     // Target amplitude level as fraction of full scale
-    // 0.99 = 99% (maximum clarity and loudness, near peak safety limit)
-    targetLevelTelnyx: 0.99,
-    targetLevelGemini: 0.99,
-    
+    // UPDATED Feb 2026: Reduced from 0.99 to 0.88 to prevent clipping distortion
+    // 0.99 was causing audible distortion when samples peaked near max
+    // 0.88 provides good loudness with headroom for peaks
+    targetLevelTelnyx: 0.88,
+    targetLevelGemini: 0.88,
+
     // Skip normalization if peak is below this (prevent noise amplification)
     minPeakToNormalize: 100,
-    
+
     // Enable adaptive gain control
     enableAGC: true,
   },

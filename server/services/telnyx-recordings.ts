@@ -1,7 +1,6 @@
 import { eq, isNull, and, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { leads, calls, callAttempts, contacts } from '../../shared/schema';
-import { transcribeLeadCall } from './google-transcription';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
@@ -89,41 +88,31 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
   }
 
   try {
-    // First, get the call details to find recordings (with retry)
-    const callResponse = await fetchWithRetry(
-      `${TELNYX_API_BASE}/calls/${callControlId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Proceed directly to fetch recordings.
+    // We skip fetching /calls/{id} because call_control_id expires (422) quickly,
+    // but the recording itself persists and can be looked up by that same ID.
 
-    // 404 and 422 are expected - call might not exist, recording not ready, or call_control_id expired
-    if (callResponse.status === 404 || callResponse.status === 422) {
-      console.log(`[Telnyx] Call not found or expired (${callResponse.status}):`, callControlId);
-      return null;
-    }
-
-    // Any other non-OK status is an error
-    if (!callResponse.ok) {
-      const errorText = await callResponse.text();
-      throw new Error(`Telnyx API error (${callResponse.status}): ${errorText}`);
-    }
-
-    const callData = await callResponse.json();
-    
     // Get recordings for this call (with retry)
-    const recordingsResponse = await fetchWithRetry(
-      `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${callControlId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${TELNYX_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
+    // We try both call_control_id and call_leg_id filters as they can be interchangeable depending on context
+    let recordingsResponse = await fetchWithRetry(
+      `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${encodeURIComponent(callControlId)}`,
+      { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
     );
+    
+    // If empty or failed, try as call_leg_id
+    try {
+        const dataClone = await recordingsResponse.clone().json().catch(() => ({ data: [] }));
+        if (!recordingsResponse.ok || !dataClone.data || dataClone.data.length === 0) {
+            console.log(`[Telnyx] No recordings found with call_control_id, trying call_leg_id: ${callControlId}`);
+            recordingsResponse = await fetchWithRetry(
+                `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${encodeURIComponent(callControlId)}`,
+                { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+            );
+        }
+    } catch (e) {
+      // Ignore clone error
+    }
+
 
     if (recordingsResponse.status === 404) {
       console.log('[Telnyx] Recordings not found (404) for call:', callControlId);
@@ -272,9 +261,9 @@ export async function syncMissingLeadRecordings(limit: number = 50): Promise<{
 
   try {
     // Find leads with call attempts but no recording URL
-    // Created within last 7 days to keep the search window reasonable
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    // Created within last 24 hours to keep the search window reasonable
+    const oneDayAgo = new Date();
+    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
     const leadsWithoutRecordings = await db
       .select({
@@ -288,7 +277,7 @@ export async function syncMissingLeadRecordings(limit: number = 50): Promise<{
       .where(
         and(
           isNull(leads.recordingUrl),
-          gte(leads.createdAt, sevenDaysAgo)
+          gte(leads.createdAt, oneDayAgo)
         )
       )
       .limit(limit);
@@ -381,9 +370,11 @@ async function updateLeadWithRecording(leadId: string, recordingUrl: string, dur
     .where(eq(leads.id, leadId));
 
   // Trigger transcription asynchronously (don't wait)
-  transcribeLeadCall(leadId).catch(err => {
-    console.error(`[Telnyx-Sync] Failed to start transcription for lead ${leadId}:`, err);
-  });
+  import('./google-transcription')
+    .then(({ transcribeLeadCall }) => transcribeLeadCall(leadId))
+    .catch(err => {
+      console.error(`[Telnyx-Sync] Failed to start transcription for lead ${leadId}:`, err);
+    });
 }
 
 /**

@@ -21,9 +21,11 @@ interface CampaignWizardProps {
   steps: CampaignWizardStep[];
   onComplete: (data: any) => void;
   onCancel: () => void;
+  initialData?: any;
+  title?: string;
 }
 
-export function CampaignWizard({ campaignType, steps, onComplete, onCancel }: CampaignWizardProps) {
+export function CampaignWizard({ campaignType, steps, onComplete, onCancel, initialData, title }: CampaignWizardProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [campaignData, setCampaignData] = useState<any>({
@@ -32,6 +34,7 @@ export function CampaignWizard({ campaignType, steps, onComplete, onCancel }: Ca
     content: {},
     scheduling: {},
     compliance: {},
+    ...initialData, // Merge initial data for edit mode
   });
 
   const progress = ((currentStep + 1) / steps.length) * 100;
@@ -90,7 +93,7 @@ export function CampaignWizard({ campaignType, steps, onComplete, onCancel }: Ca
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-2">
                 <CardTitle className="text-2xl font-semibold tracking-tight">
-                  {campaignType === "email" ? "New Email Campaign" : "New Telemarketing Campaign"}
+                  {title || (campaignType === "email" ? "New Email Campaign" : "New Telemarketing Campaign")}
                 </CardTitle>
                 <AIReasoning 
                   summary={`Step ${currentStep + 1}: ${steps[currentStep].title}`} 

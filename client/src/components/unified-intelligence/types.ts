@@ -142,6 +142,10 @@ export interface UnifiedConversationDetail {
   callAnalysis: UnifiedCallAnalysis;
   qualityAnalysis: UnifiedQualityAnalysis;
   dispositionReview?: DispositionReview;
+
+  // Consolidated call history — multiple calls to the same contact
+  callCount?: number;
+  callHistory?: CallHistoryEntry[];
 }
 
 // ============================================
@@ -199,6 +203,26 @@ export interface UnifiedConversationListItem {
   qualityScore?: number;
   testResult?: string;
   issueCount?: number;
+  callCount?: number;
+}
+
+export interface CallHistoryEntry {
+  id: string;
+  status: string;
+  disposition?: string;
+  duration?: number;
+  hasTranscript: boolean;
+  hasRecording: boolean;
+  hasAnalysis: boolean;
+  createdAt: string;
+}
+
+export interface TopChallenge {
+  type: string;
+  count: number;
+  severity: string;
+  description: string;
+  suggestions: string[];
 }
 
 export interface UnifiedIntelligenceListResponse {

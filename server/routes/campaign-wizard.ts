@@ -8,7 +8,7 @@ import {
   clientUsers,
   campaigns,
   virtualAgents,
-  users
+  users,
 } from '@shared/schema';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../auth';
@@ -75,8 +75,8 @@ function mapChannelToOrderType(channel: string, campaignType: string): WorkOrder
 router.post('/create', requireAuth, requireRole(['admin']), async (req: Request, res: Response) => {
   try {
     const campaignSchema = z.object({
-      // Admin specific
-      clientAccountId: z.string().min(1, 'Client Account ID is required'),
+      // Admin specific - required to associate campaign with a client
+      clientAccountId: z.string().min(1, 'Client Account ID is required. Please select a client before creating a campaign.'),
       
       // Step 1: Basics
       name: z.string().min(1, 'Campaign name is required'),
@@ -261,11 +261,11 @@ router.get('/agents', requireAuth, async (req: Request, res: Response) => {
 router.post('/voice-preview', requireAuth, async (req: Request, res: Response) => {
     try {
       const { voiceId, text } = req.body;
-  
+
       if (!voiceId || !text) {
         return res.status(400).json({ message: 'Voice ID and text are required' });
       }
-  
+
       res.json({
         success: true,
         message: 'Voice preview generated',
@@ -276,6 +276,5 @@ router.post('/voice-preview', requireAuth, async (req: Request, res: Response) =
       res.status(500).json({ message: 'Failed to generate voice preview' });
     }
   });
-
 
 export default router;

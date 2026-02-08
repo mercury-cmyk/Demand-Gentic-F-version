@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import {
   User,
   Building,
@@ -26,10 +27,14 @@ import {
   Sparkles,
   MessageSquare,
   Mic,
+  Brain,
+  Loader2,
+  History,
+  AlertTriangle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import type { UnifiedConversationDetail } from './types';
+import type { UnifiedConversationDetail, CallHistoryEntry } from './types';
 import { UnifiedRecordingPlayer } from './UnifiedRecordingPlayer';
 import { UnifiedTranscriptDisplay } from './UnifiedTranscriptDisplay';
 import { CallAnalysisSummary } from './CallAnalysisSummary';
@@ -39,17 +44,27 @@ interface UnifiedDetailPanelProps {
   conversation: UnifiedConversationDetail | null;
   isLoading: boolean;
   className?: string;
+  onAnalyze?: (sessionId: string) => void;
+  onTranscribe?: (sessionId: string) => void;
+  onSelectHistoryCall?: (sessionId: string) => void;
+  isAnalyzing?: boolean;
+  isTranscribing?: boolean;
 }
 
 export function UnifiedDetailPanel({
   conversation,
   isLoading,
   className,
+  onAnalyze,
+  onTranscribe,
+  onSelectHistoryCall,
+  isAnalyzing,
+  isTranscribing,
 }: UnifiedDetailPanelProps) {
   // Loading state
   if (isLoading) {
     return (
-      <Card className={cn('h-full', className)}>
+      <Card className={cn('h-full bg-background/80', className)}>
         <CardContent className="p-6 space-y-4">
           <Skeleton className="h-8 w-3/4" />
           <Skeleton className="h-20 w-full" />
@@ -63,8 +78,8 @@ export function UnifiedDetailPanel({
   // Empty state
   if (!conversation) {
     return (
-      <Card className={cn('h-full flex items-center justify-center', className)}>
-        <div className="text-center text-muted-foreground p-8">
+      <Card className={cn('h-full flex items-center justify-center bg-background/80', className)}>
+        <div className="text-center text-muted-foreground p-8 border border-dashed rounded-lg bg-muted/20">
           <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
           <p className="text-lg font-medium">Select a conversation</p>
           <p className="text-sm mt-1">Choose a conversation from the list to view details</p>
@@ -79,9 +94,14 @@ export function UnifiedDetailPanel({
     conversation.callAnalysis.detectedIssues.length > 0;
   const hasQualityAnalysis = conversation.qualityAnalysis.score !== undefined ||
     Object.keys(conversation.qualityAnalysis.subscores).length > 0;
+  const hasTranscriptContent = conversation.transcript.available;
+  const hasRecordingAvailable = conversation.recording.available;
+  const canAnalyze = hasTranscriptContent && !hasCallAnalysis && conversation.source === 'call_session';
+  const canTranscribe = hasRecordingAvailable && !hasTranscriptContent && conversation.source === 'call_session';
+  const hasCallHistory = (conversation.callCount || 1) > 1 && conversation.callHistory;
 
   return (
-    <Card className={cn('h-full flex flex-col', className)}>
+    <Card className={cn('h-full flex flex-col bg-background/80', className)}>
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
           {/* Header Section */}
@@ -91,7 +111,7 @@ export function UnifiedDetailPanel({
 
           {/* Tabbed Content */}
           <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-4 bg-muted/40 p-1 rounded-lg">
               <TabsTrigger value="overview" className="text-xs">
                 <Sparkles className="h-3 w-3 mr-1" />
                 Overview
@@ -112,8 +132,85 @@ export function UnifiedDetailPanel({
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="mt-4 space-y-4">
+              {/* Action Buttons: Analyze / Transcribe */}
+              {(canAnalyze || canTranscribe) && (
+                <div className="flex gap-2 flex-wrap">
+                  {canAnalyze && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => onAnalyze?.(conversation.id)}
+                      disabled={isAnalyzing}
+                    >
+                      {isAnalyzing ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Brain className="h-4 w-4 mr-2" />
+                      )}
+                      {isAnalyzing ? 'Analyzing...' : 'Analyze Call'}
+                    </Button>
+                  )}
+                  {canTranscribe && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onTranscribe?.(conversation.id)}
+                      disabled={isTranscribing}
+                    >
+                      {isTranscribing ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <FileText className="h-4 w-4 mr-2" />
+                      )}
+                      {isTranscribing ? 'Transcribing...' : 'Transcribe from Recording'}
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Call History (when contact has multiple calls) */}
+              {hasCallHistory && (
+                <div className="rounded-lg border bg-background/70 p-3">
+                  <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+                    <History className="h-4 w-4" />
+                    Call History ({conversation.callCount} calls to this contact)
+                  </h3>
+                  <div className="space-y-1.5 max-h-[150px] overflow-y-auto">
+                    {conversation.callHistory!.map((entry, idx) => (
+                      <div
+                        key={entry.id}
+                        className={cn(
+                          'flex items-center justify-between text-xs p-2 rounded border cursor-pointer hover:bg-muted/50 transition-colors bg-background/70',
+                          entry.id === conversation.id && 'ring-1 ring-primary bg-primary/5'
+                        )}
+                        onClick={() => onSelectHistoryCall?.(entry.id)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">#{idx + 1}</span>
+                          <Badge variant="outline" className="text-[10px]">{entry.status}</Badge>
+                          {entry.disposition && (
+                            <Badge variant="outline" className="text-[10px] capitalize">
+                              {entry.disposition.replace(/_/g, ' ')}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          {entry.hasTranscript && <FileText className="h-3 w-3 text-green-500" />}
+                          {entry.hasRecording && <Mic className="h-3 w-3 text-blue-500" />}
+                          {entry.hasAnalysis && <BarChart3 className="h-3 w-3 text-purple-500" />}
+                          {entry.duration && (
+                            <span>{Math.floor(entry.duration / 60)}:{String(entry.duration % 60).padStart(2, '0')}</span>
+                          )}
+                          <span>{format(new Date(entry.createdAt), 'MMM d, HH:mm')}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Recording Player */}
-              <div>
+              <div className="rounded-lg border bg-background/70 p-3">
                 <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
                   <Phone className="h-4 w-4" />
                   Recording
@@ -126,7 +223,7 @@ export function UnifiedDetailPanel({
 
               {/* Quick Summary */}
               {conversation.callAnalysis.summaryText && (
-                <div className="bg-muted/50 p-4 rounded-lg">
+                <div className="bg-muted/40 p-4 rounded-lg border">
                   <h3 className="text-sm font-medium mb-2">Call Summary</h3>
                   <p className="text-sm text-muted-foreground">
                     {conversation.callAnalysis.summaryText}
@@ -135,7 +232,7 @@ export function UnifiedDetailPanel({
               )}
 
               {/* Transcript Preview */}
-              <div>
+              <div className="rounded-lg border bg-background/70 p-3">
                 <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Transcript Preview
@@ -149,10 +246,37 @@ export function UnifiedDetailPanel({
 
             {/* Full Transcript Tab */}
             <TabsContent value="transcript" className="mt-4">
-              <UnifiedTranscriptDisplay
-                transcript={conversation.transcript}
-                maxHeight="600px"
-              />
+              {hasTranscriptContent ? (
+                <UnifiedTranscriptDisplay
+                  transcript={conversation.transcript}
+                  maxHeight="600px"
+                />
+              ) : canTranscribe ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border border-dashed rounded-lg bg-muted/20">
+                  <FileText className="h-12 w-12 mb-4 opacity-50" />
+                  <p className="text-sm mb-1">No transcript available</p>
+                  <p className="text-xs mb-3">A recording exists — transcription can be generated</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onTranscribe?.(conversation.id)}
+                    disabled={isTranscribing}
+                  >
+                    {isTranscribing ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <FileText className="h-4 w-4 mr-2" />
+                    )}
+                    {isTranscribing ? 'Transcribing...' : 'Transcribe from Recording'}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border border-dashed rounded-lg bg-muted/20">
+                  <FileText className="h-12 w-12 mb-4 opacity-50" />
+                  <p className="text-sm">No transcript available</p>
+                  <p className="text-xs mt-1">No recording available to generate transcript from</p>
+                </div>
+              )}
             </TabsContent>
 
             {/* Call Analysis Tab */}
@@ -164,8 +288,25 @@ export function UnifiedDetailPanel({
                   disposition={conversation.disposition}
                   status={conversation.status}
                 />
+              ) : canAnalyze ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border border-dashed rounded-lg bg-muted/20">
+                  <Brain className="h-12 w-12 mb-4 opacity-50" />
+                  <p className="text-sm mb-3">No analysis yet — transcript is available</p>
+                  <Button
+                    size="sm"
+                    onClick={() => onAnalyze?.(conversation.id)}
+                    disabled={isAnalyzing}
+                  >
+                    {isAnalyzing ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Brain className="h-4 w-4 mr-2" />
+                    )}
+                    {isAnalyzing ? 'Analyzing...' : 'Analyze This Call'}
+                  </Button>
+                </div>
               ) : (
-                <EmptyAnalysisState type="call" />
+                <EmptyAnalysisState type="call" canTranscribe={canTranscribe} onTranscribe={() => onTranscribe?.(conversation.id)} isTranscribing={isTranscribing} />
               )}
             </TabsContent>
 
@@ -174,7 +315,7 @@ export function UnifiedDetailPanel({
               {hasQualityAnalysis ? (
                 <QualityAnalysisPanel analysis={conversation.qualityAnalysis} />
               ) : (
-                <EmptyAnalysisState type="quality" />
+                <EmptyAnalysisState type="quality" canTranscribe={canTranscribe} onTranscribe={() => onTranscribe?.(conversation.id)} isTranscribing={isTranscribing} />
               )}
             </TabsContent>
           </Tabs>
@@ -196,7 +337,7 @@ function HeaderSection({
   isTest: boolean;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
       {/* Contact & Company */}
       <div className="flex items-start justify-between">
         <div>
@@ -279,16 +420,34 @@ function DispositionBadge({ disposition }: { disposition: string }) {
   );
 }
 
-function EmptyAnalysisState({ type }: { type: 'call' | 'quality' }) {
+function EmptyAnalysisState({ type, canTranscribe, onTranscribe, isTranscribing }: { type: 'call' | 'quality'; canTranscribe?: boolean; onTranscribe?: () => void; isTranscribing?: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border border-dashed rounded-lg bg-muted/20">
       <BarChart3 className="h-12 w-12 mb-4 opacity-50" />
       <p className="text-sm">
         No {type === 'call' ? 'call analysis' : 'quality analysis'} available
       </p>
       <p className="text-xs mt-1">
-        Analysis may still be processing or unavailable for this conversation
+        {canTranscribe
+          ? 'Transcribe the recording first, then analyze the call'
+          : 'Analysis may still be processing or unavailable for this conversation'}
       </p>
+      {canTranscribe && onTranscribe && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={onTranscribe}
+          disabled={isTranscribing}
+        >
+          {isTranscribing ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4 mr-2" />
+          )}
+          {isTranscribing ? 'Transcribing...' : 'Transcribe from Recording'}
+        </Button>
+      )}
     </div>
   );
 }

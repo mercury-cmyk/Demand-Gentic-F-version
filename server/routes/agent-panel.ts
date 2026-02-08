@@ -175,8 +175,8 @@ function determineRiskLevel(steps: PlannedStep[]): 'low' | 'medium' | 'high' {
 
 router.get('/capabilities', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId;
-    const userRole = (req as any).userRole || 'agent';
+    const userId = req.user!.userId;
+    const userRole = req.user!.role || 'agent';
     const isClientPortal = req.query.clientPortal === 'true';
 
     const prompts = await getPromptsForUser(userId, userRole, isClientPortal);
@@ -199,8 +199,8 @@ router.get('/capabilities', async (req: Request, res: Response) => {
 router.post('/chat', async (req: Request, res: Response) => {
   try {
     const data = chatRequestSchema.parse(req.body);
-    const userId = (req as any).userId;
-    const userRole = (req as any).userRole || 'agent';
+    const userId = req.user!.userId;
+    const userRole = req.user!.role || 'agent';
     const isClientPortal = req.query.clientPortal === 'true';
 
     // Get prompts and build system prompt
@@ -367,8 +367,8 @@ router.post('/chat', async (req: Request, res: Response) => {
 router.post('/plan', async (req: Request, res: Response) => {
   try {
     const data = chatRequestSchema.parse(req.body);
-    const userId = (req as any).userId;
-    const userRole = (req as any).userRole || 'agent';
+    const userId = req.user!.userId;
+    const userRole = req.user!.role || 'agent';
 
     // Generate plan without executing
     const prompts = await getPromptsForUser(userId, userRole, false);
@@ -428,7 +428,7 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
   try {
     const { planId } = req.params;
     const data = executePlanSchema.parse(req.body);
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
 
     // Get the plan
     const [plan] = await db
@@ -513,7 +513,7 @@ router.post('/reject/:planId', async (req: Request, res: Response) => {
   try {
     const { planId } = req.params;
     const { reason } = req.body;
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
 
     const [plan] = await db
       .select()
@@ -549,7 +549,7 @@ router.post('/reject/:planId', async (req: Request, res: Response) => {
 router.get('/conversation/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = (req as any).userId;
+    const userId = req.user!.userId;
 
     const [conversation] = await db
       .select()

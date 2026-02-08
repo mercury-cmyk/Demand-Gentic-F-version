@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { TranscriptViewer } from "@/components/client-portal/leads";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import {
   Dialog,
@@ -79,6 +80,8 @@ interface TestCall {
   disposition: string | null;
   testResult: string | null;
   callSummary: string | null;
+  fullTranscript?: string | null;
+  transcriptTurns?: Array<{ role: string; text: string; timestamp?: string }> | null;
   aiPerformanceMetrics: any;
   detectedIssues: any[] | null;
   recordingUrl: string | null;
@@ -156,6 +159,28 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
     queryKey: [`/api/campaigns/${campaignId}/test-calls-summary`],
     enabled: dialMode === "ai_agent" && showLoggedTests,
   });
+
+  // Fetch full details (including transcript) for the selected test call
+  const { data: selectedTestCallDetails, isLoading: selectedTestCallDetailsLoading } = useQuery<TestCall>({
+    queryKey: [`/api/campaigns/${campaignId}/test-calls/${selectedTestCall?.id}`],
+    enabled: !!selectedTestCall?.id,
+  });
+
+  const activeSelectedTestCall = selectedTestCallDetails || selectedTestCall;
+  const activeTranscriptText =
+    activeSelectedTestCall?.fullTranscript ||
+    (activeSelectedTestCall?.transcriptTurns && activeSelectedTestCall.transcriptTurns.length > 0
+      ? activeSelectedTestCall.transcriptTurns
+          .map((t) => `${t.role === "agent" || t.role === "assistant" ? "Agent" : "Contact"}: ${t.text}`)
+          .join("\n")
+      : null);
+  const activeStructuredTranscript = activeSelectedTestCall?.transcriptTurns
+    ? activeSelectedTestCall.transcriptTurns.map((t) => ({
+        speaker: t.role === "agent" || t.role === "assistant" ? "Agent" : "Contact",
+        text: t.text,
+        timestamp: t.timestamp,
+      }))
+    : null;
 
   // Analyze test call mutation
   const analyzeTestMutation = useMutation({
@@ -607,6 +632,23 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode }: Campai
                       </div>
                     </div>
                   )}
+
+                  {/* Transcript */}
+                  <div>
+                    <Label className="text-muted-foreground">Transcript</Label>
+                    <div className="mt-2">
+                      {selectedTestCallDetailsLoading ? (
+                        <Skeleton className="h-[120px] w-full" />
+                      ) : activeTranscriptText ? (
+                        <TranscriptViewer
+                          transcript={activeTranscriptText}
+                          structuredTranscript={activeStructuredTranscript}
+                        />
+                      ) : (
+                        <div className="text-sm text-muted-foreground">No transcript available</div>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Performance Metrics */}
                   {selectedTestCall.aiPerformanceMetrics && (

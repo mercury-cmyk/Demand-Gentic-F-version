@@ -259,19 +259,58 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
 
     console.log(`[TelnyxSync] Processing ${recordings.length} recordings for database sync...`);
 
+    // Track Telnyx recording IDs processed in this batch to skip duplicates within the same sync
+    const processedRecordingIds = new Set<string>();
+
     for (const recording of recordings) {
       try {
-        // Check if this recording already exists in call_sessions
-        const existingSession = await db
-          .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
-          .from(callSessions)
-          .where(eq(callSessions.telnyxCallId, recording.call_control_id))
-          .limit(1);
+        // Skip if we already processed this exact Telnyx recording ID in this batch
+        if (processedRecordingIds.has(recording.id)) {
+          continue;
+        }
+        processedRecordingIds.add(recording.id);
 
         const downloadUrl = recording.download_urls?.mp3 || recording.download_urls?.wav;
         const durationSec = Math.floor(recording.duration_millis / 1000);
         const recordingStartedAt = new Date(recording.recording_started_at);
         const recordingEndedAt = recording.recording_ended_at ? new Date(recording.recording_ended_at) : null;
+
+        // === DEDUP STRATEGY ===
+        // Strategy 1: Match by telnyxCallId (call_control_id) — only when it's not null/empty
+        let existingSession: { id: string; recordingUrl: string | null }[] = [];
+
+        if (recording.call_control_id) {
+          existingSession = await db
+            .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+            .from(callSessions)
+            .where(eq(callSessions.telnyxCallId, recording.call_control_id))
+            .limit(1);
+        }
+
+        // Strategy 2: Fallback — match by phone number + time window (±60 seconds)
+        // This catches recordings where call_control_id is null (common with Telnyx)
+        if (existingSession.length === 0) {
+          const fromNumber = recording.from || '';
+          const toNumber = recording.to || '';
+
+          if (toNumber && recordingStartedAt) {
+            const windowStart = new Date(recordingStartedAt.getTime() - 60_000);
+            const windowEnd = new Date(recordingStartedAt.getTime() + 60_000);
+
+            existingSession = await db
+              .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+              .from(callSessions)
+              .where(
+                and(
+                  eq(callSessions.toNumberE164, toNumber),
+                  ...(fromNumber ? [eq(callSessions.fromNumber, fromNumber)] : []),
+                  gte(callSessions.startedAt, windowStart),
+                  lte(callSessions.startedAt, windowEnd)
+                )
+              )
+              .limit(1);
+          }
+        }
 
         if (existingSession.length > 0) {
           // Update existing session if it doesn't have recording URL
@@ -283,12 +322,15 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
                 recordingDurationSec: durationSec,
                 recordingStatus: recording.status === 'completed' ? 'stored' : 'pending',
                 recordingFormat: downloadUrl?.includes('.wav') ? 'wav' : 'mp3',
+                // Also backfill telnyxCallId if it was null and we now have one
+                ...(recording.call_control_id ? { telnyxCallId: recording.call_control_id } : {}),
               })
               .where(eq(callSessions.id, existingSession[0].id));
             
             result.updatedRecordings++;
             console.log(`[TelnyxSync] Updated recording for session: ${existingSession[0].id}`);
           }
+          // Skip — session already exists (with or without recording)
         } else {
           // Create new call_session entry for this recording
           // Try to get call details for from/to numbers
@@ -304,7 +346,7 @@ export async function syncTelnyxRecordingsToDatabase(options: ListRecordingsOpti
           }
 
           await db.insert(callSessions).values({
-            telnyxCallId: recording.call_control_id,
+            telnyxCallId: recording.call_control_id || null,
             fromNumber: fromNumber,
             toNumberE164: toNumber || 'unknown',
             startedAt: recordingStartedAt,
@@ -353,7 +395,9 @@ export async function getTelnyxRecordingsForDashboard(options: {
   pagination: { total: number; page: number; limit: number; totalPages: number };
 }> {
   const {
-    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Default: last 30 days
+    // Default: last 1 hour - Telnyx presigned URLs expire after 10 minutes
+    // so older recordings won't have valid download URLs anyway
+    startDate = new Date(Date.now() - 60 * 60 * 1000), // Default: last 1 hour
     endDate = new Date(),
     phoneNumber,
     callId,

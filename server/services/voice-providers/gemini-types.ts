@@ -36,8 +36,55 @@ export interface BidiGenerateContentSetup {
      * Tools available to the model
      */
     tools?: GeminiToolConfig[];
+
+    /**
+     * Enable transcription of AI audio output (agent speech → text).
+     * Pass empty object {} to enable with defaults.
+     * Required for native-audio models that only allow a single response modality.
+     */
+    output_audio_transcription?: Record<string, never>;
+
+    /**
+     * Enable transcription of user audio input (caller speech → text).
+     * Pass empty object {} to enable with defaults.
+     */
+    input_audio_transcription?: Record<string, never>;
+
+    /**
+     * Safety settings to control content filtering thresholds.
+     * Each entry specifies a harm category and the blocking threshold.
+     */
+    safety_settings?: GeminiSafetySetting[];
+
+    /**
+     * Enable affective dialog for natural emotional adaptation.
+     * When true, the model adapts its tone/emotion to match conversational context.
+     */
+    enable_affective_dialog?: boolean;
   };
 }
+
+/**
+ * Safety setting for a single harm category.
+ * See: https://ai.google.dev/gemini-api/docs/safety-settings
+ */
+export interface GeminiSafetySetting {
+  category: GeminiHarmCategory;
+  threshold: GeminiHarmBlockThreshold;
+}
+
+export type GeminiHarmCategory =
+  | 'HARM_CATEGORY_HARASSMENT'
+  | 'HARM_CATEGORY_HATE_SPEECH'
+  | 'HARM_CATEGORY_SEXUALLY_EXPLICIT'
+  | 'HARM_CATEGORY_DANGEROUS_CONTENT'
+  | 'HARM_CATEGORY_CIVIC_INTEGRITY';
+
+export type GeminiHarmBlockThreshold =
+  | 'BLOCK_NONE'
+  | 'BLOCK_ONLY_HIGH'
+  | 'BLOCK_MEDIUM_AND_ABOVE'
+  | 'BLOCK_LOW_AND_ABOVE';
 
 export interface GeminiGenerationConfig {
   /**
@@ -83,6 +130,15 @@ export interface GeminiGenerationConfig {
    * Stop sequences
    */
   stop_sequences?: string[];
+
+  /**
+   * Thinking configuration for enhanced reasoning.
+   * thinking_budget controls how many tokens the model can use for internal reasoning.
+   * Higher budgets allow deeper analysis of complex objections/scenarios.
+   */
+  thinking_config?: {
+    thinking_budget?: number;
+  };
 }
 
 export interface GeminiToolConfig {
@@ -380,34 +436,57 @@ export function getVertexModelName(config: GeminiLiveConfig): string {
 // ==================== VOICE CONSTANTS ====================
 
 /**
- * Available Gemini voices for audio output
- * These are native audio voices with natural prosody and emotion
+ * Official Gemini TTS Voices (30 total)
+ * From Google's documentation: https://ai.google.dev/gemini-api/docs/speech-generation
+ * These are the REAL voices supported by Gemini Live API
  */
 export const GEMINI_VOICES = {
-  // Original voices (Gemini 2.0)
-  AOEDE: 'Aoede',     // Bright and warm
-  CHARON: 'Charon',   // Deep and authoritative
-  FENRIR: 'Fenrir',   // Calm and measured
-  KORE: 'Kore',       // Soft and friendly (default)
-  PUCK: 'Puck',       // Light and expressive
-
-  // Newer voices (Gemini 2.5+ Native Audio)
-  ORION: 'Orion',     // Professional, confident male voice
-  VEGA: 'Vega',       // Warm, engaging voice (best for sales)
-  PEGASUS: 'Pegasus', // Calm, professional (ideal for B2B)
-  URSA: 'Ursa',       // Deep, trustworthy voice
-  NOVA: 'Nova',       // Energetic, friendly voice
-  DIPPER: 'Dipper',   // Clear, articulate voice
-  CAPELLA: 'Capella', // Melodic, pleasant voice
-  ORBIT: 'Orbit',     // Neutral, versatile voice
-  LYRA: 'Lyra',       // Soft, soothing voice
-  ECLIPSE: 'Eclipse', // Bold, authoritative voice
+  // Primary B2B Sales voices
+  KORE: 'Kore',           // Firm - Confident and direct
+  FENRIR: 'Fenrir',       // Excitable - Enthusiastic and persuasive
+  CHARON: 'Charon',       // Informative - Trustworthy and knowledgeable
+  AOEDE: 'Aoede',         // Breezy - Light and approachable
+  PUCK: 'Puck',           // Upbeat - Energetic and engaging
+  
+  // Professional voices
+  ZEPHYR: 'Zephyr',       // Bright - Articulate and professional
+  LEDA: 'Leda',           // Youthful - Modern and relatable
+  ORUS: 'Orus',           // Firm - Reliable and trustworthy
+  SULAFAT: 'Sulafat',     // Warm - Empathetic and personable
+  GACRUX: 'Gacrux',       // Mature - Seasoned and credible
+  SCHEDAR: 'Schedar',     // Even - Calm and composed
+  ACHIRD: 'Achird',       // Friendly - Welcoming and warm
+  
+  // Specialized voices
+  SADALTAGER: 'Sadaltager',     // Knowledgeable - Authoritative consultant
+  PULCHERRIMA: 'Pulcherrima',   // Forward - Bold and assertive
+  ALGIEBA: 'Algieba',           // Smooth - Refined delivery
+  DESPINA: 'Despina',           // Smooth - Elegant and articulate
+  IAPETUS: 'Iapetus',           // Clear - Technical and accurate
+  ERINOME: 'Erinome',           // Clear - Professional presenter
+  VINDEMIATRIX: 'Vindemiatrix', // Gentle - Calming presence
+  ACHERNAR: 'Achernar',         // Soft - Comforting and kind
+  
+  // Dynamic voices
+  SADACHBIA: 'Sadachbia',       // Lively - High-energy and exciting
+  LAOMEDEIA: 'Laomedeia',       // Upbeat - Optimistic and motivating
+  AUTONOE: 'Autonoe',           // Bright - Sunny and engaging
+  CALLIRRHOE: 'Callirrhoe',     // Easy-going - Casual and comfortable
+  UMBRIEL: 'Umbriel',           // Easy-going - Relaxed and natural
+  
+  // Character voices
+  ENCELADUS: 'Enceladus',       // Breathy - Thoughtful whisper
+  ALGENIB: 'Algenib',           // Gravelly - Distinctive and memorable
+  RASALGETHI: 'Rasalgethi',     // Informative - Teacher-like clarity
+  ALNILAM: 'Alnilam',           // Firm - Strong and commanding
+  ZUBENELGENUBI: 'Zubenelgenubi', // Casual - Natural and unscripted
 } as const;
 
 export type GeminiVoice = typeof GEMINI_VOICES[keyof typeof GEMINI_VOICES];
 
 /**
  * Detailed voice descriptions for UI and agent configuration
+ * Based on official Google Gemini TTS documentation
  */
 export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
   name: string;
@@ -416,110 +495,215 @@ export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
   style: string[];
   bestFor: string[];
 }> = {
-  'Aoede': {
-    name: 'Aoede',
-    description: 'Bright and warm voice with natural enthusiasm',
+  'Kore': {
+    name: 'Kore',
+    description: 'Firm and professional voice - confident and direct',
     gender: 'female',
-    style: ['friendly', 'warm', 'engaging'],
-    bestFor: ['customer support', 'outreach', 'general conversation'],
-  },
-  'Charon': {
-    name: 'Charon',
-    description: 'Deep and authoritative voice that commands attention',
-    gender: 'male',
-    style: ['authoritative', 'deep', 'professional'],
-    bestFor: ['executive calls', 'serious topics', 'B2B sales'],
+    style: ['firm', 'professional', 'confident'],
+    bestFor: ['executive outreach', 'B2B sales', 'leadership'],
   },
   'Fenrir': {
     name: 'Fenrir',
-    description: 'Calm and measured voice for thoughtful conversations',
+    description: 'Excitable and energetic voice - enthusiastic and persuasive',
     gender: 'male',
-    style: ['calm', 'measured', 'thoughtful'],
-    bestFor: ['consulting', 'technical discussions', 'complex topics'],
+    style: ['excitable', 'energetic', 'persuasive'],
+    bestFor: ['enterprise sales', 'product launches', 'excitement'],
   },
-  'Kore': {
-    name: 'Kore',
-    description: 'Soft and friendly voice - great default for most use cases',
+  'Charon': {
+    name: 'Charon',
+    description: 'Informative and authoritative voice - trustworthy and knowledgeable',
+    gender: 'male',
+    style: ['informative', 'authoritative', 'knowledgeable'],
+    bestFor: ['technical decision makers', 'consulting', 'expertise'],
+  },
+  'Aoede': {
+    name: 'Aoede',
+    description: 'Breezy and friendly voice - light and approachable',
     gender: 'female',
-    style: ['soft', 'friendly', 'approachable'],
-    bestFor: ['general purpose', 'warm outreach', 'customer service'],
+    style: ['breezy', 'friendly', 'light'],
+    bestFor: ['mid-market outreach', 'warm introductions', 'relationship building'],
   },
   'Puck': {
     name: 'Puck',
-    description: 'Light and expressive voice with natural energy',
-    gender: 'neutral',
-    style: ['expressive', 'light', 'dynamic'],
-    bestFor: ['creative content', 'entertainment', 'casual calls'],
-  },
-  'Orion': {
-    name: 'Orion',
-    description: 'Professional and confident male voice',
+    description: 'Upbeat and lively voice - energetic and engaging',
     gender: 'male',
-    style: ['professional', 'confident', 'clear'],
-    bestFor: ['B2B sales', 'professional services', 'enterprise'],
+    style: ['upbeat', 'lively', 'engaging'],
+    bestFor: ['startups', 'SMB', 'creative pitches'],
   },
-  'Vega': {
-    name: 'Vega',
-    description: 'Warm and engaging voice - excellent for building rapport',
-    gender: 'female',
-    style: ['warm', 'engaging', 'personable'],
-    bestFor: ['sales calls', 'relationship building', 'lead qualification'],
-  },
-  'Pegasus': {
-    name: 'Pegasus',
-    description: 'Calm and professional voice - ideal for business contexts',
-    gender: 'neutral',
-    style: ['calm', 'professional', 'trustworthy'],
-    bestFor: ['B2B outreach', 'financial services', 'consulting'],
-  },
-  'Ursa': {
-    name: 'Ursa',
-    description: 'Deep and trustworthy voice with gravitas',
+  'Zephyr': {
+    name: 'Zephyr',
+    description: 'Bright and clear voice - articulate and professional',
     gender: 'male',
-    style: ['deep', 'trustworthy', 'authoritative'],
-    bestFor: ['executive conversations', 'legal', 'insurance'],
+    style: ['bright', 'clear', 'articulate'],
+    bestFor: ['financial services', 'professional services', 'clarity'],
   },
-  'Nova': {
-    name: 'Nova',
-    description: 'Energetic and friendly voice with natural enthusiasm',
+  'Leda': {
+    name: 'Leda',
+    description: 'Youthful and fresh voice - modern and relatable',
     gender: 'female',
-    style: ['energetic', 'friendly', 'upbeat'],
-    bestFor: ['outbound sales', 'marketing', 'events'],
+    style: ['youthful', 'fresh', 'modern'],
+    bestFor: ['tech companies', 'startups', 'innovation'],
   },
-  'Dipper': {
-    name: 'Dipper',
-    description: 'Clear and articulate voice with excellent diction',
+  'Orus': {
+    name: 'Orus',
+    description: 'Firm and steady voice - reliable and trustworthy',
     gender: 'male',
-    style: ['clear', 'articulate', 'precise'],
-    bestFor: ['technical sales', 'product demos', 'training'],
+    style: ['firm', 'steady', 'reliable'],
+    bestFor: ['healthcare', 'education', 'trust-building'],
   },
-  'Capella': {
-    name: 'Capella',
-    description: 'Melodic and pleasant voice with natural flow',
+  'Sulafat': {
+    name: 'Sulafat',
+    description: 'Warm and caring voice - empathetic and personable',
     gender: 'female',
-    style: ['melodic', 'pleasant', 'smooth'],
-    bestFor: ['customer experience', 'hospitality', 'healthcare'],
+    style: ['warm', 'caring', 'empathetic'],
+    bestFor: ['customer success', 'support', 'relationship management'],
   },
-  'Orbit': {
-    name: 'Orbit',
-    description: 'Neutral and versatile voice suitable for any context',
-    gender: 'neutral',
-    style: ['neutral', 'versatile', 'balanced'],
-    bestFor: ['general purpose', 'diverse audiences', 'surveys'],
-  },
-  'Lyra': {
-    name: 'Lyra',
-    description: 'Soft and soothing voice for gentle conversations',
-    gender: 'female',
-    style: ['soft', 'soothing', 'gentle'],
-    bestFor: ['support calls', 'sensitive topics', 'healthcare'],
-  },
-  'Eclipse': {
-    name: 'Eclipse',
-    description: 'Bold and authoritative voice that drives action',
+  'Gacrux': {
+    name: 'Gacrux',
+    description: 'Mature and experienced voice - seasoned and credible',
     gender: 'male',
-    style: ['bold', 'authoritative', 'commanding'],
-    bestFor: ['urgent calls', 'closing deals', 'executive outreach'],
+    style: ['mature', 'experienced', 'credible'],
+    bestFor: ['C-suite conversations', 'strategic discussions', 'authority'],
+  },
+  'Schedar': {
+    name: 'Schedar',
+    description: 'Even and balanced voice - calm and composed',
+    gender: 'male',
+    style: ['even', 'balanced', 'composed'],
+    bestFor: ['complex negotiations', 'sensitive topics', 'stability'],
+  },
+  'Achird': {
+    name: 'Achird',
+    description: 'Friendly and welcoming voice - warm and approachable',
+    gender: 'female',
+    style: ['friendly', 'welcoming', 'warm'],
+    bestFor: ['first contact calls', 'introductions', 'rapport building'],
+  },
+  'Sadaltager': {
+    name: 'Sadaltager',
+    description: 'Knowledgeable and expert voice - authoritative consultant',
+    gender: 'male',
+    style: ['knowledgeable', 'expert', 'authoritative'],
+    bestFor: ['advisory calls', 'consulting', 'thought leadership'],
+  },
+  'Pulcherrima': {
+    name: 'Pulcherrima',
+    description: 'Forward and confident voice - bold and assertive',
+    gender: 'female',
+    style: ['forward', 'confident', 'assertive'],
+    bestFor: ['closing calls', 'urgency', 'decision-making'],
+  },
+  'Algieba': {
+    name: 'Algieba',
+    description: 'Smooth and polished voice - refined delivery',
+    gender: 'male',
+    style: ['smooth', 'polished', 'refined'],
+    bestFor: ['premium brands', 'luxury', 'sophistication'],
+  },
+  'Despina': {
+    name: 'Despina',
+    description: 'Smooth and professional voice - elegant and articulate',
+    gender: 'female',
+    style: ['smooth', 'professional', 'elegant'],
+    bestFor: ['luxury market', 'high-end services', 'refinement'],
+  },
+  'Iapetus': {
+    name: 'Iapetus',
+    description: 'Clear and precise voice - technical and accurate',
+    gender: 'male',
+    style: ['clear', 'precise', 'technical'],
+    bestFor: ['product demos', 'technical sales', 'accuracy'],
+  },
+  'Erinome': {
+    name: 'Erinome',
+    description: 'Clear and articulate voice - professional presenter',
+    gender: 'female',
+    style: ['clear', 'articulate', 'professional'],
+    bestFor: ['presentations', 'webinars', 'formal settings'],
+  },
+  'Vindemiatrix': {
+    name: 'Vindemiatrix',
+    description: 'Gentle and soft voice - calming presence',
+    gender: 'female',
+    style: ['gentle', 'soft', 'calming'],
+    bestFor: ['sensitive topics', 'healthcare', 'support'],
+  },
+  'Achernar': {
+    name: 'Achernar',
+    description: 'Soft and reassuring voice - comforting and kind',
+    gender: 'female',
+    style: ['soft', 'reassuring', 'kind'],
+    bestFor: ['support calls', 'customer care', 'empathy'],
+  },
+  'Sadachbia': {
+    name: 'Sadachbia',
+    description: 'Lively and dynamic voice - high-energy and exciting',
+    gender: 'female',
+    style: ['lively', 'dynamic', 'exciting'],
+    bestFor: ['product launches', 'events', 'excitement'],
+  },
+  'Laomedeia': {
+    name: 'Laomedeia',
+    description: 'Upbeat and positive voice - optimistic and motivating',
+    gender: 'female',
+    style: ['upbeat', 'positive', 'motivating'],
+    bestFor: ['follow-up calls', 'encouragement', 'positivity'],
+  },
+  'Autonoe': {
+    name: 'Autonoe',
+    description: 'Bright and cheerful voice - sunny and engaging',
+    gender: 'female',
+    style: ['bright', 'cheerful', 'sunny'],
+    bestFor: ['relationship building', 'warm calls', 'friendliness'],
+  },
+  'Callirrhoe': {
+    name: 'Callirrhoe',
+    description: 'Easy-going and relaxed voice - casual and comfortable',
+    gender: 'female',
+    style: ['easy-going', 'relaxed', 'casual'],
+    bestFor: ['informal calls', 'casual conversations', 'comfort'],
+  },
+  'Umbriel': {
+    name: 'Umbriel',
+    description: 'Easy-going and laid-back voice - relaxed and natural',
+    gender: 'male',
+    style: ['easy-going', 'laid-back', 'natural'],
+    bestFor: ['warm introductions', 'casual outreach', 'naturalness'],
+  },
+  'Enceladus': {
+    name: 'Enceladus',
+    description: 'Breathy and intimate voice - thoughtful whisper',
+    gender: 'male',
+    style: ['breathy', 'intimate', 'thoughtful'],
+    bestFor: ['confidential discussions', 'private matters', 'intimacy'],
+  },
+  'Algenib': {
+    name: 'Algenib',
+    description: 'Gravelly and deep voice - distinctive and memorable',
+    gender: 'male',
+    style: ['gravelly', 'deep', 'distinctive'],
+    bestFor: ['brand differentiation', 'unique presence', 'memorability'],
+  },
+  'Rasalgethi': {
+    name: 'Rasalgethi',
+    description: 'Informative and educational voice - teacher-like clarity',
+    gender: 'male',
+    style: ['informative', 'educational', 'clear'],
+    bestFor: ['training calls', 'education', 'explanation'],
+  },
+  'Alnilam': {
+    name: 'Alnilam',
+    description: 'Firm and decisive voice - strong and commanding',
+    gender: 'male',
+    style: ['firm', 'decisive', 'commanding'],
+    bestFor: ['leadership messaging', 'authority', 'decisiveness'],
+  },
+  'Zubenelgenubi': {
+    name: 'Zubenelgenubi',
+    description: 'Casual and conversational voice - natural and unscripted',
+    gender: 'male',
+    style: ['casual', 'conversational', 'natural'],
+    bestFor: ['peer-to-peer', 'informal outreach', 'authenticity'],
   },
 };
 
@@ -528,12 +712,14 @@ export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
  */
 export function getRecommendedVoice(useCase: string): GeminiVoice {
   const useCaseMap: Record<string, GeminiVoice> = {
-    'sales': 'Vega',
-    'b2b': 'Pegasus',
-    'support': 'Kore',
-    'executive': 'Charon',
-    'technical': 'Fenrir',
-    'outreach': 'Nova',
+    'sales': 'Fenrir',        // Excitable, persuasive
+    'b2b': 'Kore',            // Firm, professional
+    'support': 'Sulafat',     // Warm, caring
+    'executive': 'Charon',    // Informative, authoritative
+    'technical': 'Iapetus',   // Clear, precise
+    'outreach': 'Aoede',      // Breezy, friendly
+    'closing': 'Pulcherrima', // Forward, assertive
+    'consulting': 'Sadaltager', // Knowledgeable, expert
     'default': 'Kore',
   };
   return useCaseMap[useCase.toLowerCase()] || useCaseMap['default'];

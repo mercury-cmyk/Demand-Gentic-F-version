@@ -178,7 +178,9 @@ function checkForVoicemail(transcript: string): ClassificationResult | null {
     };
   }
 
-  // Check for AI call screening (Google Call Assist, etc.) - treat as voicemail
+  // Check for AI call screening (Google Call Assist, etc.) - NOW ALLOWED
+  // We want the Agent to actually RESPOND to the screener using the new prompt logic
+  /*
   const isAiCallScreening = VOICEMAIL_DETECTION_RULES.aiCallScreeningPhrases?.some((phrase) =>
     lower.includes(phrase)
   );
@@ -194,6 +196,7 @@ function checkForVoicemail(transcript: string): ClassificationResult | null {
       reasoning: `AI call screening detected: "${transcript}"`,
     };
   }
+  */
 
   // Check for personal voicemail greeting
   const isVoicemailPhrase = VOICEMAIL_DETECTION_RULES.voicemailPhrases.some((phrase) =>

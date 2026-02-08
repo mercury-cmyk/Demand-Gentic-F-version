@@ -4,8 +4,9 @@
 
 import 'dotenv/config';
 
-const CAMPAIGN_ID = 'ad8c5155-fcc3-4b4c-bdc6-55b4b58cbb37';
-const API_URL = 'https://demandgentic-api-657571555590.us-central1.run.app';
+const CAMPAIGN_ID = '664aff97-ac3c-4fbb-a943-9b123ddb3fda'; // RingCentral Campaign
+// Use localhost with ngrok port (server running on 5000)
+const API_URL = 'http://localhost:5000'; 
 
 async function testEndpoint() {
   console.log('========================================');
@@ -16,10 +17,11 @@ async function testEndpoint() {
   console.log(`Endpoint: ${endpoint}\n`);
 
   const payload = {
-    testPhoneNumber: '+447798787206',
-    testContactName: 'Test User',
-    testCompanyName: 'Test Company',
-    testJobTitle: 'Test Title',
+    testPhoneNumber: '+14179003844',
+    testContactName: 'Zahid M',
+    testCompanyName: 'Pivotal B2B',
+    testJobTitle: 'CEO',
+    testContactEmail: 'zahid.m@pivotal-b2b.com',
     voiceProvider: 'google'
   };
 
@@ -30,8 +32,8 @@ async function testEndpoint() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // You'll need to add auth token here if testing with real auth
-        // 'Authorization': 'Bearer YOUR_TOKEN_HERE'
+        // Token from generate-test-token.ts output
+        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImVtYWlsIjoiYWRtaW5AZGVtYW5kZ2VudGljLmFpIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzcwNDMxODAxLCJleHAiOjE3NzA1MTgyMDF9.dx5jjx19y4h8wKIIpSo1ooMtLtdaAttnR2WTr1VRCFc'
       },
       body: JSON.stringify(payload)
     });

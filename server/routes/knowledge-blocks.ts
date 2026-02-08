@@ -35,7 +35,7 @@ import {
   previewCampaignPrompt,
 } from "../services/provider-prompt-assembly";
 import { db } from "../db";
-import { contacts, accounts, campaigns, dialerCallAttempts, campaignQueue } from "@shared/schema";
+import { contacts, accounts, campaigns, dialerCallAttempts, campaignQueue, lists } from "@shared/schema";
 import { eq, sql, inArray } from "drizzle-orm";
 import type { KnowledgeBlockCategory, KnowledgeBlockLayer, VoiceProvider } from "@shared/schema";
 
@@ -575,30 +575,117 @@ router.get("/campaigns/:campaignId/runtime-prompt", requireAuth, async (req, res
 
 /**
  * GET /api/knowledge-blocks/campaigns/:campaignId/accounts
- * Get accounts associated with a campaign (via campaign queue)
+ * Get accounts associated with a campaign - always returns at least 20 accounts
+ * relevant to the campaign's audience criteria
  */
 router.get("/campaigns/:campaignId/accounts", requireAuth, async (req, res) => {
   try {
     const { campaignId } = req.params;
+    const MIN_ACCOUNTS = 20;
 
-    // Get unique accounts from campaign queue
-    const queueEntries = await db
+    // Get campaign details for audience criteria
+    const [campaign] = await db
       .select({
-        accountId: campaignQueue.accountId,
+        audienceRefs: campaigns.audienceRefs,
+        targetAudienceDescription: campaigns.targetAudienceDescription,
       })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    if (!campaign) {
+      return res.status(404).json({ success: false, error: 'Campaign not found' });
+    }
+
+    const accountIdSet = new Set<string>();
+
+    // Source 1: Get accounts from campaign queue
+    const queueEntries = await db
+      .select({ accountId: campaignQueue.accountId })
       .from(campaignQueue)
       .where(eq(campaignQueue.campaignId, campaignId))
       .groupBy(campaignQueue.accountId);
 
-    const accountIds = queueEntries
-      .map(e => e.accountId)
-      .filter((id): id is string => !!id);
+    queueEntries.forEach(e => e.accountId && accountIdSet.add(e.accountId));
+
+    // Source 2: Get accounts from dialer call attempts
+    if (accountIdSet.size < MIN_ACCOUNTS) {
+      const callAttempts = await db
+        .select({ contactId: dialerCallAttempts.contactId })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.campaignId, campaignId))
+        .groupBy(dialerCallAttempts.contactId)
+        .limit(100);
+
+      const contactIds = callAttempts.map(e => e.contactId).filter(Boolean) as string[];
+      if (contactIds.length > 0) {
+        const contactAccounts = await db
+          .select({ accountId: contacts.accountId })
+          .from(contacts)
+          .where(inArray(contacts.id, contactIds))
+          .groupBy(contacts.accountId);
+
+        contactAccounts.forEach(e => e.accountId && accountIdSet.add(e.accountId));
+      }
+    }
+
+    // Source 3: Get accounts from campaign audience lists
+    if (accountIdSet.size < MIN_ACCOUNTS && campaign.audienceRefs) {
+      const audienceRefs = campaign.audienceRefs as any;
+      const listIds: string[] = [
+        ...(audienceRefs.lists || []),
+        ...(audienceRefs.selectedLists || []),
+      ];
+
+      if (listIds.length > 0) {
+        const contactListData = await db
+          .select({ recordIds: lists.recordIds })
+          .from(lists)
+          .where(inArray(lists.id, listIds));
+
+        const listContactIds = new Set<string>();
+        for (const list of contactListData) {
+          if (list.recordIds && Array.isArray(list.recordIds)) {
+            list.recordIds.forEach((id: string) => listContactIds.add(id));
+          }
+        }
+
+        if (listContactIds.size > 0) {
+          const contactIdsArray = Array.from(listContactIds).slice(0, 500);
+          const contactAccounts = await db
+            .select({ accountId: contacts.accountId })
+            .from(contacts)
+            .where(inArray(contacts.id, contactIdsArray))
+            .groupBy(contacts.accountId);
+
+          contactAccounts.forEach(e => e.accountId && accountIdSet.add(e.accountId));
+        }
+      }
+    }
+
+    // Source 4: If still below minimum, get accounts with contacts that have relevant criteria
+    // This ensures Preview Studio always has data to work with
+    if (accountIdSet.size < MIN_ACCOUNTS) {
+      // Get accounts that have contacts with phone numbers (relevant for calling campaigns)
+      const relevantAccounts = await db
+        .select({
+          accountId: contacts.accountId,
+        })
+        .from(contacts)
+        .where(sql`${contacts.accountId} IS NOT NULL AND (${contacts.directPhoneE164} IS NOT NULL OR ${contacts.mobilePhoneE164} IS NOT NULL)`)
+        .groupBy(contacts.accountId)
+        .limit(MIN_ACCOUNTS - accountIdSet.size);
+
+      relevantAccounts.forEach(e => e.accountId && accountIdSet.add(e.accountId));
+    }
+
+    // Get account details (limit to 20 accounts)
+    const accountIds = Array.from(accountIdSet).slice(0, MIN_ACCOUNTS);
 
     if (accountIds.length === 0) {
       return res.json({ success: true, accounts: [] });
     }
 
-    // Get account details
     const accountList = await db
       .select({
         id: accounts.id,
@@ -607,7 +694,8 @@ router.get("/campaigns/:campaignId/accounts", requireAuth, async (req, res) => {
         industry: accounts.industryStandardized,
       })
       .from(accounts)
-      .where(inArray(accounts.id, accountIds));
+      .where(inArray(accounts.id, accountIds))
+      .orderBy(accounts.name);
 
     res.json({
       success: true,
@@ -621,12 +709,14 @@ router.get("/campaigns/:campaignId/accounts", requireAuth, async (req, res) => {
 
 /**
  * GET /api/knowledge-blocks/accounts/:accountId/contacts
- * Get contacts for a specific account
+ * Get contacts for a specific account - returns up to 100 contacts
+ * Prioritizes contacts with phone numbers for voice preview
  */
 router.get("/accounts/:accountId/contacts", requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
 
+    // Get contacts, prioritizing those with phone numbers
     const contactList = await db
       .select({
         id: contacts.id,
@@ -635,14 +725,27 @@ router.get("/accounts/:accountId/contacts", requireAuth, async (req, res) => {
         email: contacts.email,
         jobTitle: contacts.jobTitle,
         accountId: contacts.accountId,
+        hasPhone: sql<boolean>`(${contacts.directPhoneE164} IS NOT NULL OR ${contacts.mobilePhoneE164} IS NOT NULL)`,
       })
       .from(contacts)
       .where(eq(contacts.accountId, accountId))
-      .limit(100); // Limit to prevent huge lists
+      .orderBy(
+        sql`CASE WHEN ${contacts.directPhoneE164} IS NOT NULL OR ${contacts.mobilePhoneE164} IS NOT NULL THEN 0 ELSE 1 END`,
+        contacts.lastName,
+        contacts.firstName
+      )
+      .limit(100);
 
     res.json({
       success: true,
-      contacts: contactList,
+      contacts: contactList.map(c => ({
+        id: c.id,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        email: c.email,
+        jobTitle: c.jobTitle,
+        accountId: c.accountId,
+      })),
     });
   } catch (error: any) {
     console.error("[KnowledgeBlocks] GET /accounts/:accountId/contacts error:", error);

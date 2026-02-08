@@ -67,27 +67,34 @@ interface VoiceInfo {
   description?: string;
 }
 
+// Fallback voices (used if API fails) - import from shared constants
+import { GEMINI_VOICES, OPENAI_VOICES } from '@/lib/voice-constants';
+
 interface VoicesByProvider {
   openai: VoiceInfo[];
   gemini: VoiceInfo[];
 }
 
 // Fallback voices (used if API fails)
-const FALLBACK_OPENAI_VOICES: VoiceInfo[] = [
-  { id: 'marin', name: 'marin', displayName: 'Marin', gender: 'female', language: 'en', provider: 'openai', description: 'Natural & conversational (Recommended)' },
-  { id: 'alloy', name: 'alloy', displayName: 'Alloy', gender: 'neutral', language: 'en', provider: 'openai', description: 'Balanced & neutral' },
-  { id: 'ash', name: 'ash', displayName: 'Ash', gender: 'male', language: 'en', provider: 'openai', description: 'Clear & professional' },
-  { id: 'coral', name: 'coral', displayName: 'Coral', gender: 'female', language: 'en', provider: 'openai', description: 'Warm & friendly' },
-  { id: 'verse', name: 'verse', displayName: 'Verse', gender: 'male', language: 'en', provider: 'openai', description: 'Expressive & dynamic' },
-];
+const FALLBACK_OPENAI_VOICES: VoiceInfo[] = OPENAI_VOICES.slice(0, 5).map(v => ({
+  id: v.id,
+  name: v.id,
+  displayName: v.name,
+  gender: v.gender as 'male' | 'female' | 'neutral',
+  language: 'en',
+  provider: 'openai' as const,
+  description: v.tone,
+}));
 
-const FALLBACK_GEMINI_VOICES: VoiceInfo[] = [
-  { id: 'Puck', name: 'Puck', displayName: 'Puck', gender: 'male', language: 'en', provider: 'gemini', description: 'Natural & Soft (Recommended)' },
-  { id: 'Charon', name: 'Charon', displayName: 'Charon', gender: 'male', language: 'en', provider: 'gemini', description: 'Deep & Resonant' },
-  { id: 'Kore', name: 'Kore', displayName: 'Kore', gender: 'female', language: 'en', provider: 'gemini', description: 'Balanced & Clear' },
-  { id: 'Fenrir', name: 'Fenrir', displayName: 'Fenrir', gender: 'male', language: 'en', provider: 'gemini', description: 'Authoritative & Deep' },
-  { id: 'Aoede', name: 'Aoede', displayName: 'Aoede', gender: 'female', language: 'en', provider: 'gemini', description: 'Bright & Expressive' },
-];
+const FALLBACK_GEMINI_VOICES: VoiceInfo[] = GEMINI_VOICES.slice(0, 10).map(v => ({
+  id: v.id,
+  name: v.id,
+  displayName: v.name,
+  gender: v.gender as 'male' | 'female' | 'neutral',
+  language: 'en',
+  provider: 'gemini' as const,
+  description: v.tone,
+}));
 
 // Turn detection options for OpenAI Realtime
 const TURN_DETECTION_OPTIONS = [

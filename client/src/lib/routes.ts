@@ -65,6 +65,7 @@ export const ROUTES = {
   SETTINGS_DATA: '/settings/data',
   SETTINGS_AGENT_DEFAULTS: '/settings/agent-defaults',
   SETTINGS_KNOWLEDGE_HUB: '/settings/knowledge-hub',
+  SETTINGS_PROMPT_INSPECTOR: '/settings/prompt-inspector',
 
   // Super Organization Settings (Owner-only)
   SETTINGS_SUPER_ORG: '/settings/super-org',

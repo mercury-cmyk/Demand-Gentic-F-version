@@ -171,6 +171,9 @@ export interface CallContext {
   talkingPoints?: string[]; // Key points to mention
   // Max call duration in seconds - auto-hangup after this time
   maxCallDurationSeconds?: number;
+  // Number pool tracking for metrics and rotation
+  callerNumberId?: string | null; // Pool number ID used for this call
+  callerNumberDecisionId?: string | null; // Routing decision ID for audit
 }
 
 type ConversationPhase = "opening" | "gatekeeper" | "pitch" | "objection_handling" | "closing" | "handoff";

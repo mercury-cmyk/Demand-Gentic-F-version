@@ -52,13 +52,14 @@ import {
   Sparkles, AlertCircle, ArrowRight, ArrowLeft, Bot, Mic,
   Volume2, VolumeX, Play, Square, Brain, Zap, UserCircle,
   Globe, MessageSquare, ChevronRight, Check, X, Plus, Trash2,
-  Upload, Database, Lightbulb, Headphones, Wand2, Eye, Filter, Pause, TestTube
+  Upload, Database, Lightbulb, Headphones, Wand2, Eye, Filter, Pause, TestTube, Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCampaignTypesForChannel, type CampaignType } from '@/lib/campaign-types';
 import { apiRequest } from '@/lib/queryClient'; // Import apiRequest
 import { parsePhoneNumber } from 'libphonenumber-js'; // Import phone parser
+import { ALL_VOICES as AI_VOICES } from '@/lib/voice-constants'; // Import voice constants
 
 interface CampaignCreationWizardProps {
   open: boolean;
@@ -117,169 +118,7 @@ const PROMOTION_CHANNELS = [
   { value: 'combo', label: 'Multi-Channel', icon: Sparkles, description: 'Combined voice + email outreach', color: 'bg-purple-500' },
 ];
 
-// AI Voices available for preview - Gemini Live & OpenAI Realtime
-// Each has a unique sound signature and personality
-const AI_VOICES = [
-  // ============ GEMINI VOICES (Google) ============
-  {
-    id: 'Puck',
-    name: 'Puck',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Natural, Soft, Storytelling',
-    description: 'A youthful, enthusiastic voice with high energy. Perfect for exciting product launches and engaging cold calls.',
-    bestFor: ['Product Launches', 'Cold Calling', 'Tech Startups'],
-    color: 'from-orange-500 to-amber-500',
-    provider: 'gemini'
-  },
-  {
-    id: 'Charon',
-    name: 'Charon',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Deep, Resonant, Authoritative',
-    description: 'A rich, bass-heavy voice that conveys wisdom and experience. Ideal for enterprise deals and senior executives.',
-    bestFor: ['Enterprise Sales', 'Executive Outreach', 'Financial Services'],
-    color: 'from-slate-600 to-slate-800',
-    provider: 'gemini'
-  },
-  {
-    id: 'Fenrir',
-    name: 'Fenrir',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Deep, Intense, Cinematic',
-    description: 'A strong, assertive voice that commands attention. Great for persuasive sales and overcoming objections.',
-    bestFor: ['Sales Calls', 'Lead Qualification', 'B2B Outreach'],
-    color: 'from-blue-500 to-indigo-600',
-    provider: 'gemini'
-  },
-
-  // ============ OPENAI REALTIME VOICES ============
-  {
-    id: 'verse',
-    name: 'Verse',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Poetic, Dynamic',
-    description: 'A highly expressive voice capable of subtle emotional nuance. Great for personalized outreach.',
-    bestFor: ['Relationship Management', 'Luxury Brands', 'Arts'],
-    color: 'from-purple-600 to-indigo-600',
-    provider: 'openai'
-  },
-  {
-    id: 'ash',
-    name: 'Ash',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Clear, Professional',
-    description: 'A balanced, professional voice suitable for a wide range of business contexts.',
-    bestFor: ['General Business', 'Consulting', 'Support'],
-    color: 'from-gray-500 to-gray-700',
-    provider: 'openai'
-  },
-  {
-    id: 'ballad',
-    name: 'Ballad',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Warm, Storytelling',
-    description: 'A narrative-focused voice that excels at explaining complex concepts in a relatable way.',
-    bestFor: ['Education', 'Explainer Calls', 'Nurture'],
-    color: 'from-amber-600 to-orange-700',
-    provider: 'openai'
-  },
-  {
-    id: 'echo',
-    name: 'Echo',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Deep, Resonant',
-    description: 'A very deep, soothing voice that builds trust and authority.',
-    bestFor: ['High-Trust Sales', 'Security', 'Legal'],
-    color: 'from-indigo-800 to-blue-900',
-    provider: 'openai'
-  },
-  
-  // ============ FEMALE VOICES ============
-  {
-    id: 'Kore',
-    name: 'Kore',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Balanced, Clear, Professional',
-    description: 'A gentle, reassuring voice that puts people at ease. Excellent for healthcare, insurance, and sensitive topics.',
-    bestFor: ['Healthcare', 'Insurance', 'Financial Services'],
-    color: 'from-green-400 to-emerald-500',
-    provider: 'gemini'
-  },
-  {
-    id: 'Aoede',
-    name: 'Aoede',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Bright, Expressive, Engaging',
-    description: 'A cheerful, welcoming voice that creates instant rapport. Ideal for customer outreach and appointment setting.',
-    bestFor: ['Appointment Setting', 'Customer Outreach', 'Surveys'],
-    color: 'from-rose-400 to-pink-500',
-    provider: 'gemini'
-  },
-  {
-    id: 'coral',
-    name: 'Coral',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Warm, Friendly',
-    description: 'A very approachable and kind voice, perfect for welcoming new customers.',
-    bestFor: ['Onboarding', 'Welcome Calls', 'Retail'],
-    color: 'from-pink-400 to-rose-400',
-    provider: 'openai'
-  },
-  {
-    id: 'sage',
-    name: 'Sage',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Calm, Wise',
-    description: 'A knowledgeable and steady voice that conveys expertise and reliability.',
-    bestFor: ['Advisory', 'Technical Support', 'B2B Sales'],
-    color: 'from-emerald-600 to-teal-700',
-    provider: 'openai'
-  },
-  {
-    id: 'shimmer',
-    name: 'Shimmer',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Light, Expressive',
-    description: 'A high-pitched, clear voice that cuts through noise and sounds very modern.',
-    bestFor: ['Tech Sales', 'Marketing', 'Youth-Oriented Brands'],
-    color: 'from-cyan-400 to-blue-400',
-    provider: 'openai'
-  },
-  {
-    id: 'marin',
-    name: 'Marin',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Calm, Professional, Soothing',
-    description: 'A smooth, highly professional voice ideal for corporate environments.',
-    bestFor: ['Corporate Communications', 'Executive Assistants', 'Reception'],
-    color: 'from-blue-600 to-slate-600',
-    provider: 'openai'
-  },
-  {
-    id: 'Leda',
-    name: 'Leda',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Professional & Articulate',
-    description: 'A clear, polished voice with executive presence. Perfect for C-suite conversations and professional services.',
-    bestFor: ['Executive Outreach', 'Professional Services', 'Consulting'],
-    color: 'from-violet-500 to-purple-600',
-    provider: 'gemini'
-  }
-];
+// AI Voices are imported from shared constants at the top of the file
 
 // Phone numbers are fetched dynamically from Telnyx via /api/number-pool/numbers
 
@@ -311,14 +150,34 @@ interface FormData {
   // Step 3: Type
   campaignType: string;
 
-  // Step 4: Content
+  // Step 4: Content (shared)
   objective: string;
-  talkingPoints: string[];
-  emailSubject: string;
-  emailBody: string;
   successCriteria: string;
   targetAudience: string;
+
+  // Step 4: Voice-specific content
+  talkingPoints: string[];
+  voiceIntent: string;
   objections: { objection: string; response: string }[];
+
+  // Step 4: Email-specific content
+  emailSubject: string;
+  emailBody: string;
+  emailIntent: string;
+
+  // Channel execution settings (for combo campaigns)
+  channelConfig: {
+    voice: {
+      enabled: boolean;
+      triggerMode: 'immediate' | 'scheduled' | 'manual';
+      scheduledTime?: string;
+    };
+    email: {
+      enabled: boolean;
+      triggerMode: 'immediate' | 'scheduled' | 'manual';
+      scheduledTime?: string;
+    };
+  };
 
   // Step 5: AI Agent
   selectedVoice: string;
@@ -348,7 +207,7 @@ interface FormData {
   budget: number | undefined;
 }
 
-export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = 'client', clientAccountId, initialData, campaignId }: CampaignCreationWizardProps) {
+export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = 'client', clientAccountId: propClientAccountId, initialData, campaignId }: CampaignCreationWizardProps) {
   const isEditMode = !!campaignId;
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -359,6 +218,21 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [voiceFilter, setVoiceFilter] = useState<'all' | 'male' | 'female'>('all');
+  
+  // Admin mode: allow selecting client account if not provided via props
+  const [selectedClientId, setSelectedClientId] = useState<string>(propClientAccountId || '');
+  const clientAccountId = propClientAccountId || selectedClientId;
+  
+  // Fetch client accounts for admin mode client selector
+  const { data: adminClientAccounts = [] } = useQuery<Array<{ id: string; name: string; companyName?: string }>>({
+    queryKey: ['admin-client-accounts-wizard'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/client-portal/admin/clients');
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: mode === 'admin' && !propClientAccountId && open,
+  });
 
   const defaultFormData: FormData = {
     name: '',
@@ -366,12 +240,24 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     channel: 'voice',
     campaignType: 'content_syndication',
     objective: '',
-    talkingPoints: [],
-    emailSubject: '',
-    emailBody: '',
     successCriteria: '',
     targetAudience: '',
+    talkingPoints: [],
+    voiceIntent: '',
     objections: [{ objection: '', response: '' }],
+    emailSubject: '',
+    emailBody: '',
+    emailIntent: '',
+    channelConfig: {
+      voice: {
+        enabled: true,
+        triggerMode: 'immediate',
+      },
+      email: {
+        enabled: true,
+        triggerMode: 'immediate',
+      },
+    },
     selectedVoice: 'Fenrir',
     selectedPhoneNumber: '',
     senderProfileId: '',
@@ -461,21 +347,31 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   const [regionInput, setRegionInput] = useState('');
   const [talkingPointInput, setTalkingPointInput] = useState('');
 
+  // Channel tab state for combo campaigns (Step 4 content configuration)
+  const [activeChannelTab, setActiveChannelTab] = useState<'voice' | 'email'>('voice');
+
   // Test & Launch states
   const [testPhoneNumber, setTestPhoneNumber] = useState('');
   const [testEmail, setTestEmail] = useState('');
   const [launchStatus, setLaunchStatus] = useState<'active' | 'paused' | 'draft'>('active');
   const [isTestSending, setIsTestSending] = useState(false);
+  const [isTestingChannel, setIsTestingChannel] = useState<'voice' | 'email' | null>(null);
   const [createdWorkOrderId, setCreatedWorkOrderId] = useState<string | null>(null);
 
   const handleSendTest = async (type: 'voice' | 'email') => {
     setIsTestSending(true);
+    setIsTestingChannel(type);
 
     try {
       // 1. Ensure we have a saved Work Order (Draft) config
       let workOrderId = createdWorkOrderId;
 
       if (!workOrderId) {
+        // Admin mode requires clientAccountId
+        if (mode === 'admin' && !clientAccountId) {
+          throw new Error('Please select a client account before testing. Use the Intelligent Campaign Create page or pass clientAccountId.');
+        }
+
         // Create draft if not exists
         const endpoint = mode === 'admin' 
           ? '/api/campaign-wizard/create' 
@@ -546,6 +442,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       });
     } finally {
       setIsTestSending(false);
+      setIsTestingChannel(null);
     }
   };
 
@@ -703,6 +600,10 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       } else {
         // POST for create mode
         if (mode === 'admin') {
+          // Admin mode requires a client account to be selected
+          if (!clientAccountId) {
+            throw new Error('Please select a client account before creating a campaign. Use the Intelligent Campaign Create page or pass clientAccountId.');
+          }
           // Use apiRequest which handles auth automatically for admin mode
           const bodyData = { ...formData, clientAccountId, status: launchStatus };
           const res = await apiRequest('POST', '/api/campaign-wizard/create', bodyData);
@@ -770,12 +671,24 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       channel: 'voice',
       campaignType: 'content_syndication',
       objective: '',
-      talkingPoints: [],
-      emailSubject: '',
-      emailBody: '',
       successCriteria: '',
       targetAudience: '',
+      talkingPoints: [],
+      voiceIntent: '',
       objections: [{ objection: '', response: '' }],
+      emailSubject: '',
+      emailBody: '',
+      emailIntent: '',
+      channelConfig: {
+        voice: {
+          enabled: true,
+          triggerMode: 'immediate',
+        },
+        email: {
+          enabled: true,
+          triggerMode: 'immediate',
+        },
+      },
       selectedVoice: 'Fenrir',
       selectedPhoneNumber: '',
       senderProfileId: '',
@@ -823,11 +736,36 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       // Use client portal voice TTS API which correctly routes to Google Cloud TTS
       // with unique voice mappings for each voice ID
       const token = getToken();
+      if (!token) {
+        // No auth token - use browser speech synthesis fallback
+        console.warn('[VoicePreview] No auth token, using browser TTS fallback');
+        if (window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(sampleText);
+          utterance.onend = () => {
+            setIsPlaying(false);
+            setPlayingVoice(null);
+          };
+          utterance.onerror = () => {
+            setIsPlaying(false);
+            setPlayingVoice(null);
+          };
+          window.speechSynthesis.speak(utterance);
+        } else {
+          setIsPlaying(false);
+          setPlayingVoice(null);
+          toast({
+            title: 'Voice Preview Unavailable',
+            description: 'Please log in to preview voices',
+            variant: 'destructive',
+          });
+        }
+        return;
+      }
       const response = await fetch('/api/client-portal/voice/tts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           text: sampleText,
@@ -923,6 +861,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
     const missing: string[] = [];
     switch (stepNum) {
       case 1:
+        if (mode === 'admin' && !clientAccountId) missing.push('Client Account');
         if (!formData.name.trim()) missing.push('Campaign Name');
         break;
       case 2:
@@ -1079,6 +1018,37 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                   </div>
 
                   <div className="space-y-6 max-w-2xl mx-auto">
+                    {/* Admin mode: Client Account Selector (if not preset via props) */}
+                    {mode === 'admin' && !propClientAccountId && (
+                      <div className="space-y-2">
+                        <Label htmlFor="clientAccount" className="text-base">Client Account *</Label>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          Select the client this campaign belongs to
+                        </p>
+                        <Select
+                          value={selectedClientId}
+                          onValueChange={setSelectedClientId}
+                        >
+                          <SelectTrigger className="h-12 text-lg">
+                            <SelectValue placeholder="Select a client account..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {adminClientAccounts.map((client) => (
+                              <SelectItem key={client.id} value={client.id}>
+                                {client.companyName || client.name || client.id}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!selectedClientId && (
+                          <p className="text-xs text-amber-600 flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            Required for creating campaigns and testing
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
                     <div className="space-y-2">
                       <Label htmlFor="name" className="text-base">Campaign Name *</Label>
                       <p className="text-sm text-muted-foreground mb-2">
@@ -1287,7 +1257,11 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                 >
                   <div className="text-center mb-8">
                     <h3 className="text-xl font-semibold mb-2">Define your campaign content</h3>
-                    <p className="text-muted-foreground">Tell us what makes your campaign special</p>
+                    <p className="text-muted-foreground">
+                      {formData.channel === 'combo'
+                        ? 'Configure each channel separately - your campaign shares a unified contact list and objective'
+                        : 'Tell us what makes your campaign special'}
+                    </p>
                   </div>
 
                   <div className="max-w-3xl mx-auto space-y-6">
@@ -1300,8 +1274,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                           <p className="text-xs text-muted-foreground">
                             The system uses a layered prompt approach for maximum relevance:
                             <br />
-                            <span className="font-semibold">1. Foundation Prompt</span> (Global Logic) 
-                            <ArrowRight className="inline h-3 w-3 mx-1" /> 
+                            <span className="font-semibold">1. Foundation Prompt</span> (Global Logic)
+                            <ArrowRight className="inline h-3 w-3 mx-1" />
                             <span className="font-semibold">2. Campaign Prompt</span> (Your inputs below)
                             <ArrowRight className="inline h-3 w-3 mx-1" />
                             <span className="font-semibold">3. Account Layer</span> (CRM Data)
@@ -1310,11 +1284,14 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       </div>
                     </div>
 
-                    {/* Campaign Objective */}
+                    {/* Shared Campaign Objective */}
                     <div className="space-y-2">
                       <Label className="text-base flex items-center gap-2">
                         <Target className="h-4 w-4 text-primary" />
                         Campaign Objective *
+                        {formData.channel === 'combo' && (
+                          <Badge variant="outline" className="text-xs ml-2">Shared across channels</Badge>
+                        )}
                       </Label>
                       <Textarea
                         placeholder="e.g., Book qualified meetings with IT decision makers at mid-market companies"
@@ -1324,12 +1301,218 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       />
                     </div>
 
-                    {/* Voice Content Configuration */}
-                    {(formData.channel === 'voice' || formData.channel === 'combo') && (
+                    {/* Channel Tabs for Combo Campaigns */}
+                    {formData.channel === 'combo' && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-5 w-5 text-purple-500" />
+                          <h4 className="font-semibold text-base">Multi-Channel Content</h4>
+                          <Badge variant="secondary" className="text-xs">Configure each channel</Badge>
+                        </div>
+
+                        <Tabs value={activeChannelTab} onValueChange={(v) => setActiveChannelTab(v as 'voice' | 'email')} className="w-full">
+                          <TabsList className="grid w-full grid-cols-2 mb-4">
+                            <TabsTrigger value="voice" className="gap-2">
+                              <Phone className="h-4 w-4" />
+                              Voice Call
+                              {formData.voiceIntent && formData.talkingPoints.length > 0 && (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                              )}
+                            </TabsTrigger>
+                            <TabsTrigger value="email" className="gap-2">
+                              <Mail className="h-4 w-4" />
+                              Email
+                              {formData.emailIntent && formData.emailSubject && (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                              )}
+                            </TabsTrigger>
+                          </TabsList>
+
+                          {/* Voice Tab Content */}
+                          <TabsContent value="voice" className="space-y-6 mt-0">
+                            <Card className="border-blue-200 dark:border-blue-800">
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-base flex items-center gap-2">
+                                  <Phone className="h-4 w-4 text-blue-500" />
+                                  Voice Channel Configuration
+                                </CardTitle>
+                                <CardDescription>Define the message and intent for AI voice calls</CardDescription>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                {/* Voice Intent */}
+                                <div className="space-y-2">
+                                  <Label className="flex items-center gap-2">
+                                    <Zap className="h-4 w-4 text-amber-500" />
+                                    Call Intent *
+                                  </Label>
+                                  <Textarea
+                                    placeholder="e.g., Introduce our solution and qualify interest for a demo. If interested, schedule a follow-up call with our sales team."
+                                    value={formData.voiceIntent}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, voiceIntent: e.target.value }))}
+                                    rows={2}
+                                  />
+                                  <p className="text-xs text-muted-foreground">What should the AI agent accomplish on each call?</p>
+                                </div>
+
+                                {/* Key Talking Points */}
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <Label className="flex items-center gap-2">
+                                      <MessageSquare className="h-4 w-4 text-primary" />
+                                      Key Talking Points
+                                    </Label>
+                                    {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {formData.talkingPoints.filter(p => p.trim()).length} added
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">
+                                    Type and press <kbd className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono">Enter</kbd> to add.
+                                  </p>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      placeholder="e.g., Industry-leading customer support"
+                                      value={talkingPointInput}
+                                      onChange={(e) => setTalkingPointInput(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          if (talkingPointInput.trim()) {
+                                            setFormData(prev => ({
+                                              ...prev,
+                                              talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                            }));
+                                            setTalkingPointInput('');
+                                          }
+                                        }
+                                      }}
+                                      className="flex-1"
+                                    />
+                                    <Button
+                                      type="button"
+                                      onClick={() => {
+                                        if (talkingPointInput.trim()) {
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            talkingPoints: [...prev.talkingPoints.filter(p => p.trim()), talkingPointInput.trim()],
+                                          }));
+                                          setTalkingPointInput('');
+                                        }
+                                      }}
+                                      disabled={!talkingPointInput.trim()}
+                                      size="sm"
+                                    >
+                                      <Plus className="h-4 w-4 mr-1" />
+                                      Add
+                                    </Button>
+                                  </div>
+                                  {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                    <div className="flex flex-wrap gap-2 p-1">
+                                      {formData.talkingPoints.filter(p => p.trim()).map((point, idx) => (
+                                        <Badge
+                                          key={idx}
+                                          variant="secondary"
+                                          className="gap-1.5 py-1.5 px-3 text-sm bg-blue-50 dark:bg-blue-900/30"
+                                        >
+                                          <span className="text-blue-600 dark:text-blue-400 font-medium">{idx + 1}.</span>
+                                          {point}
+                                          <button
+                                            onClick={() => {
+                                              setFormData(prev => ({
+                                                ...prev,
+                                                talkingPoints: prev.talkingPoints.filter((_, i) => i !== idx),
+                                              }));
+                                            }}
+                                            className="ml-1 hover:text-destructive rounded-full hover:bg-destructive/10 p-0.5"
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </TabsContent>
+
+                          {/* Email Tab Content */}
+                          <TabsContent value="email" className="space-y-6 mt-0">
+                            <Card className="border-green-200 dark:border-green-800">
+                              <CardHeader className="pb-3">
+                                <CardTitle className="text-base flex items-center gap-2">
+                                  <Mail className="h-4 w-4 text-green-500" />
+                                  Email Channel Configuration
+                                </CardTitle>
+                                <CardDescription>Define the message and intent for email outreach</CardDescription>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                {/* Email Intent */}
+                                <div className="space-y-2">
+                                  <Label className="flex items-center gap-2">
+                                    <Zap className="h-4 w-4 text-amber-500" />
+                                    Email Intent *
+                                  </Label>
+                                  <Textarea
+                                    placeholder="e.g., Warm up prospects before the call campaign. Introduce the value proposition and create awareness."
+                                    value={formData.emailIntent}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, emailIntent: e.target.value }))}
+                                    rows={2}
+                                  />
+                                  <p className="text-xs text-muted-foreground">What should the email accomplish?</p>
+                                </div>
+
+                                {/* Email Subject */}
+                                <div className="space-y-2">
+                                  <Label>Email Subject Line *</Label>
+                                  <Input
+                                    placeholder="e.g., Question referring to {company_name}"
+                                    value={formData.emailSubject}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, emailSubject: e.target.value }))}
+                                  />
+                                </div>
+
+                                {/* Email Body */}
+                                <div className="space-y-2">
+                                  <Label>Email Body Template *</Label>
+                                  <Textarea
+                                    placeholder="Hi {first_name}, I saw that {company_name} is..."
+                                    value={formData.emailBody}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, emailBody: e.target.value }))}
+                                    rows={5}
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    Variables: &#123;first_name&#125;, &#123;company_name&#125;, &#123;title&#125;
+                                  </p>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </TabsContent>
+                        </Tabs>
+                      </div>
+                    )}
+
+                    {/* Voice Content Configuration (Single Channel) */}
+                    {formData.channel === 'voice' && (
                       <div className="space-y-6 pt-4 border-t">
                         <div className="flex items-center gap-2 mb-2">
                            <Mic className="h-5 w-5 text-primary" />
                            <h4 className="font-semibold text-base">Voice Call Scripting</h4>
+                        </div>
+
+                        {/* Voice Intent */}
+                        <div className="space-y-2">
+                          <Label className="flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-amber-500" />
+                            Call Intent
+                          </Label>
+                          <Textarea
+                            placeholder="e.g., Introduce our solution and qualify interest for a demo"
+                            value={formData.voiceIntent}
+                            onChange={(e) => setFormData(prev => ({ ...prev, voiceIntent: e.target.value }))}
+                            rows={2}
+                          />
                         </div>
 
                         {/* Key Talking Points */}
@@ -1424,14 +1607,28 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       </div>
                     )}
 
-                    {/* Email Content Configuration */}
-                    {(formData.channel === 'email' || formData.channel === 'combo') && (
+                    {/* Email Content Configuration (Single Channel) */}
+                    {formData.channel === 'email' && (
                       <div className="space-y-6 pt-4 border-t">
                          <div className="flex items-center gap-2 mb-2">
                            <Mail className="h-5 w-5 text-primary" />
                            <h4 className="font-semibold text-base">Email Configuration</h4>
                          </div>
-                         
+
+                        {/* Email Intent */}
+                        <div className="space-y-2">
+                          <Label className="flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-amber-500" />
+                            Email Intent
+                          </Label>
+                          <Textarea
+                            placeholder="e.g., Introduce the value proposition and drive engagement"
+                            value={formData.emailIntent}
+                            onChange={(e) => setFormData(prev => ({ ...prev, emailIntent: e.target.value }))}
+                            rows={2}
+                          />
+                        </div>
+
                         <div className="space-y-2">
                           <Label>Email Subject Line *</Label>
                           <Input
@@ -1461,6 +1658,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       <Label className="text-base flex items-center gap-2">
                         <CheckCircle2 className="h-4 w-4 text-primary" />
                         Success Criteria *
+                        {formData.channel === 'combo' && (
+                          <Badge variant="outline" className="text-xs ml-2">Shared across channels</Badge>
+                        )}
                       </Label>
                       <Textarea
                         placeholder="e.g., Meeting booked with a decision maker who has budget authority and a timeline of 3-6 months"
@@ -1484,7 +1684,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       />
                     </div>
 
-                    {/* Common Objections */}
+                    {/* Common Objections (for voice campaigns) */}
+                    {(formData.channel === 'voice' || formData.channel === 'combo') && (
                     <div className="space-y-3">
                       <Label className="text-base flex items-center gap-2">
                         <AlertCircle className="h-4 w-4 text-primary" />
@@ -1530,6 +1731,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                         Add Objection
                       </Button>
                     </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -2331,12 +2533,85 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       <CardContent className="p-6 space-y-6">
                         {/* Objective */}
                         <div>
-                          <h4 className="font-medium text-sm text-muted-foreground mb-2">Objective</h4>
+                          <h4 className="font-medium text-sm text-muted-foreground mb-2">
+                            Campaign Objective
+                            {formData.channel === 'combo' && (
+                              <Badge variant="outline" className="text-xs ml-2">Shared</Badge>
+                            )}
+                          </h4>
                           <p>{formData.objective || 'Not specified'}</p>
                         </div>
 
-                        {/* Talking Points */}
-                        {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                        {/* Channel-Specific Content for Combo */}
+                        {formData.channel === 'combo' && (
+                          <>
+                            <Separator />
+                            <div className="grid md:grid-cols-2 gap-4">
+                              {/* Voice Channel Summary */}
+                              <div className="p-4 rounded-lg border bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Phone className="h-4 w-4 text-blue-500" />
+                                  <span className="font-medium text-sm">Voice Channel</span>
+                                  {formData.channelConfig.voice.enabled ? (
+                                    <Badge className="bg-green-100 text-green-700 text-xs">Enabled</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">Disabled</Badge>
+                                  )}
+                                </div>
+                                {formData.voiceIntent && (
+                                  <p className="text-sm text-muted-foreground mb-2">
+                                    <span className="font-medium">Intent:</span> {formData.voiceIntent}
+                                  </p>
+                                )}
+                                {formData.talkingPoints.filter(p => p.trim()).length > 0 && (
+                                  <div className="text-sm">
+                                    <span className="font-medium text-muted-foreground">Talking Points:</span>
+                                    <ul className="list-disc list-inside mt-1">
+                                      {formData.talkingPoints.filter(p => p.trim()).slice(0, 3).map((p, i) => (
+                                        <li key={i} className="text-muted-foreground">{p}</li>
+                                      ))}
+                                      {formData.talkingPoints.filter(p => p.trim()).length > 3 && (
+                                        <li className="text-muted-foreground">+{formData.talkingPoints.filter(p => p.trim()).length - 3} more</li>
+                                      )}
+                                    </ul>
+                                  </div>
+                                )}
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  Trigger: <span className="capitalize">{formData.channelConfig.voice.triggerMode}</span>
+                                </div>
+                              </div>
+
+                              {/* Email Channel Summary */}
+                              <div className="p-4 rounded-lg border bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Mail className="h-4 w-4 text-green-500" />
+                                  <span className="font-medium text-sm">Email Channel</span>
+                                  {formData.channelConfig.email.enabled ? (
+                                    <Badge className="bg-green-100 text-green-700 text-xs">Enabled</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">Disabled</Badge>
+                                  )}
+                                </div>
+                                {formData.emailIntent && (
+                                  <p className="text-sm text-muted-foreground mb-2">
+                                    <span className="font-medium">Intent:</span> {formData.emailIntent}
+                                  </p>
+                                )}
+                                {formData.emailSubject && (
+                                  <p className="text-sm text-muted-foreground">
+                                    <span className="font-medium">Subject:</span> {formData.emailSubject}
+                                  </p>
+                                )}
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  Trigger: <span className="capitalize">{formData.channelConfig.email.triggerMode}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {/* Talking Points (Single Channel) */}
+                        {formData.channel !== 'combo' && formData.talkingPoints.filter(p => p.trim()).length > 0 && (
                           <div>
                             <h4 className="font-medium text-sm text-muted-foreground mb-2">Key Talking Points</h4>
                             <ul className="list-disc list-inside space-y-1">
@@ -2349,7 +2624,12 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
 
                         {/* Success Criteria */}
                         <div>
-                          <h4 className="font-medium text-sm text-muted-foreground mb-2">Success Criteria</h4>
+                          <h4 className="font-medium text-sm text-muted-foreground mb-2">
+                            Success Criteria
+                            {formData.channel === 'combo' && (
+                              <Badge variant="outline" className="text-xs ml-2">Shared</Badge>
+                            )}
+                          </h4>
                           <p>{formData.successCriteria || 'Not specified'}</p>
                         </div>
 
@@ -2443,59 +2723,274 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                       </CardContent>
                     </Card>
 
-                    {/* Test & Validation */}
+                    {/* Test & Validation - Enhanced for Combo Campaigns */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="text-base flex items-center gap-2">
                           <TestTube className="h-4 w-4 text-primary" />
                           Test Campaign Assets
+                          {formData.channel === 'combo' && (
+                            <Badge variant="outline" className="text-xs ml-2">Test each channel independently</Badge>
+                          )}
                         </CardTitle>
-                        <CardDescription>Send a test to yourself before launching</CardDescription>
+                        <CardDescription>
+                          {formData.channel === 'combo'
+                            ? 'Test voice and email channels separately before launching'
+                            : 'Send a test to yourself before launching'}
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
+                        {/* Voice Test Section */}
                         {(formData.channel === 'voice' || formData.channel === 'combo') && (
-                          <div className="flex items-end gap-4">
-                            <div className="flex-1 space-y-2">
-                              <Label>Test Phone Number</Label>
-                              <Input 
-                                placeholder="+1 (555) 000-0000" 
-                                value={testPhoneNumber}
-                                onChange={(e) => setTestPhoneNumber(e.target.value)}
-                              />
+                          <div className={cn(
+                            "p-4 rounded-lg border",
+                            formData.channel === 'combo' ? "bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800" : ""
+                          )}>
+                            {formData.channel === 'combo' && (
+                              <div className="flex items-center gap-2 mb-3">
+                                <Phone className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium text-sm">Voice Channel Test</span>
+                              </div>
+                            )}
+                            <div className="flex items-end gap-4">
+                              <div className="flex-1 space-y-2">
+                                <Label>Test Phone Number</Label>
+                                <Input
+                                  placeholder="+1 (555) 000-0000"
+                                  value={testPhoneNumber}
+                                  onChange={(e) => setTestPhoneNumber(e.target.value)}
+                                />
+                              </div>
+                              <Button
+                                variant="outline"
+                                onClick={() => handleSendTest('voice')}
+                                disabled={!testPhoneNumber || isTestSending}
+                                className={formData.channel === 'combo' ? "border-blue-300 hover:bg-blue-100 dark:border-blue-700" : ""}
+                              >
+                                {isTestingChannel === 'voice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4 mr-2" />}
+                                Test Call
+                              </Button>
                             </div>
-                            <Button 
-                              variant="outline" 
-                              onClick={() => handleSendTest('voice')}
-                              disabled={!testPhoneNumber || isTestSending}
-                            >
-                              {isTestSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4 mr-2" />}
-                              Send Test Call
-                            </Button>
                           </div>
                         )}
-                        
+
+                        {/* Email Test Section */}
                         {(formData.channel === 'email' || formData.channel === 'combo') && (
-                          <div className="flex items-end gap-4">
-                            <div className="flex-1 space-y-2">
-                              <Label>Test Email Address</Label>
-                              <Input 
-                                placeholder="you@company.com" 
-                                value={testEmail}
-                                onChange={(e) => setTestEmail(e.target.value)}
-                              />
+                          <div className={cn(
+                            "p-4 rounded-lg border",
+                            formData.channel === 'combo' ? "bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800" : ""
+                          )}>
+                            {formData.channel === 'combo' && (
+                              <div className="flex items-center gap-2 mb-3">
+                                <Mail className="h-4 w-4 text-green-500" />
+                                <span className="font-medium text-sm">Email Channel Test</span>
+                              </div>
+                            )}
+                            <div className="flex items-end gap-4">
+                              <div className="flex-1 space-y-2">
+                                <Label>Test Email Address</Label>
+                                <Input
+                                  placeholder="you@company.com"
+                                  value={testEmail}
+                                  onChange={(e) => setTestEmail(e.target.value)}
+                                />
+                              </div>
+                              <Button
+                                variant="outline"
+                                onClick={() => handleSendTest('email')}
+                                disabled={!testEmail || isTestSending}
+                                className={formData.channel === 'combo' ? "border-green-300 hover:bg-green-100 dark:border-green-700" : ""}
+                              >
+                                {isTestingChannel === 'email' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                                Test Email
+                              </Button>
                             </div>
-                            <Button 
-                              variant="outline" 
-                              onClick={() => handleSendTest('email')}
-                              disabled={!testEmail || isTestSending}
-                            >
-                               {isTestSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                               Send Test Email
-                            </Button>
                           </div>
                         )}
                       </CardContent>
                     </Card>
+
+                    {/* Channel Execution Configuration (Combo only) */}
+                    {formData.channel === 'combo' && (
+                      <Card className="border-purple-200 dark:border-purple-800">
+                        <CardHeader>
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-purple-500" />
+                            Channel Execution Settings
+                          </CardTitle>
+                          <CardDescription>Configure when and how each channel should be triggered independently</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                          {/* Voice Channel Trigger */}
+                          <div className="p-4 rounded-lg border bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <Phone className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium">Voice Channel</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={formData.channelConfig.voice.enabled}
+                                  onCheckedChange={(checked) => setFormData(prev => ({
+                                    ...prev,
+                                    channelConfig: {
+                                      ...prev.channelConfig,
+                                      voice: { ...prev.channelConfig.voice, enabled: checked }
+                                    }
+                                  }))}
+                                />
+                                <span className="text-sm text-muted-foreground">
+                                  {formData.channelConfig.voice.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </div>
+                            </div>
+                            {formData.channelConfig.voice.enabled && (
+                              <div className="space-y-3">
+                                <Label className="text-sm">Trigger Mode</Label>
+                                <RadioGroup
+                                  value={formData.channelConfig.voice.triggerMode}
+                                  onValueChange={(v) => setFormData(prev => ({
+                                    ...prev,
+                                    channelConfig: {
+                                      ...prev.channelConfig,
+                                      voice: { ...prev.channelConfig.voice, triggerMode: v as 'immediate' | 'scheduled' | 'manual' }
+                                    }
+                                  }))}
+                                  className="grid grid-cols-3 gap-2"
+                                >
+                                  <div>
+                                    <RadioGroupItem value="immediate" id="voice-immediate" className="peer sr-only" />
+                                    <Label htmlFor="voice-immediate" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:bg-blue-50 dark:peer-data-[state=checked]:bg-blue-900/30">
+                                      <Zap className="h-4 w-4 mb-1 text-blue-500" />
+                                      <span className="text-xs font-medium">Immediate</span>
+                                    </Label>
+                                  </div>
+                                  <div>
+                                    <RadioGroupItem value="scheduled" id="voice-scheduled" className="peer sr-only" />
+                                    <Label htmlFor="voice-scheduled" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:bg-blue-50 dark:peer-data-[state=checked]:bg-blue-900/30">
+                                      <Clock className="h-4 w-4 mb-1 text-blue-500" />
+                                      <span className="text-xs font-medium">Scheduled</span>
+                                    </Label>
+                                  </div>
+                                  <div>
+                                    <RadioGroupItem value="manual" id="voice-manual" className="peer sr-only" />
+                                    <Label htmlFor="voice-manual" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:bg-blue-50 dark:peer-data-[state=checked]:bg-blue-900/30">
+                                      <Play className="h-4 w-4 mb-1 text-blue-500" />
+                                      <span className="text-xs font-medium">Manual</span>
+                                    </Label>
+                                  </div>
+                                </RadioGroup>
+                                {formData.channelConfig.voice.triggerMode === 'scheduled' && (
+                                  <div className="pt-2">
+                                    <Label className="text-xs text-muted-foreground">Schedule Date & Time</Label>
+                                    <Input
+                                      type="datetime-local"
+                                      value={formData.channelConfig.voice.scheduledTime || ''}
+                                      onChange={(e) => setFormData(prev => ({
+                                        ...prev,
+                                        channelConfig: {
+                                          ...prev.channelConfig,
+                                          voice: { ...prev.channelConfig.voice, scheduledTime: e.target.value }
+                                        }
+                                      }))}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Email Channel Trigger */}
+                          <div className="p-4 rounded-lg border bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <Mail className="h-4 w-4 text-green-500" />
+                                <span className="font-medium">Email Channel</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={formData.channelConfig.email.enabled}
+                                  onCheckedChange={(checked) => setFormData(prev => ({
+                                    ...prev,
+                                    channelConfig: {
+                                      ...prev.channelConfig,
+                                      email: { ...prev.channelConfig.email, enabled: checked }
+                                    }
+                                  }))}
+                                />
+                                <span className="text-sm text-muted-foreground">
+                                  {formData.channelConfig.email.enabled ? 'Enabled' : 'Disabled'}
+                                </span>
+                              </div>
+                            </div>
+                            {formData.channelConfig.email.enabled && (
+                              <div className="space-y-3">
+                                <Label className="text-sm">Trigger Mode</Label>
+                                <RadioGroup
+                                  value={formData.channelConfig.email.triggerMode}
+                                  onValueChange={(v) => setFormData(prev => ({
+                                    ...prev,
+                                    channelConfig: {
+                                      ...prev.channelConfig,
+                                      email: { ...prev.channelConfig.email, triggerMode: v as 'immediate' | 'scheduled' | 'manual' }
+                                    }
+                                  }))}
+                                  className="grid grid-cols-3 gap-2"
+                                >
+                                  <div>
+                                    <RadioGroupItem value="immediate" id="email-immediate" className="peer sr-only" />
+                                    <Label htmlFor="email-immediate" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-green-500 peer-data-[state=checked]:bg-green-50 dark:peer-data-[state=checked]:bg-green-900/30">
+                                      <Zap className="h-4 w-4 mb-1 text-green-500" />
+                                      <span className="text-xs font-medium">Immediate</span>
+                                    </Label>
+                                  </div>
+                                  <div>
+                                    <RadioGroupItem value="scheduled" id="email-scheduled" className="peer sr-only" />
+                                    <Label htmlFor="email-scheduled" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-green-500 peer-data-[state=checked]:bg-green-50 dark:peer-data-[state=checked]:bg-green-900/30">
+                                      <Clock className="h-4 w-4 mb-1 text-green-500" />
+                                      <span className="text-xs font-medium">Scheduled</span>
+                                    </Label>
+                                  </div>
+                                  <div>
+                                    <RadioGroupItem value="manual" id="email-manual" className="peer sr-only" />
+                                    <Label htmlFor="email-manual" className="flex flex-col items-center p-3 border rounded-lg cursor-pointer peer-data-[state=checked]:border-green-500 peer-data-[state=checked]:bg-green-50 dark:peer-data-[state=checked]:bg-green-900/30">
+                                      <Play className="h-4 w-4 mb-1 text-green-500" />
+                                      <span className="text-xs font-medium">Manual</span>
+                                    </Label>
+                                  </div>
+                                </RadioGroup>
+                                {formData.channelConfig.email.triggerMode === 'scheduled' && (
+                                  <div className="pt-2">
+                                    <Label className="text-xs text-muted-foreground">Schedule Date & Time</Label>
+                                    <Input
+                                      type="datetime-local"
+                                      value={formData.channelConfig.email.scheduledTime || ''}
+                                      onChange={(e) => setFormData(prev => ({
+                                        ...prev,
+                                        channelConfig: {
+                                          ...prev.channelConfig,
+                                          email: { ...prev.channelConfig.email, scheduledTime: e.target.value }
+                                        }
+                                      }))}
+                                      className="mt-1"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Unified Info */}
+                          <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-lg">
+                            <Users className="h-4 w-4 text-muted-foreground mt-0.5" />
+                            <p className="text-xs text-muted-foreground">
+                              Both channels share the same contact list and campaign objective. Reporting will be unified across channels.
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Launch Configuration */}
                     <Card className={cn(
@@ -2509,8 +3004,8 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <RadioGroup 
-                          value={launchStatus} 
+                        <RadioGroup
+                          value={launchStatus}
                           onValueChange={(v: any) => setLaunchStatus(v)}
                           className="grid gap-4 md:grid-cols-3"
                         >
@@ -2522,7 +3017,9 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                             >
                               <Zap className="mb-3 h-6 w-6 text-primary" />
                               <span className="font-semibold">Activate Now</span>
-                              <span className="text-xs text-muted-foreground text-center mt-1">Start campaign immediately</span>
+                              <span className="text-xs text-muted-foreground text-center mt-1">
+                                {formData.channel === 'combo' ? 'Start enabled channels per their trigger settings' : 'Start campaign immediately'}
+                              </span>
                             </Label>
                           </div>
 

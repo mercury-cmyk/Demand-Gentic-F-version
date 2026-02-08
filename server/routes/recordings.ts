@@ -1447,7 +1447,8 @@ router.post('/telnyx/sync', async (req: Request, res: Response) => {
     const { syncTelnyxRecordingsToDatabase } = await import('../services/telnyx-sync-service');
 
     const result = await syncTelnyxRecordingsToDatabase({
-      startDate: startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      // Default: last 1 hour - Telnyx presigned URLs expire after 10 minutes
+      startDate: startDate ? new Date(startDate) : new Date(Date.now() - 60 * 60 * 1000),
       endDate: endDate ? new Date(endDate) : new Date(),
       phoneNumber,
     });

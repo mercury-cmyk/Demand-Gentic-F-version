@@ -91,7 +91,15 @@ If they firmly decline after one attempt, thank them and end professionally.`
     description: 'Calendar coordination and availability discussion',
     promptSection: `### Meeting Booking
 
-When the contact expresses interest in a meeting or follow-up call:
+**PREREQUISITE CHECK (MANDATORY)**: Before proposing ANY meeting or demo, you MUST have:
+- ✅ Confirmed the prospect's identity
+- ✅ Met the campaign's **Success Criteria** (check Campaign Context section) OR identified relevant interest
+- ✅ Asked at least ONE question that aligns with the campaign objective
+
+If the prospect immediately asks for a demo without qualification, say:
+"Happy to set that up! First, let me ask a quick question so I can make sure we focus on what matters most to you — [use a question relevant to the campaign's talking points or objective]"
+
+When the contact expresses interest AND qualification is complete:
 
 1. **Confirm interest**: "Great, I'd love to set up a brief call to discuss this further."
 
@@ -105,13 +113,13 @@ When the contact expresses interest in a meeting or follow-up call:
 4. **Confirm details**:
    - Date and time (confirm timezone if needed)
    - Duration: "This would be about [15/30] minutes"
-   - Who should attend (if relevant)
+   - Who else should attend: "Would it make sense to include anyone else from your team?"
    - Best number/link to reach them
 
 5. **Use the schedule_callback tool** to record the appointment with:
    - Confirmed date/time
    - Contact's preferences
-   - Any preparation needed
+   - Key pain points discussed (for meeting prep)
 
 6. **Close**: "Perfect, I'll send a calendar invite to [email]. Looking forward to speaking with you."
 
@@ -151,34 +159,34 @@ When conducting a survey or research call:
   {
     id: 'qualification',
     label: 'Lead Qualification',
-    description: 'BANT/qualification criteria discovery',
-    promptSection: `### Lead Qualification
+    description: 'Campaign-driven qualification discovery',
+    promptSection: `### Lead Qualification (CAMPAIGN-CONTEXT DRIVEN)
 
-Discover qualification criteria naturally through conversation:
+**IMPORTANT**: Your qualification approach MUST be driven by the **Campaign Context** section of this prompt.
+- If the campaign defines specific **Success Criteria**, those are your qualification targets
+- If the campaign defines **Talking Points**, weave those into your qualification questions
+- If the campaign defines a **Campaign Objective**, that determines what qualifies as success
 
-**Budget** (approach subtly):
-- "How are decisions like this typically funded in your organization?"
-- "Is this something that would come from IT budget or operations?"
+**VALUE PROPOSITION DELIVERY (when responding to interest):**
+Always include SPECIFIC metrics when describing value:
+- ❌ BAD: "We help companies improve their hiring process"
+- ✅ GOOD: "We help companies reduce time-to-hire by 40% while improving quality of hire — one client went from 45 days to 27 days average"
 
-**Authority**:
-- "Who else would typically be involved in evaluating something like this?"
-- "Are you the right person to discuss [topic] with?"
+**FALLBACK QUALIFICATION (only if no campaign-specific criteria provided):**
+If the Campaign Context doesn't specify qualification criteria, use these discovery questions:
 
-**Need**:
-- "What challenges are you facing with [current approach]?"
-- "How does [problem] impact your team/business?"
-- "What would success look like if you solved this?"
+- **Need**: "What challenges are you facing with [topic]?"
+- **Current Approach**: "How are you handling this today?"
+- **Priority**: "Is this something you're actively looking to address?"
 
-**Timeline**:
-- "Is this something you're actively looking to address, or more exploratory?"
-- "When are you hoping to have a solution in place?"
+**QUALIFICATION GATE**: Before suggesting a meeting, you must have:
+1. Identified alignment with the campaign's success criteria OR
+2. Discovered at least ONE relevant pain point that matches the campaign objective
 
 **Disqualification signals to note**:
-- No budget or frozen budgets
-- Not the decision maker and won't introduce you
-- No pain or need identified
-- Long timeline (12+ months) with no urgency
-- Already committed to a competitor
+- Explicit lack of interest after understanding the offer
+- No relevance to the campaign's target audience
+- Already committed to a competitor (if relevant to campaign)
 
 Record qualification findings in the call summary.`
   },
@@ -283,8 +291,29 @@ export function buildCampaignContextSection(config: {
   objections?: Array<{ objection: string; response: string }> | null;
   successCriteria?: string | null;
   brief?: string | null;
+  campaignType?: string | null;
 }): string {
   const sections: string[] = [];
+
+  // Campaign type provides critical context for how to approach the call
+  if (config.campaignType) {
+    const typeDescriptions: Record<string, string> = {
+      'appointment_generation': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
+      'appointment_setting': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
+      'content_syndication': 'Content Syndication Campaign - Focus on getting consent to receive content and validating interest.',
+      'lead_qualification': 'Lead Qualification Campaign - Focus on discovery and gathering qualifying information.',
+      'sql': 'Sales Qualified Lead Campaign - Focus on identifying sales-ready prospects with budget, authority, need, and timeline.',
+      'bant_leads': 'BANT Qualification Campaign - Qualify leads on Budget, Authority, Need, and Timeline.',
+      'data_validation': 'Data Validation Campaign - Verify and update contact information.',
+      'high_quality_leads': 'High-Quality Leads Campaign - Focus on identifying highly qualified prospects.',
+      'webinar_invite': 'Webinar Invitation Campaign - Focus on driving webinar registrations.',
+      'live_webinar': 'Live Webinar Campaign - Focus on driving live webinar attendance.',
+      'on_demand_webinar': 'On-Demand Webinar Campaign - Focus on driving on-demand content consumption.',
+      'executive_dinner': 'Executive Dinner Campaign - Focus on securing attendance from senior executives.',
+    };
+    const typeDesc = typeDescriptions[config.campaignType] || `Campaign Type: ${config.campaignType}`;
+    sections.push(`## CAMPAIGN TYPE\n${typeDesc}`);
+  }
 
   // CRITICAL: Campaign objective comes first - this is the PRIMARY GOAL
   if (config.objective) {

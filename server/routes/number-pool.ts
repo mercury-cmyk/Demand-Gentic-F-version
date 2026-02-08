@@ -22,6 +22,7 @@ import {
   updateNumber,
   deleteNumber,
   getPoolSummary,
+  getCallStats,
   // Assignment service
   createAssignment,
   getAssignments,
@@ -41,6 +42,8 @@ import {
   endCooldown,
   processExpiredCooldowns,
   COOLDOWN_TRIGGERS,
+  // Repair functions
+  ensureReputationRecords,
 } from '../services/number-pool';
 import {
   assignNumberToAgent,
@@ -213,10 +216,31 @@ router.delete('/numbers/:id', asyncHandler(async (req, res) => {
  */
 router.post('/sync', asyncHandler(async (req, res) => {
   const result = await syncFromTelnyx();
-
+  
+  // Ensure all numbers have reputation records
+  const reputationCreated = await ensureReputationRecords();
+  
   res.json({
     success: true,
-    data: result,
+    data: {
+      ...result,
+      reputationRecordsCreated: reputationCreated,
+    },
+  });
+}));
+
+/**
+ * POST /api/number-pool/repair
+ * Repair missing reputation records
+ */
+router.post('/repair', asyncHandler(async (req, res) => {
+  const created = await ensureReputationRecords();
+  
+  res.json({
+    success: true,
+    data: {
+      reputationRecordsCreated: created,
+    },
   });
 }));
 
@@ -232,6 +256,19 @@ router.get('/summary', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: summary,
+  });
+}));
+
+/**
+ * GET /api/number-pool/stats
+ * Get aggregate call statistics for the number pool
+ */
+router.get('/stats', asyncHandler(async (req, res) => {
+  const stats = await getCallStats();
+
+  res.json({
+    success: true,
+    data: stats,
   });
 }));
 

@@ -43,6 +43,9 @@ export interface InitiateCallParams {
   productServiceInfo?: string;
   talkingPoints?: string[];
   maxCallDurationSeconds?: number;
+  // Number pool tracking
+  callerNumberId?: string | null;
+  callerNumberDecisionId?: string | null;
 }
 
 /**
@@ -136,6 +139,8 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
         campaignId: params.campaignId,
         contactId: params.contactId,
         maxCallDurationSeconds: params.maxCallDurationSeconds,
+        phoneNumber: params.toNumber,
+        callerNumberId: params.callerNumberId,
       },
     });
 
@@ -157,10 +162,10 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
       onCallStateChanged: (state: string) => {
         console.log(`[SIP Dialer] Call ${callId} state: ${state}`);
       },
-      onCallEnded: (reason: string) => {
+      onCallEnded: async (reason: string) => {
         console.log(`[SIP Dialer] Call ${callId} ended: ${reason}`);
-        // Close bridge session
-        rtpBridge.closeBridgeSession(callId);
+        // Close bridge session (async to update number pool stats)
+        await rtpBridge.closeBridgeSession(callId);
       },
     });
 
@@ -179,7 +184,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
     console.error(`[SIP Dialer] Failed to initiate call ${callId}:`, error);
 
     // Clean up on failure
-    rtpBridge.closeBridgeSession(callId);
+    await rtpBridge.closeBridgeSession(callId);
 
     return {
       success: false,

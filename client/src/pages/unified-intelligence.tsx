@@ -13,10 +13,11 @@
  * Route: /unified-intelligence
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import { RefreshCw, Brain } from 'lucide-react';
 import {
   ResizablePanelGroup,
@@ -26,9 +27,11 @@ import {
 import {
   ConversationListPanel,
   UnifiedDetailPanel,
+  TopChallengesPanel,
   type UnifiedIntelligenceFilters,
   type UnifiedConversationListItem,
   type UnifiedConversationDetail,
+  type TopChallenge,
   defaultUnifiedFilters,
   buildUnifiedQueryParams,
 } from '@/components/unified-intelligence';
@@ -59,6 +62,7 @@ function adaptConversationToListItem(conv: any): UnifiedConversationListItem {
     qualityScore: conv.analysis?.overallScore,
     testResult: conv.testResult,
     issueCount: conv.detectedIssues?.length || conv.analysis?.issues?.length,
+    callCount: conv.callCount || 1,
   };
 }
 
@@ -166,6 +170,10 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
       isAccurate: conv.analysis.dispositionReview.accurate,
       notes: conv.analysis.dispositionReview.notes,
     } : undefined,
+
+    // Consolidated call history
+    callCount: conv.callCount || 1,
+    callHistory: conv.callHistory,
   };
 }
 
@@ -178,6 +186,7 @@ function normalizeSpeaker(role: string): 'agent' | 'prospect' | 'system' {
 
 export default function UnifiedIntelligencePage() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [filters, setFilters] = useState<UnifiedIntelligenceFilters>(defaultUnifiedFilters);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isPolling, setIsPolling] = useState(false);
@@ -207,7 +216,7 @@ export default function UnifiedIntelligencePage() {
     data: conversationsData,
     isLoading: conversationsLoading,
     refetch: refetchConversations,
-  } = useQuery<{ conversations: any[] }>({
+  } = useQuery<{ conversations: any[]; topChallenges?: TopChallenge[]; stats?: any }>({
     queryKey: ['/api/qa/conversations', filters.campaignId, filters.source, filters.search],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/qa/conversations?${buildQaQueryParams()}`);
@@ -216,39 +225,97 @@ export default function UnifiedIntelligencePage() {
   });
 
   // Transform and filter conversations
-  const allConversations = (conversationsData?.conversations || []).map(adaptConversationToListItem);
+  const allConversations = useMemo(
+    () => (conversationsData?.conversations || []).map(adaptConversationToListItem),
+    [conversationsData]
+  );
 
   // Apply client-side filters
-  let conversations = allConversations;
+  const conversations = useMemo(() => {
+    let filtered = allConversations;
 
-  if (filters.type !== 'all') {
-    conversations = conversations.filter(c => c.type === filters.type);
-  }
+    if (filters.type !== 'all') {
+      filtered = filtered.filter(c => c.type === filters.type);
+    }
 
-  if (filters.disposition !== 'all') {
-    conversations = conversations.filter(c =>
-      c.disposition?.toLowerCase().includes(filters.disposition.toLowerCase())
-    );
-  }
+    if (filters.disposition !== 'all') {
+      filtered = filtered.filter(c =>
+        c.disposition?.toLowerCase().includes(filters.disposition.toLowerCase())
+      );
+    }
 
-  if (filters.hasTranscript === true) {
-    conversations = conversations.filter(c => c.hasTranscript);
-  }
+    if (filters.hasTranscript === true) {
+      filtered = filtered.filter(c => c.hasTranscript);
+    }
+
+    return filtered;
+  }, [allConversations, filters]);
 
   // Calculate stats
-  const stats = {
+  const stats = useMemo(() => ({
     total: conversations.length,
     calls: conversations.filter(c => c.interactionType === 'call' && c.type !== 'test').length,
     emails: conversations.filter(c => c.interactionType === 'email').length,
     testCalls: conversations.filter(c => c.type === 'test').length,
     withTranscripts: conversations.filter(c => c.hasTranscript).length,
-  };
+  }), [conversations]);
 
   // Find selected conversation for detail panel
-  const selectedRaw = selectedId
-    ? conversationsData?.conversations?.find((c: any) => c.id === selectedId)
-    : null;
-  const selectedConversation = selectedRaw ? adaptConversationToDetail(selectedRaw) : null;
+  const selectedRaw = useMemo(() => (
+    selectedId
+      ? conversationsData?.conversations?.find((c: any) => c.id === selectedId)
+      : null
+  ), [selectedId, conversationsData]);
+  const selectedConversation = useMemo(
+    () => (selectedRaw ? adaptConversationToDetail(selectedRaw) : null),
+    [selectedRaw]
+  );
+
+  // Top challenges from server-aggregated data
+  const topChallenges = conversationsData?.topChallenges || [];
+  const totalIssues = conversationsData?.stats?.totalIssues || 0;
+
+  // ===== ANALYZE MUTATION =====
+  const analyzeMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await apiRequest('POST', `/api/call-sessions/${sessionId}/analyze`);
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({ title: 'Analysis Complete', description: `Score: ${data.analysis?.overallScore || 'N/A'}/10` });
+      refetchConversations();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Analysis Failed', description: error.message || 'Could not analyze call', variant: 'destructive' });
+    },
+  });
+
+  // ===== TRANSCRIBE MUTATION =====
+  const transcribeMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await apiRequest('POST', `/api/recordings/${sessionId}/transcribe`, { source: 'call_sessions' });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Transcription Complete', description: 'Transcript generated from recording' });
+      refetchConversations();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Transcription Failed', description: error.message || 'Could not transcribe recording', variant: 'destructive' });
+    },
+  });
+
+  const handleAnalyze = useCallback((sessionId: string) => {
+    analyzeMutation.mutate(sessionId);
+  }, [analyzeMutation]);
+
+  const handleTranscribe = useCallback((sessionId: string) => {
+    transcribeMutation.mutate(sessionId);
+  }, [transcribeMutation]);
+
+  const handleSelectHistoryCall = useCallback((sessionId: string) => {
+    setSelectedId(sessionId);
+  }, []);
 
   // Real-time polling for active calls
   // Poll while any conversation is in non-terminal state
@@ -278,38 +345,40 @@ export default function UnifiedIntelligencePage() {
   }, [refetchConversations, selectedId, queryClient]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-muted/30">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Brain className="h-6 w-6 text-primary" />
-            Unified Intelligence
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Complete conversation analysis: recordings, transcripts, and quality insights
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isPolling && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <RefreshCw className="h-3 w-3 animate-spin" />
-              Live updating
-            </span>
-          )}
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
+      <div className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+        <div className="flex items-center justify-between p-4">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Brain className="h-6 w-6 text-primary" />
+              Unified Intelligence
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Complete conversation analysis: recordings, transcripts, and quality insights
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isPolling && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Live updating
+              </span>
+            )}
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Main Content - Resizable Panels */}
-      <div className="flex-1 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal" className="h-full">
-          {/* Left Panel - List */}
+      <div className="flex-1 overflow-hidden p-4 pt-3">
+        <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border bg-background shadow-sm">
+          {/* Left Panel - List + Challenges */}
           <ResizablePanel defaultSize={40} minSize={30} maxSize={50}>
-            <div className="h-full overflow-auto p-4">
+            <div className="h-full overflow-auto p-4 space-y-4">
               <ConversationListPanel
                 conversations={conversations}
                 filters={filters}
@@ -320,6 +389,13 @@ export default function UnifiedIntelligencePage() {
                 campaigns={campaigns}
                 stats={stats}
               />
+              {/* Top Challenges Panel */}
+              {topChallenges.length > 0 && (
+                <TopChallengesPanel
+                  challenges={topChallenges}
+                  totalIssues={totalIssues}
+                />
+              )}
             </div>
           </ResizablePanel>
 
@@ -331,6 +407,11 @@ export default function UnifiedIntelligencePage() {
               <UnifiedDetailPanel
                 conversation={selectedConversation}
                 isLoading={conversationsLoading && !!selectedId}
+                onAnalyze={handleAnalyze}
+                onTranscribe={handleTranscribe}
+                onSelectHistoryCall={handleSelectHistoryCall}
+                isAnalyzing={analyzeMutation.isPending}
+                isTranscribing={transcribeMutation.isPending}
               />
             </div>
           </ResizablePanel>

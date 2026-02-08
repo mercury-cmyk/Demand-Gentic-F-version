@@ -21,6 +21,9 @@ import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import LandingPage from "@/pages/landing";
 import AboutPage from "@/pages/about";
+import PrivacyPolicyPage from "@/pages/privacy-policy";
+import TermsOfServicePage from "@/pages/terms-of-service";
+import GDPRPolicyPage from "@/pages/gdpr-policy";
 import Dashboard from "@/pages/dashboard";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
@@ -55,7 +58,7 @@ import ImportsPage from "@/pages/imports";
 import ReportsPage from "@/pages/reports";
 import CallReportsPage from "@/pages/call-reports";
 import CallRecordingsPage from "@/pages/call-recordings";
-import CallIntelligenceDashboard from "@/pages/call-intelligence-dashboard";
+// CallIntelligenceDashboard removed - page deprecated
 import UnifiedIntelligencePage from "@/pages/unified-intelligence";
 
 // Lazy-loaded components
@@ -63,7 +66,6 @@ const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 import ConversationQualityPage from "@/pages/conversation-quality";
 import EngagementAnalyticsPage from "@/pages/engagement-analytics";
-import CampaignAnalyticsPage from "@/pages/campaign-analytics";
 import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
@@ -75,6 +77,7 @@ import SenderProfilesPage from "@/pages/sender-profiles";
 import SipTrunkSettingsPage from "@/pages/sip-trunk-settings";
 import AgentConsolePage from "./pages/agent-console";
 import ResourcesCentrePage from "@/pages/resources-centre";
+import ResourcesCentrePublicPage from "@/pages/resources-centre-public";
 import VerificationCampaignsPage from "@/pages/verification-campaigns";
 import VerificationCampaignConfigPage from "@/pages/verification-campaign-config";
 import VerificationCampaignStatsPage from "@/pages/verification-campaign-stats";
@@ -82,6 +85,7 @@ import VerificationConsolePage from "@/pages/verification-console";
 import VerificationUploadPage from "@/pages/verification-upload";
 import VerificationSuppressionUploadPage from "@/pages/verification-suppression-upload";
 import PhoneBulkEditorPage from "@/pages/phone-bulk-editor";
+import NumberPoolPage from "@/pages/number-pool";
 import EmailValidationTest from "./pages/email-validation-test";
 import PivotalPipelineManagementPage from "@/pages/pivotal-pipeline-management";
 import PipelineManagementPage from "@/pages/pipeline-management";
@@ -95,6 +99,8 @@ import LeadFormPublicPage from "@/pages/lead-form-public";
 import AIProjectCreatorPage from "@/pages/ai-project-creator";
 import ClientPortalAdmin from "@/pages/client-portal-admin";
 import AdminProjectRequests from "@/pages/admin-project-requests";
+import PublicBookingPage from "@/pages/public-booking";
+import AdminBookingsPage from "@/pages/admin-bookings";
 import ClientPortalLogin from "@/pages/client-portal-login";
 import ClientPortalJoin from "@/pages/client-portal-join";
 import ClientPortalDashboard from "@/pages/client-portal-dashboard";
@@ -128,6 +134,7 @@ import SuperOrgSettingsPage from "@/pages/settings/super-org";
 import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import UnifiedKnowledgeHubPage from "@/pages/unified-knowledge-hub";
 import PromptManagementPage from "@/pages/prompt-management";
+import PromptInspectorPage from "@/pages/prompt-inspector";
 import SmtpProvidersPage from "@/pages/smtp-providers";
 import TransactionalTemplatesPage from "@/pages/transactional-templates";
 import DomainManagementPage from "@/pages/domain-management";
@@ -323,7 +330,10 @@ function AuthenticatedApp() {
                 {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
               <Route path="/phone-campaigns/create" component={TelemarketingCreatePage} />
-              <Route path="/phone-campaigns/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Use the full wizard for editing phone campaigns (with voice selection) */}
+              <Route path="/phone-campaigns/:id/edit" component={TelemarketingCreatePage} />
+              {/* Unified 12-step wizard for creating AND editing telemarketing campaigns */}
+              <Route path="/campaigns/telemarketing/:id/edit" component={TelemarketingCreatePage} />
               {/* Legacy redirects for /campaigns/telemarketing */}
               <Route path="/campaigns/telemarketing">
                 {() => { window.location.href = '/campaigns'; return null; }}
@@ -337,19 +347,14 @@ function AuthenticatedApp() {
               <Route path="/campaigns/phone">
                 {() => { window.location.href = '/campaigns'; return null; }}
               </Route>
-              <Route path="/campaigns/phone/:id/edit" component={PhoneCampaignEditPage} />
+              {/* Use the full wizard for editing phone campaigns (with voice selection) */}
+              <Route path="/campaigns/phone/:id/edit" component={TelemarketingCreatePage} />
               <Route path="/campaigns/phone/:id/queue" component={CampaignQueuePage} />
-              {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern */}
-              <Route path="/campaigns/appointment_generation/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/lead_qualification/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/survey/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/follow_up/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/event_registration/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/reactivation/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/sql/edit/:id" component={PhoneCampaignEditPage} />
-              <Route path="/campaigns/webinar_invite/edit/:id" component={PhoneCampaignEditPage} />
+              {/* Support all phone campaign types with /campaigns/:type/edit/:id pattern - use wizard */}
+              <Route path="/campaigns/:campaignType/edit/:id" component={TelemarketingCreatePage} />
               <Route path="/telemarketing/create" component={TelemarketingCreatePage} />
               <Route path="/phone-bulk-editor" component={PhoneBulkEditorPage} />
+              <Route path="/number-pool" component={NumberPoolPage} />
               
               {/* Leads */}
               <Route path="/leads" component={LeadsPage} />
@@ -377,10 +382,9 @@ function AuthenticatedApp() {
               <Route path="/call-reports" component={CallReportsPage} />
               <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               <Route path="/call-recordings" component={CallRecordingsPage} />
-              <Route path="/call-intelligence" component={CallIntelligenceDashboard} />
+              {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence" component={UnifiedIntelligencePage} />
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
-              <Route path="/campaign-analytics" component={CampaignAnalyticsPage} />
               <Route path="/ai-call-analytics">
                 <Redirect to="/call-reports?tab=ai" />
               </Route>
@@ -396,6 +400,7 @@ function AuthenticatedApp() {
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
               <Route path="/settings/knowledge-hub" component={UnifiedKnowledgeHubPage} />
               <Route path="/settings/prompts" component={PromptManagementPage} />
+              <Route path="/settings/prompt-inspector" component={PromptInspectorPage} />
 
               {/* Settings Hub */}
               <Route path="/settings" component={SettingsIndexPage} />
@@ -434,10 +439,10 @@ function AuthenticatedApp() {
               <Route path="/email-infrastructure/sender-profiles" component={SenderProfilesPage} />
               <Route path="/telephony/sip-trunks" component={TelephonySettingsPage} />
               
-              {/* Resources */}
+              {/* Resources (Admin) */}
               <Route path="/events" component={EventsPage} />
-              <Route path="/resources" component={ResourcesPage} />
-              <Route path="/resources-centre" component={ResourcesCentrePage} />
+              <Route path="/admin/resources" component={ResourcesPage} />
+              <Route path="/admin/resources-centre" component={ResourcesCentrePage} />
               <Route path="/news" component={NewsPage} />
               
               {/* Verification */}
@@ -472,6 +477,7 @@ function AuthenticatedApp() {
               {/* Client Portal & Hierarchy Management */}
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
+              <Route path="/admin/bookings" component={AdminBookingsPage} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
               <Route path="/qa-review-center" component={QAReviewCenter} />
               
@@ -545,18 +551,97 @@ function AuthenticatedApp() {
 function Router() {
   return (
     <Switch>
-      <Route path="/welcome" component={LandingPage} />
-      <Route path="/about" component={AboutPage} />
+      {/* ================================================
+          PUBLIC ROUTES - No authentication required
+          These pages are accessible to everyone
+          ================================================ */}
+
+      {/* Welcome page is the home page */}
+      <Route path="/">
+        <LandingPage />
+      </Route>
+      <Route path="/welcome">
+        <LandingPage />
+      </Route>
+
+      {/* Static public pages */}
+      <Route path="/about">
+        <AboutPage />
+      </Route>
+      <Route path="/privacy">
+        <PrivacyPolicyPage />
+      </Route>
+      <Route path="/terms">
+        <TermsOfServicePage />
+      </Route>
+      <Route path="/gdpr">
+        <GDPRPolicyPage />
+      </Route>
+
+      {/* Public Resources Centre - Announcements, Insights, eBooks, Solution Briefs, Webinars */}
+      <Route path="/resources-centre">
+        <ResourcesCentrePublicPage />
+      </Route>
+      <Route path="/resources">
+        <ResourcesCentrePublicPage />
+      </Route>
+
+      {/* Authentication */}
       <Route path="/login" component={LoginPage} />
+
+      {/* Public lead forms and booking */}
       <Route path="/forms/:id" component={LeadFormPublicPage} />
+      <Route path="/book/:username/:slug" component={PublicBookingPage} />
+
+      {/* Client Portal public routes (login/join only) */}
       <Route path="/client-portal/login" component={ClientPortalLogin} />
       <Route path="/client-portal/join/:slug" component={ClientPortalJoin} />
-      <Route path="/client-portal/dashboard" component={ClientPortalDashboard} />
-      <Route path="/client-portal/simulations" component={ClientPortalSimulations} />
-      <Route path="/client-portal/preview-studio" component={ClientPortalPreviewStudio} />
-      <Route path="/client-portal/voice-simulation" component={ClientPortalVoiceSimulation} />
-      <Route path="/client-portal/email-simulation" component={ClientPortalEmailSimulation} />
-      <Route path="/client-portal/intelligence" component={ClientPortalIntelligence} />
+
+      {/* ================================================
+          PROTECTED ROUTES - Authentication required
+          All admin and authenticated routes below
+          ================================================ */}
+
+      {/* Client Portal authenticated routes */}
+      <Route path="/client-portal/dashboard">
+        <ProtectedRoute>
+          <ClientPortalDashboard />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/simulations">
+        <ProtectedRoute>
+          <ClientPortalSimulations />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/preview-studio">
+        <ProtectedRoute>
+          <ClientPortalPreviewStudio />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/voice-simulation">
+        <ProtectedRoute>
+          <ClientPortalVoiceSimulation />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/email-simulation">
+        <ProtectedRoute>
+          <ClientPortalEmailSimulation />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/intelligence">
+        <ProtectedRoute>
+          <ClientPortalIntelligence />
+        </ProtectedRoute>
+      </Route>
+
+      {/* Main dashboard */}
+      <Route path="/dashboard">
+        <ProtectedRoute>
+          <AuthenticatedApp />
+        </ProtectedRoute>
+      </Route>
+
+      {/* All other routes require authentication */}
       <Route>
         <ProtectedRoute>
           <AuthenticatedApp />

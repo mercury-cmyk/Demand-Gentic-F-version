@@ -17,6 +17,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { dialerCallAttempts, callSessions } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
 
 const router = Router();
 const LOG_PREFIX = "[AgentCallControl]";
@@ -29,6 +30,9 @@ interface AgentCallSession {
   agentId: string;
   prospectPhone: string;
   fromNumber: string;
+  callerNumberId?: string | null;
+  callerNumberDecisionId?: string | null;
+  numberPoolRecorded?: boolean;
   status: 'initiating' | 'ringing' | 'active' | 'held' | 'ended';
   campaignId?: string;
   contactId?: string;
@@ -109,7 +113,28 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
       return res.status(500).json({ message: "Telnyx connection not configured" });
     }
 
-    const fromNumber = process.env.TELNYX_FROM_NUMBER;
+    let fromNumber = "";
+    let callerNumberId: string | null = null;
+    let callerNumberDecisionId: string | null = null;
+
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId: campaignId || 'agent-call-control',
+        prospectNumber: to,
+        callType: 'agent_call_control',
+      });
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      console.warn(`${LOG_PREFIX} Number pool selection failed, using legacy caller ID:`, poolError);
+      fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+    }
+
     if (!fromNumber) {
       console.error(`${LOG_PREFIX} TELNYX_FROM_NUMBER not configured`);
       return res.status(500).json({ message: "Telnyx from number not configured" });
@@ -168,6 +193,7 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
         // Use default error message
       }
 
+      releaseNumberWithoutOutcome(callerNumberId);
       return res.status(response.status >= 500 ? 502 : 400).json({
         message: errorMessage,
         code: response.status,
@@ -197,6 +223,9 @@ router.post("/start", requireAuth, async (req: Request, res: ExpressResponse) =>
       agentId,
       prospectPhone: to,
       fromNumber,
+      callerNumberId,
+      callerNumberDecisionId,
+      numberPoolRecorded: false,
       status: 'initiating',
       campaignId,
       contactId,
@@ -354,6 +383,25 @@ router.get("/:callControlId/status", requireAuth, async (req: Request, res: Expr
       }
       if (status === 'ended') {
         cachedSession.endedAt = new Date();
+        if (cachedSession.callerNumberId && !cachedSession.numberPoolRecorded) {
+          const durationSec = Math.max(0, Math.round((cachedSession.endedAt.getTime() - cachedSession.startedAt.getTime()) / 1000));
+          const answered = !!cachedSession.answeredAt;
+          cachedSession.numberPoolRecorded = true;
+          handleNumberPoolCallCompleted({
+            numberId: cachedSession.callerNumberId,
+            callSessionId: cachedSession.callSessionId || undefined,
+            answered,
+            durationSec,
+            disposition: answered ? 'completed' : 'no_answer',
+            failed: !answered,
+            failureReason: !answered ? 'no_answer' : undefined,
+            prospectNumber: cachedSession.prospectPhone,
+            campaignId: cachedSession.campaignId || undefined,
+          }).catch(err => {
+            cachedSession.numberPoolRecorded = false;
+            console.error(`${LOG_PREFIX} Failed to record number pool completion:`, err);
+          });
+        }
       }
     }
 
@@ -452,6 +500,23 @@ router.post("/hangup", requireAuth, async (req: Request, res: ExpressResponse) =
       console.log(`${LOG_PREFIX} Updated call_sessions record for ${callControlId}`);
     } catch (dbErr) {
       console.error(`${LOG_PREFIX} Failed to update call_sessions on hangup:`, dbErr);
+    }
+
+    if (session?.callerNumberId && !session.numberPoolRecorded) {
+      const durationSec = session.endedAt ? Math.max(0, Math.round((session.endedAt.getTime() - session.startedAt.getTime()) / 1000)) : 0;
+      const answered = !!session.answeredAt;
+      session.numberPoolRecorded = true;
+      await handleNumberPoolCallCompleted({
+        numberId: session.callerNumberId,
+        callSessionId: session.callSessionId || undefined,
+        answered,
+        durationSec,
+        disposition: answered ? 'completed' : 'no_answer',
+        failed: !answered,
+        failureReason: !answered ? 'no_answer' : undefined,
+        prospectNumber: session.prospectPhone,
+        campaignId: session.campaignId || undefined,
+      });
     }
 
     console.log(`${LOG_PREFIX} Call hung up successfully:`, callControlId);

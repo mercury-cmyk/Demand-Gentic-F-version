@@ -1,17 +1,21 @@
 /**
  * Step: Phone Number Selection
- * 
+ *
  * Allows selection of a Telnyx phone number from the number pool
  * to use as the caller ID for this campaign.
+ *
+ * Also supports automatic number pool rotation to avoid spam flags.
  */
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Phone, RefreshCw, AlertCircle, CheckCircle2, Info, Loader2 } from "lucide-react";
+import { Phone, RefreshCw, AlertCircle, CheckCircle2, Info, Loader2, RotateCcw, Shield, Settings2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -47,12 +51,18 @@ interface NumberPoolResponse {
   count: number;
 }
 
+interface NumberPoolConfig {
+  enabled: boolean;
+  maxCallsPerNumber?: number;
+  rotationStrategy?: 'round_robin' | 'reputation_based' | 'region_match';
+  cooldownHours?: number;
+}
+
 interface StepPhoneNumberProps {
-  data: {
-    callerPhoneNumberId?: string;
-    callerPhoneNumber?: string;
-  };
-  onChange: (data: { callerPhoneNumberId?: string; callerPhoneNumber?: string }) => void;
+  data: any;
+  onNext: (data: any) => void;
+  onBack?: () => void;
+  onChange?: (data: any) => void;
 }
 
 // ==================== HELPERS ====================
@@ -81,9 +91,17 @@ function getStatusBadge(status: string) {
 
 // ==================== COMPONENT ====================
 
-export function StepPhoneNumber({ data, onChange }: StepPhoneNumberProps) {
+export function StepPhoneNumber({ data, onNext, onBack, onChange }: StepPhoneNumberProps) {
   const { toast } = useToast();
-  const [selectedNumberId, setSelectedNumberId] = useState<string>(data.callerPhoneNumberId || '');
+  const [selectedNumberId, setSelectedNumberId] = useState<string>(data?.callerPhoneNumberId || '');
+
+  // Number Pool Rotation Configuration
+  const [numberPoolConfig, setNumberPoolConfig] = useState<NumberPoolConfig>(() => ({
+    enabled: data?.numberPoolConfig?.enabled ?? true, // Default to enabled
+    maxCallsPerNumber: data?.numberPoolConfig?.maxCallsPerNumber ?? 50,
+    rotationStrategy: data?.numberPoolConfig?.rotationStrategy ?? 'reputation_based',
+    cooldownHours: data?.numberPoolConfig?.cooldownHours ?? 4,
+  }));
 
   // Fetch available phone numbers from the number pool
   const {
@@ -127,27 +145,33 @@ export function StepPhoneNumber({ data, onChange }: StepPhoneNumberProps) {
   const numbers = numbersResponse?.data || [];
   const selectedNumber = numbers.find(n => n.id === selectedNumberId);
 
-  // Update parent when selection changes
+  // Update parent when selection or config changes (if onChange is provided)
   useEffect(() => {
-    if (selectedNumberId && selectedNumber) {
+    if (onChange) {
       onChange({
-        callerPhoneNumberId: selectedNumberId,
-        callerPhoneNumber: selectedNumber.phoneNumberE164,
-      });
-    } else if (!selectedNumberId) {
-      onChange({
-        callerPhoneNumberId: undefined,
-        callerPhoneNumber: undefined,
+        callerPhoneNumberId: selectedNumberId || undefined,
+        callerPhoneNumber: selectedNumber?.phoneNumberE164 || undefined,
+        numberPoolConfig: numberPoolConfig,
       });
     }
-  }, [selectedNumberId, selectedNumber, onChange]);
+  }, [selectedNumberId, selectedNumber, numberPoolConfig, onChange]);
 
   // Restore selection from data
   useEffect(() => {
-    if (data.callerPhoneNumberId && data.callerPhoneNumberId !== selectedNumberId) {
+    if (data?.callerPhoneNumberId && data.callerPhoneNumberId !== selectedNumberId) {
       setSelectedNumberId(data.callerPhoneNumberId);
     }
-  }, [data.callerPhoneNumberId]);
+  }, [data?.callerPhoneNumberId]);
+
+  // Handle next step
+  const handleNext = () => {
+    onNext({
+      ...data,
+      callerPhoneNumberId: selectedNumberId || undefined,
+      callerPhoneNumber: selectedNumber?.phoneNumberE164 || undefined,
+      numberPoolConfig: numberPoolConfig,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -215,14 +239,14 @@ export function StepPhoneNumber({ data, onChange }: StepPhoneNumberProps) {
               </Alert>
             ) : (
               <Select
-                value={selectedNumberId}
-                onValueChange={setSelectedNumberId}
+                value={selectedNumberId || '__default__'}
+                onValueChange={(value) => setSelectedNumberId(value === '__default__' ? '' : value)}
               >
                 <SelectTrigger id="phone-number" className="w-full">
                   <SelectValue placeholder="Select a phone number..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">
+                  <SelectItem value="__default__">
                     <span className="text-muted-foreground">Use default number (env)</span>
                   </SelectItem>
                   {numbers.map((number) => (
@@ -295,6 +319,165 @@ export function StepPhoneNumber({ data, onChange }: StepPhoneNumberProps) {
           </Alert>
         </CardContent>
       </Card>
+
+      {/* Number Pool Rotation Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <RotateCcw className="h-5 w-5 text-primary" />
+            Automatic Number Rotation
+          </CardTitle>
+          <CardDescription>
+            Automatically rotate through phone numbers to avoid spam flags and maintain caller reputation.
+            This helps keep your campaigns out of spam filters.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Enable/Disable Toggle */}
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div className="space-y-0.5">
+              <Label className="text-base font-medium flex items-center gap-2">
+                <Shield className="h-4 w-4 text-green-500" />
+                Enable Number Pool Rotation
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Automatically switch between available numbers to distribute call volume
+              </p>
+            </div>
+            <Switch
+              checked={numberPoolConfig.enabled}
+              onCheckedChange={(checked) =>
+                setNumberPoolConfig((prev) => ({ ...prev, enabled: checked }))
+              }
+            />
+          </div>
+
+          {numberPoolConfig.enabled && (
+            <div className="space-y-4 pt-2">
+              {/* Rotation Strategy */}
+              <div className="space-y-2">
+                <Label htmlFor="rotation-strategy" className="flex items-center gap-2">
+                  <Settings2 className="h-4 w-4" />
+                  Rotation Strategy
+                </Label>
+                <Select
+                  value={numberPoolConfig.rotationStrategy}
+                  onValueChange={(value: 'round_robin' | 'reputation_based' | 'region_match') =>
+                    setNumberPoolConfig((prev) => ({ ...prev, rotationStrategy: value }))
+                  }
+                >
+                  <SelectTrigger id="rotation-strategy">
+                    <SelectValue placeholder="Select strategy..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="reputation_based">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Reputation-Based (Recommended)</span>
+                        <span className="text-xs text-muted-foreground">
+                          Prioritizes numbers with higher answer rates
+                        </span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="round_robin">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Round Robin</span>
+                        <span className="text-xs text-muted-foreground">
+                          Cycles through numbers evenly
+                        </span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="region_match">
+                      <div className="flex flex-col">
+                        <span className="font-medium">Region Matching</span>
+                        <span className="text-xs text-muted-foreground">
+                          Matches caller ID to prospect's region
+                        </span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Max Calls Per Number */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="max-calls">Max Calls Per Number</Label>
+                  <Input
+                    id="max-calls"
+                    type="number"
+                    min={10}
+                    max={200}
+                    value={numberPoolConfig.maxCallsPerNumber}
+                    onChange={(e) =>
+                      setNumberPoolConfig((prev) => ({
+                        ...prev,
+                        maxCallsPerNumber: parseInt(e.target.value) || 50,
+                      }))
+                    }
+                    placeholder="50"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Number rotates after this many calls
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="cooldown-hours">Cooldown Period (hours)</Label>
+                  <Input
+                    id="cooldown-hours"
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={numberPoolConfig.cooldownHours}
+                    onChange={(e) =>
+                      setNumberPoolConfig((prev) => ({
+                        ...prev,
+                        cooldownHours: parseInt(e.target.value) || 4,
+                      }))
+                    }
+                    placeholder="4"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Rest period after hitting limits
+                  </p>
+                </div>
+              </div>
+
+              {/* Active Pool Summary */}
+              {numbers.length > 0 && (
+                <Alert className="bg-green-500/10 border-green-500/30">
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <AlertTitle className="text-green-700">Number Pool Ready</AlertTitle>
+                  <AlertDescription className="text-green-600">
+                    {numbers.length} active number{numbers.length !== 1 ? 's' : ''} available for rotation.
+                    The system will automatically distribute calls across these numbers
+                    to maintain reputation and avoid spam flags.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+
+          {!numberPoolConfig.enabled && (
+            <Alert variant="destructive" className="bg-orange-500/10 border-orange-500/30">
+              <AlertCircle className="h-4 w-4 text-orange-500" />
+              <AlertTitle className="text-orange-700">Single Number Mode</AlertTitle>
+              <AlertDescription className="text-orange-600">
+                All calls will use the selected caller ID above. This may increase the risk
+                of spam flags if making high-volume calls. We recommend enabling rotation
+                for campaigns with more than 50 daily calls.
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Navigation */}
+      <div className="flex justify-end">
+        <Button onClick={handleNext}>
+          Next Step
+        </Button>
+      </div>
     </div>
   );
 }

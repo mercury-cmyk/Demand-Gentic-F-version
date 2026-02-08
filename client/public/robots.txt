@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /settings/
+Disallow: /campaigns/
+Disallow: /api/
+
+Sitemap: https://demandgentic.ai/sitemap.xml

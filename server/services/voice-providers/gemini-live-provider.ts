@@ -71,6 +71,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Accumulated transcript for the current turn
   private currentTranscript: string = '';
 
+  // Anti-repetition: Track recent phrases to prevent loops
+  private recentPhrases: string[] = [];
+  private readonly MAX_RECENT_PHRASES = 10;
+
   // Speech-to-Text streaming for user transcription
   private speechClient: SpeechClient | null = null;
   private recognizeStream: ReturnType<SpeechClient['streamingRecognize']> | null = null;
@@ -83,6 +87,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Anti-loop protection
   private sttRestartCount: number = 0;
   private sttLastRestartTime: number = 0;
+  private sttErrorLoggedAt: number = 0; // Rate-limit error logging
 
   async connect(): Promise<void> {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
@@ -282,42 +287,80 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     // Map voice to Gemini format
     const voice = mapVoiceToProvider(config.voice, 'google');
 
-    // Build generation config for audio output
-    const generationConfig: GeminiGenerationConfig = {
+    // Build generation config for audio output.
+    // CRITICAL: Native audio models (gemini-live-2.5-flash-native-audio) only allow
+    // a SINGLE response modality. Use ['AUDIO'] only, and enable transcription via
+    // output_audio_transcription / input_audio_transcription at the setup level.
+    const generationConfig: Record<string, unknown> = {
       response_modalities: ['AUDIO'],
       speech_config: {
         voice_config: {
           prebuilt_voice_config: {
             voice_name: voice,
+            speaking_rate: 0.9, // Set to 90% of normal speed for more natural pacing
           },
         },
       },
-      temperature: config.temperature ?? 0.7,
-      max_output_tokens: config.maxResponseTokens ?? 4096,
+      // Google recommends temperature 1.0 for Gemini 2.5 models.
+      // Sub-1.0 values can cause looping and degraded performance.
+      // UPDATE FEB 2026: High temperature is causing script deviation.
+      // Lowering to 0.5 to improve focus and script adherence.
+      temperature: config.temperature ?? 0.5,
+      // NOTE: max_output_tokens and thinking_config are NOT supported by native audio
+      // models in the Live API. Including them causes "The request is not supported
+      // by this model" endpoint selection failure. Omit them entirely.
     };
 
     // Build tools config - convert to Gemini format
-    const tools = config.tools.length > 0
-      ? [convertToolsToGemini(config.tools) as unknown as GeminiToolConfig]
-      : [] as GeminiToolConfig[];
+    // IMPORTANT: The Live API expects tools as a SINGLE OBJECT { function_declarations: [...] },
+    // NOT an array. This matches Google's official demo (geminilive.js).
+    const functionDeclarations = config.tools.length > 0
+      ? convertToolsToGemini(config.tools).function_declarations
+      : [];
 
-    // Build setup message
-    const setupMessage: BidiGenerateContentSetup = {
-      setup: {
-        model: useVertexAI
-          ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
-          : `models/${model}`,
-        generation_config: generationConfig,
-        system_instruction: {
-          parts: [{ text: config.systemPrompt }],
+    const modelResourceName = useVertexAI
+      ? getVertexModelName({ projectId: projectId!, location, model, useVertexAI: true })
+      : `models/${model}`;
+
+    // Build setup message - match Google's official WebSocket demo format exactly
+    const setup: Record<string, unknown> = {
+      model: modelResourceName,
+      generation_config: generationConfig,
+      system_instruction: {
+        parts: [{ text: config.systemPrompt }],
+      },
+      // Tools as single object (NOT array) per Google demo format
+      tools: { function_declarations: functionDeclarations },
+      // VAD / realtime input configuration
+      realtime_input_config: {
+        automatic_activity_detection: {
+          disabled: false,
+          ...(config.turnDetection?.silenceDurationMs ? {
+            silence_duration_ms: config.turnDetection.silenceDurationMs,
+          } : {}),
         },
-        tools,
       },
     };
+
+    // Enable transcription at setup level (supported by native-audio models)
+    if (config.transcriptionEnabled !== false) {
+      setup.output_audio_transcription = {};
+      setup.input_audio_transcription = {};
+    }
+
+    const setupMessage = { setup };
+
+    // Log the exact message for debugging
+    const debugSetup = { ...setup, system_instruction: { parts: [{ text: `[${(config.systemPrompt || '').length} chars]` }] } };
+    console.log(`${LOG_PREFIX} Setup message (debug):`, JSON.stringify(debugSetup, null, 2));
 
     this.ws.send(JSON.stringify(setupMessage));
     console.log(`${LOG_PREFIX} Setup message sent with voice: ${voice}`);
   }
+
+  // Track inbound audio frames for periodic logging
+  private audioInboundChunks: number = 0;
+  private lastBackpressureWarnAt: number = 0;
 
   sendAudio(audioBuffer: Buffer): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
@@ -329,48 +372,45 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       return;
     }
 
-    // Check for backpressure before sending
+    // Check for backpressure before sending (rate-limit the warning)
     const bufferSize = this.ws.bufferedAmount;
     const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB
     if (bufferSize > MAX_BUFFER_SIZE) {
-      console.warn(`${LOG_PREFIX} ⚠️ Audio backpressure detected (${bufferSize} bytes). Dropping frame to prevent buffer overflow.`);
-      return; // Drop frame to prevent audio quality degradation
+      const now = Date.now();
+      if (now - this.lastBackpressureWarnAt > 2000) {
+        console.warn(`${LOG_PREFIX} ⚠️ Gemini WS backpressure: ${bufferSize}B buffered, dropping frame`);
+        this.lastBackpressureWarnAt = now;
+      }
+      return;
     }
 
     // Transcode G.711 to PCM 16kHz for Gemini
     const pcmBuffer = this.transcoder.telnyxToGemini(audioBuffer);
     const base64Audio = pcmBuffer.toString('base64');
 
-    const message: BidiGenerateContentRealtimeInput = {
-      realtime_input: {
-        media_chunks: [{
-          mime_type: 'audio/pcm',
-          data: base64Audio,
-        }],
-      },
-    };
+    // Build message with fast string concatenation instead of JSON.stringify
+    const msg = `{"realtime_input":{"media_chunks":[{"mime_type":"audio/pcm","data":"${base64Audio}"}]}}`;
 
     try {
-        this.ws.send(JSON.stringify(message));
+        this.ws.send(msg);
         this.audioBytesSent += audioBuffer.length;
+        this.audioInboundChunks++;
 
         // Track when audio was received for STT idle detection
         this.lastAudioReceivedTime = Date.now();
 
         // Also stream to Speech-to-Text for user transcription
-        // Note: The streaming recognize stream expects raw PCM audio bytes
         if (this.sttEnabled) {
-          // Activate STT on demand when audio arrives
           if (!this.sttActive) {
             this.sttActive = true;
             this.startRecognizeStream().catch(() => {});
           }
 
-          if (this.recognizeStream) {
+          if (this.recognizeStream && !this.recognizeStream.destroyed && this.recognizeStream.writable) {
             try {
               this.recognizeStream.write(pcmBuffer);
             } catch (sttErr) {
-              // Ignore write errors - stream may be restarting
+              // Stream may be closing - ignore silently
             }
           }
         }
@@ -513,7 +553,11 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
              this.recognizeStream.on('end', () => {}); // No-op
          }
       } else {
-        console.warn(`${LOG_PREFIX} STT stream error:`, errorMsg);
+        // Rate-limit STT error logs to prevent flooding
+        if (!this.sttErrorLoggedAt || Date.now() - this.sttErrorLoggedAt > 5000) {
+          console.warn(`${LOG_PREFIX} STT stream error:`, errorMsg);
+          this.sttErrorLoggedAt = Date.now();
+        }
         // Prevent rapid restart loop on other errors too
         if (this.sttRestartCount > 3) {
             console.error(`${LOG_PREFIX} Too many STT errors (${this.sttRestartCount}). Disabling STT temporarily.`);
@@ -684,34 +728,48 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
    * CRITICAL: The model must ONLY say the exact greeting and then STOP.
    * It must NOT predict, assume, or continue with any follow-up like "okay, great".
    * The model must wait for the actual human to respond before saying anything else.
+   *
+   * FIX (Feb 2026): Using turn_complete: false to prevent Gemini from treating this
+   * as a complete conversation turn. The greeting is just a prompt to speak, and
+   * then Gemini should listen for actual audio input from the caller.
+   *
+   * CRITICAL FIX (Feb 2026): The issue was that sending turn_complete: true after
+   * the greeting instruction caused Gemini to think the "user" was done talking,
+   * and then Gemini would respond AND assume what the caller said. By NOT marking
+   * turn_complete, we tell Gemini "the caller is still talking" so it will listen
+   * to the actual audio stream for their real response.
    */
   sendOpeningMessage(text: string): void {
+    console.log(`${LOG_PREFIX} 🎙️ sendOpeningMessage called: ws=${!!this.ws}, wsState=${this.ws?.readyState}, setupComplete=${this.setupComplete}`);
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.setupComplete) {
-      console.warn(`${LOG_PREFIX} Cannot send opening message - not ready`);
+      console.warn(`${LOG_PREFIX} ❌ Cannot send opening message - not ready (ws=${!!this.ws}, state=${this.ws?.readyState}, setup=${this.setupComplete})`);
       return;
     }
 
-    // In Gemini Live, we send a text prompt and the model generates audio
-    // Include essential instructions for proper conversation flow
+    // MINIMAL TRIGGER APPROACH:
+    // The system prompt already contains the greeting instructions and conversation rules.
+    // We send a short trigger as a completed user turn so Gemini knows to start speaking.
+    //
+    // Key: turn_complete MUST be true here. This tells Gemini:
+    //   "The user's turn is done — now it's YOUR turn to speak."
+    // After Gemini speaks and its turn completes, it enters listening mode.
+    // The VAD (automatic_activity_detection) then handles detecting caller speech.
+    //
+    // IMPORTANT: The trigger text must be minimal. Long instructions in client_content
+    // confuse the turn state and cause Gemini to monologue (generate multiple
+    // consecutive responses without waiting for audio input).
     const message = {
       client_content: {
         turns: [{
           role: 'user',
-          parts: [{ text: `Say ONLY this exact message now: "${text}"
-
-CRITICAL RULES:
-- Do NOT add anything before or after this message
-- After speaking, STOP and WAIT in silence for their response
-- Do NOT assume they confirmed identity - wait for explicit "yes" or name confirmation
-- Do NOT proceed to pitch until you HEAR explicit confirmation
-- Listen carefully - the next words must come from THEM` }],
+          parts: [{ text: `[CALL CONNECTED] The phone line is now live. Say your greeting: "${text}" — then STOP and LISTEN.` }],
         }],
         turn_complete: true,
       },
     };
 
     this.ws.send(JSON.stringify(message));
-    console.log(`${LOG_PREFIX} Opening message sent: "${text.substring(0, 50)}..."`);
+    console.log(`${LOG_PREFIX} Opening message sent (turn_complete=true, minimal trigger): "${text.substring(0, 50)}..."`);
   }
 
   private handleMessage(data: string): void {
@@ -786,29 +844,20 @@ CRITICAL RULES:
   private handleServerContent(message: any): void {
     const content = message.server_content || message.serverContent;
 
-    console.log(`${LOG_PREFIX} 📨 handleServerContent - processing server message`);
-
     // Check for model turn with content
     if (content.model_turn?.parts || content.modelTurn?.parts) {
       const parts = content.model_turn?.parts || content.modelTurn?.parts;
-      console.log(`${LOG_PREFIX} 📦 Model turn received with ${parts.length} parts`);
 
       // Handle audio output
       if (hasAudioPart(parts)) {
-        console.log(`${LOG_PREFIX} 🎵 AUDIO PART DETECTED! Processing...`);
         const audioData = extractAudioData(parts);
         if (audioData) {
-          console.log(`${LOG_PREFIX} ✅ Audio data extracted: ${audioData.length} chars (base64)`);
-          // DEBUG: Log first few audio chunks to verify Gemini is sending data
-          if (this.audioPlaybackMs === 0) {
-              console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO RECEIVED from Gemini. Chunk size: ${audioData.length} chars (base64)`);
-          }
           this.handleAudioOutput(audioData);
         } else {
              console.warn(`${LOG_PREFIX} ⚠️ Detected AudioPart but failed to extract data!`);
         }
       } else {
-        console.log(`${LOG_PREFIX} ⚠️ No audio part detected in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
+        console.log(`${LOG_PREFIX} ⚠️ No audio part in model turn. Parts: ${parts.map((p: any) => Object.keys(p)[0]).join(', ')}`);
       }
 
       // Handle text output (for transcription)
@@ -840,7 +889,59 @@ CRITICAL RULES:
         });
       }
     } else {
-      console.log(`${LOG_PREFIX} ⚠️ Server content has no model_turn`);
+      // Log what this server_content actually contains (for debugging)
+      const contentKeys = Object.keys(content).filter(k => k !== 'model_turn' && k !== 'modelTurn');
+      if (contentKeys.length > 0) {
+        console.log(`${LOG_PREFIX} 📋 Server content (no model_turn), keys: ${contentKeys.join(', ')}`);
+      }
+    }
+
+    // Handle INPUT transcription - what Gemini heard from the caller
+    // This is critical for detecting prospect speech via Gemini's own ASR
+    if (content.input_transcription || content.inputTranscription) {
+      const inputTranscription = content.input_transcription || content.inputTranscription;
+      const text = inputTranscription.text || inputTranscription.transcript || '';
+      if (text.trim()) {
+        console.log(`${LOG_PREFIX} 👂 INPUT TRANSCRIPTION (caller): "${text}"`);
+        // Emit as user transcript so voice-dialer can detect human speech
+        this.emit('transcript:user', {
+          text: text.trim(),
+          isFinal: true,
+          timestamp: new Date(),
+        });
+      }
+    }
+
+    // Handle OUTPUT transcription - what Gemini said (text version of its audio)
+    if (content.output_transcription || content.outputTranscription) {
+      const outputTranscription = content.output_transcription || content.outputTranscription;
+      const text = outputTranscription.text || outputTranscription.transcript || '';
+      if (text.trim()) {
+        // ANTI-REPETITION CHECK: Detect if this is a repeated phrase
+        const normalizedText = text.trim().toLowerCase().replace(/[^\w\s]/g, '');
+        const isRepetition = this.recentPhrases.some(phrase => {
+          const similarity = this.calculateSimilarity(normalizedText, phrase);
+          return similarity > 0.85; // 85% similar = likely repetition
+        });
+
+        if (isRepetition) {
+          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED - suppressing duplicate phrase: "${text.substring(0, 50)}..."`);
+          // Don't emit or track this phrase - it's a repeat
+        } else {
+          // Track this phrase for future comparison
+          this.recentPhrases.push(normalizedText);
+          if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {
+            this.recentPhrases.shift(); // Remove oldest
+          }
+
+          console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
+          this.emit('transcript:agent', {
+            text: text.trim(),
+            isFinal: true,
+            timestamp: new Date(),
+          });
+        }
+      }
     }
 
     // Turn complete
@@ -890,13 +991,14 @@ CRITICAL RULES:
     }
   }
 
+  // Track audio chunks for periodic logging
+  private audioChunkCount: number = 0;
+
   private handleAudioOutput(base64Audio: string): void {
     if (!this.transcoder) {
       console.warn(`${LOG_PREFIX} Transcoder not initialized`);
       return;
     }
-
-    console.log(`${LOG_PREFIX} 🎵 handleAudioOutput called with ${base64Audio.length} chars of base64 audio`);
 
     // Start response if not already
     if (!this._isResponding) {
@@ -907,25 +1009,22 @@ CRITICAL RULES:
 
     // Decode PCM audio from Gemini (24kHz)
     const pcmBuffer = Buffer.from(base64Audio, 'base64');
-    console.log(`${LOG_PREFIX} 📦 Decoded PCM buffer: ${pcmBuffer.length} bytes (24kHz)`);
 
     // Transcode to G.711 for Telnyx
     const g711Buffer = this.transcoder.geminiToTelnyx(pcmBuffer, 24000);
-    console.log(`${LOG_PREFIX} 🔄 Transcoded to G.711: ${g711Buffer.length} bytes`);
-
-    // DEBUG: Log audio output from Gemini with quality metrics
-    if (this.audioPlaybackMs === 0 || this.audioPlaybackMs % 1000 < 50) {
-      const compressionRatio = ((pcmBuffer.length / g711Buffer.length) * 100).toFixed(1);
-      const avgChunkSize = g711Buffer.length;
-      console.log(`${LOG_PREFIX} 📊 Audio: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${compressionRatio}% compression, avg chunk ${avgChunkSize}B)`);
-    }
 
     // Calculate duration (G.711: 8 bytes per ms at 8kHz)
     const durationMs = g711Buffer.length / 8;
     this.audioPlaybackMs += durationMs;
-    console.log(`${LOG_PREFIX} ⏱️  Audio duration: ${durationMs.toFixed(0)}ms, total: ${this.audioPlaybackMs.toFixed(0)}ms`);
+    this.audioChunkCount++;
 
-    console.log(`${LOG_PREFIX} 📤 Emitting audio:delta event with ${g711Buffer.length} bytes`);
+    // Log only first chunk and then periodically (every 100 chunks / ~2s)
+    if (this.audioChunkCount === 1) {
+      console.log(`${LOG_PREFIX} 🔊 FIRST AUDIO chunk: ${pcmBuffer.length}B PCM→${g711Buffer.length}B G.711 (${durationMs.toFixed(0)}ms)`);
+    } else if (this.audioChunkCount % 100 === 0) {
+      console.log(`${LOG_PREFIX} 📊 Audio stats: ${this.audioChunkCount} chunks, ${this.audioPlaybackMs.toFixed(0)}ms total playback`);
+    }
+
     this.emit('audio:delta', {
       audioBuffer: g711Buffer,
       format: this.config?.outputAudioFormat || 'g711_ulaw',
@@ -941,6 +1040,30 @@ CRITICAL RULES:
       bytesSent: this.audioBytesSent,
       playbackMs: this.audioPlaybackMs,
     };
+  }
+
+  /**
+   * Calculate similarity between two strings (Jaccard similarity on words)
+   * Returns a value between 0 (no similarity) and 1 (identical)
+   */
+  private calculateSimilarity(str1: string, str2: string): number {
+    const words1 = new Set(str1.split(/\s+/).filter(w => w.length > 2));
+    const words2 = new Set(str2.split(/\s+/).filter(w => w.length > 2));
+
+    if (words1.size === 0 && words2.size === 0) return 1;
+    if (words1.size === 0 || words2.size === 0) return 0;
+
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+
+    return intersection.size / union.size;
+  }
+
+  /**
+   * Clear recent phrases (call when starting a new conversation)
+   */
+  clearRecentPhrases(): void {
+    this.recentPhrases = [];
   }
 
   /**

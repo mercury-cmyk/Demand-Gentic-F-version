@@ -340,8 +340,8 @@ export function isWithinBusinessHours(
 
   // Convert current time to target timezone
   const zonedTime = toZonedTime(checkTime, targetTimezone);
-  
-  // Check if it's a weekend
+
+  // Check if it's a working day
   const dayOfWeek = format(zonedTime, 'EEEE', { timeZone: targetTimezone }).toLowerCase();
   if (!config.operatingDays.includes(dayOfWeek)) {
     return false; // Not an operating day

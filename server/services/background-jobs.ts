@@ -7,6 +7,8 @@ import { processPendingTranscriptions } from './google-transcription';
 import { processUnanalyzedLeads } from './ai-qa-analyzer';
 import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
+import { processMissingTranscripts } from './transcription-reliability';
+import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
 import { eq, lt, and, inArray, sql } from 'drizzle-orm';
@@ -19,21 +21,25 @@ import { eq, lt, and, inArray, sql } from 'drizzle-orm';
 const TRANSCRIPTION_JOB_INTERVAL = 120000; // Every 120 seconds (was 60s)
 const AI_ANALYSIS_JOB_INTERVAL = 120000; // Every 120 seconds (was 90s)
 const LOCK_SWEEPER_INTERVAL = 600000; // Every 10 minutes (was 5 min)
+const TELNYX_RECORDING_SYNC_INTERVAL = 300000; // Every 5 minutes - auto-fetch last 24h recordings
 
 let transcriptionInterval: NodeJS.Timeout | null = null;
 let analysisInterval: NodeJS.Timeout | null = null;
 let lockSweeperInterval: NodeJS.Timeout | null = null;
+let telnyxSyncInterval: NodeJS.Timeout | null = null;
 
 // Execution guards to prevent overlapping runs
 let isTranscriptionRunning = false;
 let isAnalysisRunning = false;
 let isLockSweeperRunning = false;
+let isTelnyxSyncRunning = false;
 
 // Configuration flags for background jobs
 // AI Quality jobs (Transcription + Analysis) are ENABLED by default for lead QA
 const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION_JOB !== 'false';
 const ENABLE_AI_ANALYSIS = process.env.ENABLE_AI_ANALYSIS_JOB !== 'false';
 const ENABLE_LOCK_SWEEPER = process.env.ENABLE_LOCK_SWEEPER !== 'false';
+const ENABLE_TELNYX_RECORDING_SYNC = process.env.ENABLE_TELNYX_RECORDING_SYNC !== 'false'; // ENABLED by default
 
 /**
  * Lock Sweeper - Release expired locks and stuck queue entries
@@ -101,8 +107,9 @@ export function startBackgroundJobs() {
   console.log('[Background Jobs] Starting background job system...');
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] AI QUALITY JOBS (Always On):');
-  console.log(`[Background Jobs]   ✓ Transcription: ${ENABLE_TRANSCRIPTION ? 'ENABLED (every 60s)' : 'DISABLED'}`);
-  console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 90s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ Transcription: ${ENABLE_TRANSCRIPTION ? 'ENABLED (every 120s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ AI Analysis: ${ENABLE_AI_ANALYSIS ? 'ENABLED (every 120s)' : 'DISABLED'}`);
+  console.log(`[Background Jobs]   ✓ Telnyx Recording Sync: ${ENABLE_TELNYX_RECORDING_SYNC ? 'ENABLED (every 5min, last 10min window)' : 'DISABLED'}`);
   console.log('[Background Jobs] ========================================');
   console.log('[Background Jobs] SYSTEM MAINTENANCE:');
   console.log(`[Background Jobs]   • Lock Sweeper: ${ENABLE_LOCK_SWEEPER ? 'ENABLED (every 10min)' : 'DISABLED'}`);
@@ -122,7 +129,12 @@ export function startBackgroundJobs() {
 
       isTranscriptionRunning = true;
       try {
+        // Process legacy leads transcriptions (Google STT)
         await processPendingTranscriptions();
+
+        // Process AI call transcripts that may be missing (fallback for Gemini Live)
+        // This catches any calls where real-time transcription failed
+        await processMissingTranscripts();
       } catch (error) {
         console.error('[Background Jobs] Transcription job error:', error);
       } finally {
@@ -170,6 +182,52 @@ export function startBackgroundJobs() {
         isLockSweeperRunning = false;
       }
     }, LOCK_SWEEPER_INTERVAL);
+  }
+
+  // Telnyx Recording Sync job - Auto-fetch recent recordings every 5 minutes
+  // NOTE: Telnyx presigned URLs expire after 10 minutes, so we only sync recent recordings
+  // to ensure URLs are still valid when we try to download/transcribe them
+  if (ENABLE_TELNYX_RECORDING_SYNC) {
+    // Run immediately on startup to sync recent recordings (last 1 hour for startup)
+    setTimeout(async () => {
+      if (isTelnyxSyncRunning) return;
+      isTelnyxSyncRunning = true;
+      try {
+        console.log('[Background Jobs] Running initial Telnyx recording sync (last 1 hour)...');
+        const result = await syncTelnyxRecordingsToDatabase({
+          startDate: new Date(Date.now() - 60 * 60 * 1000), // Last 1 hour on startup
+          endDate: new Date(),
+        });
+        console.log(`[Background Jobs] Initial Telnyx sync complete: ${result.newRecordings} new, ${result.updatedRecordings} updated`);
+      } catch (error) {
+        console.error('[Background Jobs] Initial Telnyx sync error:', error);
+      } finally {
+        isTelnyxSyncRunning = false;
+      }
+    }, 10000); // Run 10 seconds after startup
+
+    telnyxSyncInterval = setInterval(async () => {
+      if (isTelnyxSyncRunning) {
+        return; // Skip if still running
+      }
+
+      isTelnyxSyncRunning = true;
+      try {
+        // Only sync last 10 minutes to catch fresh recordings with valid URLs
+        // Telnyx presigned URLs expire after 10 minutes
+        const result = await syncTelnyxRecordingsToDatabase({
+          startDate: new Date(Date.now() - 10 * 60 * 1000), // Last 10 minutes
+          endDate: new Date(),
+        });
+        if (result.newRecordings > 0 || result.updatedRecordings > 0) {
+          console.log(`[Background Jobs] Telnyx sync: ${result.newRecordings} new, ${result.updatedRecordings} updated recordings`);
+        }
+      } catch (error) {
+        console.error('[Background Jobs] Telnyx recording sync error:', error);
+      } finally {
+        isTelnyxSyncRunning = false;
+      }
+    }, TELNYX_RECORDING_SYNC_INTERVAL);
   }
 
   // Email validation job (cron-based) - Only start if enabled
@@ -222,6 +280,11 @@ export function stopBackgroundJobs() {
   if (lockSweeperInterval) {
     clearInterval(lockSweeperInterval);
     lockSweeperInterval = null;
+  }
+
+  if (telnyxSyncInterval) {
+    clearInterval(telnyxSyncInterval);
+    telnyxSyncInterval = null;
   }
 
   console.log('[Background Jobs] All jobs stopped');

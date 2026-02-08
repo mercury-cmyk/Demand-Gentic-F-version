@@ -36,6 +36,7 @@ import linkedinVerificationRouter from './routes/linkedin-verification';
 import agentReportsRouter from './routes/agent-reports';
 import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
+import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
@@ -57,6 +58,7 @@ import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
 import virtualAgentsRouter from './routes/virtual-agents';
+import cloudLogsRouter from './routes/cloud-logs-routes';
 import numberPoolRouter from './routes/number-pool';
 import hybridCampaignAgentsRouter from './routes/hybrid-campaign-agents';
 import unifiedAgentConsoleRouter from './routes/unified-agent-console';
@@ -83,7 +85,12 @@ import researchAnalysisRouter from './routes/research-analysis-routes';
 import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
+import telephonyProvidersRouter from './routes/telephony-providers';
+import telnyxWebhookRouter from './routes/telnyx-webhook-management';
+import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
+import documentExtractRouter from './routes/document-extract';
+import bookingRouter from './routes/booking-routes';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -106,7 +113,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, campaignOrganizations, callQualityRecords, type InsertMailboxAccount, type Account } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -299,7 +306,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? process.env.GMAIL_CLIEN
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? process.env.GMAIL_CLIENT_SECRET ?? "";
 const GOOGLE_SCOPES =
   process.env.GOOGLE_OAUTH_SCOPES ??
-  "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+  "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events";
 const GOOGLE_REDIRECT_URI =
   process.env.GOOGLE_OAUTH_REDIRECT_URI ?? `${APP_BASE_URL.replace(/\/$/, "")}/api/oauth/google/callback`;
 
@@ -647,6 +654,9 @@ export function registerRoutes(app: Express) {
 
   // Health Check Endpoint
   app.use('/api', healthRouter);
+  
+  // Public Booking Routes
+  app.use('/api/bookings', bookingRouter);
 
   // ==================== PUBLIC ENDPOINTS (No Auth Required) ====================
   // These must come BEFORE any wildcard/catch-all routes
@@ -4616,10 +4626,13 @@ export function registerRoutes(app: Express) {
   });
 
   // Get call campaign snapshot stats
+  // Combines stats from both human agent calls (callAttempts) and AI calls (callSessions)
   app.get("/api/campaigns/:id/call-stats", requireAuth, async (req, res) => {
     try {
       const campaignId = req.params.id;
       const queueStats = await storage.getCampaignQueueStats(campaignId);
+
+      // Connected dispositions for human calls
       const connectedDispositions = [
         'connected',
         'qualified',
@@ -4627,7 +4640,9 @@ export function registerRoutes(app: Express) {
         'not_interested',
         'dnc-request',
       ];
-      const [callStats] = await db
+
+      // Query human agent calls from callAttempts
+      const [humanCallStats] = await db
         .select({
           callsMade: sql<number>`COUNT(*)::int`,
           callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IN (${sql.join(
@@ -4637,18 +4652,70 @@ export function registerRoutes(app: Express) {
           leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'qualified' THEN 1 END)::int`,
           dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'dnc-request' THEN 1 END)::int`,
           notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
+          noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'no-answer' THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'voicemail' THEN 1 END)::int`,
         })
         .from(callAttempts)
         .where(eq(callAttempts.campaignId, campaignId));
 
+      // Query AI agent calls from callSessions
+      // CRITICAL: "Calls Connected" means RIGHT PARTY connects (identity confirmed)
+      // Join with callQualityRecords to get identityConfirmed status
+      const aiQualifiedDispositions = ['qualified', 'meeting_booked', 'interested'];
+      const aiDncDispositions = ['dnc_request', 'dnc-request', 'do_not_call'];
+      const aiNotInterestedDispositions = ['not_interested', 'not-interested', 'rejected'];
+      const aiNoAnswerDispositions = ['no_answer', 'no-answer', 'unanswered', 'busy', 'failed'];
+      const aiVoicemailDispositions = ['voicemail', 'left_voicemail', 'machine'];
+
+      const [aiCallStats] = await db
+        .select({
+          callsMade: sql<number>`COUNT(DISTINCT ${callSessions.id})::int`,
+          // RIGHT PARTY CONNECTS: Count calls where identity was confirmed
+          callsConnected: sql<number>`COUNT(DISTINCT CASE WHEN ${callQualityRecords.identityConfirmed} = true THEN ${callSessions.id} END)::int`,
+          leadsQualified: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+            aiQualifiedDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN ${callSessions.id} END)::int`,
+          dncRequests: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+            aiDncDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN ${callSessions.id} END)::int`,
+          notInterested: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+            aiNotInterestedDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN ${callSessions.id} END)::int`,
+          noAnswer: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+            aiNoAnswerDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) OR ${callSessions.status} IN ('no_answer', 'failed', 'busy') THEN ${callSessions.id} END)::int`,
+          voicemail: sql<number>`COUNT(DISTINCT CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
+            aiVoicemailDispositions.map((value) => sql`${value}`),
+            sql`, `
+          )}) THEN ${callSessions.id} END)::int`,
+        })
+        .from(callSessions)
+        .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
+        .where(eq(callSessions.campaignId, campaignId));
+
+      // Combine human + AI stats
+      const callsMade = (humanCallStats?.callsMade || 0) + (aiCallStats?.callsMade || 0);
+      const callsConnected = (humanCallStats?.callsConnected || 0) + (aiCallStats?.callsConnected || 0);
+      const leadsQualified = (humanCallStats?.leadsQualified || 0) + (aiCallStats?.leadsQualified || 0);
+      const dncRequests = (humanCallStats?.dncRequests || 0) + (aiCallStats?.dncRequests || 0);
+      const notInterested = (humanCallStats?.notInterested || 0) + (aiCallStats?.notInterested || 0);
+      const noAnswer = (humanCallStats?.noAnswer || 0) + (aiCallStats?.noAnswer || 0);
+      const voicemail = (humanCallStats?.voicemail || 0) + (aiCallStats?.voicemail || 0);
+
       res.json({
         campaignId,
         contactsInQueue: queueStats.queued,
-        callsMade: callStats?.callsMade || 0,
-        callsConnected: callStats?.callsConnected || 0,
-        leadsQualified: callStats?.leadsQualified || 0,
-        dncRequests: callStats?.dncRequests || 0,
-        notInterested: callStats?.notInterested || 0,
+        callsMade,
+        callsConnected,
+        leadsQualified,
+        dncRequests,
+        notInterested,
+        noAnswer,
+        voicemail,
       });
     } catch (error) {
       console.error('[CALL STATS] Error:', error);
@@ -4873,6 +4940,33 @@ export function registerRoutes(app: Express) {
 
       const campaign = await storage.createCampaign(campaignData);
 
+      // === AUTO-ASSIGN PHONE NUMBERS FROM POOL ===
+      // When number pool rotation is enabled (default), ensure campaign has access to pool numbers
+      const poolConfig = campaignData.numberPoolConfig as { enabled?: boolean } | null;
+      const isPoolEnabled = !poolConfig || poolConfig.enabled !== false;
+
+      if (isPoolEnabled && campaign.type === 'call' && !campaign.callerPhoneNumberId) {
+        try {
+          // Import number pool functions
+          const { telnyxNumbers } = await import('@shared/number-pool-schema');
+
+          // Check if we have active numbers in the pool
+          const activeNumbers = await db
+            .select({ id: telnyxNumbers.id, phoneNumberE164: telnyxNumbers.phoneNumberE164 })
+            .from(telnyxNumbers)
+            .where(eq(telnyxNumbers.status, 'active'))
+            .limit(5);
+
+          if (activeNumbers.length > 0) {
+            console.log(`[Campaign Create] Number pool enabled with ${activeNumbers.length}+ active numbers available for rotation`);
+          } else {
+            console.log(`[Campaign Create] Number pool enabled but no active numbers in pool - using legacy TELNYX_FROM_NUMBER`);
+          }
+        } catch (poolErr) {
+          console.warn('[Campaign Create] Could not check number pool:', poolErr);
+        }
+      }
+
       // Auto-populate queue from audience if defined
       if (campaign.audienceRefs && campaign.type === 'call') {
         const audienceRefs = campaign.audienceRefs as any;
@@ -5068,6 +5162,128 @@ export function registerRoutes(app: Express) {
       }
       
       const campaign = await storage.updateCampaign(req.params.id, updateData);
+      if (!campaign) {
+        return res.status(404).json({ message: 'Campaign not found' });
+      }
+
+      // === AUTO-POPULATE QUEUE WHEN AUDIENCE/STATUS CHANGES ON AI AGENT CAMPAIGNS ===
+      const isAiAgentCampaign = campaign.dialMode === 'ai_agent';
+      const audienceChanged = 'audienceRefs' in updateData;
+      const statusChangedToActive = updateData.status === 'active';
+
+      if (isAiAgentCampaign && campaign.audienceRefs && (audienceChanged || statusChangedToActive)) {
+        try {
+          // Check if queue already has items (avoid re-populating on status toggle)
+          const existingQueueCount = await db.select({ count: sql<number>`count(*)::int` })
+            .from(campaignQueue)
+            .where(and(
+              eq(campaignQueue.campaignId, req.params.id),
+              eq(campaignQueue.status, 'queued')
+            ));
+          const queuedCount = existingQueueCount[0]?.count || 0;
+
+          // Auto-populate if: audience changed (always repopulate), or status->active with empty queue
+          if (audienceChanged || (statusChangedToActive && queuedCount === 0)) {
+            console.log(`[Campaign Update] AI agent campaign — auto-populating queue (audienceChanged=${audienceChanged}, statusActive=${statusChangedToActive}, currentQueued=${queuedCount})`);
+            const audienceRefs = campaign.audienceRefs as any;
+            let audienceContacts: any[] = [];
+
+            // Resolve contacts from filterGroup
+            if (audienceRefs.filterGroup) {
+              const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
+              if (filterSQL) {
+                const filterContacts = await db.select().from(contactsTable).where(filterSQL);
+                audienceContacts.push(...filterContacts);
+              }
+            }
+
+            // Resolve contacts from lists
+            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+            if (Array.isArray(listIds) && listIds.length > 0) {
+              for (const listId of listIds) {
+                const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+                if (list && list.recordIds && list.recordIds.length > 0) {
+                  const batchSize = 1000;
+                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
+                    const batch = list.recordIds.slice(i, i + batchSize);
+                    const listContacts = await storage.getContactsByIds(batch);
+                    audienceContacts.push(...listContacts);
+                  }
+                }
+              }
+            }
+
+            // Resolve from segments
+            if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
+              for (const segmentId of audienceRefs.segments) {
+                const segment = await storage.getSegment(segmentId);
+                if (segment && segment.definitionJson) {
+                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+                  audienceContacts.push(...segmentContacts);
+                }
+              }
+            }
+
+            // Resolve from selectedSegments
+            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
+              for (const segmentId of audienceRefs.selectedSegments) {
+                const segment = await storage.getSegment(segmentId);
+                if (segment && segment.definitionJson) {
+                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+                  audienceContacts.push(...segmentContacts);
+                }
+              }
+            }
+
+            // Deduplicate + filter contacts with accountId
+            const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
+            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+
+            if (contactsWithAccount.length > 0) {
+              // Phone validation: batch-fetch with account data
+              const contactIds = contactsWithAccount.map(c => c.id);
+              const fullContacts: any[] = [];
+              const batchSize = 500;
+              for (let i = 0; i < contactIds.length; i += batchSize) {
+                const batch = contactIds.slice(i, i + batchSize);
+                const batchResults = await db.select()
+                  .from(contactsTable)
+                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                  .where(inArray(contactsTable.id, batch));
+                fullContacts.push(...batchResults);
+              }
+
+              const contactsWithCallablePhones = fullContacts.filter(row => {
+                const contact = row.contacts;
+                const account = row.accounts;
+                return getBestPhoneForContact({
+                  directPhone: contact.directPhone,
+                  directPhoneE164: contact.directPhoneE164,
+                  mobilePhone: contact.mobilePhone,
+                  mobilePhoneE164: contact.mobilePhoneE164,
+                  country: contact.country,
+                  hqPhone: account?.mainPhone,
+                  hqPhoneE164: account?.mainPhoneE164,
+                }).phone !== null;
+              });
+
+              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
+                contactId: row.contacts.id,
+                accountId: row.contacts.accountId!,
+                priority: 0
+              }));
+
+              const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+              console.log(`[Campaign Update] Auto-populated ${enqueued} contacts to queue (${contactsWithCallablePhones.length} with phones)`);
+            }
+          } else {
+            console.log(`[Campaign Update] Queue already has ${queuedCount} items — skipping auto-populate`);
+          }
+        } catch (queueErr) {
+          console.error(`[Campaign Update] Queue auto-populate error (non-fatal):`, queueErr);
+        }
+      }
+
       invalidateDashboardCache();
       res.json(campaign);
     } catch (error) {
@@ -5246,6 +5462,126 @@ export function registerRoutes(app: Express) {
       }
 
       console.log(`[LAUNCH CAMPAIGN] Successfully launched campaign ${req.params.id}`);
+
+      // === AUTO-POPULATE QUEUE FOR AI AGENT CAMPAIGNS ===
+      // When launching an AI agent campaign with audience, auto-populate campaign_queue
+      // so the orchestrator can start calling immediately — no agent assignment needed
+      const dialMode = updated.dialMode || 'manual';
+      if (dialMode === 'ai_agent' && updated.audienceRefs) {
+        try {
+          // Check if queue already has items (avoid re-populating)
+          const existingQueueCount = await db.select({ count: sql<number>`count(*)::int` })
+            .from(campaignQueue)
+            .where(and(
+              eq(campaignQueue.campaignId, req.params.id),
+              eq(campaignQueue.status, 'queued')
+            ));
+          const queuedCount = existingQueueCount[0]?.count || 0;
+
+          if (queuedCount === 0) {
+            console.log(`[LAUNCH CAMPAIGN] AI agent campaign with empty queue — auto-populating from audience...`);
+            const audienceRefs = updated.audienceRefs as any;
+            let audienceContacts: any[] = [];
+
+            // Resolve contacts from filterGroup
+            if (audienceRefs.filterGroup) {
+              const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
+              if (filterSQL) {
+                const filterContacts = await db.select().from(contactsTable).where(filterSQL);
+                audienceContacts.push(...filterContacts);
+              }
+            }
+
+            // Resolve contacts from lists
+            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+            if (Array.isArray(listIds) && listIds.length > 0) {
+              for (const listId of listIds) {
+                const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+                if (list && list.recordIds && list.recordIds.length > 0) {
+                  const batchSize = 1000;
+                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
+                    const batch = list.recordIds.slice(i, i + batchSize);
+                    const listContacts = await storage.getContactsByIds(batch);
+                    audienceContacts.push(...listContacts);
+                  }
+                }
+              }
+            }
+
+            // Resolve from segments
+            if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
+              for (const segmentId of audienceRefs.segments) {
+                const segment = await storage.getSegment(segmentId);
+                if (segment && segment.definitionJson) {
+                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+                  audienceContacts.push(...segmentContacts);
+                }
+              }
+            }
+
+            // Resolve from selectedSegments
+            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
+              for (const segmentId of audienceRefs.selectedSegments) {
+                const segment = await storage.getSegment(segmentId);
+                if (segment && segment.definitionJson) {
+                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+                  audienceContacts.push(...segmentContacts);
+                }
+              }
+            }
+
+            // Deduplicate + filter contacts with accountId
+            const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
+            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+
+            if (contactsWithAccount.length > 0) {
+              // Phone validation: batch-fetch with account data
+              const contactIds = contactsWithAccount.map(c => c.id);
+              const fullContacts: any[] = [];
+              const batchSize = 500;
+              for (let i = 0; i < contactIds.length; i += batchSize) {
+                const batch = contactIds.slice(i, i + batchSize);
+                const batchResults = await db.select()
+                  .from(contactsTable)
+                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+                  .where(inArray(contactsTable.id, batch));
+                fullContacts.push(...batchResults);
+              }
+
+              const contactsWithCallablePhones = fullContacts.filter(row => {
+                const contact = row.contacts;
+                const account = row.accounts;
+                return getBestPhoneForContact({
+                  directPhone: contact.directPhone,
+                  directPhoneE164: contact.directPhoneE164,
+                  mobilePhone: contact.mobilePhone,
+                  mobilePhoneE164: contact.mobilePhoneE164,
+                  country: contact.country,
+                  hqPhone: account?.mainPhone,
+                  hqPhoneE164: account?.mainPhoneE164,
+                }).phone !== null;
+              });
+
+              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
+                contactId: row.contacts.id,
+                accountId: row.contacts.accountId!,
+                priority: 0
+              }));
+
+              const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+              console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue (${contactsWithCallablePhones.length} with phones, ${contactsWithAccount.length} total)`);
+            } else {
+              console.log(`[LAUNCH CAMPAIGN] No contacts with accounts found in audience`);
+            }
+          } else {
+            console.log(`[LAUNCH CAMPAIGN] Queue already has ${queuedCount} items — skipping auto-populate`);
+          }
+        } catch (queueErr) {
+          // Non-fatal: campaign is launched, queue population is best-effort
+          console.error(`[LAUNCH CAMPAIGN] Queue auto-populate error (non-fatal):`, queueErr);
+        }
+      }
+
       invalidateDashboardCache();
       res.json(updated);
     } catch (error) {
@@ -11800,6 +12136,20 @@ export function registerRoutes(app: Express) {
           // Find call records by Telnyx call ID and update with recording URL
           if (callControlId) {
             try {
+              // DE-DUPLICATION: Check if recording already exists for this call
+              // This prevents duplicate recordings when both recording.completed and call.recording.saved fire
+              const existingSession = await db
+                .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+                .from(callSessions)
+                .where(eq(callSessions.telnyxCallId, callControlId))
+                .limit(1);
+
+              if (existingSession.length > 0 && existingSession[0].recordingUrl) {
+                console.log(`[Telnyx Webhook] ⏭️ Recording already exists for call ${callControlId}, skipping duplicate`);
+                res.json({ status: "ok", message: "Recording already exists", skipped: true });
+                break;
+              }
+
               const { fetchTelnyxRecording } = await import("./services/telnyx-recordings");
 
               // Get the recording URL from Telnyx
@@ -13361,6 +13711,41 @@ Provide JSON response with:
   // ==================== ADMIN PROJECT REQUESTS ====================
   app.use('/api/admin/project-requests', requireAuth, adminProjectRequestsRouter);
 
+  // ==================== CLOUD LOGGING ====================
+  app.use('/api/cloud-logs', cloudLogsRouter);
+
+  // ==================== TELEPHONY PROVIDERS (Super Admin) ====================
+  app.use('/api/admin/telephony-providers', requireAuth, telephonyProvidersRouter);
+
+  // ==================== TELNYX WEBHOOK MANAGEMENT (Admin) ====================
+  app.use('/api/telnyx', telnyxWebhookRouter);
+
+  // ==================== TRANSCRIPTION MANAGEMENT (Admin) ====================
+  app.use('/api/transcription', transcriptionManagementRouter);
+
+  // ==================== DOCUMENT EXTRACTION (AI) ====================
+  app.use('/api/documents', documentExtractRouter);
+
+  // ==================== CAMPAIGN ORGANIZATIONS ====================
+  // Returns the list of Problem Intelligence organizations for campaign context
+  app.get('/api/campaign-organizations', requireAuth, async (req, res) => {
+    try {
+      const orgs = await db.select({
+        id: campaignOrganizations.id,
+        name: campaignOrganizations.name,
+        industry: campaignOrganizations.industry,
+      })
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.isActive, true))
+      .orderBy(campaignOrganizations.name);
+
+      res.json({ organizations: orgs });
+    } catch (error) {
+      console.error('[Campaign Organizations] Error:', error);
+      res.status(500).json({ message: 'Failed to fetch organizations' });
+    }
+  });
+
   // ==================== CLIENT HIERARCHY / ASSIGNMENT ====================
   app.use('/api/admin', requireAuth, clientAssignmentRouter);
 
@@ -13420,6 +13805,7 @@ Provide JSON response with:
   // Lead Forms & Pipeline Management
   app.use(leadFormsRouter);
   app.use(pipelineRouter);
+  app.use(pipelineAccountsRouter);
   app.use(pipelineIntelligenceRouter);
 
   // AI Project Creation
@@ -14123,6 +14509,7 @@ Provide JSON response with:
             recordingUrl: callSessions.recordingUrl,
             recordingS3Key: callSessions.recordingS3Key,
             recordingStatus: callSessions.recordingStatus,
+            toNumberE164: callSessions.toNumberE164,
             createdAt: callSessions.startedAt,
           })
           .from(callSessions)
@@ -14133,18 +14520,17 @@ Provide JSON response with:
           .orderBy(desc(callSessions.startedAt))
           .limit(limitNum);
 
-        // Transform call sessions to conversation format
-        for (const session of sessions) {
+        // ===== HELPER: Transform a single session row into conversation format =====
+        const transformSession = (session: (typeof sessions)[number]) => {
           const normalized = normalizeTranscript(session.transcript);
 
           // Extract issues from analysis if available
           // HANDLE BOTH FORMATS: Old (nested under conversationQuality) and new (flat)
           const analysisObj = session.analysis as any;
-          const qualityData = analysisObj?.conversationQuality || analysisObj; // Try nested first, fallback to flat
+          const qualityData = analysisObj?.conversationQuality || analysisObj;
           const detectedIssues = qualityData?.detectedIssues || qualityData?.issues || analysisObj?.issues || [];
           const callSummary = qualityData?.summary || analysisObj?.summary || undefined;
-          
-          // Normalize analysis to consistent flat structure for frontend
+
           const normalizedAnalysis = analysisObj ? {
             overallScore: qualityData?.overallScore ?? analysisObj?.overallScore,
             summary: callSummary,
@@ -14160,7 +14546,6 @@ Provide JSON response with:
             nextBestActions: qualityData?.nextBestActions || analysisObj?.nextBestActions,
             promptUpdates: qualityData?.promptUpdates || analysisObj?.promptUpdates,
             metadata: qualityData?.metadata || analysisObj?.metadata,
-            // Also preserve original outcome/keyTopics for backwards compat
             outcome: analysisObj?.outcome,
             keyTopics: analysisObj?.keyTopics,
             nextSteps: analysisObj?.nextSteps,
@@ -14168,19 +14553,20 @@ Provide JSON response with:
             conversationState: analysisObj?.conversationState,
           } : undefined;
 
-          // Determine recording availability - prefer S3 key, fallback to legacy URL
           const hasRecording = !!(session.recordingS3Key || session.recordingUrl);
           const recordingAvailable = session.recordingStatus === 'stored' || !!session.recordingUrl;
+          const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
 
-          conversations.push({
+          return {
             id: session.id,
             type: 'call' as const,
             source: 'call_session' as const,
             campaignId: session.campaignId || '',
             campaignName: session.campaignName || 'Unknown Campaign',
             contactId: session.contactId || undefined,
-            contactName: [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact',
+            contactName,
             contactEmail: session.contactEmail || undefined,
+            contactPhone: session.toNumberE164 || undefined,
             companyName: session.companyName || 'Unknown Company',
             status: session.status || 'unknown',
             disposition: session.disposition || undefined,
@@ -14198,7 +14584,59 @@ Provide JSON response with:
             recordingAvailable,
             createdAt: session.createdAt?.toISOString() || new Date().toISOString(),
             isTestCall: false,
-          });
+          };
+        };
+
+        // ===== CONSOLIDATE: Deduplicate by contact — one entry per contact (latest call) =====
+        // Group sessions by contactId (or by id if no contactId, to avoid merging unrelated unknowns)
+        const contactGroups = new Map<string, typeof sessions>();
+        for (const session of sessions) {
+          // Group by contactId when available; otherwise each session stays separate
+          const groupKey = session.contactId || `__solo__${session.id}`;
+          const existing = contactGroups.get(groupKey);
+          if (!existing) {
+            contactGroups.set(groupKey, [session]);
+          } else {
+            existing.push(session);
+          }
+        }
+
+        // For each contact group, use the most recent session as primary,
+        // attach call history (all session IDs + summaries)
+        for (const [, group] of contactGroups) {
+          // Already sorted by startedAt DESC from the query, so first is latest
+          const primary = group[0];
+          const conv = transformSession(primary);
+
+          // Attach call history for contacts with multiple calls
+          if (group.length > 1) {
+            (conv as any).callCount = group.length;
+            (conv as any).callHistory = group.map(s => ({
+              id: s.id,
+              status: s.status,
+              disposition: s.disposition || undefined,
+              duration: s.duration || undefined,
+              hasTranscript: !!(s.transcript),
+              hasRecording: !!(s.recordingS3Key || s.recordingUrl),
+              hasAnalysis: !!(s.analysis),
+              createdAt: s.createdAt?.toISOString() || new Date().toISOString(),
+            }));
+            // Aggregate issues from ALL calls for this contact
+            const allIssues: any[] = [];
+            for (const s of group) {
+              const aObj = s.analysis as any;
+              const qd = aObj?.conversationQuality || aObj;
+              const issues = qd?.detectedIssues || qd?.issues || aObj?.issues || [];
+              allIssues.push(...issues);
+            }
+            if (allIssues.length > 0) {
+              (conv as any).allDetectedIssues = allIssues;
+            }
+          } else {
+            (conv as any).callCount = 1;
+          }
+
+          conversations.push(conv);
         }
       }
 
@@ -14315,6 +14753,42 @@ Provide JSON response with:
       // Apply limit after combining
       const limitedConversations = conversations.slice(0, limitNum);
 
+      // Aggregate top challenges across all conversations for the challenges summary
+      const allIssuesAcrossConversations: any[] = [];
+      for (const c of limitedConversations) {
+        const issues = c.allDetectedIssues || c.detectedIssues || c.analysis?.issues || [];
+        allIssuesAcrossConversations.push(...issues);
+      }
+      // Count issues by type and sort by frequency
+      const issueTypeCount = new Map<string, { count: number; severity: string; description: string; suggestions: string[] }>();
+      for (const issue of allIssuesAcrossConversations) {
+        const key = issue.type || issue.code || 'unknown';
+        const existing = issueTypeCount.get(key);
+        if (existing) {
+          existing.count++;
+          if (issue.severity === 'high') existing.severity = 'high';
+          if (issue.suggestion || issue.recommendation) {
+            existing.suggestions.push(issue.suggestion || issue.recommendation);
+          }
+        } else {
+          issueTypeCount.set(key, {
+            count: 1,
+            severity: issue.severity || 'medium',
+            description: issue.description || key,
+            suggestions: (issue.suggestion || issue.recommendation) ? [issue.suggestion || issue.recommendation] : [],
+          });
+        }
+      }
+      const topChallenges = Array.from(issueTypeCount.entries())
+        .map(([type, data]) => ({ type, ...data }))
+        .sort((a, b) => {
+          // Sort by severity first (high > medium > low), then by count
+          const severityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+          const sDiff = (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0);
+          return sDiff !== 0 ? sDiff : b.count - a.count;
+        })
+        .slice(0, 10);
+
       res.json({
         conversations: limitedConversations,
         total: limitedConversations.length,
@@ -14322,7 +14796,11 @@ Provide JSON response with:
           callSessions: conversations.filter(c => c.source === 'call_session').length,
           testCalls: conversations.filter(c => c.source === 'test_call').length,
           withTranscripts: conversations.filter(c => c.transcript || (c.transcriptTurns && c.transcriptTurns.length > 0)).length,
+          withRecordings: conversations.filter(c => c.hasRecording).length,
+          withAnalysis: conversations.filter(c => c.analysis).length,
+          totalIssues: allIssuesAcrossConversations.length,
         },
+        topChallenges,
       });
     } catch (error: any) {
       console.error('Error fetching QA conversations:', error);

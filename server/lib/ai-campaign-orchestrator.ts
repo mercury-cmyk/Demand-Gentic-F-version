@@ -27,6 +27,19 @@ import {
 } from '../utils/business-hours';
 import { getOrganizationById } from '../services/problem-intelligence/organization-service';
 import { normalizeToE164, isValidE164 } from '../lib/phone-utils';
+import {
+  getCallerIdForCall,
+  handleCallCompleted,
+  releaseNumberWithoutOutcome,
+  sleep as numberPoolSleep,
+  type CallerIdResult
+} from '../services/number-pool-integration';
+import {
+  acquireProspectLock,
+  releaseProspectLock,
+  isProspectBusy,
+  cleanupStaleLocks,
+} from '../services/active-call-tracker';
 
 const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
 const DEFAULT_MAX_CONCURRENT_CALLS = 25; // Max 25 concurrent calls per campaign unless overridden
@@ -734,9 +747,10 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     }
   }
 
-  const fromNumber = process.env.TELNYX_FROM_NUMBER;
-  if (!fromNumber) {
-    console.log(`[AI Orchestrator] No TELNYX_FROM_NUMBER configured`);
+  // Legacy fallback check - but we now use number pool rotation
+  const legacyFromNumber = process.env.TELNYX_FROM_NUMBER;
+  if (!legacyFromNumber && !process.env.TELNYX_NUMBER_POOL_ENABLED) {
+    console.log(`[AI Orchestrator] No TELNYX_FROM_NUMBER configured and number pool not enabled`);
     return { initiated: 0, skipped: 0 };
   }
 
@@ -1071,10 +1085,16 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const batch = eligibleItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
     
     const batchPromises = batch.map(async (item) => {
+      // Declare variables used in both try and catch blocks at function scope
+      // (let inside try {} is block-scoped and invisible to catch {})
+      let prospectLockAcquired = false;
+      let callInitiated = false;
+      let callerIdResult: CallerIdResult | null = null;
+      let phoneNumber = '';
       try {
         // Use resolved phone from compliance check
         const rawPhoneNumber = item._resolvedPhone || item.dialedNumber || item.phone || item.phoneNumber || "";
-        let phoneNumber = rawPhoneNumber ? normalizeToE164(rawPhoneNumber) : "";
+        phoneNumber = rawPhoneNumber ? normalizeToE164(rawPhoneNumber) : "";
         if (!phoneNumber || !isValidE164(phoneNumber)) {
           console.warn(`[AI Orchestrator] Invalid phone number for queue item ${item.id}: raw="${rawPhoneNumber}" normalized="${phoneNumber}"`);
           try {
@@ -1124,7 +1144,8 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         // Contact data comes from the SQL query (snake_case)
         // Use virtual agent name if available, fall back to aiSettings persona
         // NOTE: Default must be a real name, not "your representative" which is in PLACEHOLDER_VALUES blocklist
-        const agentName = virtualAgent?.name || aiSettings.persona?.name || "Alex";
+        // Check both agentName and name since wizard stores in agentName field
+        const agentName = virtualAgent?.name || (aiSettings.persona as any)?.agentName || aiSettings.persona?.name || "Alex";
         const agentFirstName = agentName.split(' ')[0]; // Extract first name
         
         // Create call attempt record for proper tracking
@@ -1198,6 +1219,103 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         `);
         console.log(`[AI Orchestrator] PRE-LOCK: Queue item ${item.id} updated successfully`);
 
+        // === NUMBER POOL ROTATION ===
+        // Select caller ID from number pool for spam prevention
+        // Use campaign-level number pool config if available
+        const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
+        // callerIdResult already declared at outer scope for catch-block visibility
+        try {
+          callerIdResult = await getCallerIdForCall({
+            campaignId,
+            virtualAgentId: virtualAgent?.id,
+            prospectNumber: phoneNumber,
+            prospectRegion: item._country || undefined,
+            prospectTimezone: item._timezone || undefined,
+            callType: 'ai_campaign_orchestrator',
+            numberPoolConfig: numberPoolConfig ? {
+              enabled: numberPoolConfig.enabled ?? true,
+              maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
+              rotationStrategy: numberPoolConfig.rotationStrategy as 'round_robin' | 'reputation_based' | 'region_match' | undefined,
+              cooldownHours: numberPoolConfig.cooldownHours,
+            } : undefined,
+          });
+          console.log(`[AI Orchestrator] Number pool selected: ${callerIdResult.callerId} (${callerIdResult.selectionReason})`);
+
+          // Apply jitter delay to prevent burst calling from same number
+          if (callerIdResult.jitterDelayMs > 0) {
+            console.log(`[AI Orchestrator] Applying jitter delay: ${Math.round(callerIdResult.jitterDelayMs / 1000)}s`);
+            await numberPoolSleep(callerIdResult.jitterDelayMs);
+          }
+        } catch (err: any) {
+          // CRITICAL: Check if all numbers hit hourly limit - pause calling
+          if (err?.name === 'AllNumbersAtHourlyLimitError') {
+            console.warn(`[AI Orchestrator] 🚫 ALL NUMBERS AT HOURLY LIMIT - Pausing call initiation`);
+            console.warn(`[AI Orchestrator] 📊 ${err.numbersAtHourlyCap} numbers at cap. Will resume next hour.`);
+            // Reset queue item back to queued for retry later
+            await db.execute(sql`
+              UPDATE campaign_queue
+              SET status = 'queued',
+                  updated_at = NOW(),
+                  next_attempt_at = DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour',
+                  enqueued_reason = COALESCE(enqueued_reason, '') || '|hourly_limit_pause:' || to_char(NOW(), 'HH24:MI:SS')
+              WHERE id = ${item.id}
+            `);
+            // Return a special marker to indicate the entire batch should pause
+            throw new Error('HOURLY_LIMIT_REACHED');
+          }
+
+          console.error(`[AI Orchestrator] Number pool selection failed, using legacy:`, err);
+          callerIdResult = {
+            callerId: legacyFromNumber || '',
+            numberId: null,
+            decisionId: null,
+            jitterDelayMs: 0,
+            selectionReason: 'pool_error_fallback',
+            isPoolNumber: false,
+          };
+        }
+
+        const fromNumber = callerIdResult.callerId;
+        if (!fromNumber) {
+          throw new Error('No caller ID available');
+        }
+
+        // Store numberId in context for metrics tracking after call completion
+        context.callerNumberId = callerIdResult.numberId;
+        context.callerNumberDecisionId = callerIdResult.decisionId;
+
+        // =========================================================================
+        // CENTRALIZED DUPLICATE CALL PREVENTION
+        // =========================================================================
+        // Acquire lock on prospect number BEFORE initiating call.
+        // This prevents duplicate calls to same prospect from any path (SIP or Telnyx).
+        const prospectLock = acquireProspectLock({
+          prospectNumber: phoneNumber,
+          callerNumber: fromNumber,
+          callPath: useSip ? 'sip' : 'telnyx',
+          callId: callAttemptId || undefined,
+          campaignId,
+          queueItemId: item.id,
+        });
+
+        if (!prospectLock.success) {
+          console.log(`[AI Orchestrator] ⏭️ Skipping ${phoneNumber}: ${prospectLock.reason}`);
+          // Release number pool lock since we're not making the call
+          releaseNumberWithoutOutcome(callerIdResult.numberId);
+          // Reset queue item to queued so it can be retried later
+          await db.execute(sql`
+            UPDATE campaign_queue
+            SET status = 'queued',
+                updated_at = NOW(),
+                enqueued_reason = COALESCE(enqueued_reason, '') || '|skipped_duplicate_call:' || to_char(NOW(), 'HH24:MI:SS')
+            WHERE id = ${item.id}
+          `);
+          return null;
+        }
+
+        // Track that we acquired the lock for cleanup on error
+        prospectLockAcquired = true;
+
         // Initiate call via SIP or Telnyx API based on configuration
         let callResult: any;
         let conversationId: string;
@@ -1223,6 +1341,9 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             productServiceInfo: (campaign as any).productServiceInfo || undefined,
             talkingPoints: (campaign as any).talkingPoints || undefined,
             maxCallDurationSeconds: (campaign as any).maxCallDurationSeconds || undefined,
+            // Number pool tracking
+            callerNumberId: callerIdResult.numberId,
+            callerNumberDecisionId: callerIdResult.decisionId,
           });
 
           if (!sipResult.success) {
@@ -1230,10 +1351,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           }
 
           callResult = sipResult;
+          callInitiated = true;
           conversationId = sipResult.callId || '';
         } else {
           // Use Telnyx API-based calling (legacy)
           callResult = await bridge!.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
+          callInitiated = true;
           conversationId = callResult?.callControlId || callResult?.callId || '';
         }
 
@@ -1263,6 +1386,13 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
         return { success: true, itemId: item.id, conversationId };
       } catch (error: any) {
+        // Release prospect lock if we acquired it
+        if (prospectLockAcquired && phoneNumber) {
+          releaseProspectLock(phoneNumber, 'call_initiation_error');
+        }
+        if (!callInitiated) {
+          releaseNumberWithoutOutcome(callerIdResult?.numberId || null);
+        }
         if (isVoiceVariablePreflightError(error)) {
           const missing = error.result.missingKeys.join(",");
           const invalid = error.result.invalidKeys.join(",");
@@ -1338,6 +1468,12 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
           return { success: false, itemId: item.id, error, fatalError: true };
         }
 
+        // HOURLY LIMIT REACHED - Stop processing this batch, calls will resume next hour
+        if (error?.message === 'HOURLY_LIMIT_REACHED') {
+          console.warn(`[AI Orchestrator] 🚫 Hourly limit reached - stopping batch processing for campaign ${campaignId}`);
+          return { success: false, itemId: item.id, error, hourlyLimitReached: true };
+        }
+
         console.error(`[AI Orchestrator] Failed to initiate call for ${item.id}:`, error?.message || error);
 
         // IMMEDIATE ERROR RECOVERY: Reset the queue item for retry
@@ -1361,13 +1497,35 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     });
 
     const results = await Promise.all(batchPromises);
-    const batchSuccess = results.filter(r => r.success).length;
+    const batchSuccess = results.filter(r => r && r.success).length;
     initiated += batchSuccess;
 
     console.log(`[AI Orchestrator] Batch ${Math.floor(i / PARALLEL_CALL_BATCH_SIZE) + 1}: ${batchSuccess}/${batch.length} calls initiated (total: ${initiated}/${eligibleItems.length})`);
 
+    // Check if any result hit hourly limit - stop processing remaining batches
+    const hourlyLimitResult = results.find((r: any) => r && r.hourlyLimitReached);
+    if (hourlyLimitResult) {
+      console.warn(`[AI Orchestrator] 🚫 HOURLY LIMIT: Stopping campaign ${campaignId} - all phone numbers at hourly call limit`);
+      console.warn(`[AI Orchestrator] ⏰ Calls will automatically resume when limits reset (next hour)`);
+      // Reset remaining items in this batch to queued with next_attempt_at = next hour
+      const remainingItems = eligibleItems.slice(i + PARALLEL_CALL_BATCH_SIZE);
+      if (remainingItems.length > 0) {
+        const remainingIds = remainingItems.map(item => item.id);
+        await db.execute(sql`
+          UPDATE campaign_queue
+          SET status = 'queued',
+              next_attempt_at = DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour',
+              updated_at = NOW()
+          WHERE id = ANY(${remainingIds})
+            AND status = 'in_progress'
+        `);
+        console.log(`[AI Orchestrator] Reset ${remainingItems.length} remaining items to retry next hour`);
+      }
+      return { initiated, skipped, hourlyLimitPaused: true };
+    }
+
     // Check if any result has a fatal error - if so, stop processing this campaign
-    const fatalResult = results.find((r: any) => r.fatalError);
+    const fatalResult = results.find((r: any) => r && r.fatalError);
     if (fatalResult) {
       console.log(`[AI Orchestrator] Stopping campaign ${campaignId} processing due to fatal Telnyx error`);
       return { initiated, skipped, fatalError: true };

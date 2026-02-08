@@ -95,6 +95,34 @@ const VOICE_TEMPLATE_TOKEN_ALIASES: Record<string, string> = {
   "called_number": "system.called_number",
 };
 
+// Bracket-style aliases: [Name] → contact.full_name, [Your Name] → agent.name, etc.
+// These map informal bracket tokens commonly used in campaign scripts
+const BRACKET_TOKEN_ALIASES: Record<string, string> = {
+  "name": "contact.full_name",
+  "first name": "contact.first_name",
+  "firstname": "contact.first_name",
+  "last name": "contact.last_name",
+  "lastname": "contact.last_name",
+  "full name": "contact.full_name",
+  "fullname": "contact.full_name",
+  "contact name": "contact.full_name",
+  "prospect name": "contact.full_name",
+  "lead name": "contact.full_name",
+  "your name": "agent.name",
+  "agent name": "agent.name",
+  "rep name": "agent.name",
+  "caller name": "agent.name",
+  "company": "account.name",
+  "company name": "account.name",
+  "companyname": "account.name",
+  "organization": "org.name",
+  "org": "org.name",
+  "title": "contact.job_title",
+  "job title": "contact.job_title",
+  "jobtitle": "contact.job_title",
+  "email": "contact.email",
+};
+
 const PLACEHOLDER_VALUES = new Set([
   "",
   "unknown",
@@ -191,6 +219,35 @@ export function interpolateVoiceTemplate(template: string, values: Record<string
     const value = values[normalized];
     if (!value || !value.trim()) return match;
     return value;
+  });
+}
+
+/**
+ * Interpolate bracket-style tokens: [Name], [Your Name], [Company], etc.
+ * These are common in campaign scripts written by non-technical users.
+ */
+export function interpolateBracketTokens(template: string, values: Record<string, string>): string {
+  if (!template) return template;
+  // Match [Token] style — but NOT [[double brackets]] or [links](url)
+  return template.replace(/(?<!\[)\[([^\[\]]+?)\](?!\()/g, (match, raw) => {
+    const normalized = raw.trim().toLowerCase();
+    const canonical = BRACKET_TOKEN_ALIASES[normalized];
+    if (!canonical) return match; // Not a known token, leave as-is
+    const value = values[canonical];
+    if (!value || !value.trim()) return match; // No value available
+    return value;
+  });
+}
+
+/**
+ * Check if a template contains bracket-style tokens like [Name], [Your Name]
+ */
+export function hasBracketTokens(template: string): boolean {
+  if (!template) return false;
+  const bracketMatches = template.match(/(?<!\[)\[([^\[\]]+?)\](?!\()/g) || [];
+  return bracketMatches.some(m => {
+    const inner = m.slice(1, -1).trim().toLowerCase();
+    return inner in BRACKET_TOKEN_ALIASES;
   });
 }
 

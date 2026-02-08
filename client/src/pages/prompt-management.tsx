@@ -184,7 +184,8 @@ export default function PromptManagementPage() {
     queryKey: ['/api/prompts/categories'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/prompts/categories');
-      return res.json();
+      const data = await res.json();
+      return data.categories || data;
     },
   });
 
@@ -203,7 +204,8 @@ export default function PromptManagementPage() {
       if (selectedCategory) params.set('category', selectedCategory);
       if (searchQuery) params.set('search', searchQuery);
       const res = await apiRequest('GET', `/api/prompts?${params}`);
-      return res.json();
+      const data = await res.json();
+      return data.prompts || data;
     },
   });
 
@@ -211,7 +213,8 @@ export default function PromptManagementPage() {
     queryKey: ['/api/prompts', selectedPromptId],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/prompts/${selectedPromptId}`);
-      return res.json();
+      const data = await res.json();
+      return data.prompt || data;
     },
     enabled: !!selectedPromptId,
   });
@@ -220,7 +223,8 @@ export default function PromptManagementPage() {
     queryKey: ['/api/prompts', selectedPromptId, 'versions'],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/prompts/${selectedPromptId}/versions`);
-      return res.json();
+      const data = await res.json();
+      return data.versions || data;
     },
     enabled: !!selectedPromptId && viewMode === 'history',
   });

@@ -8,12 +8,13 @@ import { validatePreflight, generatePreflightErrorResponse } from "../services/p
 import { z } from "zod";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "../db";
-import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions } from "@shared/schema";
+import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions, callQualityRecords } from "@shared/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 // Gemini is used for script generation; OpenAI runtime is disabled
-import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025 } from "../utils/business-hours";
+import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025, getBusinessHoursForCountry } from "../utils/business-hours";
 import { checkSuppressionBulk, getSuppressionReason } from "../lib/suppression.service";
 import { getBestPhoneForContact } from "../lib/phone-utils";
+import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
 
 const GEMINI_VOICE_PREFERENCES = [
   "Juniper",
@@ -199,12 +200,18 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
     // Check business hours before initiating call
     const businessHoursSettings = (aiSettings as any).businessHours;
     if (businessHoursSettings?.enabled !== false) {
+      // Get country-specific business hours (handles Middle East Sun-Thu work week)
+      const contactCountry = (contact as any).country;
+      const countryHours = getBusinessHoursForCountry(contactCountry);
+      
       const businessHoursConfig: BusinessHoursConfig = {
         enabled: true,
         timezone: businessHoursSettings?.timezone || DEFAULT_BUSINESS_HOURS.timezone,
-        operatingDays: businessHoursSettings?.operatingDays || DEFAULT_BUSINESS_HOURS.operatingDays,
-        startTime: businessHoursSettings?.startTime || DEFAULT_BUSINESS_HOURS.startTime,
-        endTime: businessHoursSettings?.endTime || DEFAULT_BUSINESS_HOURS.endTime,
+        // Use country-specific operating days (e.g., Sun-Thu for Middle East)
+        // Campaign-level override takes precedence if explicitly set
+        operatingDays: businessHoursSettings?.operatingDays || countryHours.operatingDays,
+        startTime: businessHoursSettings?.startTime || countryHours.startTime,
+        endTime: businessHoursSettings?.endTime || countryHours.endTime,
         respectContactTimezone: businessHoursSettings?.respectContactTimezone ?? true,
         excludedDates: US_FEDERAL_HOLIDAYS_2024_2025,
       };
@@ -213,7 +220,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         timezone: (contact as any).timezone,
         city: (contact as any).city || (contact as any).contactCity,
         state: (contact as any).state || (contact as any).contactState,
-        country: (contact as any).country,
+        country: contactCountry,
       };
 
       if (!isWithinBusinessHours(businessHoursConfig, contactTimezoneInfo)) {
@@ -239,6 +246,39 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         || campaign.name 
         || "Sarah Mitchell";
 
+      const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
+      let fromNumber = "";
+      let callerNumberId: string | null = null;
+      let callerNumberDecisionId: string | null = null;
+
+      try {
+        const callerIdResult = await getCallerIdForCall({
+          campaignId,
+          prospectNumber: phoneNumber,
+          callType: 'ai_calls_initiate',
+          numberPoolConfig: numberPoolConfig ? {
+            enabled: numberPoolConfig.enabled ?? true,
+            maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
+            rotationStrategy: numberPoolConfig.rotationStrategy as 'round_robin' | 'reputation_based' | 'region_match' | undefined,
+            cooldownHours: numberPoolConfig.cooldownHours,
+          } : undefined,
+        });
+        fromNumber = callerIdResult.callerId;
+        callerNumberId = callerIdResult.numberId;
+        callerNumberDecisionId = callerIdResult.decisionId;
+
+        if (callerIdResult.jitterDelayMs > 0) {
+          await numberPoolSleep(callerIdResult.jitterDelayMs);
+        }
+      } catch (poolError) {
+        console.warn("[AI Calls] Number pool selection failed, using legacy caller ID:", poolError);
+        fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+      }
+
+      if (!fromNumber) {
+        return res.status(500).json({ message: "Outbound phone number not configured" });
+      }
+
       const context: CallContext = {
         contactFirstName: contact.firstName || "there",
         contactLastName: contact.lastName || "",
@@ -249,15 +289,12 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         campaignId,
         queueItemId,
         agentFullName: resolvedAgentName,
+        callerNumberId,
+        callerNumberDecisionId,
       };
 
     const bridge = getTelnyxAiBridge();
     
-    const fromNumber = process.env.TELNYX_FROM_NUMBER || "";
-    if (!fromNumber) {
-      return res.status(500).json({ message: "Outbound phone number not configured" });
-    }
-
     // PRE-LOCK if queueItemId is present
     if (queueItemId && queueItemId !== 'test-queue-item') {
       await db.execute(sql`
@@ -282,6 +319,7 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
         message: "AI call initiated successfully",
       });
     } catch (error) {
+      releaseNumberWithoutOutcome(callerNumberId);
       // Revert lock on failure
       if (queueItemId && queueItemId !== 'test-queue-item') {
         const isWhitelistError = error instanceof Error && error.message.includes('Whitelist Error');
@@ -341,11 +379,6 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
     const aiSettings = campaign.aiAgentSettings as AiAgentSettings;
     if (!aiSettings) {
       return res.status(400).json({ message: "AI agent settings not configured" });
-    }
-
-    const fromNumber = process.env.TELNYX_FROM_NUMBER || "";
-    if (!fromNumber) {
-      return res.status(500).json({ message: "Outbound phone number not configured" });
     }
 
     const bridge = getTelnyxAiBridge();
@@ -584,6 +617,43 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
         `);
 
         try {
+          const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
+          let fromNumber = "";
+          let callerNumberId: string | null = null;
+          let callerNumberDecisionId: string | null = null;
+
+          try {
+            const callerIdResult = await getCallerIdForCall({
+              campaignId,
+              prospectNumber: phoneNumber,
+              virtualAgentId: context.virtualAgentId || undefined,
+              callType: 'ai_calls_batch',
+              numberPoolConfig: numberPoolConfig ? {
+                enabled: numberPoolConfig.enabled ?? true,
+                maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
+                rotationStrategy: numberPoolConfig.rotationStrategy as 'round_robin' | 'reputation_based' | 'region_match' | undefined,
+                cooldownHours: numberPoolConfig.cooldownHours,
+              } : undefined,
+            });
+            fromNumber = callerIdResult.callerId;
+            callerNumberId = callerIdResult.numberId;
+            callerNumberDecisionId = callerIdResult.decisionId;
+
+            if (callerIdResult.jitterDelayMs > 0) {
+              await numberPoolSleep(callerIdResult.jitterDelayMs);
+            }
+          } catch (poolError) {
+            console.warn("[AI Batch] Number pool selection failed, using legacy caller ID:", poolError);
+            fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+          }
+
+          if (!fromNumber) {
+            throw new Error("Outbound phone number not configured");
+          }
+
+          context.callerNumberId = callerNumberId;
+          context.callerNumberDecisionId = callerNumberDecisionId;
+
           const { callId } = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
           
           results.push({ contactId: contactId || item.id, queueItemId: item.id, status: "initiated", callId });
@@ -595,6 +665,7 @@ router.post("/batch-start", requireAuth, requireRole("admin"), async (req, res) 
             await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
           }
         } catch (initiateError: any) {
+          releaseNumberWithoutOutcome(context.callerNumberId || null);
           // If initiation failed, we MUST release the lock or mark as permanently failed
           const isWhitelistError = initiateError.message?.includes('Whitelist Error');
           
@@ -737,7 +808,27 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
   try {
     const { phoneNumber, contactFirstName, contactLastName, contactTitle, companyName, campaignId } = testCallSchema.parse(req.body);
     
-    const fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+    let fromNumber = "";
+    let callerNumberId: string | null = null;
+    let callerNumberDecisionId: string | null = null;
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId: campaignId || "test-call",
+        prospectNumber: phoneNumber,
+        callType: 'ai_calls_test',
+      });
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      console.warn("[AI Test Call] Number pool selection failed, using legacy caller ID:", poolError);
+      fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+    }
+
     if (!fromNumber) {
       return res.status(500).json({ message: "Outbound phone number (TELNYX_FROM_NUMBER) not configured" });
     }
@@ -790,6 +881,8 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
       campaignId: campaignId || "test-call",
       queueItemId: "test-queue-item",
       agentFullName: aiSettings.persona?.name || "Sarah",
+      callerNumberId,
+      callerNumberDecisionId,
     };
 
     // Determine provider - default to Gemini Live (same as production campaigns)
@@ -818,6 +911,7 @@ router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"),
       toNumber: phoneNumber,
     });
   } catch (error) {
+    // Number release skipped - relevant variable not in scope from inner try
     console.error("[AI Test Call] Error:", error);
     res.status(500).json({ 
       message: "Failed to initiate test call", 
@@ -853,18 +947,22 @@ router.get("/campaign/:campaignId/stats", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Campaign is not in AI agent mode" });
     }
 
-    // Query call_sessions directly for accurate AI call stats
+    // Query call_sessions with quality records to get identity confirmation status
+    // "Connected" should mean RIGHT PARTY connects (identity confirmed), not just any answered call
     const aiCallSessions = await db.select({
       id: callSessions.id,
       status: callSessions.status,
       aiDisposition: callSessions.aiDisposition,
       aiAnalysis: callSessions.aiAnalysis,
-    }).from(callSessions).where(
-      and(
-        eq(callSessions.campaignId, campaignId),
-        eq(callSessions.agentType, 'ai')
-      )
-    );
+      identityConfirmed: callQualityRecords.identityConfirmed,
+    }).from(callSessions)
+      .leftJoin(callQualityRecords, eq(callSessions.id, callQualityRecords.callSessionId))
+      .where(
+        and(
+          eq(callSessions.campaignId, campaignId),
+          eq(callSessions.agentType, 'ai')
+        )
+      );
 
     const stats = {
       totalAiCalls: aiCallSessions.length,
@@ -888,10 +986,23 @@ router.get("/campaign/:campaignId/stats", requireAuth, async (req, res) => {
         const disposition = s.aiDisposition?.toLowerCase() || '';
         return disposition.includes('no_answer') || disposition.includes('no answer');
       }).length,
+      // CRITICAL: "Connected" means RIGHT PARTY connects (identity confirmed)
+      // This counts calls where we confirmed we're speaking with the target contact
       connected: aiCallSessions.filter((s) => {
-        const disposition = s.aiDisposition?.toLowerCase() || '';
-        return disposition.includes('completed') || disposition.includes('connected') || 
-               disposition.includes('not_interested') || disposition.includes('callback');
+        // Primary: Check identityConfirmed from call quality records
+        if (s.identityConfirmed === true) {
+          return true;
+        }
+        // Fallback: Check aiAnalysis for identity confirmation
+        const analysis = s.aiAnalysis as Record<string, any> | null;
+        if (analysis?.identityConfirmed === true || analysis?.rightPartyContact === true) {
+          return true;
+        }
+        // Also check performanceMetrics if available
+        if (analysis?.performanceMetrics?.identityConfirmed === true) {
+          return true;
+        }
+        return false;
       }).length,
     };
 
@@ -965,225 +1076,12 @@ const testOpenAIRealtimeSchema = z.object({
   settings: z.record(z.unknown()).optional(),
 });
 
-router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
-  try {
-    return res.status(410).json({
-      message: "OpenAI Realtime test calls are disabled. Use /api/ai-calls/test-gemini-live instead.",
-      provider: "gemini_live",
-    });
-
-    const {
-      phoneNumber,
-      virtualAgentId,
-      campaignId,
-      systemPrompt: systemPromptOverride,
-      firstMessage: firstMessageOverride,
-      voice: voiceOverride,
-      settings: settingsOverride,
-    } = testOpenAIRealtimeSchema.parse(req.body);
-
-    // Load SIP trunk config from UI (default trunk), fallback to env vars
-    const sipConfig = await storage.getDefaultSipTrunkConfig();
-    const sipProvider = (sipConfig?.provider || process.env.SIP_TRUNK_PROVIDER || "telnyx").toLowerCase();
-
-    if (sipProvider !== "telnyx") {
-      return res.status(400).json({
-        message: "AI Call Test currently supports Telnyx call control only.",
-        recommendation: "Set the default SIP trunk provider to telnyx or use TELNYX_* environment variables."
-      });
-    }
-
-    // Check required environment variables
-    const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = sipConfig?.callerIdNumber || process.env.TELNYX_FROM_NUMBER;
-    const openaiApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-    const connectionId =
-      process.env.TELNYX_TEXML_APP_ID ||
-      sipConfig?.connectionId ||
-      process.env.TELNYX_CALL_CONTROL_APP_ID ||
-      process.env.TELNYX_CONNECTION_ID;
-
-    if (!telnyxApiKey) {
-      return res.status(500).json({ message: "TELNYX_API_KEY not configured" });
-    }
-    if (!fromNumber) {
-      return res.status(500).json({ message: "Caller ID not configured (set in SIP trunk or TELNYX_FROM_NUMBER)" });
-    }
-    if (!openaiApiKey) {
-      return res.status(500).json({ message: "OPENAI_API_KEY not configured" });
-    }
-    if (!connectionId) {
-      return res.status(500).json({ message: "TELNYX call control connection ID not configured" });
-    }
-
-    // Get virtual agent settings if provided
-    let systemPrompt = "You are a professional sales representative calling on behalf of UK Export Finance. Introduce yourself, offer the Leading with Finance whitepaper, and ask if you can send it to their email.";
-    let agentName = "UK Export Finance Representative";
-    let firstMessage: string | null = null;
-    let voice = "";
-    
-    if (virtualAgentId) {
-      const [agent] = await db.select().from(virtualAgents).where(eq(virtualAgents.id, virtualAgentId)).limit(1);
-      if (agent) {
-        systemPrompt = agent.systemPrompt || systemPrompt;
-        const settings = agent.settings as any;
-        agentName = settings?.persona?.name || agent.name || agentName;
-        firstMessage = agent.firstMessage || null;
-        voice = agent.voice || "";
-      }
-    }
-
-    if (systemPromptOverride?.trim()) {
-      systemPrompt = systemPromptOverride.trim();
-    }
-
-    if (firstMessageOverride?.trim()) {
-      firstMessage = firstMessageOverride.trim();
-    }
-
-    if (voiceOverride?.trim()) {
-      voice = voiceOverride.trim();
-    }
-
-    // Normalize phone to E.164
-    let normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
-    if (!normalizedPhone.startsWith('+')) {
-      normalizedPhone = '+' + normalizedPhone.replace(/^0+/, '');
-    }
-
-    // Build the WebSocket URL for Voice Dialer
-    // Priority: PUBLIC_WEBSOCKET_URL env var > X-Public-Host header > request host
-    // This is critical for Telnyx to reach the endpoint (Telnyx can't reach localhost)
-    let wsUrl = process.env.PUBLIC_WEBSOCKET_URL;
-    
-    if (!wsUrl) {
-      const publicHost = req.get('X-Public-Host') || req.get('host') || 'localhost:5000';
-      const protocol = publicHost.includes('localhost') ? 'ws' : 'wss';
-      wsUrl = `${protocol}://${publicHost}/voice-dialer`;
-      
-      // WARN if localhost is being used (Telnyx won't be able to reach it)
-      if (publicHost.includes('localhost')) {
-        console.warn(`[Voice Dialer Test] ⚠️  CRITICAL: Using localhost WebSocket URL ${wsUrl}`);
-        console.warn(`[Voice Dialer Test] ⚠️  Telnyx CANNOT reach localhost! Audio will NOT flow.`);
-        console.warn(`[Voice Dialer Test] ⚠️  Set PUBLIC_WEBSOCKET_URL env var or pass X-Public-Host header`);
-        console.warn(`[Voice Dialer Test] ⚠️  Example: PUBLIC_WEBSOCKET_URL=wss://1234-56-789.ngrok.io/voice-dialer`);
-      }
-    }
-
-    // Generate unique call identifiers
-    const callId = `openai-test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const callAttemptId = `attempt-${Date.now()}`;
-    const queueItemId = `queue-test-${Date.now()}`;
-    const runId = `run-test-${Date.now()}`;
-    const contactId = `contact-test-${Date.now()}`;
-
-    console.log(`[OpenAI Realtime Test] Initiating test call:
-  - To: ${normalizedPhone}
-  - From: ${fromNumber}
-  - WebSocket URL: ${wsUrl}
-  - Call ID: ${callId}
-  - Virtual Agent: ${virtualAgentId || 'default'}
-  - Connection ID: ${connectionId}`);
-
-    // Create the Telnyx call with media streaming to OpenAI Realtime WebSocket
-    // CRITICAL: Use base stream_url WITHOUT query params, pass all data via client_state instead
-    // Telnyx Media Streaming validates the stream_url and may reject URLs with complex query strings
-    
-    const customParams = {
-      call_id: callId,
-      run_id: runId,
-      campaign_id: campaignId || 'test-campaign',
-      queue_item_id: queueItemId,
-      call_attempt_id: callAttemptId,
-      contact_id: contactId,
-      called_number: normalizedPhone, // Required for database tracking
-      virtual_agent_id: virtualAgentId || 'test-agent',
-      system_prompt: systemPrompt,
-      first_message: firstMessage,
-      voice,
-      agent_settings: settingsOverride,
-      agent_name: agentName,
-      provider: 'openai_realtime', // Mark this as OpenAI Realtime call
-    };
-
-    // Encode custom parameters as base64 in client_state
-    // This avoids complex query strings that might trigger Telnyx validation
-    const clientStateStr = JSON.stringify(customParams);
-    const clientStateB64 = Buffer.from(clientStateStr).toString('base64');
-
-    console.log(`[OpenAI Realtime Test] Stream URL (clean, no query params): ${wsUrl}`);
-    console.log(`[OpenAI Realtime Test] Custom parameters in client_state:`, customParams);
-
-    // Use the same host (public if provided) for Telnyx webhook callbacks
-    // Resolve webhook host robustly to avoid localhost in production
-    let webhookHost = process.env.PUBLIC_WEBHOOK_HOST || req.get('X-Public-Host') || req.get('host') || '';
-    if (!webhookHost && process.env.TELNYX_WEBHOOK_URL) {
-      try {
-        const u = new URL((process.env.TELNYX_WEBHOOK_URL || "").trim());
-        webhookHost = u.host;
-      } catch {}
-    }
-    // Ensure host doesn't have protocol
-    webhookHost = (webhookHost || 'localhost:5000').replace(/^https?:\/\//, '');
-
-    const webhookProtocol = webhookHost.includes('localhost') ? 'http' : 'https';
-    const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call`;
-
-    console.log(`[OpenAI Realtime Test] Initiating TeXML call to: ${normalizedPhone}`);
-    console.log(`[OpenAI Realtime Test] TeXML URL: ${texmlUrl}`);
-
-    const response = await fetch("https://api.telnyx.com/v2/texml_calls", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${telnyxApiKey}`,
-      },
-      body: JSON.stringify({
-        texml_application_id: connectionId, // Correct parameter for texml_calls endpoint
-        to: normalizedPhone,
-        from: fromNumber,
-        url: texmlUrl, // Point to our TeXML endpoint
-        client_state: clientStateB64, // Pass parameters via client_state
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[OpenAI Realtime Test] Telnyx API error: ${response.status} - ${errorText}`);
-      return res.status(500).json({ 
-        message: "Failed to initiate Telnyx call", 
-        error: errorText,
-        status: response.status
-      });
-    }
-
-    const result = await response.json();
-    const callControlId = result.data?.call_control_id;
-
-    console.log(`[OpenAI Realtime Test] Call initiated successfully:
-  - Call Control ID: ${callControlId}
-  - Call ID: ${callId}`);
-
-    res.json({
-      success: true,
-      message: "OpenAI Realtime test call initiated - your phone should ring shortly",
-      callId,
-      callControlId,
-      // Include snake_case keys for the diagnostic script expectations
-      call_id: callId,
-      call_control_id: callControlId,
-      phoneNumber: normalizedPhone,
-      provider: "openai-realtime",
-      wsUrl,
-      ws_url: wsUrl,
-    });
-  } catch (error) {
-    console.error("[AI Calls] Error initiating OpenAI Realtime test call:", error);
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: "Validation error", errors: error.errors });
-    }
-    res.status(500).json({ message: "Failed to initiate test call", error: String(error) });
-  }
+// OpenAI Realtime endpoint is disabled - use Gemini Live instead
+router.post("/test-openai-realtime", requireAuth, requireRole("admin", "campaign_manager"), async (_req, res) => {
+  return res.status(410).json({
+    message: "OpenAI Realtime test calls are disabled. Use /api/ai-calls/test-gemini-live instead.",
+    provider: "gemini_live",
+  });
 });
 
 /**
@@ -1225,12 +1123,37 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     } = testGeminiLiveSchema.parse(req.body);
 
     const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = process.env.TELNYX_FROM_NUMBER;
+    let fromNumber = "";
+    let callerNumberId: string | null = null;
+    let callerNumberDecisionId: string | null = null;
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     const connectionId = process.env.TELNYX_TEXML_APP_ID;
 
-    if (!telnyxApiKey || !fromNumber || !geminiApiKey || !connectionId) {
+    if (!telnyxApiKey || !geminiApiKey || !connectionId) {
       return res.status(500).json({ message: "Missing required configuration (Telnyx, Gemini, or Connection ID)" });
+    }
+
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId: campaignId || 'test-campaign',
+        prospectNumber: phoneNumber,
+        virtualAgentId: virtualAgentId || undefined,
+        callType: 'ai_calls_test_gemini',
+      });
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      console.warn("[AI Calls] Number pool selection failed, using legacy caller ID:", poolError);
+      fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+    }
+
+    if (!fromNumber) {
+      return res.status(500).json({ message: "Caller ID not configured (set TELNYX_FROM_NUMBER or enable number pool)" });
     }
 
     let systemPrompt = "You are a professional AI assistant.";
@@ -1272,6 +1195,9 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       call_id: callId,
       campaign_id: campaignId || 'test-campaign',
       called_number: normalizedPhone, // Required for database tracking
+      from_number: fromNumber,
+      caller_number_id: callerNumberId,
+      caller_number_decision_id: callerNumberDecisionId,
       virtual_agent_id: virtualAgentId || 'test-agent',
       system_prompt: systemPrompt,
       voice, // Dynamic voice selection for automatic synchronization
@@ -1317,6 +1243,7 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
     });
 
     if (!response.ok) {
+      releaseNumberWithoutOutcome(callerNumberId);
       const errorText = await response.text();
       return res.status(500).json({ message: "Failed to initiate Telnyx call", error: errorText });
     }
@@ -1334,18 +1261,362 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
  * Returns the list of available Google Gemini Live voices.
  * This ensures the UI is synchronized with the latest available options.
  */
+// Track active continuous calling sessions per campaign
+const activeContinuousSessions = new Map<string, { active: boolean; startedAt: Date; callsMade: number; lastActivity: Date }>();
+
+/**
+ * POST /api/ai-calls/continuous-start
+ * Starts continuous AI calling for a campaign - processes queue one call at a time until empty or stopped
+ */
+router.post("/continuous-start", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { campaignId, delayBetweenCalls = 5000 } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ message: "campaignId is required" });
+    }
+
+    const campaign = await storage.getCampaign(campaignId);
+    if (!campaign) {
+      return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    if (campaign.dialMode !== "ai_agent") {
+      return res.status(400).json({ message: "Campaign is not configured for AI agent mode" });
+    }
+
+    // Check if already running
+    const existingSession = activeContinuousSessions.get(campaignId);
+    if (existingSession?.active) {
+      return res.status(400).json({
+        message: "Continuous calling already active for this campaign",
+        startedAt: existingSession.startedAt,
+        callsMade: existingSession.callsMade
+      });
+    }
+
+    // Initialize session
+    activeContinuousSessions.set(campaignId, {
+      active: true,
+      startedAt: new Date(),
+      callsMade: 0,
+      lastActivity: new Date()
+    });
+
+    console.log(`[AI Continuous] Starting continuous calling for campaign ${campaignId}`);
+
+    // Start the continuous calling loop in the background
+    processContinuousCalls(campaignId, delayBetweenCalls).catch(err => {
+      console.error(`[AI Continuous] Fatal error in continuous calling loop:`, err);
+      activeContinuousSessions.delete(campaignId);
+    });
+
+    res.json({
+      success: true,
+      message: "Continuous AI calling started",
+      campaignId,
+      delayBetweenCalls
+    });
+  } catch (error) {
+    console.error("[AI Continuous] Error starting continuous calls:", error);
+    res.status(500).json({ message: "Failed to start continuous calling", error: String(error) });
+  }
+});
+
+/**
+ * POST /api/ai-calls/continuous-stop
+ * Stops continuous AI calling for a campaign
+ */
+router.post("/continuous-stop", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    const { campaignId } = req.body;
+
+    if (!campaignId) {
+      return res.status(400).json({ message: "campaignId is required" });
+    }
+
+    const session = activeContinuousSessions.get(campaignId);
+    if (!session?.active) {
+      return res.status(400).json({ message: "No active continuous calling session for this campaign" });
+    }
+
+    // Mark as inactive - the loop will stop on next iteration
+    session.active = false;
+    console.log(`[AI Continuous] Stopping continuous calling for campaign ${campaignId} - ${session.callsMade} calls made`);
+
+    res.json({
+      success: true,
+      message: "Continuous calling stopped",
+      callsMade: session.callsMade,
+      runDuration: Date.now() - session.startedAt.getTime()
+    });
+  } catch (error) {
+    console.error("[AI Continuous] Error stopping continuous calls:", error);
+    res.status(500).json({ message: "Failed to stop continuous calling", error: String(error) });
+  }
+});
+
+/**
+ * GET /api/ai-calls/continuous-status/:campaignId
+ * Gets the status of continuous calling for a campaign
+ */
+router.get("/continuous-status/:campaignId", requireAuth, async (req, res) => {
+  const { campaignId } = req.params;
+  const session = activeContinuousSessions.get(campaignId);
+
+  if (!session) {
+    return res.json({ active: false, campaignId });
+  }
+
+  res.json({
+    active: session.active,
+    campaignId,
+    startedAt: session.startedAt,
+    callsMade: session.callsMade,
+    lastActivity: session.lastActivity,
+    runDuration: Date.now() - session.startedAt.getTime()
+  });
+});
+
+/**
+ * Background process that continuously makes AI calls one at a time
+ */
+async function processContinuousCalls(campaignId: string, delayBetweenCalls: number) {
+  const session = activeContinuousSessions.get(campaignId);
+  if (!session) return;
+
+  const campaign = await storage.getCampaign(campaignId);
+  if (!campaign) {
+    console.error(`[AI Continuous] Campaign ${campaignId} not found`);
+    activeContinuousSessions.delete(campaignId);
+    return;
+  }
+
+  const aiSettings = campaign.aiAgentSettings as AiAgentSettings;
+  if (!aiSettings) {
+    console.error(`[AI Continuous] No AI settings for campaign ${campaignId}`);
+    activeContinuousSessions.delete(campaignId);
+    return;
+  }
+
+  const bridge = getTelnyxAiBridge();
+
+  while (session.active) {
+    try {
+      // Wait for any active calls to complete before making next call
+      let activeCallsCount = bridge.getActiveCallsCount();
+      while (activeCallsCount > 0 && session.active) {
+        console.log(`[AI Continuous] Waiting for ${activeCallsCount} active call(s) to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        activeCallsCount = bridge.getActiveCallsCount();
+      }
+
+      if (!session.active) break;
+
+      // Get next queued item
+      const queueItems = await storage.getCampaignQueue(campaignId, "queued");
+      const now = new Date();
+
+      // Filter for items ready to be called
+      const eligibleItems = queueItems.filter((item: any) => {
+        const phone = item.phone || item.phoneNumber || item.contact?.phoneNumber;
+        if (!phone || item.status !== "queued") return false;
+
+        // Check scheduled retry time
+        if (item.nextAttemptAt) {
+          const nextAttempt = new Date(item.nextAttemptAt);
+          if (nextAttempt > now) return false;
+        }
+
+        return true;
+      });
+
+      if (eligibleItems.length === 0) {
+        console.log(`[AI Continuous] Queue empty for campaign ${campaignId} - stopping continuous calling`);
+        session.active = false;
+        break;
+      }
+
+      const item = eligibleItems[0];
+      const phoneNumber = item.phone || item.phoneNumber || item.contact?.phoneNumber;
+      const contactId = item.contactId;
+
+      console.log(`[AI Continuous] Processing queue item ${item.id} (${session.callsMade + 1} calls made so far)`);
+
+      // Compliance checks
+      const phonesArray = [phoneNumber.replace(/[^\d+]/g, '')];
+      const e164Phone = phonesArray[0].startsWith('+') ? phonesArray[0] : '+' + phonesArray[0].replace(/^0+/, '');
+
+      const suppressedPhones = await db.select({ phoneE164: suppressionPhones.phoneE164 })
+        .from(suppressionPhones)
+        .where(inArray(suppressionPhones.phoneE164, [e164Phone]));
+
+      if (suppressedPhones.length > 0) {
+        console.log(`[AI Continuous] Skipping ${item.id}: phone on DNC list`);
+        await db.execute(sql`UPDATE campaign_queue SET status = 'removed', removed_reason = 'dnc:global_phone_list', updated_at = NOW() WHERE id = ${item.id}`);
+        continue;
+      }
+
+      // Check suppression for contact
+      if (contactId) {
+        const suppressionResult = await checkSuppressionBulk([contactId]);
+        if (suppressionResult.get(contactId)) {
+          console.log(`[AI Continuous] Skipping ${item.id}: contact suppressed`);
+          await db.execute(sql`UPDATE campaign_queue SET status = 'removed', removed_reason = 'suppressed', updated_at = NOW() WHERE id = ${item.id}`);
+          continue;
+        }
+      }
+
+      // Get contact and account details
+      const contact = contactId ? await storage.getContact(contactId) : null;
+      const account = contact?.accountId ? await storage.getAccount(contact.accountId) : null;
+
+      const resolvedAgentName = aiSettings.persona?.name
+        || (aiSettings as any).agentName
+        || campaign.name
+        || "Sarah Mitchell";
+
+      const context: CallContext = {
+        contactFirstName: item.firstName || contact?.firstName || "there",
+        contactLastName: item.lastName || contact?.lastName || "",
+        contactTitle: item.title || (contact as any)?.title || (contact as any)?.jobTitle || "Decision Maker",
+        contactEmail: item.email || contact?.email || "",
+        companyName: item.companyName || account?.name || "your company",
+        phoneNumber,
+        campaignId,
+        contactId: contactId || undefined,
+        queueItemId: item.id,
+        agentFullName: resolvedAgentName,
+        virtualAgentId: (item as any).virtualAgentId || undefined,
+      };
+
+      // Lock the queue item
+      await db.execute(sql`
+        UPDATE campaign_queue
+        SET status = 'in_progress', updated_at = NOW()
+        WHERE id = ${item.id}
+      `);
+
+      try {
+        // Get caller ID from number pool
+        const numberPoolConfig = campaign.numberPoolConfig as { enabled?: boolean; maxCallsPerNumber?: number; rotationStrategy?: string; cooldownHours?: number } | null;
+        let fromNumber = "";
+        let callerNumberId: string | null = null;
+        let callerNumberDecisionId: string | null = null;
+
+        try {
+          const callerIdResult = await getCallerIdForCall({
+            campaignId,
+            prospectNumber: phoneNumber,
+            virtualAgentId: context.virtualAgentId || undefined,
+            callType: 'ai_calls_continuous',
+            numberPoolConfig: numberPoolConfig ? {
+              enabled: numberPoolConfig.enabled ?? true,
+              maxCallsPerNumber: numberPoolConfig.maxCallsPerNumber,
+              rotationStrategy: numberPoolConfig.rotationStrategy as 'round_robin' | 'reputation_based' | 'region_match' | undefined,
+              cooldownHours: numberPoolConfig.cooldownHours,
+            } : undefined,
+          });
+          fromNumber = callerIdResult.callerId;
+          callerNumberId = callerIdResult.numberId;
+          callerNumberDecisionId = callerIdResult.decisionId;
+
+          if (callerIdResult.jitterDelayMs > 0) {
+            await numberPoolSleep(callerIdResult.jitterDelayMs);
+          }
+        } catch (poolError) {
+          console.warn("[AI Continuous] Number pool selection failed, using legacy caller ID:", poolError);
+          fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+        }
+
+        if (!fromNumber) {
+          throw new Error("Outbound phone number not configured");
+        }
+
+        context.callerNumberId = callerNumberId;
+        context.callerNumberDecisionId = callerNumberDecisionId;
+
+        // Initiate the call
+        const { callId } = await bridge.initiateAiCall(phoneNumber, fromNumber, aiSettings, context);
+
+        session.callsMade++;
+        session.lastActivity = new Date();
+
+        console.log(`[AI Continuous] Call ${session.callsMade} initiated: ${callId} to ${phoneNumber}`);
+
+        // Wait for the call to complete before starting next
+        // The bridge tracks active calls, so we wait for count to return to 0
+        await new Promise(resolve => setTimeout(resolve, delayBetweenCalls));
+
+      } catch (initiateError: any) {
+        releaseNumberWithoutOutcome(context.callerNumberId || null);
+
+        const isWhitelistError = initiateError.message?.includes('Whitelist Error');
+        if (isWhitelistError) {
+          console.error(`[AI Continuous] Permanent failure for ${item.id}: ${initiateError.message}`);
+          await db.execute(sql`
+            UPDATE campaign_queue
+            SET status = 'removed', removed_reason = 'country_not_whitelisted', updated_at = NOW()
+            WHERE id = ${item.id}
+          `);
+        } else {
+          // Revert to queued with cooldown
+          await db.execute(sql`
+            UPDATE campaign_queue
+            SET status = 'queued', next_attempt_at = NOW() + INTERVAL '5 minutes', updated_at = NOW()
+            WHERE id = ${item.id}
+          `);
+          console.error(`[AI Continuous] Call failed for ${item.id}:`, initiateError.message);
+        }
+      }
+
+    } catch (loopError) {
+      console.error(`[AI Continuous] Error in continuous loop:`, loopError);
+      // Brief pause before retrying
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+
+  console.log(`[AI Continuous] Continuous calling ended for campaign ${campaignId} - Total calls: ${session.callsMade}`);
+  activeContinuousSessions.delete(campaignId);
+}
+
 router.get("/gemini-voices", requireAuth, (req, res) => {
-  // These are the current Gemini Live voices as of the latest documentation.
-  // The backend uses a pass-through string in the dialer, so any voice name
-  // provided by the UI will be sent to the API.
+  // Official Google Gemini Live TTS voices (30 available)
+  // Source: https://ai.google.dev/gemini-api/docs/speech-generation
   res.json([
-    { id: "Juniper", name: "Juniper", description: "Energetic and bright" },
-    { id: "Ember", name: "Ember", description: "Warm and rich" },
-    { id: "Lyra", name: "Lyra", description: "Clear and professional" },
-    { id: "Orion", name: "Orion", description: "Deep and authoritative" },
-    { id: "Bamboo", name: "Bamboo", description: "Calm and grounded" },
-    { id: "Jade", name: "Jade", description: "New experimental voice" },
-    { id: "Pumice", name: "Pumice", description: "Soft and breathy (legacy)" }
+    // Female voices
+    { id: "Kore", name: "Kore", gender: "female", description: "Warm, professional voice ideal for executive outreach" },
+    { id: "Aoede", name: "Aoede", gender: "female", description: "Bright, engaging voice for mid-market outreach" },
+    { id: "Leda", name: "Leda", gender: "female", description: "Youthful, consultative voice for high-value prospects" },
+    { id: "Callirrhoe", name: "Callirrhoe", gender: "female", description: "Easy-going, casual voice for warm outreach" },
+    { id: "Autonoe", name: "Autonoe", gender: "female", description: "Bright, balanced voice for friendly conversations" },
+    { id: "Despina", name: "Despina", gender: "female", description: "Smooth, expressive voice for storytelling" },
+    { id: "Erinome", name: "Erinome", gender: "female", description: "Clear, precise voice for informative content" },
+    { id: "Laomedeia", name: "Laomedeia", gender: "female", description: "Upbeat, dynamic voice for engaging presentations" },
+    { id: "Pulcherrima", name: "Pulcherrima", gender: "female", description: "Forward, articulate voice for modern business" },
+    { id: "Vindemiatrix", name: "Vindemiatrix", gender: "female", description: "Gentle, refined voice for premium experiences" },
+    { id: "Achernar", name: "Achernar", gender: "female", description: "Soft, intimate voice for personal connections" },
+    // Male voices
+    { id: "Puck", name: "Puck", gender: "male", description: "Upbeat, friendly voice for warm outreach" },
+    { id: "Charon", name: "Charon", gender: "male", description: "Informative, authoritative voice for technical audiences" },
+    { id: "Fenrir", name: "Fenrir", gender: "male", description: "Bold, confident voice for enterprise sales" },
+    { id: "Orus", name: "Orus", gender: "male", description: "Firm, confident voice for professional settings" },
+    { id: "Zephyr", name: "Zephyr", gender: "male", description: "Bright, optimistic voice for engaging content" },
+    { id: "Enceladus", name: "Enceladus", gender: "male", description: "Clear, direct voice for straightforward messaging" },
+    { id: "Iapetus", name: "Iapetus", gender: "male", description: "Clear, even voice for balanced communication" },
+    { id: "Umbriel", name: "Umbriel", gender: "male", description: "Calm, reassuring voice for trust-building" },
+    { id: "Algieba", name: "Algieba", gender: "male", description: "Smooth, flowing voice for pleasant conversations" },
+    { id: "Algenib", name: "Algenib", gender: "male", description: "Raspy, distinctive voice for memorable pitches" },
+    { id: "Rasalgethi", name: "Rasalgethi", gender: "male", description: "Informed, mature voice for executive discussions" },
+    { id: "Alnilam", name: "Alnilam", gender: "male", description: "Firm, strong voice for authoritative presentations" },
+    { id: "Schedar", name: "Schedar", gender: "male", description: "Even, steady voice for professional calls" },
+    { id: "Gacrux", name: "Gacrux", gender: "male", description: "Mature, experienced voice for senior audiences" },
+    { id: "Achird", name: "Achird", gender: "male", description: "Friendly, approachable voice for relationship building" },
+    { id: "Zubenelgenubi", name: "Zubenelgenubi", gender: "male", description: "Casual, conversational voice for informal settings" },
+    { id: "Sadachbia", name: "Sadachbia", gender: "male", description: "Lively, energetic voice for dynamic outreach" },
+    { id: "Sadaltager", name: "Sadaltager", gender: "male", description: "Knowledgeable, articulate voice for consultative sales" },
+    { id: "Sulafat", name: "Sulafat", gender: "male", description: "Warm, engaging voice for nurturing prospects" }
   ]);
 });
 

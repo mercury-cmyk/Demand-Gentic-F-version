@@ -13,6 +13,9 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
+// Import voices from shared constants
+import { ALL_VOICES } from '@/lib/voice-constants';
+
 interface Step2bDialModeConfigProps {
   data: any;
   onNext: (data: any) => void;
@@ -20,31 +23,18 @@ interface Step2bDialModeConfigProps {
 }
 
 type DialMode = 'ai_agent';
-// Gemini Live Native Voices
-type AiVoice = 'Puck' | 'Charon' | 'Fenrir' | 'Orus' | 'Kore' | 'Aoede' | 'Leda' | 'Zephyr' | 'verse' | 'ash' | 'ballad' | 'echo' | 'coral' | 'sage' | 'shimmer' | 'marin' | string;
+// Native live voices
+type AiVoice = string;
 type HandoffTrigger = 'decision_maker_reached' | 'explicit_request' | 'complex_objection' | 'pricing_discussion' | 'technical_question' | 'angry_prospect';
 
-const AI_VOICES: { value: AiVoice; label: string; description: string; gender: 'male' | 'female'; provider?: 'gemini' | 'openai' }[] = [
-  // ============ GEMINI VOICES (Google) ============
-  { value: 'Puck', label: 'Puck', description: 'Upbeat, energetic, youthful (Male)', gender: 'male', provider: 'gemini' },
-  { value: 'Charon', label: 'Charon', description: 'Deep, mature, bass-heavy (Male)', gender: 'male', provider: 'gemini' },
-  { value: 'Fenrir', label: 'Fenrir', description: 'Bold, confident, assertive (Male)', gender: 'male', provider: 'gemini' },
-  { value: 'Orus', label: 'Orus', description: 'Warm, conversational, friendly (Male)', gender: 'male', provider: 'gemini' },
-  { value: 'Kore', label: 'Kore', description: 'Calm, soothing, reassuring (Female)', gender: 'female', provider: 'gemini' },
-  { value: 'Aoede', label: 'Aoede', description: 'Bright, friendly, cheerful (Female)', gender: 'female', provider: 'gemini' },
-  { value: 'Leda', label: 'Leda', description: 'Professional, articulate, polished (Female)', gender: 'female', provider: 'gemini' },
-  { value: 'Zephyr', label: 'Zephyr', description: 'Light, modern, contemporary (Female)', gender: 'female', provider: 'gemini' },
-
-  // ============ OPENAI REALTIME VOICES ============
-  { value: 'verse', label: 'Verse (OpenAI)', description: 'Poetic, dynamic, expressive (Male)', gender: 'male', provider: 'openai' },
-  { value: 'ash', label: 'Ash (OpenAI)', description: 'Clear, professional, balanced (Male)', gender: 'male', provider: 'openai' },
-  { value: 'ballad', label: 'Ballad (OpenAI)', description: 'Warm, storytelling, narrative (Male)', gender: 'male', provider: 'openai' },
-  { value: 'echo', label: 'Echo (OpenAI)', description: 'Deep, resonant, authoritative (Male)', gender: 'male', provider: 'openai' },
-  { value: 'coral', label: 'Coral (OpenAI)', description: 'Warm, friendly, approachable (Female)', gender: 'female', provider: 'openai' },
-  { value: 'sage', label: 'Sage (OpenAI)', description: 'Calm, wise, knowledgeable (Female)', gender: 'female', provider: 'openai' },
-  { value: 'shimmer', label: 'Shimmer (OpenAI)', description: 'Light, expressive, clear (Female)', gender: 'female', provider: 'openai' },
-  { value: 'marin', label: 'Marin (OpenAI)', description: 'Calm, professional, soothing (Female)', gender: 'female', provider: 'openai' },
-];
+// Use imported voices
+const AI_VOICES = ALL_VOICES.map(v => ({
+  value: v.id as AiVoice,
+  label: v.provider === 'openai' ? `${v.name} (OpenAI)` : v.name,
+  description: `${v.description} (${v.gender === 'male' ? 'Male' : 'Female'})`,
+  gender: v.gender,
+  provider: v.provider,
+}));
 
 const HANDOFF_TRIGGERS: { value: HandoffTrigger; label: string }[] = [
   { value: 'decision_maker_reached', label: 'Decision maker reached' },
@@ -248,7 +238,7 @@ export function Step2bDialModeConfig({ data, onNext, onBack }: Step2bDialModeCon
             <div>
               <CardTitle className="text-lg">AI Voice Agent Mode</CardTitle>
               <CardDescription className="mt-1">
-                Intelligent AI agents handle calls autonomously using Gemini Live voice technology
+                Intelligent AI agents handle calls autonomously using live voice technology
               </CardDescription>
             </div>
           </div>

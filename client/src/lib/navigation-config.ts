@@ -187,6 +187,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/',
             roles: ALL_ROLES,
           },
+          {
+            id: 'bookings',
+            title: 'Bookings',
+            url: '/admin/bookings',
+            roles: MANAGEMENT_ROLES,
+            badge: { text: "New", variant: "new" }
+          },
         ],
       },
       {
@@ -376,14 +383,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Campaign engagement metrics',
       },
       {
-        id: 'campaign-analytics',
-        title: 'Campaign Analytics',
-        url: '/campaign-analytics',
-        icon: 'BarChart3',
-        roles: MANAGEMENT_ROLES,
-        description: 'Detailed campaign performance and queue stats',
-      },
-      {
         id: 'call-reports',
         title: 'Call Reports',
         url: '/call-reports',
@@ -398,15 +397,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'Headphones',
         roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
         description: 'Browse, search, and playback all call recordings',
-      },
-      {
-        id: 'call-intelligence',
-        title: 'Call Intelligence',
-        url: '/call-intelligence',
-        icon: 'Brain',
-        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Unified view of recordings, transcripts, and quality analysis',
-        badge: { text: 'New', variant: 'new' },
       },
       {
         id: 'reports',
@@ -577,10 +567,31 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [USER_ROLES.ADMIN],
           },
           {
+            id: 'settings-number-pool',
+            title: 'Number Pool',
+            url: '/number-pool',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Manage Telnyx phone numbers for AI calling',
+          },
+          {
             id: 'settings-integrations',
             title: 'Integrations',
             url: '/settings/integrations',
             roles: [USER_ROLES.ADMIN],
+          },
+          {
+            id: 'settings-agent-defaults',
+            title: 'Agent Defaults',
+            url: '/settings/agent-defaults',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Configure default AI agent settings',
+          },
+          {
+            id: 'settings-knowledge-hub',
+            title: 'Knowledge Hub',
+            url: '/settings/knowledge-hub',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Unified AI knowledge source management',
           },
           {
             id: 'settings-platform',

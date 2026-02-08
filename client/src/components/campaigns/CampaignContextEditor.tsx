@@ -15,6 +15,7 @@ import {
 
 export interface CampaignContextData {
   campaignObjective: string;
+  campaignContextBrief?: string;
   productServiceInfo: string;
   talkingPoints: string[];
   targetAudienceDescription: string;
@@ -100,6 +101,27 @@ export function CampaignContextEditor({
             data-testid="textarea-campaign-objective"
           />
           <p className="text-xs text-muted-foreground">What is the primary goal of each call?</p>
+        </div>
+
+        {/* AI Agent Context Brief */}
+        <div className="space-y-2">
+          <Label htmlFor="campaign-context-brief" className="flex items-center gap-2">
+            AI Agent Context Brief
+            <span className="text-xs text-muted-foreground font-normal">(Recommended)</span>
+          </Label>
+          <Textarea
+            id="campaign-context-brief"
+            placeholder="e.g., We are Acme Security, a cloud security platform helping mid-market companies protect their infrastructure. Our solution reduces security incidents by 40% and provides 24/7 automated monitoring. We're calling IT leaders who have shown interest in security solutions to schedule a brief discovery call to understand their current security challenges."
+            value={data.campaignContextBrief || ""}
+            onChange={(e) => updateField("campaignContextBrief", e.target.value)}
+            rows={4}
+            className="bg-purple-50/50 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800"
+            data-testid="textarea-campaign-context-brief"
+          />
+          <p className="text-xs text-muted-foreground">
+            A 3-5 sentence brief that gives the AI voice agent all the context it needs for intelligent conversations.
+            Include: who you are, what you offer, why it matters, and what outcome you want.
+          </p>
         </div>
 
         {/* Product/Service Info */}

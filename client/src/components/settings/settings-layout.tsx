@@ -20,6 +20,8 @@ import {
   ChevronRight,
   Crown,
   Brain,
+  Eye,
+  GitBranch,
 } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
 
@@ -104,6 +106,14 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     href: ROUTES.SETTINGS_KNOWLEDGE_HUB,
     icon: Brain,
     description: 'Unified AI knowledge source',
+    category: 'infrastructure',
+  },
+  {
+    id: 'prompt-inspector',
+    label: 'Prompt Inspector',
+    href: ROUTES.SETTINGS_PROMPT_INSPECTOR,
+    icon: Eye,
+    description: 'View all knowledge layers',
     category: 'infrastructure',
   },
   {

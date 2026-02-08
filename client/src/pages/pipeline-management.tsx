@@ -4,14 +4,17 @@ import { useLocation } from "wouter";
 import { PageShell } from "@/components/patterns/page-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  Plus, TrendingUp, DollarSign, Target, BarChart3, 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Plus, TrendingUp, DollarSign, Target, BarChart3,
   ArrowUpRight, ArrowDownRight, ChevronRight, MoreVertical,
   Calendar, User, Building2, Percent, LayoutGrid, List, Trash2,
-  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown
+  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Users, Sparkles
 } from "lucide-react";
 import { PipelineFormDialog } from "@/components/pipeline/pipeline-form-dialog";
 import { OpportunityFormDialog } from "@/components/pipeline/opportunity-form-dialog";
+import { PipelineAccountsPanel } from "@/components/pipeline/pipeline-accounts-panel";
+import { BuyerJourneyBoard } from "@/components/pipeline/buyer-journey-board";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -84,6 +87,7 @@ export default function PipelineManagementPage() {
   const [opportunityDialogOpen, setOpportunityDialogOpen] = useState(false);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | undefined>();
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [mainTab, setMainTab] = useState<'opportunities' | 'accounts' | 'journey'>('opportunities');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [pipelineToDelete, setPipelineToDelete] = useState<Pipeline | null>(null);
   const [sortColumn, setSortColumn] = useState<string>('name');
@@ -341,50 +345,76 @@ export default function PipelineManagementPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {/* View Toggle */}
-            <div className="flex items-center border rounded-md">
-              <Button
-                variant={viewMode === 'kanban' ? 'secondary' : 'ghost'}
-                size="sm"
-                onClick={() => setViewMode('kanban')}
-                data-testid="button-view-kanban"
-                className="rounded-r-none"
-              >
-                <LayoutGrid className="h-4 w-4 mr-2" />
-                Kanban
-              </Button>
-              <Button
-                variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-                size="sm"
-                onClick={() => setViewMode('list')}
-                data-testid="button-view-list"
-                className="rounded-l-none"
-              >
-                <List className="h-4 w-4 mr-2" />
-                List
-              </Button>
-            </div>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setPipelineDialogOpen(true)}
               data-testid="button-manage-pipelines"
             >
               Manage Pipelines
             </Button>
-            <Button 
-              onClick={() => {
-                setSelectedOpportunity(undefined);
-                setOpportunityDialogOpen(true);
-              }} 
-              data-testid="button-new-opportunity"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              New Opportunity
-            </Button>
+            {mainTab === 'opportunities' && (
+              <Button
+                onClick={() => {
+                  setSelectedOpportunity(undefined);
+                  setOpportunityDialogOpen(true);
+                }}
+                data-testid="button-new-opportunity"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Opportunity
+              </Button>
+            )}
           </div>
         </div>
 
-        {/* Metrics Dashboard */}
+        {/* Main Tabs: Opportunities / Accounts / Journey */}
+        <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as any)} className="w-full">
+          <div className="flex items-center justify-between mb-4">
+            <TabsList>
+              <TabsTrigger value="opportunities" className="gap-2">
+                <DollarSign className="h-4 w-4" />
+                Opportunities
+              </TabsTrigger>
+              <TabsTrigger value="accounts" className="gap-2">
+                <Users className="h-4 w-4" />
+                Pipeline Accounts
+              </TabsTrigger>
+              <TabsTrigger value="journey" className="gap-2">
+                <Sparkles className="h-4 w-4" />
+                Buyer Journey
+              </TabsTrigger>
+            </TabsList>
+
+            {/* View Toggle - only for opportunities tab */}
+            {mainTab === 'opportunities' && (
+              <div className="flex items-center border rounded-md">
+                <Button
+                  variant={viewMode === 'kanban' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('kanban')}
+                  data-testid="button-view-kanban"
+                  className="rounded-r-none"
+                >
+                  <LayoutGrid className="h-4 w-4 mr-2" />
+                  Kanban
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('list')}
+                  data-testid="button-view-list"
+                  className="rounded-l-none"
+                >
+                  <List className="h-4 w-4 mr-2" />
+                  List
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Opportunities Tab Content */}
+          <TabsContent value="opportunities" className="mt-0">
+            {/* Metrics Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card data-testid="card-metric-total">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -788,6 +818,32 @@ export default function PipelineManagementPage() {
             </div>
           </Card>
         )}
+          </TabsContent>
+
+          {/* Pipeline Accounts Tab Content */}
+          <TabsContent value="accounts" className="mt-0">
+            {selectedPipeline && (
+              <PipelineAccountsPanel
+                pipelineId={selectedPipeline.id}
+                onConvertToOpportunity={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/pipelines", selectedPipeline.id, "opportunities"] });
+                }}
+              />
+            )}
+          </TabsContent>
+
+          {/* Buyer Journey Tab Content */}
+          <TabsContent value="journey" className="mt-0">
+            {selectedPipeline && (
+              <BuyerJourneyBoard
+                pipelineId={selectedPipeline.id}
+                onConvertClick={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/pipelines", selectedPipeline.id, "opportunities"] });
+                }}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       <PipelineFormDialog

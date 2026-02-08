@@ -155,7 +155,7 @@ export function AgentPromptViewer({
   const providerInfo: Record<string, { color: string; name: string }> = {
     deepseek: { color: "text-purple-500", name: "DeepSeek" },
     openai: { color: "text-green-500", name: agentType === 'voice' ? "OpenAI Realtime" : "OpenAI" },
-    gemini: { color: "text-blue-500", name: agentType === 'voice' ? "Gemini Live" : "Google Gemini" },
+    gemini: { color: "text-blue-500", name: agentType === 'voice' ? "Live Voice" : "Google Gemini" },
     claude: { color: "text-orange-500", name: "Anthropic Claude" },
   };
 

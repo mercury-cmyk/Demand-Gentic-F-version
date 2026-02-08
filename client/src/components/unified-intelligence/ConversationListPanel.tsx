@@ -79,7 +79,7 @@ export function ConversationListPanel({
   return (
     <div className="space-y-4">
       {/* Stats Cards */}
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
         <StatCard icon={<MessageSquare className="h-4 w-4" />} value={stats.total} label="Total" />
         <StatCard icon={<Phone className="h-4 w-4 text-purple-500" />} value={stats.calls} label="Calls" />
         <StatCard icon={<Mail className="h-4 w-4 text-blue-500" />} value={stats.emails} label="Emails" />
@@ -90,6 +90,12 @@ export function ConversationListPanel({
       {/* Filters */}
       <Card>
         <CardContent className="p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-sm font-medium">Filters</p>
+              <p className="text-[11px] text-muted-foreground">Refine conversations quickly</p>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-3 items-end">
             {/* Search */}
             <div className="flex-1 min-w-[180px]">
@@ -186,8 +192,8 @@ export function ConversationListPanel({
       </Card>
 
       {/* Conversation List */}
-      <Card className="h-[500px] flex flex-col">
-        <CardHeader className="pb-2 px-4 pt-3">
+      <Card className="h-[520px] flex flex-col">
+        <CardHeader className="pb-2 px-4 pt-3 border-b bg-muted/30">
           <CardTitle className="text-sm">Conversations</CardTitle>
           <CardDescription className="text-xs">
             {conversations.length} result{conversations.length !== 1 ? 's' : ''}
@@ -240,12 +246,12 @@ function StatCard({
   label: string;
 }) {
   return (
-    <Card className="p-2">
-      <div className="flex items-center gap-1.5">
+    <Card className="p-2 border-muted/60 bg-background/80 shadow-sm">
+      <div className="flex items-center gap-2">
         {icon}
         <div>
-          <p className="text-lg font-bold leading-none">{value}</p>
-          <p className="text-[10px] text-muted-foreground">{label}</p>
+          <p className="text-lg font-semibold leading-none">{value}</p>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
         </div>
       </div>
     </Card>
@@ -266,9 +272,9 @@ function ConversationCard({
   return (
     <Card
       className={cn(
-        'cursor-pointer transition-all hover:shadow-md p-3',
-        isSelected && 'ring-2 ring-primary',
-        isTest && 'border-yellow-200 bg-yellow-50/30'
+        'cursor-pointer transition-all hover:shadow-md p-3 border-muted/60 bg-background/80 hover:bg-muted/20',
+        isSelected && 'ring-2 ring-primary/60 bg-primary/5',
+        isTest && 'border-yellow-200 bg-yellow-50/40'
       )}
       onClick={onClick}
     >
@@ -284,6 +290,11 @@ function ConversationCard({
             <span className="font-medium text-sm truncate">{conversation.contactName || 'Unknown'}</span>
             {conversation.agentType === 'ai' && (
               <Badge variant="secondary" className="text-[10px] px-1">AI</Badge>
+            )}
+            {conversation.callCount && conversation.callCount > 1 && (
+              <Badge variant="outline" className="text-[10px] px-1 bg-blue-50 text-blue-700 border-blue-300">
+                {conversation.callCount} calls
+              </Badge>
             )}
           </div>
           {/* Company */}

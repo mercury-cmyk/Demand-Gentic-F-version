@@ -5,8 +5,6 @@
  * channels can be generated from a single shared campaign context.
  */
 
-import type { CallFlowConfig } from './campaign-types';
-
 // ============================================================
 // CHANNEL TYPES
 // ============================================================
@@ -104,11 +102,11 @@ export interface CampaignChannelVariant {
   channelType: ChannelType;
   status: ChannelVariantStatus;
 
-  /** Generated flow - CallFlowConfig for voice, EmailSequenceFlow for email */
-  generatedFlow: CallFlowConfig | EmailSequenceFlow | null;
+  /** Generated flow - EmailSequenceFlow for email, voice uses campaign context directly */
+  generatedFlow: EmailSequenceFlow | null;
 
   /** User customizations that override the generated flow */
-  flowOverride?: Partial<CallFlowConfig | EmailSequenceFlow>;
+  flowOverride?: Partial<EmailSequenceFlow>;
 
   /** Channel-specific settings */
   channelSettings: ChannelSettings;
@@ -243,8 +241,6 @@ export interface AssembledPromptComponents {
   resolvedTemplates: ResolvedTemplates;
   /** Compliance rules */
   complianceRules: string;
-  /** Call flow (voice only) */
-  callFlow?: CallFlowConfig;
   /** Email sequence (email only) */
   emailSequence?: EmailSequenceFlow;
 }

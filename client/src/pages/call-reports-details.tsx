@@ -98,17 +98,19 @@ export default function CallReportsDetailsPage() {
       id: 'disposition',
       header: 'Disposition',
       accessorKey: 'disposition',
-      cell: (row: any) => (
-        <Badge 
-          variant={
-            row.disposition === 'qualified' ? 'default' :
-            row.disposition === 'dnc_request' ? 'destructive' :
-            'secondary'
-          }
-        >
-          {row.disposition?.replace(/_/g, ' ')}
-        </Badge>
-      ),
+      cell: (row: any) => {
+        const disposition = row.disposition || 'Unknown';
+        const variant =
+          disposition === 'Qualified Lead' || disposition === 'qualified' ? 'default' :
+          disposition === 'DNC Request' || disposition === 'dnc_request' || disposition === 'do_not_call' ? 'destructive' :
+          disposition === 'Not Interested' || disposition === 'not_interested' ? 'outline' :
+          'secondary';
+        return (
+          <Badge variant={variant}>
+            {disposition.replace(/_/g, ' ')}
+          </Badge>
+        );
+      },
       sortable: true,
     },
     {

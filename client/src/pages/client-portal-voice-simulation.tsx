@@ -217,6 +217,10 @@ export default function ClientPortalVoiceSimulationPage() {
   // Chat mutation
   const chatMutation = useMutation({
     mutationFn: async (userMessage: string) => {
+      if (!sessionId) throw new Error('No active session. Start a simulation first.');
+      const campaignId = context?.campaignId ?? selectedCampaignId;
+      if (!campaignId) throw new Error('Please select a campaign.');
+
       const res = await fetch('/api/client-portal/simulation/chat', {
         method: 'POST',
         headers: {
@@ -225,7 +229,7 @@ export default function ClientPortalVoiceSimulationPage() {
         },
         body: JSON.stringify({
           sessionId,
-          campaignId: selectedCampaign,
+          campaignId,
           userMessage,
         }),
       });
@@ -268,12 +272,31 @@ export default function ClientPortalVoiceSimulationPage() {
     try {
       setIsSpeaking(true);
       
+      // Check for auth token before calling TTS API
+      const authHeaders = getAuthHeaders();
+      if (!authHeaders.Authorization) {
+        // No auth token - use browser speech synthesis fallback
+        console.warn('[VoiceSim] No auth token, using browser TTS fallback');
+        if (window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            if (view === 'simulation') startListening();
+          };
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        } else {
+          setIsSpeaking(false);
+        }
+        return;
+      }
+      
       // Generate TTS audio using the client portal voice API
       const response = await fetch('/api/client-portal/voice/tts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeaders(),
+          ...authHeaders,
         },
         body: JSON.stringify({
           text,

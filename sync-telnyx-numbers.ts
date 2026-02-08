@@ -64,18 +64,17 @@ async function syncTelnyxNumbers() {
       
       const existing = await db.select()
         .from(telnyxNumbersTable)
-        .where(eq(telnyxNumbersTable.telnyxId, telnyxId));
+        .where(eq(telnyxNumbersTable.telnyxNumberId, telnyxId));
 
       if (existing.length === 0) {
         await db.insert(telnyxNumbersTable).values({
-          telnyxId: telnyxId,
+          telnyxNumberId: telnyxId,
           phoneNumberE164: phoneNumber,
           displayName: num.connection_name || null,
           region: num.address?.locality || null,
           areaCode: phoneNumber.substring(2, 5),
           status: num.status === 'active' ? 'active' : 'suspended',
           tags: num.tags || [],
-          lastSyncedAt: new Date(),
         });
         console.log('  Inserted: ' + phoneNumber);
       } else {
@@ -83,9 +82,9 @@ async function syncTelnyxNumbers() {
           .set({
             phoneNumberE164: phoneNumber,
             status: num.status === 'active' ? 'active' : 'suspended',
-            lastSyncedAt: new Date(),
+            updatedAt: new Date(),
           })
-          .where(eq(telnyxNumbersTable.telnyxId, telnyxId));
+          .where(eq(telnyxNumbersTable.telnyxNumberId, telnyxId));
         console.log('  Updated: ' + phoneNumber);
       }
     }

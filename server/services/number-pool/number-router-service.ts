@@ -8,6 +8,7 @@
  * - Geographic matching (local presence)
  * - Cooldown status
  * - Concurrent call limits
+ * - Number warmup status (new numbers have reduced limits)
  * 
  * @see docs/NUMBER_POOL_MANAGEMENT_SYSTEM.md
  */
@@ -25,6 +26,7 @@ import {
   type TelnyxNumber,
   type NumberReputationRecord,
 } from "@shared/number-pool-schema";
+import { canMakeCallDuringWarmup, getNumberWarmupStatus } from "./number-warmup-service";
 
 // ==================== TYPES ====================
 
@@ -62,10 +64,10 @@ interface FilterResult {
 
 // ==================== CONSTANTS ====================
 
-const MAX_CALLS_PER_HOUR_DEFAULT = 20;
-const MAX_CALLS_PER_DAY_DEFAULT = 100;
-const JITTER_MIN_MS = 80_000;  // 80 seconds
-const JITTER_MAX_MS = 160_000; // 160 seconds
+const MAX_CALLS_PER_HOUR_DEFAULT = 50;
+const MAX_CALLS_PER_DAY_DEFAULT = 250;
+const JITTER_MIN_MS = 45_000;  // 45 seconds (base for unknown/new numbers)
+const JITTER_MAX_MS = 90_000;  // 90 seconds
 
 // In-memory tracking for concurrent calls (should be Redis in production)
 const numbersInUse = new Set<string>();
@@ -83,6 +85,25 @@ export class CallRoutingError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CallRoutingError';
+  }
+}
+
+/**
+ * Error thrown when all numbers have reached their hourly call limit.
+ * The orchestrator should pause calling until limits reset (next hour).
+ */
+export class AllNumbersAtHourlyLimitError extends Error {
+  public readonly filterStats: Record<string, number>;
+  public readonly totalNumbers: number;
+  public readonly numbersAtHourlyCap: number;
+
+  constructor(filterStats: Record<string, number>, totalNumbers: number) {
+    const numbersAtHourlyCap = filterStats.at_hourly_cap || 0;
+    super(`All ${totalNumbers} numbers at hourly limit (${numbersAtHourlyCap} at cap). Calls paused until limits reset.`);
+    this.name = 'AllNumbersAtHourlyLimitError';
+    this.filterStats = filterStats;
+    this.totalNumbers = totalNumbers;
+    this.numbersAtHourlyCap = numbersAtHourlyCap;
   }
 }
 
@@ -107,9 +128,28 @@ export async function selectNumber(
 
     // Step 2: Filter numbers
     const { available, filtered } = await filterNumbers(pool, request);
-    
+
     if (available.length === 0) {
       console.warn('[NumberRouter] All numbers filtered:', filtered);
+
+      // CRITICAL: If all numbers are at hourly limit, throw specific error
+      // The orchestrator should PAUSE calling, not fall back to legacy number
+      const atHourlyCap = filtered.at_hourly_cap || 0;
+      const atDailyCap = filtered.at_daily_cap || 0;
+      const warmupLimited = filtered.warmup_limited || 0;
+
+      // If majority of filtering is due to hourly/daily caps, signal to pause
+      if (atHourlyCap > 0 && atHourlyCap >= pool.length * 0.5) {
+        console.warn(`[NumberRouter] 🚫 HOURLY LIMIT REACHED: ${atHourlyCap}/${pool.length} numbers at hourly cap`);
+        throw new AllNumbersAtHourlyLimitError(filtered, pool.length);
+      }
+
+      if (atDailyCap > 0 && atDailyCap >= pool.length * 0.5) {
+        console.warn(`[NumberRouter] 🚫 DAILY LIMIT REACHED: ${atDailyCap}/${pool.length} numbers at daily cap`);
+        throw new AllNumbersAtHourlyLimitError(filtered, pool.length);
+      }
+
+      // For other filtering reasons (cooldown, warmup, concurrent), use fallback
       return useFallbackNumber('all_filtered');
     }
 
@@ -235,6 +275,7 @@ async function filterNumbers(
     in_cooldown: 0,
     concurrent_in_use: 0,
     recently_called_prospect: 0,
+    warmup_limited: 0,
   };
   
   const available: EligibleNumber[] = [];
@@ -247,16 +288,35 @@ async function filterNumbers(
       continue;
     }
 
-    // Check hourly cap
-    const maxHourly = num.maxCallsPerHour ?? MAX_CALLS_PER_HOUR_DEFAULT;
-    if ((num.callsThisHour ?? 0) >= maxHourly) {
+    // Check warmup limits (new numbers have reduced caps, mature numbers get reputation bonus)
+    const warmupCheck = canMakeCallDuringWarmup({
+      id: num.id,
+      phoneNumberE164: num.phoneNumberE164,
+      acquiredAt: num.acquiredAt,
+      maxCallsPerHour: num.maxCallsPerHour,
+      maxCallsPerDay: num.maxCallsPerDay,
+      callsThisHour: num.callsThisHour,
+      callsToday: num.callsToday,
+      reputationScore: num.reputation?.score ?? null,
+      reputationBand: num.reputation?.band ?? null,
+    });
+
+    if (!warmupCheck.canCall) {
+      console.log(`[NumberRouter] Number ${num.phoneNumberE164} filtered by warmup: ${warmupCheck.reason}`);
+      filtered.warmup_limited++;
+      continue;
+    }
+
+    // Check hourly cap (using warmup-adjusted effective limits)
+    const effectiveMaxHourly = warmupCheck.warmupStatus.effectiveMaxCallsPerHour;
+    if ((num.callsThisHour ?? 0) >= effectiveMaxHourly) {
       filtered.at_hourly_cap++;
       continue;
     }
 
-    // Check daily cap
-    const maxDaily = num.maxCallsPerDay ?? MAX_CALLS_PER_DAY_DEFAULT;
-    if ((num.callsToday ?? 0) >= maxDaily) {
+    // Check daily cap (using warmup-adjusted effective limits)
+    const effectiveMaxDaily = warmupCheck.warmupStatus.effectiveMaxCallsPerDay;
+    if ((num.callsToday ?? 0) >= effectiveMaxDaily) {
       filtered.at_daily_cap++;
       continue;
     }
@@ -366,14 +426,21 @@ function rankCandidates(
  * Calculate jitter delay for carrier-safe pacing
  */
 function calculateJitter(number: EligibleNumber): number {
-  // Base jitter: random between 80-160 seconds
+  // Base jitter: random between 45-90 seconds
   let jitter = JITTER_MIN_MS + Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS);
 
-  // Reputation-based adjustment
+  // Reputation-based adjustment — reward good numbers, penalize bad
   const rep = number.reputation?.score ?? 70;
-  
-  if (rep < 40) {
-    // Burned: 3x delay (but we shouldn't be using burned numbers)
+  const band = number.reputation?.band ?? 'healthy';
+
+  if (band === 'excellent' || rep >= 85) {
+    // Excellent: 50% jitter reduction — proven safe number
+    jitter *= 0.5;
+  } else if (band === 'healthy' || rep >= 70) {
+    // Healthy: 30% jitter reduction
+    jitter *= 0.7;
+  } else if (rep < 40) {
+    // Burned: 3x delay (shouldn't be using burned numbers)
     jitter *= 3.0;
   } else if (rep < 50) {
     // Risk: 2x delay
@@ -383,12 +450,27 @@ function calculateJitter(number: EligibleNumber): number {
     jitter *= 1.5;
   }
 
-  // High volume adjustment
-  if ((number.callsThisHour ?? 0) > 15) {
+  // Age-based trust bonus — numbers over 14 days get additional reduction
+  const daysSinceAcquired = number.acquiredAt
+    ? Math.floor((Date.now() - number.acquiredAt.getTime()) / (24 * 60 * 60 * 1000)) + 1
+    : 1;
+
+  if (daysSinceAcquired >= 30 && rep >= 70) {
+    // Established + healthy: additional 20% reduction
+    jitter *= 0.8;
+  } else if (daysSinceAcquired >= 14 && rep >= 70) {
+    // Mature + healthy: additional 10% reduction
+    jitter *= 0.9;
+  }
+
+  // High volume adjustment — scale with total hourly cap, not fixed threshold
+  const effectiveHourlyCap = number.maxCallsPerHour ?? 50;
+  if ((number.callsThisHour ?? 0) > effectiveHourlyCap * 0.75) {
     jitter *= 1.25;
   }
 
-  return Math.floor(jitter);
+  // Floor: never go below 15 seconds (carrier safety)
+  return Math.max(15_000, Math.floor(jitter));
 }
 
 /**

@@ -20,105 +20,8 @@ import { Bot, Send, Loader2, User, Sparkles, Phone, MessageSquare, Mic, MicOff, 
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Complete list of Gemini voices mapped to high-quality Google Cloud TTS
-const AI_VOICES = [
-  {
-    id: 'Puck',
-    name: 'Puck',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Natural, Soft, Storytelling',
-    description: 'Light and expressive voice - great for creative content.',
-    bestFor: ['Product Launches', 'Cold Calling'],
-    color: 'from-orange-500 to-amber-500',
-    provider: 'gemini',
-    googleVoice: 'en-US-Journey-D',
-  },
-  {
-    id: 'Charon',
-    name: 'Charon',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Deep, Resonant, Authoritative',
-    description: 'Deep and authoritative voice that commands attention.',
-    bestFor: ['Enterprise Sales', 'Executive Outreach'],
-    color: 'from-slate-600 to-slate-800',
-    provider: 'gemini',
-    googleVoice: 'en-US-Studio-M',
-  },
-  {
-    id: 'Fenrir',
-    name: 'Fenrir',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Calm, Measured, Thoughtful',
-    description: 'Calm and measured voice for thoughtful conversations.',
-    bestFor: ['Sales Calls', 'Lead Qualification', 'B2B'],
-    color: 'from-blue-500 to-indigo-600',
-    provider: 'gemini',
-    googleVoice: 'en-US-Studio-Q',
-  },
-  {
-    id: 'Kore',
-    name: 'Kore',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Balanced, Clear, Professional',
-    description: 'Soft and friendly voice - great default for most use cases.',
-    bestFor: ['Healthcare', 'Insurance', 'Customer Service'],
-    color: 'from-green-400 to-emerald-500',
-    provider: 'gemini',
-    googleVoice: 'en-US-Journey-F',
-  },
-  {
-    id: 'Aoede',
-    name: 'Aoede',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Bright, Expressive, Engaging',
-    description: 'Bright and warm voice with natural enthusiasm.',
-    bestFor: ['Appointment Setting', 'Customer Outreach'],
-    color: 'from-rose-400 to-pink-500',
-    provider: 'gemini',
-    googleVoice: 'en-US-Journey-F',
-  },
-  {
-    id: 'Leda',
-    name: 'Leda',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Professional, Articulate, Steady',
-    description: 'Steady and clear voice with executive presence.',
-    bestFor: ['Executive Outreach', 'Consulting', 'Financial Services'],
-    color: 'from-violet-500 to-purple-600',
-    provider: 'gemini',
-    googleVoice: 'en-US-Studio-O',
-  },
-  {
-    id: 'Orus',
-    name: 'Orus',
-    gender: 'male',
-    accent: 'American',
-    tone: 'Confident, Direct, Professional',
-    description: 'Confident and direct voice for assertive conversations.',
-    bestFor: ['Sales Calls', 'Lead Qualification', 'Negotiations'],
-    color: 'from-amber-500 to-orange-600',
-    provider: 'gemini',
-    googleVoice: 'en-US-Journey-D',
-  },
-  {
-    id: 'Zephyr',
-    name: 'Zephyr',
-    gender: 'female',
-    accent: 'American',
-    tone: 'Gentle, Reliable, Soothing',
-    description: 'Gentle and reliable voice for sensitive conversations.',
-    bestFor: ['Healthcare', 'Support Calls', 'Sensitive Topics'],
-    color: 'from-teal-400 to-cyan-500',
-    provider: 'gemini',
-    googleVoice: 'en-US-Journey-O',
-  },
-];
+// Import voices from shared constants
+import { GEMINI_VOICES as AI_VOICES } from '@/lib/voice-constants';
 
 // Prospect Personas - Different types of prospects the AI agent will simulate calling
 const PROSPECT_PERSONAS = [
@@ -320,12 +223,31 @@ export function SimulationStudioPanel({ open, onOpenChange, campaignId: initialC
     try {
       setIsSpeaking(true);
       
+      // Check for auth token before calling TTS API
+      const token = getToken();
+      if (!token) {
+        // No auth token - use browser speech synthesis fallback
+        console.warn('[SimStudio] No auth token, using browser TTS fallback');
+        if (window.speechSynthesis) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            if (view === 'simulation') startListening();
+          };
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        } else {
+          setIsSpeaking(false);
+        }
+        return;
+      }
+      
       // Generate TTS audio using the client portal voice API
       const response = await fetch('/api/client-portal/voice/tts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           text,

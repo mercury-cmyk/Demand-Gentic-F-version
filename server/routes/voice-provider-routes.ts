@@ -261,13 +261,13 @@ router.get('/default', requireAuth, async (req: Request, res: Response) => {
 
     res.json({
       provider: isGeminiDefault ? 'google' : 'openai',
-      providerName: isGeminiDefault ? 'Gemini Live' : 'OpenAI Realtime',
+      providerName: isGeminiDefault ? 'Live Voice' : 'OpenAI Realtime',
       model: isGeminiDefault
         ? (process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio')
         : 'gpt-4o-realtime-preview-2024-12-17',
       defaultVoice: isGeminiDefault ? 'Fenrir' : 'marin',
       costInfo: isGeminiDefault
-        ? 'Gemini Live uses Google Cloud pricing - typically 50-70% lower than OpenAI Realtime'
+        ? 'Live Voice uses Google Cloud pricing - typically 50-70% lower than OpenAI Realtime'
         : 'OpenAI Realtime uses per-minute pricing',
       features: isGeminiDefault
         ? ['Native audio output', 'Natural prosody', '15+ voice options', 'Low latency', 'Function calling']

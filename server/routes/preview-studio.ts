@@ -39,6 +39,7 @@ import {
   mergeAgentSettings,
   type VirtualAgentSettings,
 } from "../services/virtual-agent-settings";
+import { getCallerIdForCall, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "../services/number-pool-integration";
 
 type AgentSettingsSource = 'agent' | 'default';
 
@@ -927,12 +928,11 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
 
     // Check environment configuration
     const telnyxApiKey = process.env.TELNYX_API_KEY;
-    const fromNumber = process.env.TELNYX_FROM_NUMBER;
     const openaiApiKey = process.env.OPENAI_API_KEY;
     const texmlAppId = process.env.TELNYX_TEXML_APP_ID;
 
-    if (!telnyxApiKey || !fromNumber || telnyxApiKey.startsWith('REPLACE_ME')) {
-      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY and TELNYX_FROM_NUMBER." });
+    if (!telnyxApiKey || telnyxApiKey.startsWith('REPLACE_ME')) {
+      return res.status(500).json({ message: "Telnyx not configured. Please set TELNYX_API_KEY." });
     }
     if (!openaiApiKey) {
       return res.status(500).json({ message: "OpenAI API key not configured" });
@@ -1017,6 +1017,32 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       } else {
         normalizedPhone = '+' + normalizedPhone;
       }
+    }
+
+    let fromNumber = "";
+    let callerNumberId: string | null = null;
+    let callerNumberDecisionId: string | null = null;
+    try {
+      const callerIdResult = await getCallerIdForCall({
+        campaignId,
+        prospectNumber: normalizedPhone,
+        virtualAgentId: resolvedVirtualAgentId || undefined,
+        callType: 'preview_phone_test',
+      });
+      fromNumber = callerIdResult.callerId;
+      callerNumberId = callerIdResult.numberId;
+      callerNumberDecisionId = callerIdResult.decisionId;
+
+      if (callerIdResult.jitterDelayMs > 0) {
+        await numberPoolSleep(callerIdResult.jitterDelayMs);
+      }
+    } catch (poolError) {
+      console.warn("[Preview Studio Phone Test] Number pool selection failed, using legacy caller ID:", poolError);
+      fromNumber = process.env.TELNYX_FROM_NUMBER || "";
+    }
+
+    if (!fromNumber) {
+      return res.status(500).json({ message: "Caller ID not configured (set TELNYX_FROM_NUMBER or enable number pool)." });
     }
 
     // Create preview session
@@ -1126,6 +1152,9 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       call_attempt_id: `preview-attempt-${testCallId}`,
       contact_id: contactId || `preview-contact-${testCallId}`,
       called_number: normalizedPhone, // Required for database tracking
+      from_number: fromNumber,
+      caller_number_id: callerNumberId,
+      caller_number_decision_id: callerNumberDecisionId,
       virtual_agent_id: resolvedVirtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
@@ -1154,6 +1183,9 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
       call_attempt_id: customParams.call_attempt_id,
       contact_id: customParams.contact_id,
       called_number: normalizedPhone, // Required for database tracking
+      from_number: fromNumber,
+      caller_number_id: callerNumberId,
+      caller_number_decision_id: callerNumberDecisionId,
       virtual_agent_id: resolvedVirtualAgentId || undefined,
       is_test_call: true,
       is_preview_test: true,
@@ -1205,6 +1237,7 @@ router.post("/phone-test/start", requireAuth, async (req, res) => {
     });
 
     if (!telnyxResponse.ok) {
+      releaseNumberWithoutOutcome(callerNumberId);
       const errorText = await telnyxResponse.text();
       console.error(`[Preview Studio Phone Test] Telnyx API error:`, errorText);
 

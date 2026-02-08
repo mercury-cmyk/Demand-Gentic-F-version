@@ -27,6 +27,7 @@ import { TextToSpeechClient } from "@google-cloud/text-to-speech";
 import { normalizeToE164, isValidE164 } from "../lib/phone-utils";
 import { processDisposition } from "./disposition-engine";
 import { getGoogleVoiceConfig } from "./voice-constants";
+import { handleCallCompleted } from "./number-pool-integration";
 
 
 export interface TelnyxCallEvent {
@@ -53,6 +54,9 @@ export interface ActiveAiCall {
   queueItemId: string;
   callAttemptId?: string;
   dialedNumber?: string;
+  fromNumber?: string;
+  callerNumberId?: string | null;
+  callerNumberDecisionId?: string | null;
   startTime: Date;
   disposition?: string;
   isAnswered?: boolean;
@@ -131,6 +135,10 @@ export class TelnyxAiBridge extends EventEmitter {
   private semaphore: Semaphore;
   private callQueue: QueuedCall[] = [];
   
+  // Per-number call tracking - ensures only 1 active call per phone number
+  // This prevents calling the same number concurrently (important for call quality and compliance)
+  private activePhoneNumbers: Set<string> = new Set();
+  
   // Call metrics tracking
   private callDurations: number[] = [];
   private peakConcurrent: number = 0;
@@ -145,8 +153,9 @@ export class TelnyxAiBridge extends EventEmitter {
     this.webhookUrl = (process.env.TELNYX_WEBHOOK_URL || "").trim();
 
     // Allow overriding via env; enforce minimum of 1 to avoid deadlock
-    const configuredMax = Number(process.env.TELNYX_MAX_CONCURRENT_CALLS || 8);
-    this.MAX_CONCURRENT_CALLS = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 8;
+    // Default: 50 concurrent calls (up from 8) to support higher throughput
+    const configuredMax = Number(process.env.TELNYX_MAX_CONCURRENT_CALLS || 50);
+    this.MAX_CONCURRENT_CALLS = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 50;
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
   }
 
@@ -226,16 +235,25 @@ export class TelnyxAiBridge extends EventEmitter {
     }
   }
 
-  // Get queue status
-  getQueueStatus(): { activeCalls: number; queuedCalls: number; availableSlots: number } {
+  // Get queue status including per-number tracking
+  getQueueStatus(): { activeCalls: number; queuedCalls: number; availableSlots: number; activeNumbers: number; maxConcurrent: number } {
     return {
       activeCalls: this.activeCalls.size,
       queuedCalls: this.semaphore.queueLength,
       availableSlots: this.semaphore.available,
+      activeNumbers: this.activePhoneNumbers.size,
+      maxConcurrent: this.MAX_CONCURRENT_CALLS,
     };
+  }
+  
+  // Check if a phone number is currently busy (has an active call)
+  isNumberBusy(phoneNumber: string): boolean {
+    const normalized = this.formatToE164(phoneNumber);
+    return this.activePhoneNumbers.has(normalized);
   }
 
   // Safely release a semaphore slot for a call (prevents double-release)
+  // Also releases the phone number from per-number tracking
   private releaseSlot(callId: string, call: ActiveAiCall | undefined, reason: string): void {
     if (!call) {
       console.log(`[TelnyxAiBridge] 🔓 Cannot release slot for ${callId} - call not found`);
@@ -247,7 +265,23 @@ export class TelnyxAiBridge extends EventEmitter {
     }
     call.slotReleased = true;
     this.semaphore.release();
+    
+    // Release the phone number from per-number tracking
+    if (call.dialedNumber) {
+      this.activePhoneNumbers.delete(call.dialedNumber);
+      console.log(`[TelnyxAiBridge] 🔓 Released number ${call.dialedNumber} (${this.activePhoneNumbers.size} numbers still active)`);
+    }
+    
     console.log(`[TelnyxAiBridge] 🔓 Released slot (${reason}) for ${callId} - available: ${this.semaphore.available}`);
+  }
+  
+  // Release phone number tracking without releasing semaphore slot
+  // Used when call fails after number was locked but before ActiveAiCall is created
+  private releasePhoneNumber(phoneNumber: string, reason: string): void {
+    if (this.activePhoneNumbers.has(phoneNumber)) {
+      this.activePhoneNumbers.delete(phoneNumber);
+      console.log(`[TelnyxAiBridge] 🔓 Released number ${phoneNumber} (${reason}) - ${this.activePhoneNumbers.size} numbers still active`);
+    }
   }
 
   // Process queued calls when a slot opens up
@@ -279,18 +313,43 @@ export class TelnyxAiBridge extends EventEmitter {
   ): Promise<{ callId: string; callControlId: string }> {
     const provider = 'gemini_live';
 
+    // Format phone numbers to E.164 format first (required for tracking and Telnyx)
+    const normalizedPhoneNumber = this.formatToE164(phoneNumber);
+    const normalizedFromNumber = this.formatToE164(fromNumber);
+
+    // =========================================================================
+    // PER-NUMBER CONCURRENCY GUARD: Only 1 active call per phone number
+    // =========================================================================
+    // This prevents calling the same number while a call is already in progress.
+    // Important for: call quality, compliance, and avoiding customer frustration.
+    if (this.activePhoneNumbers.has(normalizedPhoneNumber)) {
+      console.log(`[TelnyxAiBridge] 🚫 BLOCKED: Number ${normalizedPhoneNumber} already has an active call`);
+      throw new Error(`number_busy:${normalizedPhoneNumber} - This number already has an active call in progress`);
+    }
+
     // Global channel guard: wait for available Telnyx outbound slot
     const waitStart = Date.now();
     await this.semaphore.acquire();
     const waitedMs = Date.now() - waitStart;
     if (waitedMs > 0) {
-      console.log(`[TelnyxAiBridge] ⏳ Queued call for ${phoneNumber} (${waitedMs}ms wait, max ${this.MAX_CONCURRENT_CALLS})`);
+      console.log(`[TelnyxAiBridge] ⏳ Queued call for ${normalizedPhoneNumber} (${waitedMs}ms wait, max ${this.MAX_CONCURRENT_CALLS})`);
     }
 
+    // Re-check per-number lock after acquiring semaphore (another call may have started)
+    if (this.activePhoneNumbers.has(normalizedPhoneNumber)) {
+      this.semaphore.release();
+      console.log(`[TelnyxAiBridge] 🚫 BLOCKED (post-semaphore): Number ${normalizedPhoneNumber} already has an active call`);
+      throw new Error(`number_busy:${normalizedPhoneNumber} - This number already has an active call in progress`);
+    }
+
+    // Mark this number as in-use BEFORE making the call
+    this.activePhoneNumbers.add(normalizedPhoneNumber);
+    console.log(`[TelnyxAiBridge] 🔒 Locked number ${normalizedPhoneNumber} (${this.activePhoneNumbers.size} numbers active)`);
+
     try {
-      // Format phone numbers to E.164 format (required by Telnyx)
-      phoneNumber = this.formatToE164(phoneNumber);
-      fromNumber = this.formatToE164(fromNumber);
+      // Use normalized phone numbers
+      phoneNumber = normalizedPhoneNumber;
+      fromNumber = normalizedFromNumber;
 
       console.log(`[TelnyxAiBridge] 🎤 Initiating AI call with ENFORCED provider: Gemini Live`);
       
@@ -300,8 +359,8 @@ export class TelnyxAiBridge extends EventEmitter {
         .trim();
 
       const preflight = await preflightVoiceVariableContract({
-        agentName: context.agentFullName || settings.persona?.name || "",
-        orgName: settings.persona?.companyName || "",
+        agentName: context.agentFullName || (settings.persona as any)?.agentName || settings.persona?.name || "",
+        orgName: context.organizationName || settings.persona?.companyName || "",
         account: { name: context.companyName },
         contact: {
           fullName: contactFullName,
@@ -432,13 +491,16 @@ export class TelnyxAiBridge extends EventEmitter {
         call_attempt_id: fallbackCallAttemptId,
         contact_id: metadata.contactId || null,
         called_number: phoneNumber,
+        from_number: fromNumber,
+        caller_number_id: (context as any).callerNumberId || null,
+        caller_number_decision_id: (context as any).callerNumberDecisionId || null,
         virtual_agent_id: metadata.virtualAgentId || null,
         provider: provider,
         // Include agent configuration for WebSocket session
         // system_prompt is built by Gemini Live Dialer from agent_settings
         first_message: settings.scripts?.opening || '',
         voice: settings.persona?.voice || 'Puck', // Default to Gemini 2.5 compatible voice
-        agent_name: settings.persona?.name || '',
+        agent_name: (settings.persona as any)?.agentName || settings.persona?.name || '',
         agent_settings: settings,
         // CRITICAL: Field names must match what gemini-live-dialer.ts expects
         // gemini-live-dialer looks for: contact_name, contact_first_name, contact_job_title, account_name, organization_name
@@ -451,16 +513,12 @@ export class TelnyxAiBridge extends EventEmitter {
         // Do NOT use campaign.name - that's the campaign name, not the organization
         organization_name: context.organizationName || settings.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
         company_name: context.companyName || '',
-        // System prompt for the AI agent
-        system_prompt: settings.scripts?.systemPrompt || '',
-        // Campaign context for AI agent behavior
-        campaign_objective: context.campaignObjective || '',
-        success_criteria: context.successCriteria || '',
-        target_audience_description: context.targetAudienceDescription || '',
-        product_service_info: context.productServiceInfo || '',
-        talking_points: context.talkingPoints || [],
-        // Call flow configuration - state machine for AI agent execution
-        call_flow: (context as any).callFlow || undefined,
+        // System prompt for the AI agent - EXCLUDED from URL (loaded from campaign in gemini-live-dialer)
+        // system_prompt: settings.scripts?.systemPrompt || '',
+        // Campaign context - EXCLUDED from URL to avoid HTTP 431 (loaded from campaign in gemini-live-dialer)
+        // These large fields are looked up server-side using campaign_id:
+        // - campaign_objective, success_criteria, target_audience_description
+        // - product_service_info, talking_points, call_flow
         // Max call duration in seconds - auto-hangup after this time
         max_call_duration_seconds: context.maxCallDurationSeconds || undefined,
         // Also include canonical dot-notation fields for other consumers
@@ -471,6 +529,45 @@ export class TelnyxAiBridge extends EventEmitter {
         'account.name': context.companyName || '',
       };
       const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+
+      // CRITICAL: Store session data in Redis - same as test calls
+      // This ensures queue calls have identical session data available in voice-dialer
+      try {
+        const { callSessionStore } = await import('./call-session-store');
+        await callSessionStore.setSession(callId, {
+          call_id: callId,
+          run_id: metadata.runId || customParams.run_id,
+          campaign_id: metadata.campaignId,
+          queue_item_id: metadata.queueItemId,
+          call_attempt_id: fallbackCallAttemptId,
+          contact_id: metadata.contactId,
+          called_number: phoneNumber,
+          from_number: fromNumber,
+          caller_number_id: (context as any).callerNumberId || null,
+          caller_number_decision_id: (context as any).callerNumberDecisionId || null,
+          virtual_agent_id: metadata.virtualAgentId,
+          is_test_call: false,
+          first_message: settings.scripts?.opening || '',
+          voice: settings.persona?.voice || 'Puck',
+          agent_name: (settings.persona as any)?.agentName || settings.persona?.name || '',
+          organization_name: context.organizationName || settings.persona?.companyName || '',
+          provider: 'google',
+          // Campaign context for unified behavior
+          campaign_objective: (context as any).campaignObjective || '',
+          success_criteria: (context as any).successCriteria || '',
+          target_audience_description: (context as any).targetAudienceDescription || '',
+          product_service_info: (context as any).productServiceInfo || '',
+          talking_points: (context as any).talkingPoints || [],
+          // Contact context
+          contact_name: contactFullName,
+          contact_first_name: context.contactFirstName || '',
+          contact_job_title: context.contactTitle || '',
+          account_name: context.companyName || '',
+        });
+        console.log(`[TelnyxAiBridge] ✅ Stored session ${callId} in Redis (unified with test calls)`);
+      } catch (storeErr) {
+        console.warn(`[TelnyxAiBridge] Failed to store session in Redis:`, storeErr);
+      }
 
       let response: Response | undefined;
       const useTexml = !!texmlAppId;
@@ -570,6 +667,9 @@ export class TelnyxAiBridge extends EventEmitter {
         queueItemId: context.queueItemId,
         callAttemptId: context.callAttemptId || undefined,
         dialedNumber: phoneNumber,
+        fromNumber,
+        callerNumberId: (context as any).callerNumberId || null,
+        callerNumberDecisionId: (context as any).callerNumberDecisionId || null,
         startTime: new Date(),
         isAnswered: false,
       });
@@ -583,6 +683,8 @@ export class TelnyxAiBridge extends EventEmitter {
       return { callId, callControlId };
     } catch (error) {
       console.error("[TelnyxAiBridge] Failed to initiate call:", error);
+      // Release both the phone number and the semaphore slot on error
+      this.releasePhoneNumber(phoneNumber, 'call_initiation_error');
       this.semaphore.release();
       throw error;
     }
@@ -626,8 +728,66 @@ export class TelnyxAiBridge extends EventEmitter {
         console.log(`[TelnyxAiBridge] Media streaming stopped for ${callId}`);
         break;
 
+      case "call.transcription":
+        // Handle real-time transcription from Telnyx
+        await this.handleTranscriptionEvent(callId!, activeCall, data);
+        break;
+
+      case "call.transcription.stopped":
+        console.log(`[TelnyxAiBridge] Transcription stopped for ${callId}`);
+        break;
+
       default:
         console.log(`[TelnyxAiBridge] Unhandled event type: ${event_type}`);
+    }
+  }
+
+  private async handleTranscriptionEvent(callId: string, call: ActiveAiCall, data: any): Promise<void> {
+    const transcriptionData = data.transcription_data;
+    if (!transcriptionData) return;
+
+    const { transcript, is_final, confidence } = transcriptionData;
+    if (!is_final || !transcript?.trim()) return;
+
+    console.log(`[TelnyxAiBridge] 📝 Telnyx transcription for ${callId}: "${transcript.substring(0, 50)}..." (confidence: ${(confidence * 100).toFixed(0)}%)`);
+
+    // Store in Telnyx transcription accumulator
+    try {
+      const { addTranscriptSegment, handleTranscriptionWebhook } = await import('./telnyx-transcription');
+      handleTranscriptionWebhook('call.transcription', {
+        call_control_id: call.callControlId,
+        transcription_data: transcriptionData,
+      });
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Error handling transcription:`, err);
+    }
+
+    // CRITICAL: Feed transcript to Gemini so AI can respond
+    // This is the backup path when Deepgram isn't catching the audio
+    try {
+      const { getVoiceDialerSession, feedTranscriptToGemini } = await import('./voice-dialer');
+      const session = getVoiceDialerSession(callId);
+      if (session) {
+        // Only feed if this isn't a duplicate of what Deepgram already sent
+        const recentUserTexts = session.transcripts
+          .filter((t: any) => t.role === 'user')
+          .slice(-3)
+          .map((t: any) => t.text.toLowerCase().trim());
+
+        const normalizedTranscript = transcript.toLowerCase().trim();
+        const isDuplicate = recentUserTexts.some((t: string) =>
+          t === normalizedTranscript || t.includes(normalizedTranscript) || normalizedTranscript.includes(t)
+        );
+
+        if (!isDuplicate) {
+          feedTranscriptToGemini(callId, transcript, 'telnyx');
+          console.log(`[TelnyxAiBridge] 🎯 Fed Telnyx transcript to Gemini for ${callId}`);
+        } else {
+          console.log(`[TelnyxAiBridge] ⏭️ Skipping duplicate transcript for ${callId}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Error feeding transcript to Gemini:`, err);
     }
   }
 
@@ -639,13 +799,31 @@ export class TelnyxAiBridge extends EventEmitter {
     // The opening message will be sent through the Gemini Live WebSocket connection
     // No need to call startMediaStreaming() or speakText() here
 
+    // Enable Telnyx real-time transcription for backup/redundancy
+    // This supplements Deepgram transcription and provides two-way transcription
+    try {
+      const { enableCallTranscription, initializeCallTranscription } = await import('./telnyx-transcription');
+      initializeCallTranscription(call.callControlId, call.campaignId, call.callAttemptId || '');
+      const transcriptionEnabled = await enableCallTranscription(call.callControlId, {
+        language: 'en',
+        interimResults: true,
+      });
+      if (transcriptionEnabled) {
+        console.log(`[TelnyxAiBridge] ✅ Telnyx real-time transcription enabled for call ${callId}`);
+      }
+    } catch (err) {
+      console.warn(`[TelnyxAiBridge] Failed to enable Telnyx transcription:`, err);
+      // Don't fail the call - Deepgram is the primary transcription source
+    }
+
     await call.agent.startConversation();
     this.emit("call:answered", { callId });
   }
 
   private async pollCallStatus(callId: string, callControlId: string, agent: AiVoiceAgent): Promise<void> {
     let attempts = 0;
-    const maxAttempts = 20; // Poll for up to 20 seconds
+    const preAnswerMaxAttempts = 60; // Wait up to 60s for call to be answered (ringing can take 30-45s)
+    const postAnswerMaxAttempts = 600; // Track answered calls for up to 10 minutes
     const basePollInterval = 1000; // 1 second
     const mediaPollInterval = 5000; // Reduce polling when media is connected
     const maxPollInterval = 10000;
@@ -670,9 +848,14 @@ export class TelnyxAiBridge extends EventEmitter {
 
     const poll = async () => {
       attempts++;
-      if (attempts > maxAttempts) {
-        console.log(`[TelnyxAiBridge] Call ${callId} polling timeout - cleaning up`);
-        // Set disposition to no_answer for timeout (call never connected)
+      // Use different timeout based on whether call has been answered
+      const activeCall = this.activeCalls.get(callId);
+      const isCallAnswered = activeCall?.isAnswered === true;
+      const effectiveMaxAttempts = isCallAnswered ? postAnswerMaxAttempts : preAnswerMaxAttempts;
+
+      if (attempts > effectiveMaxAttempts) {
+        console.log(`[TelnyxAiBridge] Call ${callId} polling timeout (${isCallAnswered ? 'post-answer' : 'pre-answer'}) - cleaning up`);
+        // Only set no_answer disposition if call was never answered
         const timedOutCall = this.activeCalls.get(callId);
         if (timedOutCall && !timedOutCall.isAnswered) {
           timedOutCall.disposition = "no-answer";
@@ -731,7 +914,11 @@ export class TelnyxAiBridge extends EventEmitter {
         // Check if WebSocket is connected (definitive proof call is alive for TeXML)
         const hasMediaConnection = activeCall?.mediaWs !== null;
 
-        console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+        // Log polling status (reduce frequency for answered calls to avoid log spam)
+        const shouldLog = !isAnsweredViaWebhook || attempts % 10 === 0 || attempts <= 5;
+        if (shouldLog) {
+          console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+        }
 
         // Call is alive if: API says so, OR we have a media WebSocket connection
         if (!isAlive && !hasMediaConnection) {
@@ -751,15 +938,22 @@ export class TelnyxAiBridge extends EventEmitter {
         const isAnsweredViaApi = callState === 'answered' || callState === 'bridged' || callState === 'active';
         const isAnswered = isAnsweredViaApi || isAnsweredViaWebhook;
 
-        // Start conversation when call is answered, or after max wait time as fallback
-        if (isAlive && !hasSpoken && (isAnswered || attempts >= 20)) {
+        // Start conversation when call is answered, or after 30s as fallback
+        // (TeXML calls may not report state correctly but Telnyx still bridges them)
+        if (isAlive && !hasSpoken && (isAnswered || attempts >= 30)) {
           hasSpoken = true;
-          if (isAnsweredViaWebhook) {
-            console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
-          } else if (isAnsweredViaApi) {
-            console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
-          } else {
-            console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState})`);
+
+          // CRITICAL: Mark call as answered so polling continues with extended timeout
+          // Without this, the next poll iteration would kill the call as "no-answer"
+          if (activeCall && !activeCall.isAnswered) {
+            activeCall.isAnswered = true;
+            if (isAnsweredViaWebhook) {
+              console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
+            } else if (isAnsweredViaApi) {
+              console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
+            } else {
+              console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState}) — marking isAnswered=true`);
+            }
           }
 
           console.log(`[TelnyxAiBridge] TeXML streaming active - AI audio handled by Gemini Live dialer for ${callId}`);
@@ -1036,10 +1230,16 @@ export class TelnyxAiBridge extends EventEmitter {
         
         // Then process disposition through engine (creates leads, updates queue, handles suppression)
         try {
+          // Pass transcript to disposition engine so it can be stored on the lead
+          const cleanTranscript = (typeof transcript === 'string' ? transcript : JSON.stringify(transcript)) || "";
+          
           const dispositionResult = await processDisposition(
             call.callAttemptId,
             canonicalDisposition,
-            'telnyx_ai_bridge'
+            'telnyx_ai_bridge',
+            {
+                transcript: cleanTranscript
+            }
           );
           
           if (dispositionResult.success) {
@@ -1068,6 +1268,28 @@ export class TelnyxAiBridge extends EventEmitter {
       campaignId: call.campaignId,
       queueItemId: call.queueItemId,
     });
+
+    // Update number pool stats if using pool number
+    if (call.callerNumberId) {
+      try {
+        const durationSec = Math.round(duration / 1000);
+        const canonicalDisposition = this.mapToCanonicalDisposition(disposition);
+        await handleCallCompleted({
+          numberId: call.callerNumberId,
+          callSessionId: call.callSessionId,
+          dialerAttemptId: call.callAttemptId,
+          answered: call.isAnswered ?? false,
+          durationSec,
+          disposition: canonicalDisposition,
+          failed: false,
+          prospectNumber: call.dialedNumber || '',
+          campaignId: call.campaignId,
+        });
+        console.log(`[TelnyxAiBridge] 📊 Number pool stats updated for ${call.callerNumberId}`);
+      } catch (statsErr) {
+        console.error(`[TelnyxAiBridge] Failed to update number pool stats:`, statsErr);
+      }
+    }
 
     if (call.mediaWs) {
       call.mediaWs.close();
@@ -1262,13 +1484,18 @@ export class TelnyxAiBridge extends EventEmitter {
 
   // Map internal disposition to canonical disposition enum values
   // Canonical values: 'qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data'
-  private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' {
+  private mapToCanonicalDisposition(disposition: string): 'qualified_lead' | 'not_interested' | 'do_not_call' | 'voicemail' | 'no_answer' | 'invalid_data' | 'needs_review' {
     const d = disposition.toLowerCase();
 
     // Qualified outcomes - create lead
-    if (d === "qualified" || d === "handoff" || d === "meeting_booked" || d === "callback_requested" || d === "callback") {
+    if (d === "qualified" || d === "qualified_lead" || d === "handoff" || d === "meeting_booked") {
       console.log(`[TelnyxAiBridge] ✅ Mapping "${disposition}" to qualified_lead`);
       return "qualified_lead";
+    }
+
+    // Callback requested - schedule retry (needs review or standard retry)
+    if (d === "callback_requested" || d === "callback") {
+      return "needs_review"; 
     }
 
     // Voicemail - schedule retry
