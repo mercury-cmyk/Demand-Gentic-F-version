@@ -388,7 +388,9 @@ const ENGAGED_DISPOSITIONS = new Set<DispositionCode>([
   "needs_review",
 ]);
 
-const activeSessions = new Map<string, OpenAIRealtimeSession>();
+export type RealtimeSession = (OpenAIRealtimeSession | ElevenLabsRealtimeSession | GeminiRealtimeSession) & { bookingTypeId?: number };
+
+const activeSessions = new Map<string, RealtimeSession>();
 const streamIdToCallId = new Map<string, string>();
 
 // AMD result channel - populated by webhook, consumed by sessions
