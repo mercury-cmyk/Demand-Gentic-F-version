@@ -27,6 +27,8 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
   const [inputMode, setInputMode] = useState<"auto" | "manual">("auto");
 
   // Campaign Context fields (shared between AI and Human agents)
+  const [campaignType, setCampaignType] = useState(data.type || '');
+  const [campaignContextBrief, setCampaignContextBrief] = useState(data.campaignContextBrief || '');
   const [campaignObjective, setCampaignObjective] = useState(data.campaignObjective || '');
   const [productServiceInfo, setProductServiceInfo] = useState(data.productServiceInfo || '');
   const [talkingPoints, setTalkingPoints] = useState<string[]>(data.talkingPoints || []);
@@ -36,7 +38,9 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
 
   // Handle AI-generated campaign application
   const handleAutoGenerateApply = (generated: {
+    campaignType: string;
     campaignObjective: string;
+    campaignContextBrief: string;
     productServiceInfo: string;
     talkingPoints: string[];
     targetAudienceDescription: string;
@@ -44,13 +48,18 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
     campaignObjections: any[];
     qualificationQuestions: any[];
   }) => {
+    // Update campaign type from AI generation (this will override the manual selection)
+    if (generated.campaignType) {
+      setCampaignType(generated.campaignType);
+    }
+    setCampaignContextBrief(generated.campaignContextBrief || '');
     setCampaignObjective(generated.campaignObjective);
     setProductServiceInfo(generated.productServiceInfo);
     setTalkingPoints(generated.talkingPoints);
     setTargetAudienceDescription(generated.targetAudienceDescription);
     setSuccessCriteria(generated.successCriteria);
     setCampaignObjections(generated.campaignObjections);
-    
+
     // Convert qualification questions to the existing format
     if (generated.qualificationQuestions?.length > 0) {
       const converted = generated.qualificationQuestions.map((q, idx) => ({
@@ -62,7 +71,7 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
       }));
       setQualificationFields(converted);
     }
-    
+
     // Switch to manual mode to show filled fields
     setInputMode("manual");
   };
@@ -72,7 +81,10 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
       content: {
         qualificationFields,
       },
+      // Campaign type (can be overridden by AI generation)
+      type: campaignType || data.type,
       // Campaign Context fields
+      campaignContextBrief: campaignContextBrief || undefined,
       campaignObjective,
       productServiceInfo,
       talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
@@ -118,6 +130,7 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
           <CampaignContextEditor
             data={{
               campaignObjective,
+              campaignContextBrief,
               productServiceInfo,
               talkingPoints,
               targetAudienceDescription,
@@ -126,6 +139,7 @@ export function Step2TelemarketingContent({ data, onNext }: Step2TelemarketingPr
             }}
             onChange={(newData) => {
               setCampaignObjective(newData.campaignObjective);
+              setCampaignContextBrief(newData.campaignContextBrief || '');
               setProductServiceInfo(newData.productServiceInfo);
               setTalkingPoints(newData.talkingPoints);
               setTargetAudienceDescription(newData.targetAudienceDescription);

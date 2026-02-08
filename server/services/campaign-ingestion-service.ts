@@ -18,10 +18,26 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+// Valid campaign types (must match shared/campaign-types.ts)
+export type CampaignType =
+  | 'appointment_setting'
+  | 'content_syndication'
+  | 'lead_qualification'
+  | 'sql'
+  | 'bant_leads'
+  | 'data_validation'
+  | 'high_quality_leads'
+  | 'webinar_invite'
+  | 'live_webinar'
+  | 'on_demand_webinar'
+  | 'executive_dinner';
+
 // Structured campaign output type
 export interface IngestedCampaign {
   campaignName: string;
+  campaignType: CampaignType; // AI-inferred campaign type
   campaignObjective: string;
+  campaignContextBrief: string; // Brief summary for AI agent context
   productServiceInfo: string;
   talkingPoints: string[];
   targetAudienceDescription: string;
@@ -99,25 +115,41 @@ RAW CAMPAIGN CONTENT:
 
 {hints_section}
 
+CAMPAIGN TYPE SELECTION:
+Based on the content, determine the most appropriate campaign type from these options:
+- "appointment_setting" - Goal is to book meetings/demos with qualified prospects
+- "content_syndication" - Goal is to get consent to receive content and validate interest
+- "lead_qualification" - Goal is discovery and gathering qualifying information
+- "sql" - Sales Qualified Lead - identifying sales-ready prospects with BANT
+- "bant_leads" - Specifically qualifying on Budget, Authority, Need, Timeline
+- "data_validation" - Verifying and updating contact information
+- "high_quality_leads" - Identifying highly qualified prospects
+- "webinar_invite" - Driving webinar registrations
+- "live_webinar" - Driving live webinar attendance
+- "on_demand_webinar" - Driving on-demand content consumption
+- "executive_dinner" - Securing attendance from senior executives
+
 Generate a complete campaign configuration as JSON with this exact structure:
 {
   "campaignName": "Short descriptive name for the campaign",
+  "campaignType": "appointment_setting|content_syndication|lead_qualification|sql|bant_leads|data_validation|high_quality_leads|webinar_invite|live_webinar|on_demand_webinar|executive_dinner",
   "campaignObjective": "The primary goal of each call (1-2 sentences)",
-  "productServiceInfo": "Clear description of product/service and its value proposition (2-4 sentences)",
-  "talkingPoints": ["Point 1", "Point 2", "Point 3", "Point 4", "Point 5"],
+  "campaignContextBrief": "A 3-5 sentence brief that gives the AI voice agent all the context it needs to have intelligent conversations. Include: who we are, what we offer, why it matters to the prospect, and what outcome we want. This is the AI agent's 'cheat sheet' for the call.",
+  "productServiceInfo": "Clear description of product/service and its value proposition with SPECIFIC METRICS (e.g., 'reduces time by 40%', 'saves $50K annually'). Include 2-4 sentences.",
+  "talkingPoints": ["Point 1 with specific metric/proof point", "Point 2 with specific metric/proof point", "Point 3 with specific metric/proof point", "Point 4", "Point 5"],
   "targetAudienceDescription": "Who we're calling and why they'd care (1-2 sentences)",
-  "successCriteria": "What counts as a successful call outcome",
+  "successCriteria": "What counts as a successful call outcome - be specific about what signals indicate qualification",
   "campaignObjections": [
-    {"objection": "Common objection 1", "response": "How to address it"},
-    {"objection": "Common objection 2", "response": "How to address it"},
-    {"objection": "Common objection 3", "response": "How to address it"}
+    {"objection": "Common objection 1", "response": "How to address it with empathy and value"},
+    {"objection": "Common objection 2", "response": "How to address it with empathy and value"},
+    {"objection": "Common objection 3", "response": "How to address it with empathy and value"}
   ],
   "qualificationQuestions": [
-    {"question": "Question text", "type": "text|number|boolean|select", "required": true, "options": ["if select type"]},
+    {"question": "Question text", "type": "text|number|boolean|select", "required": true, "options": ["if select type"]}
   ],
   "callFlow": {
     "openingApproach": "How to open the call after confirmation",
-    "valueProposition": "Core value statement (15 seconds or less)",
+    "valueProposition": "Core value statement with at least ONE specific metric (15 seconds or less)",
     "closingStrategy": "How to close for the desired outcome",
     "voicemailScript": "30-second voicemail message if no answer"
   },
@@ -126,6 +158,12 @@ Generate a complete campaign configuration as JSON with this exact structure:
   "confidenceScore": 85,
   "suggestedImprovements": ["Recommendations to improve campaign effectiveness"]
 }
+
+IMPORTANT REQUIREMENTS:
+1. campaignType MUST be one of the exact values listed above
+2. campaignContextBrief should be conversational and give the AI agent everything it needs to sound knowledgeable
+3. talkingPoints should include SPECIFIC metrics, not vague claims (e.g., "Reduces hiring time by 40%" not "Speeds up hiring")
+4. successCriteria should be specific enough that the AI can determine when to mark a lead as qualified
 
 Return ONLY the JSON object, no additional text.`;
 
@@ -249,12 +287,51 @@ export class CampaignIngestionService {
    * Validate and normalize the ingested campaign structure
    */
   private validateAndNormalize(campaign: any): IngestedCampaign {
+    // Valid campaign types
+    const validCampaignTypes: CampaignType[] = [
+      'appointment_setting',
+      'content_syndication',
+      'lead_qualification',
+      'sql',
+      'bant_leads',
+      'data_validation',
+      'high_quality_leads',
+      'webinar_invite',
+      'live_webinar',
+      'on_demand_webinar',
+      'executive_dinner'
+    ];
+
+    // Infer campaign type if not provided or invalid
+    let campaignType: CampaignType = 'appointment_setting'; // default
+    if (campaign.campaignType && validCampaignTypes.includes(campaign.campaignType)) {
+      campaignType = campaign.campaignType;
+    } else if (campaign.campaignObjective) {
+      // Try to infer from objective
+      const objective = campaign.campaignObjective.toLowerCase();
+      if (objective.includes('webinar') || objective.includes('registration')) {
+        campaignType = 'webinar_invite';
+      } else if (objective.includes('demo') || objective.includes('meeting') || objective.includes('appointment')) {
+        campaignType = 'appointment_setting';
+      } else if (objective.includes('qualify') || objective.includes('qualification') || objective.includes('bant')) {
+        campaignType = 'lead_qualification';
+      } else if (objective.includes('content') || objective.includes('download') || objective.includes('whitepaper')) {
+        campaignType = 'content_syndication';
+      } else if (objective.includes('data') || objective.includes('verify') || objective.includes('validate')) {
+        campaignType = 'data_validation';
+      } else if (objective.includes('dinner') || objective.includes('executive') || objective.includes('event')) {
+        campaignType = 'executive_dinner';
+      }
+    }
+
     return {
       campaignName: campaign.campaignName || "Untitled Campaign",
+      campaignType,
       campaignObjective: campaign.campaignObjective || "",
+      campaignContextBrief: campaign.campaignContextBrief || "",
       productServiceInfo: campaign.productServiceInfo || "",
-      talkingPoints: Array.isArray(campaign.talkingPoints) 
-        ? campaign.talkingPoints.slice(0, 10) 
+      talkingPoints: Array.isArray(campaign.talkingPoints)
+        ? campaign.talkingPoints.slice(0, 10)
         : [],
       targetAudienceDescription: campaign.targetAudienceDescription || "",
       successCriteria: campaign.successCriteria || "Positive conversation outcome",
@@ -278,8 +355,8 @@ export class CampaignIngestionService {
         closingStrategy: campaign.callFlow?.closingStrategy || "",
         voicemailScript: campaign.callFlow?.voicemailScript
       },
-      complianceNotes: Array.isArray(campaign.complianceNotes) 
-        ? campaign.complianceNotes 
+      complianceNotes: Array.isArray(campaign.complianceNotes)
+        ? campaign.complianceNotes
         : [],
       estimatedCallDuration: typeof campaign.estimatedCallDuration === 'number'
         ? Math.min(Math.max(campaign.estimatedCallDuration, 60), 600)

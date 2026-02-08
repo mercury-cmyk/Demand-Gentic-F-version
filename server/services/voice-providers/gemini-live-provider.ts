@@ -71,6 +71,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // Accumulated transcript for the current turn
   private currentTranscript: string = '';
 
+  // Anti-repetition: Track recent phrases to prevent loops
+  private recentPhrases: string[] = [];
+  private readonly MAX_RECENT_PHRASES = 10;
+
   // Speech-to-Text streaming for user transcription
   private speechClient: SpeechClient | null = null;
   private recognizeStream: ReturnType<SpeechClient['streamingRecognize']> | null = null;
@@ -293,12 +297,15 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         voice_config: {
           prebuilt_voice_config: {
             voice_name: voice,
+            speaking_rate: 0.9, // Set to 90% of normal speed for more natural pacing
           },
         },
       },
       // Google recommends temperature 1.0 for Gemini 2.5 models.
       // Sub-1.0 values can cause looping and degraded performance.
-      temperature: config.temperature ?? 1.0,
+      // UPDATE FEB 2026: High temperature is causing script deviation.
+      // Lowering to 0.5 to improve focus and script adherence.
+      temperature: config.temperature ?? 0.5,
       // NOTE: max_output_tokens and thinking_config are NOT supported by native audio
       // models in the Live API. Including them causes "The request is not supported
       // by this model" endpoint selection failure. Omit them entirely.
@@ -910,12 +917,30 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       const outputTranscription = content.output_transcription || content.outputTranscription;
       const text = outputTranscription.text || outputTranscription.transcript || '';
       if (text.trim()) {
-        console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
-        this.emit('transcript:agent', {
-          text: text.trim(),
-          isFinal: true,
-          timestamp: new Date(),
+        // ANTI-REPETITION CHECK: Detect if this is a repeated phrase
+        const normalizedText = text.trim().toLowerCase().replace(/[^\w\s]/g, '');
+        const isRepetition = this.recentPhrases.some(phrase => {
+          const similarity = this.calculateSimilarity(normalizedText, phrase);
+          return similarity > 0.85; // 85% similar = likely repetition
         });
+
+        if (isRepetition) {
+          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED - suppressing duplicate phrase: "${text.substring(0, 50)}..."`);
+          // Don't emit or track this phrase - it's a repeat
+        } else {
+          // Track this phrase for future comparison
+          this.recentPhrases.push(normalizedText);
+          if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {
+            this.recentPhrases.shift(); // Remove oldest
+          }
+
+          console.log(`${LOG_PREFIX} 🗣️ OUTPUT TRANSCRIPTION (agent): "${text}"`);
+          this.emit('transcript:agent', {
+            text: text.trim(),
+            isFinal: true,
+            timestamp: new Date(),
+          });
+        }
       }
     }
 
@@ -1015,6 +1040,30 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
       bytesSent: this.audioBytesSent,
       playbackMs: this.audioPlaybackMs,
     };
+  }
+
+  /**
+   * Calculate similarity between two strings (Jaccard similarity on words)
+   * Returns a value between 0 (no similarity) and 1 (identical)
+   */
+  private calculateSimilarity(str1: string, str2: string): number {
+    const words1 = new Set(str1.split(/\s+/).filter(w => w.length > 2));
+    const words2 = new Set(str2.split(/\s+/).filter(w => w.length > 2));
+
+    if (words1.size === 0 && words2.size === 0) return 1;
+    if (words1.size === 0 || words2.size === 0) return 0;
+
+    const intersection = new Set([...words1].filter(x => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+
+    return intersection.size / union.size;
+  }
+
+  /**
+   * Clear recent phrases (call when starting a new conversation)
+   */
+  clearRecentPhrases(): void {
+    this.recentPhrases = [];
   }
 
   /**

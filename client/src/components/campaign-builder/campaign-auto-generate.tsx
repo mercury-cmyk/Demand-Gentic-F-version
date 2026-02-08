@@ -36,10 +36,41 @@ import {
   Loader2
 } from "lucide-react";
 
+// Campaign types matching the backend
+type CampaignType =
+  | 'appointment_setting'
+  | 'content_syndication'
+  | 'lead_qualification'
+  | 'sql'
+  | 'bant_leads'
+  | 'data_validation'
+  | 'high_quality_leads'
+  | 'webinar_invite'
+  | 'live_webinar'
+  | 'on_demand_webinar'
+  | 'executive_dinner';
+
+// Human-readable labels for campaign types
+const CAMPAIGN_TYPE_LABELS: Record<CampaignType, string> = {
+  appointment_setting: 'Appointment Setting',
+  content_syndication: 'Content Syndication',
+  lead_qualification: 'Lead Qualification',
+  sql: 'Sales Qualified Lead (SQL)',
+  bant_leads: 'BANT Qualification',
+  data_validation: 'Data Validation',
+  high_quality_leads: 'High-Quality Leads',
+  webinar_invite: 'Webinar Invitation',
+  live_webinar: 'Live Webinar',
+  on_demand_webinar: 'On-Demand Webinar',
+  executive_dinner: 'Executive Dinner',
+};
+
 // Types matching the backend service
 interface IngestedCampaign {
   campaignName: string;
+  campaignType: CampaignType;
   campaignObjective: string;
+  campaignContextBrief: string;
   productServiceInfo: string;
   talkingPoints: string[];
   targetAudienceDescription: string;
@@ -69,7 +100,9 @@ interface IngestedCampaign {
 interface CampaignAutoGenerateProps {
   onCampaignGenerated: (campaign: IngestedCampaign) => void;
   onApply: (data: {
+    campaignType: CampaignType;
     campaignObjective: string;
+    campaignContextBrief: string;
     productServiceInfo: string;
     talkingPoints: string[];
     targetAudienceDescription: string;
@@ -221,9 +254,11 @@ export function CampaignAutoGenerate({ onCampaignGenerated, onApply }: CampaignA
 
   const handleApply = () => {
     if (!generatedCampaign) return;
-    
+
     onApply({
+      campaignType: generatedCampaign.campaignType,
       campaignObjective: generatedCampaign.campaignObjective,
+      campaignContextBrief: generatedCampaign.campaignContextBrief,
       productServiceInfo: generatedCampaign.productServiceInfo,
       talkingPoints: generatedCampaign.talkingPoints,
       targetAudienceDescription: generatedCampaign.targetAudienceDescription,
@@ -231,7 +266,7 @@ export function CampaignAutoGenerate({ onCampaignGenerated, onApply }: CampaignA
       campaignObjections: generatedCampaign.campaignObjections,
       qualificationQuestions: generatedCampaign.qualificationQuestions,
     });
-    
+
     toast({
       title: "Campaign applied",
       description: "Generated content has been added to your campaign",
@@ -383,9 +418,14 @@ Goal: Book demo meetings with qualified decision makers who have budget authorit
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold">{generatedCampaign.campaignName}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Generated in {generatedCampaign.estimatedCallDuration}s estimated call duration
-                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge variant="outline" className="text-xs">
+                      {CAMPAIGN_TYPE_LABELS[generatedCampaign.campaignType] || generatedCampaign.campaignType}
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">
+                      ~{generatedCampaign.estimatedCallDuration}s call duration
+                    </span>
+                  </div>
                 </div>
                 <Badge variant={generatedCampaign.confidenceScore >= 80 ? "default" : "secondary"}>
                   {generatedCampaign.confidenceScore}% confidence
@@ -405,6 +445,22 @@ Goal: Book demo meetings with qualified decision makers who have budget authorit
                     </div>
                     <p className="text-sm bg-muted p-3 rounded-lg">{generatedCampaign.campaignObjective}</p>
                   </div>
+
+                  {/* Campaign Brief (AI Context) */}
+                  {generatedCampaign.campaignContextBrief && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Sparkles className="w-4 h-4 text-purple-500" />
+                        AI Agent Context Brief
+                      </div>
+                      <p className="text-sm bg-purple-50 dark:bg-purple-950/20 p-3 rounded-lg border border-purple-200 dark:border-purple-800">
+                        {generatedCampaign.campaignContextBrief}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        This brief gives the AI voice agent context for intelligent conversations.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Product Info */}
                   <div className="space-y-2">
@@ -439,6 +495,22 @@ Goal: Book demo meetings with qualified decision makers who have budget authorit
                     </div>
                     <p className="text-sm bg-muted p-3 rounded-lg">{generatedCampaign.targetAudienceDescription}</p>
                   </div>
+
+                  {/* Success Criteria */}
+                  {generatedCampaign.successCriteria && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Check className="w-4 h-4 text-green-500" />
+                        Success Criteria (Qualification Signals)
+                      </div>
+                      <p className="text-sm bg-green-50 dark:bg-green-950/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
+                        {generatedCampaign.successCriteria}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        When these criteria are met, the AI will mark the lead as qualified.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Objections */}
                   {generatedCampaign.campaignObjections.length > 0 && (
