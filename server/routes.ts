@@ -92,6 +92,7 @@ import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
 import bookingRouter from './routes/booking-routes';
+import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -13487,6 +13488,10 @@ Provide JSON response with:
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-defaults", agentDefaultsRouter);
+
+  // ==================== KNOWLEDGE BLOCKS ====================
+
+  app.use("/api/knowledge-blocks", knowledgeBlocksRouter);
 
   // ==================== RESEARCH & ANALYSIS (Quality Control, Scoring) ====================
 

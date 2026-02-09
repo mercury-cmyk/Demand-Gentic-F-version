@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AI Generative Studio Service
  *
  * Provides AI-powered content generation for multiple content types:
@@ -124,7 +124,13 @@ export async function generateLandingPage(params: LandingPageParams): Promise<Ge
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an expert landing page designer and conversion optimization specialist working within Generative Studio. ` +
+      `Your role is to create high-converting, visually stunning landing pages that reflect the organization's brand identity, ` +
+      `messaging, value propositions, and target audience. Use the organization's intelligence context  - including ICP, ` +
+      `competitive positioning, industry knowledge, compliance policies, and campaign learnings  - to craft landing pages ` +
+      `that resonate with the right audience segments and align with the organization's go-to-market strategy.`
+    );
   } catch {
     systemPrompt = 'You are an expert content creation AI assistant.';
   }
@@ -212,7 +218,13 @@ export async function generateEmailTemplate(params: EmailTemplateParams): Promis
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an expert email marketing copywriter and HTML email developer working within Generative Studio. ` +
+      `Your role is to create compelling, high-performing email templates that drive engagement and conversions. ` +
+      `Use the organization's intelligence context  - including brand voice, ICP profiles, competitive positioning, ` +
+      `industry knowledge, compliance policies, and campaign learnings  - to craft emails that speak directly to ` +
+      `the target audience, maintain brand consistency, and follow email marketing best practices.`
+    );
   } catch {
     systemPrompt = 'You are an expert email marketing copywriter and HTML email developer.';
   }
@@ -300,7 +312,13 @@ export async function generateBlogPost(params: BlogPostParams): Promise<Generati
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an expert B2B content writer and SEO specialist working within Generative Studio. ` +
+      `Your role is to create thought-leadership blog posts that establish authority, drive organic traffic, and ` +
+      `educate target audiences. Use the organization's intelligence context  - including ICP profiles, industry ` +
+      `expertise, competitive positioning, value propositions, compliance policies, and campaign learnings  - to ` +
+      `produce blog content that aligns with the organization's content strategy and resonates with their ideal buyers.`
+    );
   } catch {
     systemPrompt = 'You are an expert B2B content writer and SEO specialist.';
   }
@@ -393,7 +411,14 @@ export async function generateEbook(params: EbookParams): Promise<GenerationResu
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an expert B2B content strategist and eBook author working within Generative Studio. ` +
+      `Your role is to create comprehensive, high-value eBooks that serve as premium lead-generation assets. ` +
+      `Use the organization's intelligence context  - including ICP profiles, industry expertise, competitive ` +
+      `positioning, solution capabilities, compliance policies, and campaign learnings  - to produce authoritative ` +
+      `long-form content that demonstrates thought leadership and addresses the real challenges facing the ` +
+      `organization's target audience.`
+    );
   } catch {
     systemPrompt = 'You are an expert B2B content strategist and eBook author.';
   }
@@ -501,7 +526,14 @@ export async function generateSolutionBrief(params: SolutionBriefParams): Promis
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an expert B2B solution architect and technical writer working within Generative Studio. ` +
+      `Your role is to create persuasive, technically credible solution briefs that articulate how the ` +
+      `organization's offerings solve specific business challenges. Use the organization's intelligence context ` +
+      ` - including solution capabilities, ICP profiles, competitive differentiation, industry expertise, ` +
+      `compliance policies, and campaign learnings  - to produce solution briefs that clearly map problems ` +
+      `to solutions and drive buying decisions.`
+    );
   } catch {
     systemPrompt = 'You are an expert B2B solution architect and technical writer.';
   }
@@ -614,7 +646,14 @@ export async function chat(params: ChatParams): Promise<{
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt(
+      `You are an AI content strategy assistant working within Generative Studio. ` +
+      `Your role is to help users brainstorm, plan, and refine content across all content types  - landing pages, ` +
+      `emails, blog posts, eBooks, and solution briefs. Use the organization's intelligence context  - including ` +
+      `brand voice, ICP profiles, competitive positioning, industry knowledge, compliance policies, and campaign ` +
+      `learnings  - to provide strategic content advice that aligns with the organization's go-to-market strategy ` +
+      `and resonates with their target audience.`
+    );
   } catch {
     systemPrompt = '';
   }
@@ -703,7 +742,7 @@ export async function refineContent(
 
   let systemPrompt: string;
   try {
-    systemPrompt = await buildAgentSystemPrompt('content_creator');
+    systemPrompt = await buildAgentSystemPrompt('You are an expert content editor and refiner in Generative Studio. Improve and polish content while preserving intent. Use org intelligence context to keep content on-brand and aligned with organizational standards.');
   } catch {
     systemPrompt = 'You are an expert content editor and refiner.';
   }

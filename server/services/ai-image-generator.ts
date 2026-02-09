@@ -339,12 +339,21 @@ class AIImageGenerator {
     const imageBuffer = Buffer.from(base64Data, 'base64');
     const sizeBytes = imageBuffer.length;
 
-    // Upload to cloud storage
+    // Upload to cloud storage and make publicly accessible
     await uploadToS3(storageKey, imageBuffer, 'image/png');
-    const storedUrl = await getPublicUrl(storageKey);
 
-    // Create thumbnail (simplified - just use the same image for now)
-    // In production, you'd use Sharp or similar to resize
+    // Make the file publicly readable so the URL doesn't expire
+    const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
+    try {
+      const { Storage } = await import('@google-cloud/storage');
+      const gcs = new Storage({ projectId: this.projectId });
+      await gcs.bucket(bucketName).file(storageKey).makePublic();
+    } catch (err) {
+      console.warn('[AIImageGenerator] Could not make file public, falling back to signed URL:', err);
+    }
+
+    // Use permanent public URL (no expiry) instead of signed URL
+    const storedUrl = `https://storage.googleapis.com/${bucketName}/${storageKey}`;
     const thumbnailUrl = storedUrl;
 
     // Save to database

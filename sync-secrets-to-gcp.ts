@@ -64,39 +64,38 @@ async function getSecretsToSync(): Promise<SecretConfig[]> {
     // Session & Auth
     { name: 'SESSION_SECRET', value: envLocal.SESSION_SECRET, description: 'Express session secret' },
     { name: 'JWT_SECRET', value: JWT_SECRET, description: 'JWT signing secret (generated)' },
-    
-    // Database (using local working credentials)
+    { name: 'SECRET_MANAGER_MASTER_KEY', value: envLocal.SECRET_MANAGER_MASTER_KEY, description: 'Master key for secret encryption' },
+
+    // Database
     { name: 'PGDATABASE', value: envLocal.PGDATABASE, description: 'PostgreSQL database name' },
     { name: 'PGHOST', value: envLocal.PGHOST, description: 'PostgreSQL host' },
     { name: 'PGPORT', value: envLocal.PGPORT, description: 'PostgreSQL port' },
     { name: 'PGUSER', value: envLocal.PGUSER, description: 'PostgreSQL user' },
     { name: 'PGPASSWORD', value: envLocal.PGPASSWORD, description: 'PostgreSQL password' },
     { name: 'DATABASE_URL', value: envLocal.DATABASE_URL, description: 'Full database connection URL' },
-    
+
     // AI Providers
     { name: 'AI_INTEGRATIONS_OPENAI_API_KEY', value: envLocal.AI_INTEGRATIONS_OPENAI_API_KEY, description: 'OpenAI API key' },
+    { name: 'AI_INTEGRATIONS_OPENAI_BASE_URL', value: envLocal.AI_INTEGRATIONS_OPENAI_BASE_URL, description: 'OpenAI API base URL' },
     { name: 'OPENAI_API_KEY', value: envLocal.OPENAI_API_KEY, description: 'OpenAI API key (alternative)' },
     { name: 'OPENAI_WEBHOOK_SECRET', value: envLocal.OPENAI_WEBHOOK_SECRET, description: 'OpenAI webhook secret' },
     { name: 'AI_INTEGRATIONS_GEMINI_API_KEY', value: envLocal.AI_INTEGRATIONS_GEMINI_API_KEY, description: 'Gemini API key' },
+    { name: 'AI_INTEGRATIONS_GEMINI_BASE_URL', value: envLocal.AI_INTEGRATIONS_GEMINI_BASE_URL, description: 'Gemini API base URL' },
     { name: 'GEMINI_API_KEY', value: envLocal.GEMINI_API_KEY, description: 'Gemini API key (alternative)' },
     { name: 'AI_INTEGRATIONS_ANTHROPIC_API_KEY', value: envLocal.AI_INTEGRATIONS_ANTHROPIC_API_KEY, description: 'Anthropic Claude API key' },
     { name: 'DEEPSEEK_API_KEY', value: envLocal.DEEPSEEK_API_KEY, description: 'DeepSeek API key' },
-    
-    // Telnyx (using local working configuration)
+
+    // Telnyx Telephony
     { name: 'TELNYX_API_KEY', value: envLocal.TELNYX_API_KEY, description: 'Telnyx API key' },
     { name: 'TELNYX_CONNECTION_ID', value: envLocal.TELNYX_CONNECTION_ID, description: 'Telnyx SIP connection ID' },
     { name: 'TELNYX_FROM_NUMBER', value: envLocal.TELNYX_FROM_NUMBER, description: 'Telnyx outbound phone number' },
-    { name: 'TELNYX_WEBRTC_USERNAME', value: envLocal.TELNYX_WEBRTC_USERNAME, description: 'Telnyx WebRTC username' },
-    { name: 'TELNYX_WEBRTC_PASSWORD', value: envLocal.TELNYX_WEBRTC_PASSWORD, description: 'Telnyx WebRTC password' },
+    { name: 'TELNYX_WEBRTC_USERNAME', value: envLocal.TELNYX_WEBRTC_USERNAME || envLocal.TELNYX_SIP_USERNAME, description: 'Telnyx WebRTC username' },
+    { name: 'TELNYX_WEBRTC_PASSWORD', value: envLocal.TELNYX_WEBRTC_PASSWORD || envLocal.TELNYX_SIP_PASSWORD, description: 'Telnyx WebRTC password' },
     { name: 'TELNYX_CALL_CONTROL_APP_ID', value: envLocal.TELNYX_CALL_CONTROL_APP_ID, description: 'Telnyx Call Control app ID' },
-    { name: 'TELNYX_TEXML_APP_ID', value: envLocal.TELNYX_TEXML_APP_ID, description: 'Telnyx TeXML app ID' },
-    
-    // URLs (Hardcoded to demandgentic.ai for production)
-    { name: 'BASE_URL', value: 'https://demandgentic.ai', description: 'Application base URL' },
-    { name: 'TELNYX_WEBHOOK_URL', value: 'https://demandgentic.ai/api/webhooks/telnyx', description: 'Telnyx webhook URL' },
-    { name: 'PUBLIC_WEBSOCKET_URL', value: 'wss://demandgentic.ai/voice-dialer', description: 'Public WebSocket URL' },
-    { name: 'PUBLIC_WEBHOOK_HOST', value: 'demandgentic.ai', description: 'Public webhook host (domain only)' },
-    
+    { name: 'TELNYX_SIP_USERNAME', value: envLocal.TELNYX_SIP_USERNAME, description: 'Telnyx SIP username' },
+    { name: 'TELNYX_SIP_PASSWORD', value: envLocal.TELNYX_SIP_PASSWORD, description: 'Telnyx SIP password' },
+    { name: 'TELNYX_SIP_CONNECTION_ID', value: envLocal.TELNYX_SIP_CONNECTION_ID, description: 'Telnyx SIP connection ID' },
+
     // Search & Intelligence
     { name: 'BRAVE_SEARCH_API_KEY', value: envLocal.BRAVE_SEARCH_API_KEY, description: 'Brave Search API key' },
     { name: 'GOOGLE_SEARCH_API_KEY', value: envLocal.GOOGLE_SEARCH_API_KEY, description: 'Google Custom Search API key' },
@@ -104,29 +103,33 @@ async function getSecretsToSync(): Promise<SecretConfig[]> {
     { name: 'PSE_GOOGLE', value: envLocal.PSE_GOOGLE, description: 'Google Programmable Search Engine key' },
     { name: 'EMAIL_LIST_VERIFY_API_KEY', value: envLocal.EMAIL_LIST_VERIFY_API_KEY, description: 'Email verification API key' },
     { name: 'COMPANIES_HOUSE_API_KEY', value: envLocal.COMPANIES_HOUSE_API_KEY, description: 'UK Companies House API key' },
-    
+
     // OAuth & Social
     { name: 'GOOGLE_AUTH_CLIENT_ID', value: envLocal.GOOGLE_AUTH_CLIENT_ID, description: 'Google OAuth client ID' },
     { name: 'GOOGLE_CLIENT_SECRET', value: envLocal.GOOGLE_CLIENT_SECRET, description: 'Google OAuth client secret' },
     { name: 'MICROSOFT_CLIENT_ID', value: envLocal.MICROSOFT_CLIENT_ID, description: 'Microsoft OAuth client ID' },
     { name: 'MICROSOFT_CLIENT_SECRET', value: envLocal.MICROSOFT_CLIENT_SECRET, description: 'Microsoft OAuth client secret' },
     { name: 'MICROSOFT_TENANT_ID', value: envLocal.MICROSOFT_TENANT_ID, description: 'Microsoft tenant ID' },
-    
+
     // Email & Messaging
     { name: 'MAILGUN_API_KEY', value: envLocal.MAILGUN_API_KEY, description: 'Mailgun API key' },
     { name: 'MAILGUN_DOMAIN', value: envLocal.MAILGUN_DOMAIN, description: 'Mailgun sending domain' },
-    
+
     // Infrastructure
     { name: 'REDIS_URL', value: envLocal.REDIS_URL, description: 'Redis connection URL' },
-    { name: 'GCS_BUCKET', value: envLocal.GCS_BUCKET, description: 'Google Cloud Storage bucket name' },
-    
-    // Configuration
-    { name: 'S3_REGION', value: envLocal.S3_REGION || 'ap-south-1', description: 'AWS S3 region' },
-    { name: 'VOICE_PROVIDER', value: envLocal.VOICE_PROVIDER || 'openai', description: 'Voice provider (openai/google)' },
-    { name: 'GEMINI_LIVE_MODEL', value: envLocal.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio', description: 'Gemini Live model name' },
+
+    // Transcription
+    { name: 'DEEPGRAM_API_KEY', value: envLocal.DEEPGRAM_API_KEY, description: 'Deepgram transcription API key' },
+
+    // Org Intelligence Models
     { name: 'ORG_INTELLIGENCE_OPENAI_MODEL', value: envLocal.ORG_INTELLIGENCE_OPENAI_MODEL || 'gpt-4o', description: 'OpenAI model for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_GEMINI_MODEL', value: envLocal.ORG_INTELLIGENCE_GEMINI_MODEL || 'gemini-2.5-pro', description: 'Gemini model for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_CLAUDE_MODEL', value: envLocal.ORG_INTELLIGENCE_CLAUDE_MODEL || 'claude-3-5-sonnet-20241022', description: 'Claude model for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_SYNTH_PROVIDER', value: envLocal.ORG_INTELLIGENCE_SYNTH_PROVIDER || 'gemini', description: 'Synth provider for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_SYNTH_MODEL', value: envLocal.ORG_INTELLIGENCE_SYNTH_MODEL || 'gemini-2.5-pro', description: 'Synth model for org intelligence' },
+    { name: 'ORG_INTELLIGENCE_OPENAI_MAX_TOKENS', value: envLocal.ORG_INTELLIGENCE_OPENAI_MAX_TOKENS || '6500', description: 'Max tokens for OpenAI' },
     { name: 'ORG_INTELLIGENCE_GEMINI_MAX_OUTPUT_TOKENS', value: envLocal.ORG_INTELLIGENCE_GEMINI_MAX_OUTPUT_TOKENS || '6500', description: 'Max tokens for Gemini' },
-    { name: 'ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS', value: envLocal.ORG_INTELLIGENCE_CLAUDE_MAX_OUTPUT_TOKENS || '6500', description: 'Max tokens for Claude' },
+    { name: 'ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS', value: envLocal.ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS || '6500', description: 'Max tokens for Claude' },
   ];
   
   return secrets.filter(s => {

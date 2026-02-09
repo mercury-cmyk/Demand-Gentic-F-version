@@ -2,11 +2,33 @@ import { env } from './server/env';
 
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
 
+// Helper to fetch tunnel URL from ngrok local API
+async function getNgrokUrl() {
+  try {
+    const res = await fetch('http://127.0.0.1:4040/api/tunnels');
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    const tunnel = data.tunnels.find((t: any) => t.proto === 'https');
+    return tunnel ? tunnel.public_url : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function switchToDev() {
   const apiKey = env.TELNYX_API_KEY;
   const texmlAppId = env.TELNYX_TEXML_APP_ID;
   const callControlAppId = env.TELNYX_CALL_CONTROL_APP_ID;
-  const ngrokUrl = 'https://steve-unbalking-guessingly.ngrok-free.dev';
+  
+  // Try to get dynamic ngrok URL first, fallback to hardcoded
+  const dynamicNgrokUrl = await getNgrokUrl();
+  const ngrokUrl = dynamicNgrokUrl || 'https://steve-unbalking-guessingly.ngrok-free.dev';
+
+  if (dynamicNgrokUrl) {
+    console.log(`✅ Detected active ngrok tunnel: ${dynamicNgrokUrl}`);
+  } else {
+    console.log(`⚠️  No active ngrok tunnel found via API, using fallback: ${ngrokUrl}`);
+  }
 
   if (!apiKey) {
     console.error('Missing TELNYX_API_KEY');
@@ -32,6 +54,7 @@ async function switchToDev() {
       },
       body: JSON.stringify({
         voice_url: texmlVoiceUrl,
+        status_callback: texmlStatusUrl,
         status_callback_url: texmlStatusUrl,
       }),
     });

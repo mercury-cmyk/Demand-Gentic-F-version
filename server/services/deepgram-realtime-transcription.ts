@@ -19,7 +19,7 @@ import WebSocket from 'ws';
 const LOG_PREFIX = '[Deepgram-RT]';
 
 // Configuration
-const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+const DEEPGRAM_API_KEY = (process.env.DEEPGRAM_API_KEY || '').trim();
 const DEEPGRAM_WS_URL = 'wss://api.deepgram.com/v1/listen';
 
 // Deepgram model options
