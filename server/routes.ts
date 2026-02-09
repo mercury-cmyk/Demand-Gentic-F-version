@@ -4673,10 +4673,7 @@ export function registerRoutes(app: Express) {
       const [aiCallStats] = await db
         .select({
           callsMade: sql<number>`COUNT(*)::int`,
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.status} IN (${sql.join(
-            aiConnectedStatuses.map((value) => sql`${value}`),
-            sql`, `
-          )}) OR ${callSessions.aiDisposition} IN (${sql.join(
+          callsConnected: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN (${sql.join(
             aiConnectedDispositions.map((value) => sql`${value}`),
             sql`, `
           )}) THEN 1 END)::int`,

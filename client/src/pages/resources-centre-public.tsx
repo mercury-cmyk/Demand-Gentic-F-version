@@ -527,7 +527,7 @@ export default function ResourcesCentrePublic() {
               <a href="/gdpr" className="hover:text-white transition-colors">GDPR</a>
             </div>
             <p className="text-slate-500 text-sm">
-              © 2024 Pivotal B2B LLC. All rights reserved.
+              © 2026 Pivotal B2B LLC. All rights reserved.
             </p>
           </div>
         </div>

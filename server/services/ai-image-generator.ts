@@ -280,6 +280,8 @@ class AIImageGenerator {
     };
 
     try {
+      console.log(`[AIImageGenerator] Calling Imagen API: endpoint=${endpoint}, prompt="${prompt.slice(0, 80)}...", sampleCount=${sampleCount}, aspectRatio=${aspectRatio}`);
+
       // Import GoogleAuth for authentication
       const { GoogleAuth } = await import('google-auth-library');
       const auth = new GoogleAuth({
@@ -288,6 +290,10 @@ class AIImageGenerator {
 
       const client = await auth.getClient();
       const accessToken = await client.getAccessToken();
+
+      if (!accessToken.token) {
+        throw new Error('Failed to obtain access token for Vertex AI — check service account credentials');
+      }
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -300,10 +306,12 @@ class AIImageGenerator {
 
       if (!response.ok) {
         const errorText = await response.text();
+        console.error(`[AIImageGenerator] Imagen API HTTP ${response.status}:`, errorText);
         throw new Error(`Imagen API error: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
+      console.log(`[AIImageGenerator] Imagen API response keys: ${Object.keys(data).join(', ')}, predictions count: ${data.predictions?.length || 0}`);
 
       // Extract base64 images from response
       const images: string[] = [];
@@ -312,13 +320,22 @@ class AIImageGenerator {
         for (const prediction of data.predictions) {
           if (prediction.bytesBase64Encoded) {
             images.push(prediction.bytesBase64Encoded);
+            console.log(`[AIImageGenerator] Got image: ${prediction.bytesBase64Encoded.length} chars base64`);
+          } else {
+            console.warn('[AIImageGenerator] Prediction missing bytesBase64Encoded:', Object.keys(prediction));
           }
         }
+      } else {
+        console.warn('[AIImageGenerator] No predictions in response:', JSON.stringify(data).slice(0, 500));
+      }
+
+      if (images.length === 0) {
+        throw new Error('Imagen API returned no images — the prompt may have been rejected by content safety filters');
       }
 
       return images;
     } catch (error: any) {
-      console.error('[AIImageGenerator] Imagen API call failed:', error);
+      console.error('[AIImageGenerator] Imagen API call failed:', error.message || error);
       throw error;
     }
   }
@@ -338,9 +355,11 @@ class AIImageGenerator {
     // Decode base64 to buffer
     const imageBuffer = Buffer.from(base64Data, 'base64');
     const sizeBytes = imageBuffer.length;
+    console.log(`[AIImageGenerator] Saving image ${imageId}: ${sizeBytes} bytes, key=${storageKey}`);
 
     // Upload to cloud storage and make publicly accessible
     await uploadToS3(storageKey, imageBuffer, 'image/png');
+    console.log(`[AIImageGenerator] Image uploaded to GCS: ${storageKey}`);
 
     // Make the file publicly readable so the URL doesn't expire
     const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
@@ -352,16 +371,15 @@ class AIImageGenerator {
       console.warn('[AIImageGenerator] Could not make file public, falling back to signed URL:', err);
     }
 
-    // Use permanent public URL (no expiry) instead of signed URL
+    // Store the direct GCS URL in the database for internal use
     const storedUrl = `https://storage.googleapis.com/${bucketName}/${storageKey}`;
-    const thumbnailUrl = storedUrl;
 
     // Save to database
     await db.insert(emailBuilderImages).values({
       id: imageId,
       source: 'ai_generated',
       storedUrl,
-      thumbnailUrl,
+      thumbnailUrl: storedUrl,
       fileName,
       mimeType: 'image/png',
       width: dimensions.width,
@@ -375,10 +393,14 @@ class AIImageGenerator {
       uploadedBy,
     });
 
+    // Return the proxy URL so images always load regardless of GCS public access settings
+    const proxyUrl = `/api/email-builder/images/serve/${imageId}`;
+    console.log(`[AIImageGenerator] Image saved: id=${imageId}, proxyUrl=${proxyUrl}, storedUrl=${storedUrl}`);
+
     return {
       imageId,
-      url: storedUrl,
-      thumbnailUrl,
+      url: proxyUrl,
+      thumbnailUrl: proxyUrl,
       width: dimensions.width,
       height: dimensions.height,
       sizeBytes,

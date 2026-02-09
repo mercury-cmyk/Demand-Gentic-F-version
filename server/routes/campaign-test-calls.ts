@@ -157,311 +157,110 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
             requiredDialMode: "ai_agent or hybrid"
           });
         }
+      }
 
-        // Fetch campaign organization for organization name
-        const campaignOrgId = (campaign as any).problemIntelligenceOrgId;
-        if (campaignOrgId) {
-          try {
-            const campaignOrg = await getOrganizationById(campaignOrgId);
-            if (campaignOrg) {
-              campaignOrganizationName = campaignOrg.name;
-              console.log(`[Campaign Test Call] Using organization: ${campaignOrganizationName} (${campaignOrgId})`);
-            }
-          } catch (err) {
-            console.warn(`[Campaign Test Call] Failed to fetch organization ${campaignOrgId}:`, err);
+        // Check environment configuration
+        const telnyxApiKey = env.TELNYX_API_KEY;
+        const openaiApiKey = env.OPENAI_API_KEY;
+        const googleApiKey = env.GOOGLE_AI_API_KEY || env.GEMINI_API_KEY;
+        const googleProjectId = env.GOOGLE_CLOUD_PROJECT || env.GCP_PROJECT_ID;
+        const texmlAppId = env.TELNYX_TEXML_APP_ID;
+
+        // Validate provider-specific credentials
+        if (validatedData.voiceProvider === 'google') {
+          if (!googleApiKey && !googleProjectId) {
+            return res.status(500).json({
+              message: "Google/Gemini credentials not configured. Please set GEMINI_API_KEY or GOOGLE_AI_API_KEY in your .env.local file.",
+              provider: "google"
+            });
+          }
+          console.log("[Campaign Test Call] Using Google Gemini voice provider");
+        } else {
+          if (!openaiApiKey) {
+            return res.status(500).json({ message: "OpenAI API key not configured" });
+          }
+          console.log("[Campaign Test Call] Using OpenAI voice provider");
+        }
+
+        // Normalize phone number to E.164
+        let normalizedPhone = validatedData.testPhoneNumber.replace(/[^\d+]/g, '');
+        if (!normalizedPhone.startsWith('+')) {
+          if (normalizedPhone.startsWith('0')) {
+            normalizedPhone = '+44' + normalizedPhone.substring(1);
+          } else {
+            normalizedPhone = '+' + normalizedPhone;
           }
         }
 
-        // PRIORITY 1: Use aiAgentSettings from campaign (new wizard-based approach)
-        const aiSettings = (campaign as any).aiAgentSettings;
-        if (aiSettings) {
-          console.log("[Campaign Test Call] Using campaign aiAgentSettings (wizard-configured voice)");
-          const persona = aiSettings.persona || {};
-          const systemPromptParts = [];
+        // TEST CALLS: Skip number pool enforcement entirely for immediate execution.
+        let fromNumber: string = env.TELNYX_FROM_NUMBER || '';
+        let callerNumberId: string | undefined;
+        let callerNumberDecisionId: string | undefined;
 
-          // Build system prompt from persona and campaign context
-          if (persona.agentName) systemPromptParts.push(`You are ${persona.agentName}.`);
-          if (persona.companyName || campaignOrganizationName) {
-            systemPromptParts.push(`You represent ${persona.companyName || campaignOrganizationName}.`);
-          }
-          if (persona.role) systemPromptParts.push(`Your role is ${persona.role}.`);
-          if (persona.personality) systemPromptParts.push(`Your personality: ${persona.personality}.`);
-          if (aiSettings.talkingPoints?.length) {
-            systemPromptParts.push(`Key talking points: ${aiSettings.talkingPoints.join('; ')}`);
-          }
-          if (aiSettings.objective || (campaign as any).campaignObjective) {
-            systemPromptParts.push(`Objective: ${aiSettings.objective || (campaign as any).campaignObjective}`);
-          }
-
-          assignment = {
-            virtualAgentId: `campaign-${campaignId}-inline`,
-            agentName: persona.agentName || persona.name || 'AI Sales Agent',
-            systemPrompt: systemPromptParts.join(' ') || 'You are a helpful sales development representative.',
-            firstMessage: aiSettings.openingMessage || aiSettings.firstMessage || `Hello, this is ${persona.agentName || persona.name || 'your sales representative'} calling from ${persona.companyName || campaignOrganizationName || 'our company'}.`,
-            // Voice priority: persona.voice (wizard) > aiSettings.voiceId > aiSettings.voice > fallback
-            voice: persona.voice || aiSettings.voiceId || aiSettings.voice || 'Puck',
-            settings: aiSettings,
-          };
-        }
-
-        // PRIORITY 2: Fallback to legacy virtual agent assignment
-        if (!assignment) {
-          console.log("[Campaign Test Call] No aiAgentSettings, checking legacy virtual agent assignment");
-          const [dbAssignment] = await db
-            .select({
-              virtualAgentId: campaignAgentAssignments.virtualAgentId,
-              agentName: virtualAgents.name,
-              systemPrompt: virtualAgents.systemPrompt,
-              firstMessage: virtualAgents.firstMessage,
-              voice: virtualAgents.voice,
-              settings: virtualAgents.settings,
-            })
-            .from(campaignAgentAssignments)
-            .innerJoin(virtualAgents, eq(virtualAgents.id, campaignAgentAssignments.virtualAgentId))
-            .where(
-              and(
-                eq(campaignAgentAssignments.campaignId, campaignId),
-                eq(campaignAgentAssignments.agentType, "ai"),
-                eq(campaignAgentAssignments.isActive, true)
-              )
-            )
-            .limit(1);
-
-          assignment = dbAssignment;
-        }
-
-        if (!assignment) {
-          return res.status(400).json({
-            message: "No AI voice configuration found for this campaign",
-            suggestion: "Please configure AI voice settings in the campaign wizard before testing"
+        if (!fromNumber) {
+          return res.status(500).json({
+            message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file."
           });
         }
-    }
+        console.log(`[Campaign Test Call] ⚡ Using direct number (no pool): ${fromNumber}`);
 
-    // Check environment configuration
-    const telnyxApiKey = env.TELNYX_API_KEY;
-    const openaiApiKey = env.OPENAI_API_KEY;
-    const googleApiKey = env.GOOGLE_AI_API_KEY || env.GEMINI_API_KEY;
-    const googleProjectId = env.GOOGLE_CLOUD_PROJECT || env.GCP_PROJECT_ID;
-    // For TeXML outbound calls, use ONLY TELNYX_TEXML_APP_ID
-    const texmlAppId = env.TELNYX_TEXML_APP_ID;
-
-    // Validate provider-specific credentials
-    if (validatedData.voiceProvider === 'google') {
-      if (!googleApiKey && !googleProjectId) {
-        return res.status(500).json({
-          message: "Google/Gemini credentials not configured. Please set GEMINI_API_KEY or GOOGLE_AI_API_KEY in your .env.local file.",
-          provider: "google"
+        // Build Unified Context
+        // This ensures test calls use the EXACT same context logic as production queue calls
+        const ctx = await buildUnifiedCallContext({
+          campaignId,
+          isTestCall: true,
+          provider: (validatedData.voiceProvider === 'google') ? 'google' : 'openai',
+          calledNumber: normalizedPhone,
+          fromNumber: fromNumber,
+          callerNumberId,
+          callerNumberDecisionId,
+          contactName: validatedData.testContactName,
+          contactFirstName: validatedData.testContactName?.split(' ')[0],
+          contactEmail: validatedData.testContactEmail,
+          contactJobTitle: validatedData.testJobTitle,
+          accountName: validatedData.testCompanyName,
         });
-      }
-      console.log("[Campaign Test Call] Using Google Gemini voice provider");
-    } else {
-      if (!openaiApiKey) {
-        return res.status(500).json({ message: "OpenAI API key not configured" });
-      }
-      console.log("[Campaign Test Call] Using OpenAI voice provider");
-    }
 
-    // Normalize phone number to E.164
-    let normalizedPhone = validatedData.testPhoneNumber.replace(/[^\d+]/g, '');
-    if (!normalizedPhone.startsWith('+')) {
-      // Assume UK if starts with 0, otherwise assume +1 for US
-      if (normalizedPhone.startsWith('0')) {
-        normalizedPhone = '+44' + normalizedPhone.substring(1);
-      } else {
-        normalizedPhone = '+' + normalizedPhone;
-      }
-    }
+        if (!ctx) {
+           return res.status(400).json({
+              message: "No AI voice configuration found for this campaign",
+              suggestion: "Please configure AI voice settings in the campaign wizard before testing"
+           });
+        }
 
-    // TEST CALLS: Skip number pool enforcement entirely for immediate execution.
-    // No pool DB lookups, no jitter delays, no rotation strategy needed.
-    // Use TELNYX_FROM_NUMBER directly so test calls fire instantly.
-    let fromNumber: string = env.TELNYX_FROM_NUMBER || '';
-    let callerNumberId: string | undefined;
-    let callerNumberDecisionId: string | undefined;
+        // Create test call record in database
+        const isInlineCampaignAgent = ctx.virtualAgentId?.startsWith('campaign-') && ctx.virtualAgentId?.includes('-inline');
+        const dbVirtualAgentId = isInlineCampaignAgent ? null : ctx.virtualAgentId;
 
-    if (!fromNumber) {
-      return res.status(500).json({
-        message: "No phone number configured. Please set TELNYX_FROM_NUMBER in your .env.local file."
-      });
-    }
-    console.log(`[Campaign Test Call] ⚡ Using direct number (no pool): ${fromNumber}`);
+        const [testCallRecord] = await db.insert(campaignTestCalls).values({
+          id: ctx.testCallId!,
+          campaignId,
+          virtualAgentId: dbVirtualAgentId,
+          testPhoneNumber: normalizedPhone,
+          testContactName: validatedData.testContactName,
+          testCompanyName: validatedData.testCompanyName || null,
+          testJobTitle: validatedData.testJobTitle || null,
+          testContactEmail: validatedData.testContactEmail || null,
+          customVariables: validatedData.customVariables || null,
+          status: 'pending',
+          testedBy: userId,
+        }).returning();
 
-    // Create test call record in database
-    const testCallId = `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const runId = `run-test-${Date.now()}`;
+        // Store session in Redis
+        await storeCallSession(ctx);
 
-    // Determine if we have a real virtual agent ID (not an inline campaign ID)
-    // Inline campaign IDs start with "campaign-" and don't exist in the virtual_agents table
-    const isInlineCampaignAgent = assignment.virtualAgentId?.startsWith('campaign-') && assignment.virtualAgentId?.includes('-inline');
-    const dbVirtualAgentId = isInlineCampaignAgent ? null : assignment.virtualAgentId;
+        // Generate client state params
+        const customParams = contextToClientStateParams(ctx);
+        
+        // HACK: Explicitly include system_prompt in customParams because existing voice-dialer.ts 
+        // logic (lines 1172+) looks for it there. Ideally, voice-dialer should read from Redis.
+        // We include it here to ensure test calls work with current voice-dialer implementation.
+        if (ctx.systemPrompt) {
+            customParams.system_prompt = ctx.systemPrompt;
+        }
 
-    const [testCallRecord] = await db.insert(campaignTestCalls).values({
-      id: testCallId,
-      campaignId,
-      virtualAgentId: dbVirtualAgentId, // null for inline campaign settings, real ID for legacy virtual agents
-      testPhoneNumber: normalizedPhone,
-      testContactName: validatedData.testContactName,
-      testCompanyName: validatedData.testCompanyName || null,
-      testJobTitle: validatedData.testJobTitle || null,
-      testContactEmail: validatedData.testContactEmail || null,
-      customVariables: validatedData.customVariables || null,
-      status: 'pending',
-      testedBy: userId,
-    }).returning();
-
-    // Determine provider FIRST (needed for WebSocket path)
-    // Determine provider - ENFORCE Google Gemini Live (same as production campaigns)
-    const effectiveProvider = 'google';
-
-    // Build WebSocket URL for the OpenAI dialer
-    const dialerPath = '/voice-dialer';
-
-    let wsHost = process.env.PUBLIC_WEBSOCKET_URL?.split('/voice-dialer')[0]?.split('/gemini-live-dialer')[0] ||
-                   process.env.REPLIT_DEV_DOMAIN ||
-                   req.get('X-Public-Host') ||
-                   req.get('host') ||
-                   'localhost:5000';
-
-    // Remove any trailing path from wsHost
-    wsHost = wsHost.replace(/\/(voice-dialer|gemini-live-dialer).*$/, '');
-
-    const wsUrl = wsHost.startsWith('wss://') || wsHost.startsWith('ws://')
-      ? `${wsHost}${dialerPath}`
-      : `wss://${wsHost}${dialerPath}`;
-
-    // Prepare system prompt with test contact variables
-    const agentSettings = assignment.settings as any || {};
-    let systemPrompt = assignment.systemPrompt || agentSettings.systemPrompt || '';
-
-    // Add test contact context to system prompt if not already included
-    const testContext = `
-[TEST CALL CONTEXT]
-This is a test call to validate AI agent behavior.
-Contact Name: ${validatedData.testContactName}
-Company: ${validatedData.testCompanyName || 'Not specified'}
-Job Title: ${validatedData.testJobTitle || 'Not specified'}
-${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedData.customVariables)}` : ''}
-`;
-
-    // Custom parameters for the WebSocket connection
-    // Support both OpenAI and Gemini voices
-    const openaiVoices = new Set(['alloy', 'ash', 'coral', 'marin', 'verse', 'cedar', 'echo', 'fable', 'nova', 'shimmer', 'onyx']);
-    // All 30 real Gemini Live voices - must match server/services/gemini-live-dialer.ts
-    const geminiVoices = new Set([
-      // Core voices (original 8)
-      'puck', 'charon', 'kore', 'fenrir', 'aoede', 'leda', 'orus', 'zephyr',
-      // Professional voices
-      'sulafat', 'gacrux', 'achird', 'schedar', 'sadaltager', 'pulcherrima',
-      // Specialized voices
-      'algieba', 'despina', 'iapetus', 'erinome', 'vindemiatrix', 'achernar',
-      // Dynamic voices
-      'sadachbia', 'laomedeia', 'autonoe', 'callirrhoe', 'umbriel',
-      // Character voices
-      'enceladus', 'algenib', 'rasalgethi', 'alnilam', 'zubenelgenubi',
-    ]);
-
-    const rawVoice = `${assignment.voice || ''}`.trim().toLowerCase();
-
-    // Select appropriate voice based on provider (effectiveProvider determined above)
-    // IMPORTANT: When provider is Gemini, ONLY use Gemini voices - don't fallback to OpenAI voices
-    let voice: string;
-    if (effectiveProvider === 'google') {
-      // Use Gemini voice if specified, otherwise default to 'Puck' (friendly, natural)
-      voice = geminiVoices.has(rawVoice) ? rawVoice : 'puck';
-    } else {
-      // Use OpenAI voice
-      voice = openaiVoices.has(rawVoice) ? rawVoice : 'marin';
-    }
-
-    // Map provider selection to internal format
-    // ENFORCED: Gemini-only runtime - no OpenAI fallback
-    const providerForClientState = 'gemini_live';
-    const providerForSession = 'google';
-    console.log(`[Campaign Test Call] Using voice provider: ${effectiveProvider} (voice: ${voice})`);
-
-    const customParams = {
-      call_id: testCallId,
-      run_id: runId,
-      campaign_id: campaignId,
-      queue_item_id: `test-queue-${testCallId}`,
-      call_attempt_id: `test-attempt-${testCallId}`,
-      contact_id: `test-contact-${testCallId}`,
-      called_number: normalizedPhone, // Required for database tracking
-      from_number: fromNumber,
-      caller_number_id: callerNumberId || null,
-      caller_number_decision_id: callerNumberDecisionId || null,
-      virtual_agent_id: assignment.virtualAgentId,
-      is_test_call: true,
-      test_call_id: testCallId,
-      // Store large data in Redis, not in URL
-      // system_prompt will be fetched from virtual_agent in voice-dialer
-      first_message: assignment.firstMessage,
-      voice,
-      agent_name: assignment.agentName,
-      // CRITICAL: Include contact context for Gemini Live placeholder substitution
-      // These fields match what gemini-live-dialer.ts expects in CallContext
-      contact_name: validatedData.testContactName,
-      contact_first_name: validatedData.testContactName?.split(' ')[0] || validatedData.testContactName,
-      contact_job_title: validatedData.testJobTitle,
-      account_name: validatedData.testCompanyName,
-      // Priority: campaign organization > persona companyName > fallback
-      organization_name: campaignOrganizationName || (agentSettings as any)?.persona?.companyName || 'DemandGentic.ai By Pivotal B2B',
-      system_prompt: systemPrompt, // Include full system prompt for Gemini
-      // Campaign context for AI agent behavior
-      campaign_objective: (campaign as any).campaignObjective || '',
-      success_criteria: (campaign as any).successCriteria || '',
-      target_audience_description: (campaign as any).targetAudienceDescription || '',
-      product_service_info: (campaign as any).productServiceInfo || '',
-      talking_points: (campaign as any).talkingPoints || [],
-      test_contact: {
-        name: validatedData.testContactName,
-        company: validatedData.testCompanyName,
-        title: validatedData.testJobTitle,
-        email: validatedData.testContactEmail,
-      },
-      provider: providerForClientState,
-    };
-
-    // Store full session data in Redis for retrieval by WebSocket handler
-    // CRITICAL: Must include ALL fields that queue calls include for unified behavior
-    const { callSessionStore } = await import("../services/call-session-store");
-    await callSessionStore.setSession(testCallId, {
-      call_id: testCallId,
-      run_id: runId,
-      campaign_id: campaignId,
-      queue_item_id: customParams.queue_item_id,
-      call_attempt_id: customParams.call_attempt_id,
-      contact_id: customParams.contact_id,
-      called_number: normalizedPhone, // Required for database tracking
-      from_number: fromNumber,
-      caller_number_id: callerNumberId || null,
-      caller_number_decision_id: callerNumberDecisionId || null,
-      virtual_agent_id: assignment.virtualAgentId || undefined,
-      is_test_call: true,
-      test_call_id: testCallId,
-      first_message: assignment.firstMessage || undefined,
-      voice,
-      agent_name: assignment.agentName || undefined,
-      // CRITICAL: Include organization_name for unified template interpolation
-      organization_name: customParams.organization_name,
-      test_contact: customParams.test_contact,
-      provider: providerForSession,
-      system_prompt: systemPrompt, // Store full prompt in Redis
-      // Campaign context for unified behavior (same as queue calls)
-      campaign_objective: customParams.campaign_objective,
-      success_criteria: customParams.success_criteria,
-      target_audience_description: customParams.target_audience_description,
-      product_service_info: customParams.product_service_info,
-      talking_points: customParams.talking_points,
-      // Contact context for unified interpolation
-      contact_name: customParams.contact_name,
-      contact_first_name: customParams.contact_first_name,
-      contact_job_title: customParams.contact_job_title,
-      account_name: customParams.account_name,
-    });
-
-    const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+        const clientStateB64 = Buffer.from(JSON.stringify(customParams)).toString('base64');
+        const providerForClientState = (ctx.provider === 'google') ? 'gemini_live' : 'openai_realtime';
 
     // Prepare webhook URL - include client_state as query param so it's available at the TeXML endpoint
     // DEVELOPMENT: Use ngrok tunnel (PUBLIC_WEBHOOK_HOST) - this is set by dev-with-ngrok.ts
@@ -592,6 +391,7 @@ ${validatedData.customVariables ? `Custom Variables: ${JSON.stringify(validatedD
       agentName: assignment.agentName,
       wsUrl,
     });
+
   } catch (error) {
     console.error("[Campaign Test Call] Error:", error);
     if (error instanceof z.ZodError) {

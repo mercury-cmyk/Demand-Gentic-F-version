@@ -113,13 +113,17 @@ export const CAMPAIGN_CONFIGURATIONS: Record<string, CampaignConfiguration> = {
   appointment_generation: {
     type: "appointment_generation",
     label: "Appointment Generation",
-    purpose: "Secure agreement for a sales or discovery meeting.",
+    purpose: "Secure agreement for a specific meeting date/time with a qualified prospect.",
     agentFocus: [
-      "Scheduling",
-      "Value proposition objection handling"
+      "Qualify interest with ONE discovery question",
+      "Propose specific meeting times (e.g., 'Would Tuesday at 10am or Thursday at 2pm work?')",
+      "Confirm meeting details and email",
+      "Handle scheduling objections"
     ],
     successCriteria: [
-      "Scheduled or explicitly agreed appointment"
+      "Prospect agrees to a specific date/time",
+      "OR explicit agreement to receive calendar invite",
+      "Email confirmed for meeting invite"
     ]
   },
   lead_qualification: {

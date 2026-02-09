@@ -147,8 +147,8 @@ const AMD_CHECK_INTERVAL_MS = 50; // Check for AMD result every 50ms (faster pol
 
 // NATURAL CONVERSATION: Wait for human to speak first, but with timeout
 // If human doesn't speak within this time, AI takes initiative
-// Set to 5 seconds - enough time for human to answer and say "Hello?"
-const WAIT_FOR_HUMAN_SPEECH_MS = 5000; // Wait up to 5 seconds for human to speak first
+// Set to 3 seconds - enough time for human to answer and say "Hello?"
+const WAIT_FOR_HUMAN_SPEECH_MS = 3000; // Wait up to 3 seconds for human to speak first
 
 // EARLY AUDIO QUALITY GATE - DISABLED
 // Was causing false-positive disconnects ~6s after answer due to connection_drop
@@ -585,19 +585,40 @@ Agent: "Great, thank you!"
 3. Call submit_disposition with disposition="not_interested", notes="Prospect declined politely"
 4. Then call end_call with reason="not_interested"
 
-## ENDING THE CALL
+## ENDING THE CALL (CRITICAL — PROSPECT-LED DISCONNECT)
 
-When the conversation is over:
-1. FIRST call \`submit_disposition\` with the appropriate outcome
-2. THEN call \`end_call\` to hang up
+**ABSOLUTE RULE: Call termination must be PROSPECT-LED, never agent-triggered.**
+You must NEVER disconnect immediately after achieving the call objective (booking confirmed, email confirmed, etc.).
 
-Call \`end_call\` AFTER:
-- The user says goodbye and you respond with a farewell
-- Booking an appointment and confirming
-- The user explicitly asks to end the call
-- The user says they're not interested and you've acknowledged
+### After Booking Confirmation — MANDATORY CLOSING SEQUENCE:
+Once the prospect has confirmed their email and meeting time, you MUST follow this exact sequence:
 
-Example: After saying "Thank you, have a great day!", call submit_disposition then end_call
+1. **CONFIRMATION**: "Perfect, I've got you down for [day] at [time]."
+2. **APPRECIATION**: "Thank you very much for your time today — I really appreciate it."
+3. **EXPECTATION SETTING**: "You'll receive a calendar invite and a follow-up email shortly."
+4. **CONVERSATIONAL CLOSE**: "Have a great day, and I look forward to speaking with you!"
+5. **WAIT FOR PROSPECT**: You MUST pause and LISTEN. Do NOT call end_call yet.
+6. **ONLY DISCONNECT AFTER PROSPECT RESPONDS**: Wait until the prospect says "thank you", "bye", "take care", "sounds good", or any equivalent closing phrase.
+7. THEN call \`submit_disposition\` followed by \`end_call\`.
+
+### After Declined/Not Interested:
+1. "I understand, thank you for your time."
+2. "Have a great day!"
+3. WAIT for prospect to respond ("thanks, bye" etc.)
+4. THEN call submit_disposition → end_call
+
+### WRONG (COMPLIANCE VIOLATION — WILL BE BLOCKED):
+- Confirming "I'll send the invite for Tuesday at 2pm" and immediately calling end_call
+- Ending the call without saying a warm farewell
+- Hanging up right after they confirm their email
+- Calling end_call before the prospect has responded to your farewell
+
+### CORRECT:
+- "Perfect, I'll send that calendar invite to your email for Tuesday at 2pm. Thank you so much for your time today! Have a wonderful day!"
+- *Wait for prospect*: "Thanks, talk to you then!"
+- THEN call submit_disposition → end_call
+
+Example: After saying "Thank you, have a great day!", WAIT for prospect's goodbye, then call submit_disposition then end_call
 
 `;};
 
@@ -2707,6 +2728,77 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 return;
               }
 
+              // CRITICAL: Farewell requirement check — agent MUST say proper goodbye before end_call
+              // Matches the same enforcement in voice-dialer.ts
+              const closingFarewellPatterns = [
+                'goodbye', 'bye', 'take care', 'have a great day', 'have a good day',
+                'have a great one', 'have a wonderful', 'talk to you soon', 'speak soon',
+                'thanks for your time', 'thank you for your time', 'look forward to speaking',
+                'have a good one', 'enjoy your day', 'thank you so much',
+              ];
+
+              // Check the LAST agent statement for farewell
+              const agentTurns = transcriptTurns.filter(t => t.speaker === 'agent' || t.speaker === 'assistant');
+              const lastAgentTurn = agentTurns.length > 0 ? agentTurns[agentTurns.length - 1] : null;
+              const lastAgentText = lastAgentTurn?.text?.toLowerCase() || '';
+              const hasProperClosingFarewell = closingFarewellPatterns.some(phrase => lastAgentText.includes(phrase));
+
+              // Check the LAST user statement for farewell (prospect responded to agent's goodbye)
+              const userTurns = transcriptTurns.filter(t => t.speaker === 'user' && t.text.trim().length > 0);
+              const lastUserTurn = userTurns.length > 0 ? userTurns[userTurns.length - 1] : null;
+              const lastUserText = lastUserTurn?.text?.toLowerCase() || '';
+              const userSaidFarewell = closingFarewellPatterns.some(phrase => lastUserText.includes(phrase));
+
+              const requiresFarewell = !isLegitimateEarlyEnd && userTurnCount > 0;
+
+              // Block if agent hasn't said farewell yet
+              if (requiresFarewell && !hasProperClosingFarewell) {
+                console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - Missing proper closing farewell from agent.`);
+                console.warn(`[Gemini Live] Last agent statement: "${lastAgentText.substring(0, 100)}..."`);
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [{
+                      name: call.name,
+                      id: call.id,
+                      response: {
+                        error: 'STOP — you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.'
+                      }
+                    }]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return;
+              }
+
+              // Block if agent said farewell but prospect hasn't responded yet (prospect-led disconnect)
+              // Only enforce this when the agent farewell was very recent (last agent turn)
+              // and the prospect hasn't spoken since the agent's farewell
+              if (requiresFarewell && hasProperClosingFarewell && !userSaidFarewell) {
+                // Check if the last turn was the agent's farewell (prospect hasn't responded yet)
+                const lastTurn = transcriptTurns.length > 0 ? transcriptTurns[transcriptTurns.length - 1] : null;
+                const lastTurnIsAgent = lastTurn?.speaker === 'agent' || lastTurn?.speaker === 'assistant';
+                if (lastTurnIsAgent) {
+                  console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
+                  const toolResponse = {
+                    toolResponse: {
+                      functionResponses: [{
+                        name: call.name,
+                        id: call.id,
+                        response: {
+                          error: 'WAIT — you said your farewell but the prospect has not responded yet. You MUST wait for them to say "bye", "thank you", "take care" or similar before ending. Pause and listen for 3-5 seconds. Call termination must be prospect-led, not agent-triggered.'
+                        }
+                      }]
+                    }
+                  };
+                  if (geminiWs?.readyState === WebSocket.OPEN) {
+                    geminiWs.send(JSON.stringify(toolResponse));
+                  }
+                  return;
+                }
+              }
+
               endCallRequested = true;
               console.log(`[Gemini Live] 📞 end_call tool invoked. Reason: ${reason} (duration: ${callDurationSeconds}s, userTurns: ${userTurnCount})`);
 
@@ -2728,10 +2820,12 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 geminiWs.send(JSON.stringify(toolResponse));
               }
 
-              // Give Gemini a moment to finish any final audio, then hang up
+              // Give enough time for the agent's farewell audio to finish playing AND
+              // for the prospect to respond — prospect-led disconnect requirement
+              // 3000ms = enough for farewell audio + prospect response window
               setTimeout(async () => {
                 if (callControlId) {
-                  console.log(`[Gemini Live] 👋 Hanging up call. Reason: ${reason}`);
+                  console.log(`[Gemini Live] 👋 Hanging up call after farewell exchange. Reason: ${reason}`);
                   try {
                     await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
                       method: 'POST',
@@ -2753,7 +2847,7 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                     geminiWs.close(1000, 'Call ended normally');
                   }
                 }, 500); // Additional 500ms for cleanup
-              }, 500); // 500ms delay to let final goodbye audio play
+              }, 3000); // 3000ms delay — allows farewell audio to finish + prospect response window
             }
           }
         }

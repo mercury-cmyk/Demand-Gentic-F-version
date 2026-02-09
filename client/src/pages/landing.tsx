@@ -8,12 +8,10 @@ import {
   Users,
   Phone,
   Mail,
-  MessageSquare,
   ArrowRight,
   CheckCircle2,
   Zap,
   Search,
-  Filter,
   Lightbulb,
   Play,
   ChevronRight,
@@ -21,28 +19,22 @@ import {
   Globe,
   Database,
   Shield,
-  Award,
   TrendingUp,
-  Mic,
   FileText,
-  Video,
   Calendar,
   UserCheck,
-  ClipboardCheck,
-  BadgeCheck,
   PenTool,
   Bot,
   Layers,
   AlertTriangle,
   XCircle,
   Volume2,
-  BarChart3,
   RefreshCw,
-  Lock,
-  Headphones,
-  Building2,
   CircleDot,
   Quote,
+  Wand2,
+  BookOpen,
+  LayoutDashboard,
 } from "lucide-react";
 
 export default function LandingPage() {
@@ -52,7 +44,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background">
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
               <div className="relative flex items-center justify-center">
@@ -62,7 +54,7 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human Led Intelligence, AI Led Execution — By Pivotal B2B</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -98,7 +90,7 @@ export default function LandingPage() {
           <div className="text-center max-w-4xl mx-auto">
             <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
               <Sparkles className="h-3.5 w-3.5 mr-2" />
-              Agentic B2B Demand Generation
+              Human Led Intelligence. AI Led Execution.
             </Badge>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6">
@@ -107,32 +99,33 @@ export default function LandingPage() {
               </span>
               <br />
               <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
-                The Era of Agentic Reasoning.
+                The Era of Agentic ABM Demand Reasoning.
               </span>
             </h1>
 
             <p className="text-xl md:text-2xl text-muted-foreground mb-8 leading-relaxed max-w-3xl mx-auto">
-              Precision B2B demand generation powered by account-aware intelligence.
-              Expert strategists + autonomous AI agents + 70M+ verified contacts.
+              Problem Intelligence. Solution Mapping. Pinpoint Context.
+              A B2B demand engine trained on 11+ years of front-line experience —
+              where no interaction happens without reasoning first, and no interaction is ever forgotten.
             </p>
 
             {/* Stats Pills */}
             <div className="flex flex-wrap justify-center gap-3 mb-10">
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Database className="h-4 w-4 text-violet-600" />
-                <span className="text-sm font-semibold">70M+ Verified Contacts</span>
+                <Brain className="h-4 w-4 text-violet-600" />
+                <span className="text-sm font-semibold">Problem Intelligence</span>
               </div>
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Globe className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-semibold">195+ Countries</span>
+                <Target className="h-4 w-4 text-indigo-600" />
+                <span className="text-sm font-semibold">Solution Mapping</span>
               </div>
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Target className="h-4 w-4 text-emerald-600" />
-                <span className="text-sm font-semibold">98% Data Accuracy</span>
+                <Search className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-semibold">Pinpoint Context</span>
               </div>
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-white shadow-md border">
-                <Phone className="h-4 w-4 text-amber-600" />
-                <span className="text-sm font-semibold">AI Voice Agents</span>
+                <Shield className="h-4 w-4 text-emerald-600" />
+                <span className="text-sm font-semibold">Compliance First</span>
               </div>
             </div>
 
@@ -162,7 +155,12 @@ export default function LandingPage() {
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
               <div className="text-center">
-                <p className="text-3xl font-bold text-slate-900">10+</p>
+                <p className="text-3xl font-bold text-slate-900">7</p>
+                <p className="text-sm text-muted-foreground">Content Generation Engines</p>
+              </div>
+              <div className="h-8 w-px bg-slate-200 hidden md:block" />
+              <div className="text-center">
+                <p className="text-3xl font-bold text-slate-900">11+</p>
                 <p className="text-sm text-muted-foreground">Years B2B Expertise</p>
               </div>
               <div className="h-8 w-px bg-slate-200 hidden md:block" />
@@ -259,9 +257,15 @@ export default function LandingPage() {
             <div className="inline-block p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur">
               <p className="text-lg text-slate-300 mb-4">
                 CRMs store data. Marketing tools send messages. SDRs chase activity.
+                Content teams scramble to keep up. None of them truly reason.
               </p>
-              <p className="text-2xl font-bold text-white">
-                None of them truly <span className="text-violet-400">reason</span>.
+              <p className="text-2xl font-bold text-white mb-3">
+                No <span className="text-violet-400">problem intelligence</span>.{" "}
+                No <span className="text-emerald-400">solution mapping</span>.{" "}
+                No <span className="text-blue-400">pinpoint context</span>.
+              </p>
+              <p className="text-sm text-slate-400">
+                Every interaction happens without reasoning. Every conversation is forgotten at the contact and account level.
               </p>
             </div>
           </div>
@@ -279,35 +283,37 @@ export default function LandingPage() {
               Our Solution
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Services + Intelligence + Data ={" "}
+              The Problem Solvers.{" "}
               <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Demand That Converts.
+                Your Agentic Demand Partner.
               </span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              DemandGentic.ai is not just a platform. It's a full-service demand generation partner
-              powered by autonomous AI, world-class data, and expert strategists.
+              We are not just a platform — we are The Problem Solvers.
+              Human led intelligence meets AI led execution: organization intelligence powers every agent,
+              every voice conversation, every piece of content, and every pipeline decision.
+              Truth, human-to-human connection, and empathy are never optional — they're the foundation.
             </p>
           </div>
 
-          {/* Three Pillars */}
-          <div className="grid lg:grid-cols-3 gap-8 mb-16">
+          {/* Four Pillars */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
             {/* Pillar 1 */}
             <Card className="border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white shadow-xl shadow-violet-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-6 shadow-lg shadow-violet-500/25">
-                  <Users className="h-8 w-8 text-white" />
+              <CardContent className="p-6 relative">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-500/25">
+                  <Users className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-4 bg-violet-100 text-violet-700 border-none">Expert Services</Badge>
-                <h3 className="text-2xl font-bold mb-3">Human Expertise</h3>
-                <p className="text-muted-foreground mb-6">
-                  Dedicated strategists design, monitor, and optimize every campaign.
-                  AI executes; humans ensure excellence.
+                <Badge className="mb-3 bg-violet-100 text-violet-700 border-none">The Problem Solvers</Badge>
+                <h3 className="text-xl font-bold mb-2">Human Led Intelligence</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  11+ years of front-line B2B demand experience. We lead with problem intelligence,
+                  solution mapping, and empathy — AI executes what humans architect.
                 </p>
-                <div className="p-4 rounded-xl bg-violet-50 border border-violet-100">
-                  <p className="text-sm font-medium text-violet-900">
-                    "We don't hand you software and walk away. We deliver outcomes."
+                <div className="p-3 rounded-xl bg-violet-50 border border-violet-100">
+                  <p className="text-xs font-medium text-violet-900">
+                    "Truth, human connection, and empathy are never optional."
                   </p>
                 </div>
               </CardContent>
@@ -316,39 +322,60 @@ export default function LandingPage() {
             {/* Pillar 2 */}
             <Card className="border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-white shadow-xl shadow-indigo-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/25">
-                  <Brain className="h-8 w-8 text-white" />
+              <CardContent className="p-6 relative">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center mb-5 shadow-lg shadow-indigo-500/25">
+                  <Brain className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-4 bg-indigo-100 text-indigo-700 border-none">AI Agents</Badge>
-                <h3 className="text-2xl font-bold mb-3">Agentic Intelligence</h3>
-                <p className="text-muted-foreground mb-6">
-                  Purpose-built AI agents that research accounts, craft personalized messaging,
-                  and execute across voice, email, and digital.
+                <Badge className="mb-3 bg-indigo-100 text-indigo-700 border-none">AgentX Suite</Badge>
+                <h3 className="text-xl font-bold mb-2">Agentic Intelligence</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Purpose-built agents powered by organization intelligence — reasoning first,
+                  compliance first, and never forgetting a single interaction at contact or account level.
                 </p>
-                <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-100">
-                  <p className="text-sm font-medium text-indigo-900">
-                    "AI that thinks like your best SDR — at unlimited scale."
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                  <p className="text-xs font-medium text-indigo-900">
+                    "No interaction happens without reasoning first."
                   </p>
                 </div>
               </CardContent>
             </Card>
 
             {/* Pillar 3 */}
+            <Card className="border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 to-white shadow-xl shadow-emerald-500/5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
+              <CardContent className="p-6 relative">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/25">
+                  <Wand2 className="h-7 w-7 text-white" />
+                </div>
+                <Badge className="mb-3 bg-emerald-100 text-emerald-700 border-none">Content Studio</Badge>
+                <h3 className="text-xl font-bold mb-2">Generative Content</h3>
+                <p className="text-muted-foreground text-sm mb-4">
+                  Landing pages, emails, blogs, eBooks, solution briefs, and images —
+                  all generated with your brand voice and published in one click.
+                </p>
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                  <p className="text-xs font-medium text-emerald-900">
+                    "An entire content team, powered by AI, guided by your brand."
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Pillar 4 */}
             <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white shadow-xl shadow-blue-500/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
-              <CardContent className="p-8 relative">
-                <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/25">
-                  <Database className="h-8 w-8 text-white" />
+              <CardContent className="p-6 relative">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center mb-5 shadow-lg shadow-blue-500/25">
+                  <Database className="h-7 w-7 text-white" />
                 </div>
-                <Badge className="mb-4 bg-blue-100 text-blue-700 border-none">Global Data</Badge>
-                <h3 className="text-2xl font-bold mb-3">Precision Data</h3>
-                <p className="text-muted-foreground mb-6">
+                <Badge className="mb-3 bg-blue-100 text-blue-700 border-none">Global Data</Badge>
+                <h3 className="text-xl font-bold mb-2">Precision Data</h3>
+                <p className="text-muted-foreground text-sm mb-4">
                   70M+ verified contacts across 195 countries. 98% email accuracy.
                   Weekly refresh. Multi-source verification.
                 </p>
-                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                  <p className="text-sm font-medium text-blue-900">
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                  <p className="text-xs font-medium text-blue-900">
                     "Your campaigns are only as good as your data. Ours is the best."
                   </p>
                 </div>
@@ -360,15 +387,16 @@ export default function LandingPage() {
           <div className="p-8 rounded-3xl bg-slate-900 text-white">
             <div className="text-center mb-8">
               <h3 className="text-2xl font-bold mb-2">How It Comes Together</h3>
-              <p className="text-slate-400">A unified flow from strategy to qualified pipeline</p>
+              <p className="text-slate-400">Human led intelligence, AI led execution — from reasoning to qualified pipeline</p>
             </div>
             <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
               {[
                 { icon: Target, label: "Your Goals", color: "violet" },
-                { icon: Users, label: "Our Strategists Design", color: "violet" },
+                { icon: Users, label: "Strategists Design", color: "violet" },
                 { icon: Search, label: "AI Agents Research", color: "indigo" },
                 { icon: Database, label: "Data Fuels Targeting", color: "blue" },
-                { icon: Zap, label: "Agentic Execution", color: "emerald" },
+                { icon: Wand2, label: "Content Generated", color: "emerald" },
+                { icon: Phone, label: "Voice & Email Execute", color: "amber" },
                 { icon: TrendingUp, label: "Qualified Pipeline", color: "emerald" },
               ].map((step, i) => (
                 <div key={i} className="flex items-center gap-4">
@@ -378,7 +406,7 @@ export default function LandingPage() {
                     </div>
                     <span className="text-sm text-center text-slate-300 max-w-[100px]">{step.label}</span>
                   </div>
-                  {i < 5 && (
+                  {i < 6 && (
                     <ChevronRight className="h-5 w-5 text-slate-600 hidden lg:block" />
                   )}
                 </div>
@@ -400,12 +428,12 @@ export default function LandingPage() {
               <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Delivered.</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              A proven five-step process that combines human strategy with agentic AI execution.
+              A proven six-step process where human intelligence leads the strategy and AI agents execute with reasoning, compliance, and context.
             </p>
           </div>
 
           {/* Process Steps */}
-          <div className="grid md:grid-cols-5 gap-6">
+          <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-6">
             {[
               {
                 step: "01",
@@ -425,27 +453,35 @@ export default function LandingPage() {
               },
               {
                 step: "03",
-                icon: PenTool,
-                title: "Precision Content",
-                description: "AI generates personalized emails, call scripts, and objection responses. Human strategists review and refine.",
-                deliverable: "Campaign-ready content",
-                color: "blue",
+                icon: Wand2,
+                title: "Content Generation",
+                description: "AI creates landing pages, emails, blogs, eBooks, and solution briefs — all in your brand voice, ready to publish.",
+                deliverable: "Full campaign content suite",
+                color: "emerald",
               },
               {
                 step: "04",
                 icon: Zap,
-                title: "Agentic Execution",
-                description: "Live voice agents make calls. Intelligent email sequences deploy. Real-time quality auditing on every interaction.",
+                title: "Multi-Channel Execution",
+                description: "Voice agents hold live conversations. Email sequences deploy intelligently. Content publishes to branded pages.",
                 deliverable: "Active campaign execution",
-                color: "emerald",
+                color: "blue",
               },
               {
                 step: "05",
+                icon: LayoutDashboard,
+                title: "Pipeline Management",
+                description: "Accounts flow through intelligent pipeline stages. AI assigns reps, tracks buyer journeys, and surfaces ready-to-close opportunities.",
+                deliverable: "Managed pipeline with AE assignment",
+                color: "amber",
+              },
+              {
+                step: "06",
                 icon: TrendingUp,
                 title: "Optimization & Handoff",
                 description: "Continuous analysis identifies what's working. AI optimizes in real-time. Qualified leads delivered to your sales team.",
                 deliverable: "BANT-qualified leads",
-                color: "amber",
+                color: "rose",
               },
             ].map((item, i) => (
               <div key={i} className="relative">
@@ -463,8 +499,8 @@ export default function LandingPage() {
                     </div>
                   </CardContent>
                 </Card>
-                {i < 4 && (
-                  <ChevronRight className="hidden md:block absolute top-1/2 -right-4 transform -translate-y-1/2 h-6 w-6 text-slate-300 z-10" />
+                {i < 5 && (
+                  <ChevronRight className="hidden lg:block absolute top-1/2 -right-4 transform -translate-y-1/2 h-6 w-6 text-slate-300 z-10" />
                 )}
               </div>
             ))}
@@ -632,31 +668,58 @@ export default function LandingPage() {
                 color: "violet",
               },
               {
-                icon: FileText,
-                badge: "Content Demand",
-                title: "Content-Led Demand Generation",
-                description: "Whitepapers, research reports, webinars, and solution assets — promoted through intelligent, compliant outreach.",
-                features: ["Strategic asset distribution", "High-intent qualification", "Opt-in consent capture"],
-                ideal: "Brand authority & pipeline",
-                color: "blue",
+                icon: Phone,
+                badge: "Voice AI",
+                title: "Conversational AI Voice Agents",
+                description: "AI agents that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.",
+                features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"],
+                ideal: "Outbound at scale without headcount",
+                color: "amber",
+              },
+              {
+                icon: Mail,
+                badge: "Email Marketing",
+                title: "Intelligent Email Marketing",
+                description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis — every email reasoned before it's sent.",
+                features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"],
+                ideal: "Nurture & conversion at scale",
+                color: "sky",
+              },
+              {
+                icon: Wand2,
+                badge: "Content Studio",
+                title: "Generative Content Creation",
+                description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
+                features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"],
+                ideal: "Campaign content at speed",
+                color: "emerald",
               },
               {
                 icon: Bot,
                 badge: "AI SDR",
                 title: "AI SDR-as-a-Service",
-                description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking.",
+                description: "Autonomous AI agents conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.",
                 features: ["24/7 autonomous engagement", "Human strategist oversight", "Intelligent escalation"],
                 ideal: "Scale without headcount",
-                color: "emerald",
+                color: "blue",
+              },
+              {
+                icon: LayoutDashboard,
+                badge: "Pipeline",
+                title: "Intelligent Pipeline Management",
+                description: "Manage your entire top-of-funnel with AI-driven account staging, automated AE assignment, and buyer journey tracking.",
+                features: ["AI-powered AE assignment", "Buyer journey stages", "Account intelligence scoring"],
+                ideal: "Pipeline visibility & control",
+                color: "indigo",
               },
               {
                 icon: Calendar,
                 badge: "Appointments",
                 title: "Qualified Appointment Generation",
-                description: "We deliver BANT-qualified sales appointments directly to your team's calendar.",
+                description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.",
                 features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"],
                 ideal: "Sales efficiency",
-                color: "amber",
+                color: "rose",
               },
               {
                 icon: Search,
@@ -665,7 +728,7 @@ export default function LandingPage() {
                 description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.",
                 features: ["ICP refinement", "Competitive landscape", "Buying signal detection"],
                 ideal: "GTM strategy",
-                color: "indigo",
+                color: "cyan",
               },
               {
                 icon: Database,
@@ -674,7 +737,7 @@ export default function LandingPage() {
                 description: "Access our 70M+ verified contact database or enrich your existing data with our verification engine.",
                 features: ["Custom list building", "Database enrichment", "Continuous hygiene"],
                 ideal: "Campaign fuel",
-                color: "cyan",
+                color: "slate",
               },
             ].map((service, i) => (
               <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
@@ -711,48 +774,65 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
               <Bot className="h-3.5 w-3.5 mr-2" />
-              AI Agent Suite
+              AgentX Suite
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Purpose-Built Agents for{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Every Function.</span>
+              Purpose-Built Agents.{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Reasoning First.</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Not generic AI. Specialized agents trained on a decade of B2B demand generation expertise.
+              Not generic AI. Specialized agents trained on 11+ years of front-line B2B demand experience —
+              powered by Organization Intelligence, governed by compliance, driven by empathy.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
             {[
               {
                 icon: Search,
                 title: "Research Agent",
                 subtitle: "Demand Intel",
-                description: "Autonomous fact-gathering and strategic synthesis. Researches accounts and generates actionable intelligence.",
+                description: "Autonomous fact-gathering and strategic synthesis. Researches accounts, verifies data, and generates actionable intelligence briefs.",
                 capabilities: ["Multi-source verification", "Problem-to-account matching", "Confidence scoring"],
                 color: "emerald",
               },
               {
                 icon: Phone,
                 title: "Voice Agent",
-                subtitle: "Live Calling",
-                description: "Real-time conversational AI that makes actual phone calls. Natural conversation with live objection handling.",
-                capabilities: ["Gatekeeper navigation", "BANT qualification", "Real-time adaptation"],
+                subtitle: "Live Conversations",
+                description: "AI that makes real phone calls with natural speech, live objection handling, and the ability to book meetings mid-conversation.",
+                capabilities: ["Natural live conversations", "Gatekeeper navigation", "Real-time BANT qualification"],
                 color: "amber",
               },
               {
                 icon: Mail,
                 title: "Email Agent",
                 subtitle: "Demand Engage",
-                description: "AI trained on millions of B2B campaigns. Knows what converts and when to follow up.",
+                description: "AI trained on millions of B2B campaigns. Crafts persona-specific sequences that know when to push and when to nurture.",
                 capabilities: ["Persona-specific copy", "Sequence optimization", "Reply sentiment analysis"],
                 color: "blue",
               },
               {
+                icon: Wand2,
+                title: "Content Agent",
+                subtitle: "Generative Studio",
+                description: "Creates complete campaign assets — landing pages, email templates, blog posts, eBooks, solution briefs, and images — all in your brand voice.",
+                capabilities: ["7 content engines", "One-click publish", "AI-powered refinement"],
+                color: "violet",
+              },
+              {
+                icon: LayoutDashboard,
+                title: "Pipeline Agent",
+                subtitle: "Account Intelligence",
+                description: "Manages your top-of-funnel pipeline. Scores accounts, tracks buyer journeys through stages, and intelligently assigns reps to opportunities.",
+                capabilities: ["AI-driven AE assignment", "Buyer journey tracking", "Account stage automation"],
+                color: "indigo",
+              },
+              {
                 icon: Shield,
                 title: "QA Agent",
-                subtitle: "Compliance",
-                description: "Real-time auditing for quality, accuracy, and compliance. Ensures innocent-first engagement.",
+                subtitle: "Compliance & Quality",
+                description: "Real-time auditing across every interaction for quality, accuracy, and compliance. Ensures every touchpoint meets your standards.",
                 capabilities: ["Real-time monitoring", "Policy enforcement", "Audit trail generation"],
                 color: "rose",
               },
@@ -780,22 +860,23 @@ export default function LandingPage() {
             ))}
           </div>
 
-          {/* Agent Architecture */}
+          {/* Agent Intelligence */}
           <Card className="bg-slate-900 text-white border-none">
             <CardContent className="p-8">
               <div className="grid md:grid-cols-2 gap-8 items-center">
                 <div>
                   <div className="flex items-center gap-2 mb-4">
                     <Layers className="h-5 w-5 text-violet-400" />
-                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">Agent Architecture</span>
+                    <span className="text-sm font-bold uppercase tracking-wider text-violet-400">The Agentic Steward — AgentX</span>
                   </div>
-                  <h3 className="text-2xl font-bold mb-4">Agents That Truly Understand Your Business</h3>
+                  <h3 className="text-2xl font-bold mb-4">Reasoning First. Compliance First. Nothing Forgotten.</h3>
                   <p className="text-slate-400 mb-6">
-                    Every agent inherits your Organization Intelligence — positioning, ICP, problem framework,
-                    and compliance rules. Campaign-specific context layers on top for precision execution.
+                    Every AgentX agent is powered by Organization Intelligence — your DNA, your rules, your truth.
+                    No interaction happens without reasoning first. No interaction is ever forgotten at the contact
+                    or account level. Compliance isn't a checkbox — it's woven into every layer.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {["Org Identity", "Service Catalog", "Problem Framework", "Compliance Policy"].map((item, i) => (
+                    {["Organization Intelligence", "Problem Framework", "Compliance First", "Reasoning First", "Brand Voice"].map((item, i) => (
                       <Badge key={i} className="bg-white/10 border-white/20 text-white">{item}</Badge>
                     ))}
                   </div>
@@ -804,21 +885,125 @@ export default function LandingPage() {
                   <div className="p-4 rounded-xl bg-white/5 border border-white/10">
                     <div className="flex items-center gap-3 mb-2">
                       <Bot className="h-5 w-5 text-slate-400" />
-                      <span className="font-semibold">Foundation Layer</span>
+                      <span className="font-semibold">Foundation — Reasoning Layer</span>
                     </div>
-                    <p className="text-sm text-slate-400">Core capabilities: gatekeeper handling, verification, objection detection</p>
+                    <p className="text-sm text-slate-400">Problem intelligence, solution mapping, pinpoint context — every action is reasoned before execution</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-indigo-500/20 border border-indigo-500/30">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Brain className="h-5 w-5 text-indigo-400" />
+                      <span className="font-semibold">+ Organization Intelligence</span>
+                    </div>
+                    <p className="text-sm text-slate-300">Your identity, ICP, brand voice, problem frameworks, compliance policies, and empathy guidelines</p>
                   </div>
                   <div className="p-4 rounded-xl bg-violet-500/20 border border-violet-500/30">
                     <div className="flex items-center gap-3 mb-2">
                       <Target className="h-5 w-5 text-violet-400" />
-                      <span className="font-semibold">+ Campaign Context</span>
+                      <span className="font-semibold">+ Campaign & Memory Context</span>
                     </div>
-                    <p className="text-sm text-slate-300">Account briefing, talking points, qualification rules, success criteria</p>
+                    <p className="text-sm text-slate-300">Account history, contact interactions, talking points, qualification rules — nothing is ever forgotten</p>
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
+        </div>
+      </section>
+
+      {/* Generative Content Studio Showcase */}
+      <section className="py-24 px-6 bg-gradient-to-br from-emerald-950 via-slate-900 to-indigo-950 text-white relative overflow-hidden">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+
+        <div className="max-w-7xl mx-auto relative">
+          <div className="text-center mb-16">
+            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
+              <Wand2 className="h-3.5 w-3.5 mr-2" />
+              Generative Content Studio
+            </Badge>
+            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+              Create Entire Campaigns.{" "}
+              <span className="text-emerald-400">In Minutes, Not Months.</span>
+            </h2>
+            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
+              Stop waiting weeks for content. Our AI-powered studio generates conversion-ready landing pages,
+              email campaigns, blog posts, eBooks, solution briefs, and images — all aligned to your brand,
+              your audience, and your campaign goals.
+            </p>
+          </div>
+
+          {/* Content Engines Grid */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+            {[
+              {
+                icon: Globe,
+                title: "Landing Pages",
+                description: "Full responsive landing pages with forms, CTAs, and SEO — generated and published with a single click.",
+                color: "violet",
+              },
+              {
+                icon: Mail,
+                title: "Email Campaigns",
+                description: "Persona-targeted email templates and sequences that match your tone, your offer, and your audience's pain points.",
+                color: "blue",
+              },
+              {
+                icon: FileText,
+                title: "Blog Posts",
+                description: "SEO-optimized thought leadership content that positions your brand as the authority in your space.",
+                color: "indigo",
+              },
+              {
+                icon: BookOpen,
+                title: "eBooks & Briefs",
+                description: "Long-form eBooks and solution briefs designed to educate buyers and drive high-intent lead capture.",
+                color: "emerald",
+              },
+            ].map((engine, i) => (
+              <Card key={i} className="bg-white/5 border-white/10 backdrop-blur hover:bg-white/10 transition-colors">
+                <CardContent className="p-6">
+                  <div className={`h-12 w-12 rounded-xl bg-${engine.color}-500/20 flex items-center justify-center mb-4`}>
+                    <engine.icon className={`h-6 w-6 text-${engine.color}-400`} />
+                  </div>
+                  <h3 className="font-bold text-lg text-white mb-2">{engine.title}</h3>
+                  <p className="text-sm text-slate-400">{engine.description}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Studio Capabilities Banner */}
+          <div className="grid md:grid-cols-3 gap-6">
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
+              <div className="h-12 w-12 rounded-xl bg-violet-500/20 flex items-center justify-center mx-auto mb-4">
+                <Sparkles className="h-6 w-6 text-violet-400" />
+              </div>
+              <h3 className="font-bold text-lg text-white mb-2">Generate</h3>
+              <p className="text-sm text-slate-400">
+                Describe what you need. The AI creates complete, publication-ready content
+                with your brand voice, value propositions, and audience context built in.
+              </p>
+            </div>
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
+              <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+                <PenTool className="h-6 w-6 text-emerald-400" />
+              </div>
+              <h3 className="font-bold text-lg text-white mb-2">Refine</h3>
+              <p className="text-sm text-slate-400">
+                Chat with the AI to iterate. Adjust tone, expand sections, add CTAs,
+                or rework entire pieces — all through natural conversation.
+              </p>
+            </div>
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-center">
+              <div className="h-12 w-12 rounded-xl bg-blue-500/20 flex items-center justify-center mx-auto mb-4">
+                <Globe className="h-6 w-6 text-blue-400" />
+              </div>
+              <h3 className="font-bold text-lg text-white mb-2">Publish</h3>
+              <p className="text-sm text-slate-400">
+                One click to go live. Landing pages publish to branded URLs with full SEO.
+                Content saves to your asset library for campaign use across all channels.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -830,11 +1015,12 @@ export default function LandingPage() {
               Our Beliefs
             </Badge>
             <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              The Four Principles of{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Intelligent Demand.</span>
+              The Principles of{" "}
+              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">The Problem Solvers.</span>
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              These beliefs inform every model we train, every agent we deploy, and every campaign we run.
+              These principles define who we are — not just what we build. They inform every agent we deploy,
+              every conversation we hold, and every campaign we run.
             </p>
           </div>
 
@@ -842,27 +1028,27 @@ export default function LandingPage() {
             {[
               {
                 number: "01",
-                title: "Permission is Earned",
-                description: "Every touchpoint is an opportunity to prove value. If you haven't done the research, you don't have the right to their time.",
-                icon: UserCheck,
+                title: "Reasoning First",
+                description: "No interaction happens without reasoning first. Every touchpoint is researched, contextualized, and justified before it reaches a human being.",
+                icon: Brain,
               },
               {
                 number: "02",
-                title: "Context Over Content",
-                description: "Great copy is worthless if sent to the wrong person at the wrong time. We prioritize business context above all else.",
-                icon: Target,
+                title: "Nothing Forgotten",
+                description: "No interaction is ever forgotten at the contact or account level. Every conversation, every signal, every response — remembered and reasoned upon.",
+                icon: Database,
               },
               {
                 number: "03",
-                title: "Data is Evidence",
-                description: "We don't just collect data; we look for evidence. Our agents reason through conflicting signals to find the truth.",
-                icon: Search,
+                title: "Compliance First",
+                description: "Trust is earned through transparency. Every agent operates within compliance boundaries. Every data point is sourced, verified, and governed.",
+                icon: Shield,
               },
               {
                 number: "04",
-                title: "Judgment at Scale",
-                description: "Automating judgment is the only way to scale demand without scaling noise. We build systems that think.",
-                icon: Brain,
+                title: "Truth & Empathy",
+                description: "Human-to-human connection and empathy always come first. We believe in truth over vanity metrics, real conversations over automated noise.",
+                icon: UserCheck,
               },
             ].map((principle, i) => (
               <Card key={i} className="border-2 hover:shadow-lg transition-shadow bg-white">
@@ -880,8 +1066,8 @@ export default function LandingPage() {
 
           <div className="text-center p-8 rounded-2xl bg-slate-900 text-white">
             <p className="text-2xl font-bold">
-              Intelligence isn't a feature.{" "}
-              <span className="text-violet-400">It's the foundation.</span>
+              Human Led Intelligence. AI Led Execution.{" "}
+              <span className="text-violet-400">We are The Problem Solvers.</span>
             </p>
           </div>
         </div>
@@ -897,7 +1083,7 @@ export default function LandingPage() {
                 <div className="relative bg-slate-900 rounded-3xl p-8 text-white">
                   <Quote className="h-10 w-10 text-violet-400 mb-6" />
                   <div className="space-y-4">
-                    <div className="text-4xl font-bold">10+</div>
+                    <div className="text-4xl font-bold">11+</div>
                     <div className="text-slate-400">Years in B2B</div>
                     <div className="h-px bg-slate-700 my-4" />
                     <div className="text-4xl font-bold">2M+</div>
@@ -912,13 +1098,13 @@ export default function LandingPage() {
             <div className="md:col-span-3">
               <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200">Our Story</Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-6">
-                Built in the Trenches.{" "}
-                <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Designed for Truth.</span>
+                The Problem Solvers.{" "}
+                <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Built for Truth.</span>
               </h2>
               <blockquote className="text-xl text-muted-foreground mb-6 border-l-4 border-violet-500 pl-6 italic">
-                "Starting Pivotal B2B in Afghanistan in 2017 taught me that technology is only as good as the purpose
-                behind it. In high-stakes environments, you learn that every interaction counts and every mistake is public.
-                We built DemandGentic.ai to be a steward of progress — a system that uses data to solve problems, not just create noise."
+                "Starting Pivotal B2B in Afghanistan in 2017 taught me that every interaction counts and every mistake is public.
+                We built DemandGentic.ai to be The Agentic Steward — a system that reasons before it acts, remembers every interaction,
+                and puts truth, human connection, and compliance above everything else."
               </blockquote>
               <div className="flex items-center gap-4">
                 <div className="h-14 w-14 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl">
@@ -930,7 +1116,8 @@ export default function LandingPage() {
                 </div>
               </div>
               <p className="mt-6 text-muted-foreground">
-                DemandGentic.ai is built by Pivotal B2B — a team with over a decade in the trenches of global B2B demand generation.
+                DemandGentic.ai is built by Pivotal B2B — a B2B marketing and demand team trained on 11+ years
+                of first-hand front-line experience. We love to be called The Problem Solvers.
                 From Afghanistan to enterprise clients worldwide, we didn't build theory. We built what actually works.
               </p>
             </div>
@@ -950,17 +1137,19 @@ export default function LandingPage() {
             Ready to Build Demand That Actually Converts?
           </h2>
           <p className="text-xl text-white/80 mb-8 max-w-2xl mx-auto">
-            Join the revenue teams replacing noise with intelligence. See how our combination of
-            expert services, AI agents, and precision data can transform your pipeline.
+            Join the revenue teams replacing algorithmic noise with agentic reasoning. See how
+            Problem Intelligence, Solution Mapping, and Pinpoint Context — powered by 11+ years
+            of front-line experience — transform your demand engine.
           </p>
 
           {/* Value Pills */}
           <div className="flex flex-wrap justify-center gap-3 mb-10">
             {[
-              "70M+ Verified Contacts",
-              "98% Data Accuracy",
-              "AI Voice Agents",
-              "Full-Service Delivery",
+              "Problem Intelligence",
+              "Solution Mapping",
+              "Reasoning First",
+              "Compliance First",
+              "The Problem Solvers",
             ].map((pill, i) => (
               <div key={i} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 border border-white/20">
                 <CheckCircle2 className="h-4 w-4" />
@@ -988,7 +1177,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="py-16 px-6 bg-slate-900 text-white">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-[1600px] mx-auto">
           <div className="grid md:grid-cols-5 gap-12 mb-12">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
@@ -1000,11 +1189,11 @@ export default function LandingPage() {
                 </div>
                 <div className="flex flex-col">
                   <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human Led Intelligence, AI Led Execution — By Pivotal B2B</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
-                The end of algorithmic noise. The era of agentic reasoning.
+                Your entire revenue engine. Voice, content, pipeline, data — one intelligent platform.
               </p>
               <div className="text-slate-500 text-xs space-y-1">
                 <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
@@ -1018,9 +1207,10 @@ export default function LandingPage() {
               <h4 className="font-semibold mb-4">Platform</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="#platform" className="hover:text-white transition-colors">AI Agents</a></li>
+                <li><a href="#platform" className="hover:text-white transition-colors">Voice AI</a></li>
+                <li><a href="#platform" className="hover:text-white transition-colors">Content Studio</a></li>
+                <li><a href="#platform" className="hover:text-white transition-colors">Pipeline Intelligence</a></li>
                 <li><a href="#data" className="hover:text-white transition-colors">Data & Intelligence</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Integrations</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Security</a></li>
               </ul>
             </div>
 
@@ -1028,7 +1218,8 @@ export default function LandingPage() {
               <h4 className="font-semibold mb-4">Services</h4>
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="#services" className="hover:text-white transition-colors">AI-Led ABM</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">Content Demand</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Conversational Voice AI</a></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Generative Content</a></li>
                 <li><a href="#services" className="hover:text-white transition-colors">AI SDR</a></li>
                 <li><a href="#services" className="hover:text-white transition-colors">Appointments</a></li>
                 <li><a href="#services" className="hover:text-white transition-colors">Data Services</a></li>
@@ -1056,7 +1247,7 @@ export default function LandingPage() {
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+              © 2026 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
               <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

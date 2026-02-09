@@ -292,15 +292,16 @@ export function buildCampaignContextSection(config: {
   successCriteria?: string | null;
   brief?: string | null;
   campaignType?: string | null;
+  qualificationCriteria?: any | null; // Added qualification criteria
 }): string {
   const sections: string[] = [];
 
   // Campaign type provides critical context for how to approach the call
   if (config.campaignType) {
     const typeDescriptions: Record<string, string> = {
-      'appointment_generation': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
-      'appointment_setting': '**APPOINTMENT SETTING CAMPAIGN** - Your primary goal is to SCHEDULE A MEETING or get explicit agreement for a follow-up call at a specific time. Do NOT end the call after just sending content - push for an appointment.',
-      'content_syndication': 'Content Syndication Campaign - Focus on getting consent to receive content and validating interest.',
+      'appointment_generation': '**APPOINTMENT SETTING CAMPAIGN** - Your PRIMARY goal is to BOOK A SPECIFIC MEETING. Flow: (1) Deliver value proposition with metrics, (2) Ask ONE discovery question to qualify interest, (3) When interest is confirmed, propose specific times: "Would [day] at [time] or [day] at [time] work better for a quick 15-20 minute call?", (4) Confirm the meeting details and email. SUCCESS = explicit agreement to a specific date/time. Do NOT just send content and end - PUSH for the appointment.',
+      'appointment_setting': '**APPOINTMENT SETTING CAMPAIGN** - Your PRIMARY goal is to BOOK A SPECIFIC MEETING. Flow: (1) Deliver value proposition with metrics, (2) Ask ONE discovery question to qualify interest, (3) When interest is confirmed, propose specific times: "Would [day] at [time] or [day] at [time] work better for a quick 15-20 minute call?", (4) Confirm the meeting details and email. SUCCESS = explicit agreement to a specific date/time. Do NOT just send content and end - PUSH for the appointment.',
+      'content_syndication': '**CONTENT SYNDICATION CAMPAIGN** - Your ONLY goal is to get consent to send the white paper/content. Do NOT ask discovery questions like "Are you focused on this?" or "Is this a priority?". Simply: (1) Introduce the content briefly, (2) Ask if they would like to receive it, (3) Confirm email, (4) Close warmly. Keep it simple and direct.',
       'lead_qualification': 'Lead Qualification Campaign - Focus on discovery and gathering qualifying information.',
       'sql': 'Sales Qualified Lead Campaign - Focus on identifying sales-ready prospects with budget, authority, need, and timeline.',
       'bant_leads': 'BANT Qualification Campaign - Qualify leads on Budget, Authority, Need, and Timeline.',
@@ -341,7 +342,41 @@ ${points}
 - If interrupted mid-point, acknowledge and return naturally when appropriate`);
   }
 
-  // Campaign brief provides additional context for intelligent delivery
+  // Qualification questions - CRITICAL for gathering required data
+  if (config.qualificationCriteria && config.qualificationCriteria.length > 0) {
+    let qualSection = `### ⚠️ MANDATORY QUALIFICATION QUESTIONS (Must Ask)\n\n`;
+    qualSection += `**You are REQUIRED to ask these questions to qualify the lead. Do NOT skip them.**\n\n`;
+    
+    // Check if it's a JSON array of questions or just a string
+    try {
+      if (typeof config.qualificationCriteria === 'string' && config.qualificationCriteria.startsWith('[')) {
+        const questions = JSON.parse(config.qualificationCriteria);
+        if (Array.isArray(questions)) {
+          questions.forEach((q, i) => {
+            const requiredMark = q.required ? ' (REQUIRED)' : '';
+            qualSection += `${i + 1}. **${q.label || q.question}**${requiredMark}\n`;
+            if (q.type === 'select' && q.options) {
+              qualSection += `   Options: ${q.options.join(', ')}\n`;
+            }
+          });
+        } else {
+            qualSection += config.qualificationCriteria;
+        }
+      } else {
+        // It might be a plain string
+        qualSection += config.qualificationCriteria;
+      }
+    } catch (e) {
+      // Fallback if parsing fails
+      qualSection += String(config.qualificationCriteria);
+    }
+    
+    qualSection += `\n\n**INSTRUCTIONS:**\n- Weave these questions naturally into the conversation.\n- You MUST get answers to all REQUIRED questions before marking as qualified_lead.\n- If the prospect refuses to answer a required question, they cannot be marked as qualified.`;
+    
+    sections.push(qualSection);
+  }
+
+  // Campaign specific context helps agent adapt their approach
   if (config.brief) {
     sections.push(`### Campaign Brief\n${config.brief}`);
   }

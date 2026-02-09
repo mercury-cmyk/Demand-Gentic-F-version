@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth';
-import { requirePermission, auditLog } from '../middleware/iam-middleware';
+import { requireAuth, requireRole } from '../auth';
+import { auditLog } from '../middleware/iam-middleware';
 import * as secretService from '../services/secret-service';
 import { SecretEnvironment } from '@shared/schema';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireRole('admin'));
 
 const ENVIRONMENT_VALUES: SecretEnvironment[] = ['development', 'production'];
 const RUNTIME_ENVIRONMENT: SecretEnvironment =
@@ -95,7 +96,6 @@ const deactivateSecretSchema = z.object({
 
 router.get(
   '/',
-  requirePermission('secret', 'view'),
   async (req: Request, res: Response) => {
     try {
       const query = listQuerySchema.parse(req.query);
@@ -130,7 +130,6 @@ router.get(
 
 router.get(
   '/:id',
-  requirePermission('secret', 'view_sensitive'),
   async (req: Request, res: Response) => {
     try {
       const allowedEnvironments = getAllowedEnvironments();
@@ -148,13 +147,12 @@ router.get(
 
 router.post(
   '/',
-  requirePermission('secret', 'create'),
   auditLog('secret', 'secret_create'),
   async (req: Request, res: Response) => {
     try {
       const body = createSecretSchema.parse(req.body);
       const environment = resolveEnvironment(body.environment);
-      const userId = (req as any).userId;
+      const userId = req.user!.userId;
       const secretId = await secretService.createSecret(
         {
           ...body,
@@ -181,7 +179,6 @@ router.post(
 
 router.put(
   '/:id',
-  requirePermission('secret', 'edit'),
   auditLog('secret', 'secret_update'),
   async (req: Request, res: Response) => {
     try {
@@ -198,7 +195,7 @@ router.put(
           ...body,
           environment: environment ?? body.environment,
         },
-        (req as any).userId
+        req.user!.userId
       );
 
       res.json(updated);
@@ -217,7 +214,6 @@ router.put(
 
 router.post(
   '/:id/rotate',
-  requirePermission('secret', 'manage_settings'),
   auditLog('secret', 'secret_rotate'),
   async (req: Request, res: Response) => {
     try {
@@ -230,7 +226,7 @@ router.post(
       const rotated = await secretService.rotateSecret(
         req.params.id,
         body.value,
-        (req as any).userId
+        req.user!.userId
       );
 
       res.json(rotated);
@@ -246,7 +242,6 @@ router.post(
 
 router.post(
   '/:id/deactivate',
-  requirePermission('secret', 'manage_settings'),
   auditLog('secret', 'secret_deactivate'),
   async (req: Request, res: Response) => {
     try {
@@ -258,7 +253,7 @@ router.post(
 
       const deactivated = await secretService.deactivateSecret(
         req.params.id,
-        (req as any).userId
+        req.user!.userId
       );
 
       res.json(deactivated);
