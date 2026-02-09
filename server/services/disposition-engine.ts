@@ -179,14 +179,14 @@ export async function processDisposition(
 
     // Track call quality metrics for number reputation (anti-spam)
     try {
-      if (callAttempt.fromNumber) {
-        const durationSeconds = callAttempt.callDurationSeconds || callAttempt.talkDurationSec || 0;
+      if (callAttempt.phoneDialed) {
+        const durationSeconds = callAttempt.callDurationSeconds || 0;
         const answered = !['no_answer', 'voicemail'].includes(disposition);
-        
+
         await callQualityTracker.recordCallQuality({
           callId: callAttempt.id,
-          numberId: callAttempt.fromNumber, // This is the phone number used
-          phoneNumberE164: callAttempt.fromNumber,
+          numberId: callAttempt.phoneDialed, // This is the phone number used
+          phoneNumberE164: callAttempt.phoneDialed,
           durationSeconds,
           answered,
           disconnectReason: mapDispositionToDisconnectReason(disposition),
@@ -241,6 +241,9 @@ async function processQualifiedLead(
   result: DispositionResult,
   callData?: DispositionCallData
 ): Promise<void> {
+  console.log(`[DispositionEngine] ==> Starting processQualifiedLead for call attempt: ${callAttempt.id}`);
+  console.log(`[DispositionEngine] Call Data Received: ${JSON.stringify(callData, null, 2)}`);
+
   // QUALITY GATE: Flag short calls for review but don't prevent lead creation
   // All qualified dispositions should create leads regardless of duration.
   // Short calls are flagged for immediate QA review but still appear as leads.
@@ -304,60 +307,75 @@ async function processQualifiedLead(
   const transcript = callData?.transcript || undefined;
   const structuredTranscript = callData?.structuredTranscript || undefined;
 
+  const leadPayload = {
+    campaignId: callAttempt.campaignId,
+    contactId: callAttempt.contactId,
+    callAttemptId: callAttempt.id, // CRITICAL: Link lead to call attempt for traceability
+    contactName: contactName,
+    contactEmail: contact?.email || undefined,
+    accountName: contact?.companyName || undefined,
+    qaStatus: qaStatus as 'new' | 'under_review',
+    qaDecision: qaDecision,
+    agentId: callAttempt.humanAgentId,
+    dialedNumber: callAttempt.phoneDialed,
+    recordingUrl: recordingUrl,
+    callDuration: callAttempt.callDurationSeconds,
+    transcript: transcript,
+    structuredTranscript: structuredTranscript,
+    telnyxCallId: callAttempt.telnyxCallId, // This might be needed for recording lookups
+    notes: agentSource, // Track agent type and ID for full auditability
+  };
+
+  console.log('[DispositionEngine] Preparing to create lead with payload:', JSON.stringify(leadPayload, null, 2));
+
   // Create lead record with contact info and source tracking
-  const [newLead] = await db
-    .insert(leads)
-    .values({
-      campaignId: callAttempt.campaignId,
-      contactId: callAttempt.contactId,
-      callAttemptId: callAttempt.id, // CRITICAL: Link lead to call attempt for traceability
-      contactName: contactName,
-      contactEmail: contact?.email || undefined,
-      companyName: contact?.companyName || undefined,
-      qaStatus: qaStatus,
-      qaDecision: qaDecision,
-      agentId: callAttempt.humanAgentId,
-      dialedNumber: callAttempt.phoneDialed,
-      recordingUrl: recordingUrl,
-      callDuration: callAttempt.callDurationSeconds,
-      transcript: transcript,
-      structuredTranscript: structuredTranscript,
-      telnyxCallId: callAttempt.telnyxCallControlId, // This might be needed for recording lookups
-      notes: agentSource, // Track agent type and ID for full auditability
-    })
-    .returning({ id: leads.id });
+  try {
+    const [newLead] = await db
+      .insert(leads)
+      .values(leadPayload)
+      .returning({ id: leads.id });
 
-  if (newLead) {
-    result.leadId = newLead.id;
-    result.actions.push(`Created lead ${newLead.id}${isShortDurationCall ? ' (flagged: short duration)' : ''}`);
+    if (newLead) {
+      result.leadId = newLead.id;
+      result.actions.push(`Created lead ${newLead.id}${isShortDurationCall ? ' (flagged: short duration)' : ''}`);
 
-    // Log lead creation for monitoring
-    console.log(`[DispositionEngine] ✅ LEAD CREATED: ${newLead.id} | Contact: ${contactName} | Duration: ${callDuration}s | QA Status: ${qaStatus}${isShortDurationCall ? ' | ⚠️ SHORT DURATION' : ''}`);
+      // Log lead creation for monitoring
+      console.log(`[DispositionEngine] ✅ LEAD CREATED: ${newLead.id} | Contact: ${contactName} | Duration: ${callDuration}s | QA Status: ${qaStatus}${isShortDurationCall ? ' | ⚠️ SHORT DURATION' : ''}`);
 
-    // Insert activity log entry for lead creation
-    try {
-      await db.insert(activityLog).values({
-        entityType: 'lead',
-        entityId: newLead.id,
-        eventType: 'lead_created',
-        payload: {
-          callAttemptId: callAttempt.id,
-          contactId: callAttempt.contactId,
-          campaignId: callAttempt.campaignId,
-          contactName: contactName,
-          companyName: contact?.companyName || null,
-          callDuration: callDuration,
-          qaStatus: qaStatus,
-          isShortDuration: isShortDurationCall,
-          recordingUrl: recordingUrl,
-          phoneDialed: callAttempt.phoneDialed,
-        },
-        createdBy: callAttempt.humanAgentId || null,
-      });
-    } catch (logErr) {
-      console.error('[DispositionEngine] Failed to log lead_created activity:', logErr);
+      // Insert activity log entry for lead creation
+      try {
+        await db.insert(activityLog).values({
+          entityType: 'lead',
+          entityId: newLead.id,
+          eventType: 'lead_created',
+          payload: {
+            callAttemptId: callAttempt.id,
+            contactId: callAttempt.contactId,
+            campaignId: callAttempt.campaignId,
+            contactName: contactName,
+            companyName: contact?.companyName || null,
+            callDuration: callDuration,
+            qaStatus: qaStatus,
+            isShortDuration: isShortDurationCall,
+            recordingUrl: recordingUrl,
+            phoneDialed: callAttempt.phoneDialed,
+          },
+          createdBy: callAttempt.humanAgentId || null,
+        });
+      } catch (logErr) {
+        console.error('[DispositionEngine] Failed to log lead_created activity:', logErr);
+      }
+    } else {
+      // This case should ideally not happen if the insert doesn't throw
+      console.error(`[DispositionEngine] ❌ FAILED TO CREATE LEAD: db.insert did not return a new lead ID for call attempt ${callAttempt.id}.`);
+      result.errors.push('Lead creation failed: No ID returned from database.');
     }
+  } catch (dbError) {
+    console.error(`[DispositionEngine] ❌ DATABASE ERROR during lead creation for call attempt ${callAttempt.id}:`, dbError);
+    result.errors.push(`Lead creation failed due to database error: ${dbError instanceof Error ? dbError.message : 'Unknown DB error'}`);
+    return; // Stop further processing for this lead if DB insert fails
   }
+
 
   // Add to QC work queue with higher priority for short duration calls
   // Priority: 0 = normal, -1 = high priority (process first)
@@ -924,13 +942,13 @@ async function processCallbackRequested(
       callAttemptId: callAttempt.id,
       contactName: contactName,
       contactEmail: contact?.email || undefined,
-      companyName: contact?.companyName || undefined,
-      qaStatus: 'new',
+      accountName: contact?.companyName || undefined,
+      qaStatus: 'new' as const,
       qaDecision: '📞 CALLBACK REQUESTED: Prospect asked to be called back. Schedule and confirm callback time.',
       agentId: callAttempt.humanAgentId,
       dialedNumber: callAttempt.phoneDialed,
       recordingUrl: callAttempt.recordingUrl,
-      callDuration: callAttempt.callDurationSeconds,
+      callDuration: callDuration,
       notes: `${agentSource} | Callback requested`,
     })
     .returning({ id: leads.id });

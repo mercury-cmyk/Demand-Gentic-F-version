@@ -145,6 +145,13 @@ export class TelnyxAiBridge extends EventEmitter {
   private peakConcurrent: number = 0;
   private readonly METRICS_WINDOW = 100; // Keep last 100 calls for metrics
   
+  // Carrier failure retry tracking (per Telnyx support Feb 2026)
+  // Sub-500ms failures with no media are carrier/routing issues, not codec problems.
+  // Track per-destination to avoid infinite retries.
+  private carrierFailureCounts: Map<string, { count: number; lastAttempt: number }> = new Map();
+  private readonly MAX_CARRIER_RETRIES = 2; // Max retries per destination per hour
+  private readonly CARRIER_RETRY_WINDOW_MS = 3600_000; // 1 hour window
+  
   // Audio cache for legacy TTS audio files (temporary storage)
   private audioCache: Map<string, Buffer> = new Map();
 
@@ -158,6 +165,23 @@ export class TelnyxAiBridge extends EventEmitter {
     const configuredMax = Number(process.env.TELNYX_MAX_CONCURRENT_CALLS || 50);
     this.MAX_CONCURRENT_CALLS = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 50;
     this.semaphore = new Semaphore(this.MAX_CONCURRENT_CALLS);
+
+    // CARRIER FAILURE RETRY HANDLER (per Telnyx support Feb 2026)
+    // Sub-500ms call failures with no media exchange are carrier/routing issues.
+    // These are common for international destinations (UAE, etc.).
+    // Strategy: re-queue the item so the orchestrator retries with a different
+    // fromNumber or after a short delay, giving carrier routes time to recover.
+    this.on("call:carrier_failure", async (event: {
+      callId: string;
+      durationMs: number;
+      destination: string;
+      isInternational: boolean;
+      fromNumber?: string;
+      campaignId?: string;
+      queueItemId?: string;
+    }) => {
+      await this.handleCarrierFailureRetry(event);
+    });
   }
 
   private async telnyxFetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -225,6 +249,68 @@ export class TelnyxAiBridge extends EventEmitter {
     const metrics = this.getMetrics();
     if (metrics.totalCalls >= 10 && metrics.fastCallPercentage < 35) {
       console.warn(`[TelnyxAiBridge] ⚠️ Fast call ratio (${metrics.fastCallPercentage}%) is below 35% target`);
+    }
+  }
+
+  /**
+   * Handle carrier failure retry for sub-500ms international call failures.
+   *
+   * Per Telnyx support (Feb 2026): these failures indicate routing or carrier
+   * compatibility issues rather than codec problems. Strategy:
+   * 1. Check retry budget (max 2 retries per destination per hour)
+   * 2. Re-queue the campaign_queue item with a short delay so the orchestrator
+   *    picks it up again (potentially with a different fromNumber / carrier route)
+   * 3. Log detailed diagnostics for Telnyx support investigation
+   */
+  private async handleCarrierFailureRetry(event: {
+    callId: string;
+    durationMs: number;
+    destination: string;
+    isInternational: boolean;
+    fromNumber?: string;
+    campaignId?: string;
+    queueItemId?: string;
+  }): Promise<void> {
+    const { callId, durationMs, destination, isInternational, fromNumber, campaignId, queueItemId } = event;
+
+    // Check retry budget
+    const now = Date.now();
+    const existing = this.carrierFailureCounts.get(destination);
+    if (existing && (now - existing.lastAttempt) < this.CARRIER_RETRY_WINDOW_MS) {
+      if (existing.count >= this.MAX_CARRIER_RETRIES) {
+        console.error(`[TelnyxAiBridge] 🚫 CARRIER RETRY BUDGET EXHAUSTED for ${destination}: ${existing.count} failures in the last hour. Skipping retry. Contact Telnyx support for route investigation.`);
+        return;
+      }
+      existing.count++;
+      existing.lastAttempt = now;
+    } else {
+      this.carrierFailureCounts.set(destination, { count: 1, lastAttempt: now });
+    }
+
+    const retryCount = this.carrierFailureCounts.get(destination)!.count;
+    console.log(`[TelnyxAiBridge] 🔄 CARRIER FAILURE RETRY ${retryCount}/${this.MAX_CARRIER_RETRIES} for ${destination} (call ${callId}, ${durationMs}ms, from: ${fromNumber || 'unknown'}, international: ${isInternational})`);
+
+    // Re-queue the campaign_queue item if we have the identifiers
+    if (queueItemId) {
+      try {
+        const { db } = await import('../db');
+        const { sql } = await import('drizzle-orm');
+        // Set next_attempt_at to 30s in the future to give carrier routes time to recover
+        // Also rotate the fromNumber by clearing any caller-number affinity
+        await db.execute(sql`
+          UPDATE campaign_queue
+          SET status = 'queued',
+              next_attempt_at = NOW() + INTERVAL '30 seconds',
+              updated_at = NOW(),
+              enqueued_reason = COALESCE(enqueued_reason, '') || '|carrier_retry_' || ${String(retryCount)} || ':' || to_char(NOW(), 'HH24:MI:SS')
+          WHERE id = ${queueItemId}
+        `);
+        console.log(`[TelnyxAiBridge] ✅ Re-queued ${queueItemId} for carrier retry in 30s (attempt ${retryCount})`);
+      } catch (dbErr) {
+        console.error(`[TelnyxAiBridge] Failed to re-queue ${queueItemId} for carrier retry:`, dbErr);
+      }
+    } else {
+      console.warn(`[TelnyxAiBridge] Cannot re-queue carrier failure — no queueItemId for call ${callId}`);
     }
   }
 

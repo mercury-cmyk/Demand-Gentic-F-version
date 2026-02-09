@@ -840,7 +840,18 @@ export class DatabaseStorage implements IStorage {
     if (ids.length === 0) {
       return [];
     }
-    return await db.select().from(contacts).where(inArray(contacts.id, ids));
+    // Batch large arrays to avoid PostgreSQL parameter limits
+    if (ids.length <= 1000) {
+      return await db.select().from(contacts).where(inArray(contacts.id, ids));
+    }
+    const results: Contact[] = [];
+    const batchSize = 1000;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize);
+      const batchResults = await db.select().from(contacts).where(inArray(contacts.id, batch));
+      results.push(...batchResults);
+    }
+    return results;
   }
 
   async getContactsByEmails(emails: string[]): Promise<Contact[]> {
@@ -1726,6 +1737,8 @@ export class DatabaseStorage implements IStorage {
     queued: number;
     inProgress: number;
     completed: number;
+    removed: number;
+    removedBreakdown: Record<string, number>;
     agents: number;
   }> {
     // Determine dial mode to query the correct table
@@ -1771,7 +1784,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return { total, queued, inProgress, completed, agents: agentCount };
+      return { total, queued, inProgress, completed, removed: 0, removedBreakdown: {}, agents: agentCount };
     } else {
       // POWER MODE: Query campaign_queue table with GROUP BY for efficiency
       const stats = await db
@@ -1783,26 +1796,48 @@ export class DatabaseStorage implements IStorage {
         .where(eq(campaignQueue.campaignId, campaignId))
         .groupBy(campaignQueue.status);
 
+      // Also get removed reason breakdown
+      const removedStats = await db
+        .select({
+          reason: campaignQueue.removedReason,
+          count: sql<number>`count(*)::int`
+        })
+        .from(campaignQueue)
+        .where(and(
+          eq(campaignQueue.campaignId, campaignId),
+          eq(campaignQueue.status, 'removed')
+        ))
+        .groupBy(campaignQueue.removedReason);
+
+      const removedBreakdown: Record<string, number> = {};
+      for (const row of removedStats) {
+        const key = row.reason || 'unknown';
+        removedBreakdown[key] = row.count;
+      }
+
       // Aggregate counts
       let total = 0;
       let queued = 0;
       let inProgress = 0;
       let completed = 0;
+      let removed = 0;
 
       for (const row of stats) {
         const count = row.count;
         total += count;
-        
+
         if (row.status === 'queued') {
           queued += count;
         } else if (row.status === 'in_progress') {
           inProgress += count;
         } else if (row.status === 'done') {
           completed += count;
+        } else if (row.status === 'removed') {
+          removed += count;
         }
       }
 
-      return { total, queued, inProgress, completed, agents: agentCount };
+      return { total, queued, inProgress, completed, removed, removedBreakdown, agents: agentCount };
     }
   }
 

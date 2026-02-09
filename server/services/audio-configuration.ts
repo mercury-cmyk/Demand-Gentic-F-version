@@ -28,10 +28,30 @@ export type VoiceProvider = 'google' | 'openai';
  * All code paths (test/production, test/real) reference these settings.
  */
 export const UNIFIED_AUDIO_CONFIG = {
-  // Default format for all Telnyx calls (PSTN standard)
-  // G.711 ulaw (µ-law) is native Telnyx format, best compatibility
-  telnyxFormat: 'g711_ulaw' as const,
+  // Default format for Telnyx calls (PSTN standard)
+  // G.711 ulaw (µ-law) is native for North America; A-law for international
+  // Per Telnyx support (Feb 2026): Send A-law directly for international destinations
+  // to minimize transcoding hops and quality degradation.
+  // Use getTelnyxFormatForDestination() for per-call codec selection.
+  telnyxFormat: 'g711_ulaw' as const, // Default; overridden per-call by destination
   telnyxSampleRate: 8000,
+  
+  // Higher-quality codec support (future)
+  // G.722 (wideband 16kHz) or OPUS could reduce transcoding loss for international.
+  // Telnyx WebSocket <Stream> bidirectional supports: PCMU, PCMA, G722, OPUS, AMR-WB, L16
+  // Set this flag to true once G.722/OPUS testing is validated.
+  enableWidebandCodecs: false,
+
+  // L16 Bidirectional Mode (RECOMMENDED for maximum quality)
+  // Telnyx supports L16 (Linear PCM 16kHz) on bidirectional WebSocket streams.
+  // Benefits:
+  //   - Eliminates ALL G.711 encoding/decoding on our server
+  //   - Only requires linear resampling (16kHz ↔ 24kHz for Gemini)
+  //   - No lossy codec artifacts — pure waveform
+  //   - Telnyx handles L16 ↔ G.711 conversion on their optimized media servers
+  // Trade-off: Doubles bandwidth (256kbps vs 128kbps) — acceptable for WebSocket
+  // To enable: set to true and update TeXML bidirectionalCodec to "L16"
+  enableL16Bidirectional: false,
   
   // Gemini Live input format (can accept 16kHz or 24kHz)
   // Using 16kHz: good balance of quality and processing
@@ -75,6 +95,52 @@ export const UNIFIED_AUDIO_CONFIG = {
     interpolationMethod: 'linear' as const,
   },
 } as const;
+
+// ==================== DESTINATION-AWARE CODEC SELECTION ====================
+
+/**
+ * Determine the correct Telnyx G.711 format for a destination phone number.
+ *
+ * Per Telnyx support (Feb 2026):
+ * - North America (+1) and Japan (+81) use µ-law (PCMU)
+ * - UK (+44), Europe, Middle East (UAE +971), Australia (+61), and most
+ *   international destinations use A-law (PCMA)
+ * - Sending A-law directly to A-law destinations avoids an extra transcoding
+ *   step at Telnyx, which compounds quality loss on the 24kHz→8kHz conversion.
+ *
+ * @returns 'g711_alaw' for A-law regions, 'g711_ulaw' for µ-law regions
+ */
+export function getTelnyxFormatForDestination(phoneNumber?: string): 'g711_ulaw' | 'g711_alaw' {
+  if (!phoneNumber) return 'g711_ulaw';
+
+  const cleaned = phoneNumber.replace(/[^\d+]/g, '');
+  const digits = cleaned.startsWith('+') ? cleaned.substring(1) : cleaned;
+
+  // µ-law regions
+  const muLawPrefixes = ['1', '81']; // US/Canada/Caribbean, Japan
+  for (const prefix of muLawPrefixes) {
+    if (digits.startsWith(prefix)) return 'g711_ulaw';
+  }
+
+  // Everything else is A-law (UK, EU, UAE, Australia, India, etc.)
+  return 'g711_alaw';
+}
+
+/**
+ * Get the preferred high-quality codec for a destination, if wideband is enabled.
+ * Returns null if wideband codecs are disabled or unsupported.
+ *
+ * Future-proofing: Once Telnyx WebSocket <Stream> supports G.722 or OPUS,
+ * enable UNIFIED_AUDIO_CONFIG.enableWidebandCodecs and this will return
+ * the optimal codec for the destination.
+ */
+export function getPreferredCodecForDestination(phoneNumber?: string): 'PCMU' | 'PCMA' | 'G722' | 'OPUS' | null {
+  if (!UNIFIED_AUDIO_CONFIG.enableWidebandCodecs) return null;
+  // When enabled, prefer OPUS for international (better compression over long routes)
+  // and G.722 for domestic (wideband, low latency)
+  const format = getTelnyxFormatForDestination(phoneNumber);
+  return format === 'g711_alaw' ? 'OPUS' : 'G722';
+}
 
 // ==================== PROVIDER-SPECIFIC CONFIG ====================
 
@@ -253,12 +319,17 @@ export function getAudioConfigDiagnostics() {
 /**
  * Apply audio configuration to a session or provider
  * Used by all code paths to ensure consistency
+ *
+ * @param context.destinationNumber — The destination phone number (E.164).
+ *   When provided, selects A-law for international destinations and µ-law for
+ *   North America / Japan, per Telnyx support guidance (Feb 2026).
  */
 export function applyAudioConfiguration(context: {
   isTestSession?: boolean;
   provider?: VoiceProvider;
   campaignId?: string;
   source?: string;
+  destinationNumber?: string;
 }) {
   const config = resolveAudioConfiguration({
     isTestSession: context.isTestSession,
@@ -266,10 +337,15 @@ export function applyAudioConfiguration(context: {
     campaignId: context.campaignId,
     source: (context.source || 'production_queue') as any,
   });
+
+  // Per-call codec: A-law for international, µ-law for US/Canada
+  const telnyxAudioFormat = context.destinationNumber
+    ? getTelnyxFormatForDestination(context.destinationNumber)
+    : UNIFIED_AUDIO_CONFIG.telnyxFormat;
   
   return {
-    // Format for Telnyx
-    telnyxAudioFormat: UNIFIED_AUDIO_CONFIG.telnyxFormat,
+    // Format for Telnyx (destination-aware)
+    telnyxAudioFormat,
     telnyxSampleRate: UNIFIED_AUDIO_CONFIG.telnyxSampleRate,
     
     // Format for provider
@@ -284,12 +360,15 @@ export function applyAudioConfiguration(context: {
     provider: config.provider,
     isTest: config.isTestSession,
     source: config.configSource,
+    isInternational: telnyxAudioFormat === 'g711_alaw',
   };
 }
 
 export default {
   UNIFIED_AUDIO_CONFIG,
   getProviderAudioConfig,
+  getTelnyxFormatForDestination,
+  getPreferredCodecForDestination,
   resolveAudioConfiguration,
   validateConfigurationConsistency,
   initializeAudioConfiguration,

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc, like } from "drizzle-orm";
+import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { storage } from "./storage";
 import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
@@ -115,7 +116,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, campaignTestCalls, campaignOrganizations, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, type InsertMailboxAccount, type Account } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -5018,12 +5019,15 @@ export function registerRoutes(app: Express) {
           new Map(contacts.map(c => [c.id, c])).values()
         );
         const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+        const contactsWithoutAccount = uniqueContacts.length - contactsWithAccount.length;
+
+        console.log(`[Campaign Creation] Audience breakdown: ${contacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${contactsWithoutAccount} dropped: no accountId)`);
 
         // PHONE VALIDATION: Filter contacts with callable phone numbers
         // Fetch full contact data with account/HQ phone info if not already present
         const contactIds = contactsWithAccount.map(c => c.id);
         if (contactIds.length === 0) {
-          console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id}`);
+          console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id} (${uniqueContacts.length} unique contacts, all missing accountId)`);
         } else {
           // Batch to avoid PostgreSQL parameter limits
           const fullContacts: any[] = [];
@@ -5055,7 +5059,8 @@ export function registerRoutes(app: Express) {
             return bestPhone.phone !== null;
           });
 
-          console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} contacts have callable phones`);
+          const noPhoneCount = fullContacts.length - contactsWithCallablePhones.length;
+          console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} have callable phones (${noPhoneCount} dropped: no valid phone)`);
 
           // Bulk enqueue all contacts with callable phones
           const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
@@ -5066,6 +5071,7 @@ export function registerRoutes(app: Express) {
 
           const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
           console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
+          console.log(`[Campaign Creation] SUMMARY: ${uniqueContacts.length} audience -> ${contactsWithoutAccount} no account -> ${noPhoneCount} no phone -> ${enqueued} enqueued`);
         }
       }
 
@@ -5538,6 +5544,9 @@ export function registerRoutes(app: Express) {
             // Deduplicate + filter contacts with accountId
             const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
             const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+            const contactsWithoutAccount = uniqueContacts.length - contactsWithAccount.length;
+
+            console.log(`[LAUNCH CAMPAIGN] Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${contactsWithoutAccount} dropped: no accountId)`);
 
             if (contactsWithAccount.length > 0) {
               // Phone validation: batch-fetch with account data
@@ -5567,6 +5576,9 @@ export function registerRoutes(app: Express) {
                 }).phone !== null;
               });
 
+              const noPhoneCount = fullContacts.length - contactsWithCallablePhones.length;
+              console.log(`[LAUNCH CAMPAIGN] Phone validation: ${contactsWithCallablePhones.length}/${fullContacts.length} have callable phones (${noPhoneCount} dropped: no valid phone)`);
+
               const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
                 contactId: row.contacts.id,
                 accountId: row.contacts.accountId!,
@@ -5574,9 +5586,10 @@ export function registerRoutes(app: Express) {
               }));
 
               const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
-              console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue (${contactsWithCallablePhones.length} with phones, ${contactsWithAccount.length} total)`);
+              console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue`);
+              console.log(`[LAUNCH CAMPAIGN] SUMMARY: ${uniqueContacts.length} audience -> ${contactsWithoutAccount} no account -> ${noPhoneCount} no phone -> ${enqueued} enqueued`);
             } else {
-              console.log(`[LAUNCH CAMPAIGN] No contacts with accounts found in audience`);
+              console.log(`[LAUNCH CAMPAIGN] No contacts with accounts found in audience (${uniqueContacts.length} unique contacts, all missing accountId)`);
             }
           } else {
             console.log(`[LAUNCH CAMPAIGN] Queue already has ${queuedCount} items — skipping auto-populate`);
@@ -6106,42 +6119,60 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "Campaign has no audience defined" });
       }
 
-      let contacts: any[] = [];
+      let audienceContacts: any[] = [];
 
-      // Resolve contacts from segments
-      if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
-        for (const segmentId of audienceRefs.segments) {
-          const segment = await storage.getSegment(segmentId);
-          if (segment && segment.definitionJson) {
-            const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-            contacts.push(...segmentContacts);
-          }
+      // Resolve contacts from filterGroup (Advanced Filters)
+      if (audienceRefs.filterGroup) {
+        console.log(`[Queue Populate] Resolving contacts from filterGroup for campaign ${req.params.id}`);
+        const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
+        audienceContacts.push(...filterContacts);
+        console.log(`[Queue Populate] Found ${filterContacts.length} contacts from filterGroup`);
+      }
+
+      // Resolve contacts from segments (check both keys)
+      const segmentIds = [
+        ...(audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : []),
+        ...(audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments) ? audienceRefs.selectedSegments : []),
+      ];
+      const uniqueSegmentIds = [...new Set(segmentIds)];
+      for (const segmentId of uniqueSegmentIds) {
+        const segment = await storage.getSegment(segmentId);
+        if (segment && segment.definitionJson) {
+          const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+          audienceContacts.push(...segmentContacts);
         }
       }
 
-      // Resolve contacts from lists
-      if (audienceRefs.lists && Array.isArray(audienceRefs.lists)) {
-        for (const listId of audienceRefs.lists) {
+      // Resolve contacts from lists (check both keys, batch for large lists)
+      const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+      if (Array.isArray(listIds) && listIds.length > 0) {
+        for (const listId of listIds) {
           const list = await storage.getList(listId);
-          if (list && list.recordIds) {
-            const listContacts = await storage.getContactsByIds(list.recordIds);
-            contacts.push(...listContacts);
+          if (list && list.recordIds && list.recordIds.length > 0) {
+            // Batch large lists to avoid PostgreSQL parameter limits
+            const batchSize = 1000;
+            for (let i = 0; i < list.recordIds.length; i += batchSize) {
+              const batch = list.recordIds.slice(i, i + batchSize);
+              const listContacts = await storage.getContactsByIds(batch);
+              audienceContacts.push(...listContacts);
+            }
           }
         }
       }
 
-      // Remove duplicates
+      // Remove duplicates and filter contacts with accountId
       const uniqueContacts = Array.from(
-        new Map(contacts.map(c => [c.id, c])).values()
+        new Map(audienceContacts.map(c => [c.id, c])).values()
       );
 
       if (uniqueContacts.length === 0) {
         return res.status(400).json({ message: "No contacts found in campaign audience" });
       }
 
-      // Filter out contacts without accountId
       const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
       const skippedNoAccount = uniqueContacts.length - contactsWithAccount.length;
+
+      console.log(`[Queue Populate] Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${skippedNoAccount} dropped: no accountId)`);
 
       if (contactsWithAccount.length === 0) {
         return res.status(400).json({
@@ -6181,25 +6212,31 @@ export function registerRoutes(app: Express) {
       });
 
       const skippedNoPhone = contactsWithAccount.length - contactsWithCallablePhones.length;
-      console.log(`[Queue Populate] Phone validation: ${contactsWithCallablePhones.length}/${contactsWithAccount.length} contacts have callable phones`);
+      console.log(`[Queue Populate] Phone validation: ${contactsWithCallablePhones.length}/${contactsWithAccount.length} have callable phones (${skippedNoPhone} dropped: no valid phone)`);
 
-      // Enqueue contacts with callable phones only
-      const enqueued = [];
-      let alreadyQueued = 0;
-      for (const row of contactsWithCallablePhones) {
-        try {
-          const queueItem = await storage.enqueueContact(
-            req.params.id,
-            row.contacts.id,
-            row.contacts.accountId!,
-            100 // HIGH priority for fresh contacts (voicemail retries get 0-50)
-          );
-          enqueued.push(queueItem);
-        } catch (error) {
-          // Count contacts already in queue
-          alreadyQueued++;
-        }
+      // Check which contacts are already in the queue (any status) to avoid duplicates
+      const existingQueueItems = await db.select({ contactId: campaignQueue.contactId })
+        .from(campaignQueue)
+        .where(eq(campaignQueue.campaignId, req.params.id));
+      const existingContactIds = new Set(existingQueueItems.map(q => q.contactId));
+
+      const newContacts = contactsWithCallablePhones.filter(row => !existingContactIds.has(row.contacts.id));
+      const alreadyQueued = contactsWithCallablePhones.length - newContacts.length;
+
+      // Use bulk enqueue for efficiency
+      const contactsToEnqueue = newContacts.map(row => ({
+        contactId: row.contacts.id,
+        accountId: row.contacts.accountId!,
+        priority: 100, // HIGH priority for fresh contacts (voicemail retries get 0-50)
+      }));
+
+      let enqueuedCount = 0;
+      if (contactsToEnqueue.length > 0) {
+        const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+        enqueuedCount = enqueued;
       }
+
+      console.log(`[Queue Populate] SUMMARY: ${uniqueContacts.length} audience -> ${skippedNoAccount} no account -> ${skippedNoPhone} no phone -> ${alreadyQueued} already queued -> ${enqueuedCount} newly enqueued`);
 
       // Get agents assigned to this campaign
       const campaignAgents = await storage.getCampaignAgents(req.params.id);
@@ -6207,15 +6244,16 @@ export function registerRoutes(app: Express) {
 
       // Automatically assign queue items to agents if agents are assigned
       let assignResult = { assigned: 0 };
-      if (agentIds.length > 0 && enqueued.length > 0) {
+      if (agentIds.length > 0 && enqueuedCount > 0) {
         assignResult = await storage.assignQueueToAgents(req.params.id, agentIds, 'round_robin');
       }
 
       res.json({
-        message: `Successfully enqueued ${enqueued.length} contacts${skippedNoAccount > 0 ? ` (${skippedNoAccount} skipped without account)` : ''}${alreadyQueued > 0 ? ` (${alreadyQueued} already in queue)` : ''}`,
-        enqueuedCount: enqueued.length,
+        message: `Successfully enqueued ${enqueuedCount} contacts${skippedNoAccount > 0 ? ` (${skippedNoAccount} skipped without account)` : ''}${skippedNoPhone > 0 ? ` (${skippedNoPhone} skipped without phone)` : ''}${alreadyQueued > 0 ? ` (${alreadyQueued} already in queue)` : ''}`,
+        enqueuedCount,
         totalContacts: uniqueContacts.length,
-        skippedCount: skippedNoAccount,
+        skippedNoAccount,
+        skippedNoPhone,
         alreadyQueued,
         queueItemsAssigned: assignResult.assigned,
       });
@@ -8874,6 +8912,21 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "approvedById is required" });
       }
 
+      // STRICT QUALITY ENFORCEMENT
+      // Check for mandatory intelligence requirements (recording, transcript, AI analysis)
+      const leadToCheck = await storage.getLead(req.params.id);
+      if (!leadToCheck) {
+        return res.status(404).json({ message: "Lead not found" });
+      }
+
+      const qualityCheck = validateLeadQuality(leadToCheck);
+      if (!qualityCheck.valid) {
+        return res.status(400).json({ 
+          message: "Cannot approve lead: Quality requirements not met", 
+          errors: qualityCheck.errors 
+        });
+      }
+
       const lead = await storage.approveLead(req.params.id, approvedById);
       if (!lead) {
         return res.status(404).json({ message: "Lead not found" });
@@ -8920,6 +8973,15 @@ export function registerRoutes(app: Express) {
       const [existingLead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
       if (!existingLead) {
         return res.status(404).json({ message: "Lead not found" });
+      }
+
+      // STRICT ENFORCEMENT: Check quality requirements before PM approval
+      const qualityCheck = validateLeadQuality(existingLead);
+      if (!qualityCheck.valid) {
+        return res.status(400).json({ 
+          message: "Cannot approve lead: Quality requirements not met", 
+          errors: qualityCheck.errors 
+        });
       }
 
       // Only leads pending PM review can be approved by PM
@@ -9016,7 +9078,34 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "leadIds array is required" });
       }
 
-      // Update all pending PM review leads to published
+      // STRICT ENFORCEMENT: Validate all leads against quality requirements
+      const candidates = await db.select().from(leads).where(inArray(leads.id, leadIds));
+      
+      const validIds: string[] = [];
+      const failedLeads: {id: string, errors: string[]}[] = [];
+
+      for (const lead of candidates) {
+        const check = validateLeadQuality(lead);
+        // Also check status eligibility (must be approved or pending_pm_review)
+        const isStatusEligible = (lead.qaStatus === 'approved' || lead.qaStatus === 'pending_pm_review');
+        
+        if (check.valid && isStatusEligible) {
+          validIds.push(lead.id);
+        } else {
+          const errors = check.errors;
+          if (!isStatusEligible) errors.push(`Invalid status: ${lead.qaStatus}`);
+          failedLeads.push({ id: lead.id, errors });
+        }
+      }
+
+      if (validIds.length === 0) {
+        return res.status(400).json({ 
+          message: "No leads eligible for approval. All leads failed quality or status checks.",
+          failures: failedLeads
+        });
+      }
+
+      // Update all valid leads to published
       const updatedLeads = await db.update(leads)
         .set({
           qaStatus: 'published',
@@ -9026,10 +9115,7 @@ export function registerRoutes(app: Express) {
           pmApprovedBy: approvedById,
           updatedAt: new Date(),
         })
-        .where(and(
-          inArray(leads.id, leadIds),
-          or(eq(leads.qaStatus, 'approved'), eq(leads.qaStatus, 'pending_pm_review'))
-        ))
+        .where(inArray(leads.id, validIds))
         .returning();
 
       // Trigger lead delivery for all approved leads
@@ -9044,11 +9130,13 @@ export function registerRoutes(app: Express) {
         });
       }
 
-      console.log(`[PM-APPROVE-BULK] ${updatedLeads.length} leads approved by PM ${approvedById}`);
+      console.log(`[PM-APPROVE-BULK] ${updatedLeads.length} leads approved by PM ${approvedById}. ${failedLeads.length} failed validation.`);
       res.json({
-        message: `${updatedLeads.length} leads approved and published successfully`,
+        message: `${updatedLeads.length} leads approved and published successfully. ${failedLeads.length} failed validation.`,
         approvedCount: updatedLeads.length,
-        leads: updatedLeads
+        failedCount: failedLeads.length,
+        leads: updatedLeads,
+        failures: failedLeads
       });
     } catch (error) {
       console.error('[PM-APPROVE-BULK] Error:', error);
@@ -9067,6 +9155,15 @@ export function registerRoutes(app: Express) {
       const [existingLead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
       if (!existingLead) {
         return res.status(404).json({ message: "Lead not found" });
+      }
+
+      // STRICT ENFORCEMENT: Check quality requirements before publishing
+      const qualityCheck = validateLeadQuality(existingLead);
+      if (!qualityCheck.valid) {
+        return res.status(400).json({ 
+          message: "Cannot publish lead: Quality requirements not met", 
+          errors: qualityCheck.errors 
+        });
       }
 
       // Only approved or pending_pm_review leads can be published
@@ -9103,6 +9200,32 @@ export function registerRoutes(app: Express) {
         return res.status(400).json({ message: "leadIds array is required" });
       }
 
+      // STRICT ENFORCEMENT: Validate all leads against quality requirements
+      const candidates = await db.select().from(leads).where(inArray(leads.id, leadIds));
+      
+      const validIds: string[] = [];
+      const failedLeads: {id: string, errors: string[]}[] = [];
+
+      for (const lead of candidates) {
+        const check = validateLeadQuality(lead);
+        const isStatusEligible = (lead.qaStatus === 'approved');
+        
+        if (check.valid && isStatusEligible) {
+          validIds.push(lead.id);
+        } else {
+          const errors = check.errors;
+          if (!isStatusEligible) errors.push(`Invalid status: ${lead.qaStatus}`);
+          failedLeads.push({ id: lead.id, errors });
+        }
+      }
+
+      if (validIds.length === 0) {
+        return res.status(400).json({ 
+          message: "No leads eligible for publishing. All leads failed quality or status checks.",
+          failures: failedLeads
+        });
+      }
+
       // Update all approved leads to published
       const updatedLeads = await db.update(leads)
         .set({
@@ -9111,17 +9234,16 @@ export function registerRoutes(app: Express) {
           publishedBy: publishedById,
           updatedAt: new Date(),
         })
-        .where(and(
-          inArray(leads.id, leadIds),
-          eq(leads.qaStatus, 'approved')
-        ))
+        .where(inArray(leads.id, validIds))
         .returning();
 
-      console.log(`[LEAD-PUBLISH-BULK] ${updatedLeads.length} leads published by user ${publishedById}`);
+      console.log(`[LEAD-PUBLISH-BULK] ${updatedLeads.length} leads published by user ${publishedById}. ${failedLeads.length} failed validation.`);
       res.json({
-        message: `${updatedLeads.length} leads published successfully`,
+        message: `${updatedLeads.length} leads published successfully. ${failedLeads.length} failed validation.`,
         publishedCount: updatedLeads.length,
-        leads: updatedLeads
+        failedCount: failedLeads.length,
+        leads: updatedLeads,
+        failures: failedLeads
       });
     } catch (error) {
       console.error('[LEAD-PUBLISH-BULK] Error bulk publishing leads:', error);
@@ -9298,6 +9420,15 @@ export function registerRoutes(app: Express) {
 
       if (!lead) {
         return res.status(404).json({ message: "Lead not found" });
+      }
+
+      // STRICT ENFORCEMENT: Check quality requirements before marking as delivered
+      const qualityCheck = validateLeadQuality(lead);
+      if (!qualityCheck.valid) {
+        return res.status(400).json({ 
+          message: "Cannot mark lead as delivered: Quality requirements not met", 
+          errors: qualityCheck.errors 
+        });
       }
 
       // Verify lead is approved
@@ -9542,6 +9673,250 @@ export function registerRoutes(app: Express) {
         message: "Failed to bulk submit leads to client", 
         error: error instanceof Error ? error.message : String(error) 
       });
+    }
+  });
+
+  // ============================================
+  // Generic: Push leads to Client Dashboard
+  // Works for ANY campaign - marks leads as submitted so they appear in client portal
+  // ============================================
+
+  // Push all qualified leads for a campaign to client dashboard
+  app.post("/api/leads/push-to-client-dashboard", requireAuth, requireRole('admin', 'quality_analyst', 'campaign_manager'), async (req, res) => {
+    try {
+      const userId = req.user!.userId;
+      const { campaignId, leadIds, autoPublish = false } = req.body as {
+        campaignId?: string;
+        leadIds?: string[];
+        autoPublish?: boolean; // If true, also publish approved leads first
+      };
+
+      if (!campaignId && (!leadIds || leadIds.length === 0)) {
+        return res.status(400).json({ message: "Either campaignId or leadIds array is required" });
+      }
+
+      const results = {
+        published: 0,
+        pushed: 0,
+        alreadyPushed: 0,
+        accessGranted: false,
+        campaignName: '',
+        clientAccountName: '',
+        details: [] as { leadId: string; contactName: string | null; status: string }[],
+      };
+
+      // Step 1: If autoPublish, first publish all approved leads for this campaign
+      if (autoPublish) {
+        const whereAutoPublish = campaignId
+          ? and(eq(leads.campaignId, campaignId), eq(leads.qaStatus, 'approved'))
+          : and(inArray(leads.id, leadIds!), eq(leads.qaStatus, 'approved'));
+
+        const publishedLeads = await db.update(leads)
+          .set({
+            qaStatus: 'published',
+            publishedAt: new Date(),
+            publishedBy: userId,
+            updatedAt: new Date(),
+          })
+          .where(whereAutoPublish!)
+          .returning();
+
+        results.published = publishedLeads.length;
+        console.log(`[PUSH-DASHBOARD] Auto-published ${publishedLeads.length} approved leads`);
+      }
+
+      // Step 2: Get all published leads that haven't been submitted yet
+      const wherePush = campaignId
+        ? and(
+            eq(leads.campaignId, campaignId),
+            eq(leads.qaStatus, 'published'),
+            eq(leads.submittedToClient, false)
+          )
+        : and(
+            inArray(leads.id, leadIds!),
+            eq(leads.qaStatus, 'published'),
+            eq(leads.submittedToClient, false)
+          );
+
+      const leadsToPush = await db.select({
+        id: leads.id,
+        contactName: leads.contactName,
+        campaignId: leads.campaignId,
+      })
+      .from(leads)
+      .where(wherePush!);
+
+      if (leadsToPush.length === 0) {
+        // Check how many are already pushed
+        const whereAlready = campaignId
+          ? and(eq(leads.campaignId, campaignId), eq(leads.submittedToClient, true))
+          : and(inArray(leads.id, leadIds!), eq(leads.submittedToClient, true));
+
+        const [alreadyCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(leads)
+          .where(whereAlready!);
+
+        results.alreadyPushed = alreadyCount?.count || 0;
+
+        return res.json({
+          success: true,
+          message: results.alreadyPushed > 0
+            ? `All leads are already pushed to client dashboard (${results.alreadyPushed} leads)`
+            : "No published leads found to push. Ensure leads are approved/published first.",
+          ...results
+        });
+      }
+
+      // Step 3: Mark all published leads as submitted to client
+      const leadIdsToPush = leadsToPush.map(l => l.id);
+      const pushedLeads = await db.update(leads)
+        .set({
+          submittedToClient: true,
+          submittedAt: new Date(),
+          submissionResponse: {
+            method: 'client_dashboard_push',
+            submittedAt: new Date().toISOString(),
+            submittedBy: userId,
+          },
+          updatedAt: new Date(),
+        })
+        .where(inArray(leads.id, leadIdsToPush))
+        .returning();
+
+      results.pushed = pushedLeads.length;
+      results.details = pushedLeads.map(l => ({
+        leadId: l.id,
+        contactName: l.contactName,
+        status: 'pushed',
+      }));
+
+      // Step 4: Ensure client campaign access exists
+      const targetCampaignId = campaignId || leadsToPush[0]?.campaignId;
+      if (targetCampaignId) {
+        const [campaign] = await db.select()
+          .from(campaigns)
+          .where(eq(campaigns.id, targetCampaignId))
+          .limit(1);
+
+        results.campaignName = campaign?.name || '';
+
+        if (campaign?.clientAccountId) {
+          // Check if access already exists
+          const [existingAccess] = await db.select()
+            .from(clientCampaignAccess)
+            .where(and(
+              eq(clientCampaignAccess.clientAccountId, campaign.clientAccountId),
+              eq(clientCampaignAccess.regularCampaignId, targetCampaignId)
+            ))
+            .limit(1);
+
+          if (!existingAccess) {
+            // Auto-create client campaign access
+            await db.insert(clientCampaignAccess).values({
+              clientAccountId: campaign.clientAccountId,
+              regularCampaignId: targetCampaignId,
+              grantedBy: userId,
+            });
+            results.accessGranted = true;
+            console.log(`[PUSH-DASHBOARD] Auto-granted client campaign access for campaign ${targetCampaignId}`);
+          }
+
+          // Get client account name
+          const [clientAccount] = await db.select({ name: clientAccounts.name })
+            .from(clientAccounts)
+            .where(eq(clientAccounts.id, campaign.clientAccountId))
+            .limit(1);
+          results.clientAccountName = clientAccount?.name || '';
+        }
+      }
+
+      console.log(`[PUSH-DASHBOARD] Pushed ${results.pushed} leads to client dashboard for campaign "${results.campaignName}" by user ${userId}`);
+
+      res.json({
+        success: true,
+        message: `Successfully pushed ${results.pushed} lead(s) to client dashboard${results.published > 0 ? ` (auto-published ${results.published} first)` : ''}`,
+        ...results
+      });
+    } catch (error) {
+      console.error('[PUSH-DASHBOARD] Error pushing leads to client dashboard:', error);
+      res.status(500).json({
+        message: "Failed to push leads to client dashboard",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  // Get campaign lead summary for push-to-dashboard action
+  app.get("/api/leads/campaign-dashboard-summary/:campaignId", requireAuth, async (req, res) => {
+    try {
+      const { campaignId } = req.params;
+
+      // Get campaign info
+      const [campaign] = await db.select({
+        id: campaigns.id,
+        name: campaigns.name,
+        clientAccountId: campaigns.clientAccountId,
+        status: campaigns.status,
+      })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+      if (!campaign) {
+        return res.status(404).json({ message: "Campaign not found" });
+      }
+
+      // Get lead counts by status
+      const [counts] = await db.select({
+        total: sql<number>`count(*)::int`,
+        approved: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} = 'approved' THEN 1 END)::int`,
+        published: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} = 'published' THEN 1 END)::int`,
+        publishedNotPushed: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} = 'published' AND ${leads.submittedToClient} = false THEN 1 END)::int`,
+        pushedToClient: sql<number>`COUNT(CASE WHEN ${leads.submittedToClient} = true THEN 1 END)::int`,
+        rejected: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} = 'rejected' THEN 1 END)::int`,
+      })
+      .from(leads)
+      .where(eq(leads.campaignId, campaignId));
+
+      // Check client access
+      let clientInfo = null;
+      if (campaign.clientAccountId) {
+        const [clientAccount] = await db.select({
+          id: clientAccounts.id,
+          name: clientAccounts.name
+        })
+        .from(clientAccounts)
+        .where(eq(clientAccounts.id, campaign.clientAccountId))
+        .limit(1);
+
+        const [accessExists] = await db.select({ id: clientCampaignAccess.id })
+          .from(clientCampaignAccess)
+          .where(and(
+            eq(clientCampaignAccess.clientAccountId, campaign.clientAccountId),
+            eq(clientCampaignAccess.regularCampaignId, campaignId)
+          ))
+          .limit(1);
+
+        clientInfo = {
+          clientAccountId: clientAccount?.id,
+          clientAccountName: clientAccount?.name,
+          hasAccess: !!accessExists,
+        };
+      }
+
+      res.json({
+        campaign: {
+          id: campaign.id,
+          name: campaign.name,
+          status: campaign.status,
+        },
+        counts: counts || { total: 0, approved: 0, published: 0, publishedNotPushed: 0, pushedToClient: 0, rejected: 0 },
+        clientInfo,
+      });
+    } catch (error) {
+      console.error('[CAMPAIGN-SUMMARY] Error fetching campaign dashboard summary:', error);
+      res.status(500).json({ message: "Failed to fetch campaign summary" });
     }
   });
 

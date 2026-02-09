@@ -323,6 +323,12 @@ export function determineSmartDisposition(
     missedIndicators: [],
   };
 
+  // Log the initial state and analysis
+  console.log(`${LOG_PREFIX} Analyzing call. Current Disposition: ${currentDisposition}, Duration: ${callDurationSeconds}s, User Turns: ${analysis.userTurns}`);
+  console.log(`${LOG_PREFIX} Signals - Positive: [${analysis.positiveSignals.join(', ')}], Negative: [${analysis.negativeSignals.join(', ')}]`);
+  console.log(`${LOG_PREFIX} Flags - Voicemail: ${analysis.isVoicemail}, IVR: ${analysis.isIVR}, Gatekeeper: ${analysis.isGatekeeper}, Real Conversation: ${analysis.hasRealConversation}`);
+
+
   // HARD GATE: Very short calls (<60s) with minimal user turns (<3) can NEVER be qualified
   // This prevents IVR greetings, gatekeepers saying "please hold", etc. from being misclassified
   const isMinimalCall = callDurationSeconds < 60 && analysis.userTurns < 3;
@@ -337,6 +343,7 @@ export function determineSmartDisposition(
     if (currentDisposition !== 'voicemail') {
       result.shouldOverride = true;
     }
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -352,6 +359,7 @@ export function determineSmartDisposition(
     result.confidence = 0.6;
     result.reasoning = `Mixed signals detected: Positive(${analysis.positiveSignals.length}) vs Negative(${analysis.negativeSignals.length}) - needs human review`;
     result.shouldOverride = currentDisposition !== 'needs_review' && currentDisposition !== 'qualified_lead';
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -366,6 +374,7 @@ export function determineSmartDisposition(
       result.confidence = 0.7;
       result.reasoning = `Positive keywords detected but call too short (${callDurationSeconds}s, ${analysis.userTurns} turns) - likely IVR/gatekeeper, not real engagement`;
       result.shouldOverride = false; // Don't override existing disposition
+      console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
       return result;
     }
 
@@ -376,6 +385,7 @@ export function determineSmartDisposition(
     // Only suggest override if current disposition is no_answer/voicemail (under-classification)
     // Never override an AI-set qualified_lead or not_interested
     result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -385,6 +395,7 @@ export function determineSmartDisposition(
     result.confidence = 0.85;
     result.reasoning = `User expressed disinterest: ${analysis.negativeSignals.join(', ')}`;
     result.shouldOverride = currentDisposition === 'no_answer' || currentDisposition === 'voicemail' || currentDisposition === null;
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -394,6 +405,7 @@ export function determineSmartDisposition(
     result.confidence = 0.7;
     result.reasoning = `Real conversation with ${analysis.userTurns} user turns - needs human review`;
     result.shouldOverride = currentDisposition === 'no_answer';
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -409,6 +421,7 @@ export function determineSmartDisposition(
       result.suggestedDisposition = currentDisposition as any || 'no_answer';
       result.reasoning = 'Minimal user engagement';
     }
+    console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
     return result;
   }
 
@@ -417,6 +430,7 @@ export function determineSmartDisposition(
   result.confidence = 0.8;
   result.reasoning = analysis.isIVR ? 'Only IVR interaction detected' : 'No meaningful user response detected';
   
+  console.log(`${LOG_PREFIX} Final Decision: ${result.suggestedDisposition}. Reason: ${result.reasoning}`);
   return result;
 }
 
