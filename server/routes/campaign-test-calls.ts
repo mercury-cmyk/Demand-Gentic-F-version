@@ -31,6 +31,40 @@ import {
 
 const router = Router();
 
+/**
+ * Detect if a phone number is international (non-US/Canada)
+ * Returns codec preference and region info for diagnostics
+ */
+function getInternationalCallInfo(phoneNumber: string): {
+  isInternational: boolean;
+  codec: 'PCMA' | 'PCMU';
+  region: string;
+  countryCode: string;
+} {
+  const cleaned = phoneNumber.replace(/[^\d+]/g, '');
+  const digits = cleaned.startsWith('+') ? cleaned.substring(1) : cleaned;
+
+  // µ-law regions
+  if (digits.startsWith('1')) return { isInternational: false, codec: 'PCMU', region: 'US/Canada', countryCode: '1' };
+  if (digits.startsWith('81')) return { isInternational: true, codec: 'PCMU', region: 'Japan', countryCode: '81' };
+
+  // A-law regions (international)
+  const regionMap: Record<string, string> = {
+    '44': 'UK', '49': 'Germany', '33': 'France', '61': 'Australia',
+    '91': 'India', '971': 'UAE', '86': 'China', '55': 'Brazil',
+    '966': 'Saudi Arabia', '974': 'Qatar', '973': 'Bahrain', '968': 'Oman',
+    '965': 'Kuwait', '962': 'Jordan', '961': 'Lebanon', '27': 'South Africa',
+  };
+
+  for (const [prefix, region] of Object.entries(regionMap)) {
+    if (digits.startsWith(prefix)) {
+      return { isInternational: true, codec: 'PCMA', region, countryCode: prefix };
+    }
+  }
+
+  return { isInternational: true, codec: 'PCMA', region: 'International', countryCode: digits.substring(0, 3) };
+}
+
 // Schema for initiating a test call
 const initiateTestCallSchema = z.object({
   campaignId: z.string(),
@@ -390,8 +424,7 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       callControlId,
       phoneNumber: normalizedPhone,
       campaignName: campaign.name,
-      agentName: assignment.agentName,
-      wsUrl,
+      agentName: assignment?.agentName || ctx?.agentName || campaign?.name || 'AI Agent',
     });
 
   } catch (error) {

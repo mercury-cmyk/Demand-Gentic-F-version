@@ -187,7 +187,7 @@ export async function resolveAgentAssignment(campaignId: string): Promise<Resolv
     systemPromptParts.push(`
 
 CRITICAL CONVERSATION BEHAVIOR:
-1. CALL OPENING: When the call connects, WAIT 2 seconds to hear from the prospect before speaking. Let them say "Hello?" first, then respond with your identity check.
+1. CALL OPENING: When the call connects, IMMEDIATELY say your greeting. Do NOT wait or pause before speaking. The prospect has already picked up the phone and is waiting to hear who is calling. Start speaking right away with your opening script.
 2. CALL CLOSING: You MUST ALWAYS say a proper farewell before ending the call. After confirming any appointment, email, or completing your objective, say "Thank you so much for your time today! Have a great day!" and WAIT for their response before calling end_call. NEVER hang up immediately after confirming details.
 3. TURN-TAKING: Wait for the prospect to finish speaking before responding. Do not interrupt.
 `);
