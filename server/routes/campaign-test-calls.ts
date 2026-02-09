@@ -325,6 +325,9 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
     // Pass client_state in URL so TeXML endpoint can forward it to WebSocket
     const texmlUrl = `${webhookProtocol}://${webhookHost}/api/texml/ai-call?client_state=${encodeURIComponent(clientStateB64)}`;
     
+    // Detect international call routing info
+    const callInfo = getInternationalCallInfo(normalizedPhone);
+
     console.log("=".repeat(60));
     console.log(`[Campaign Test Call] 🔧 CRITICAL CONFIGURATION CHECK:`);
     console.log(`[Campaign Test Call] NODE_ENV: ${process.env.NODE_ENV}`);
@@ -333,6 +336,14 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
     console.log(`[Campaign Test Call] webhookHost (resolved): ${webhookHost}`);
     console.log(`[Campaign Test Call] TeXML URL that Telnyx will fetch: ${texmlUrl}`);
     console.log(`[Campaign Test Call] Target Provider: ${providerForClientState}`);
+    console.log(`[Campaign Test Call] 🌍 International: ${callInfo.isInternational ? `YES - ${callInfo.region} (+${callInfo.countryCode})` : 'NO (US/Canada)'}`);
+    console.log(`[Campaign Test Call] 🎧 Codec: ${callInfo.codec} (${callInfo.codec === 'PCMA' ? 'A-law' : 'µ-law'})`);
+    if (callInfo.isInternational) {
+      console.log(`[Campaign Test Call] 📋 International call notes:`);
+      console.log(`[Campaign Test Call]   - TeXML will use ${callInfo.codec} codec to minimize transcoding`);
+      console.log(`[Campaign Test Call]   - Krisp noise suppression will be enabled automatically`);
+      console.log(`[Campaign Test Call]   - A-law optimized audio path will be used for transcoding`);
+    }
     console.log(`[Campaign Test Call] ⚠️ If ngrok is not running, Telnyx cannot reach ${webhookHost}!`);
     console.log("=".repeat(60));
 
