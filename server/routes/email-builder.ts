@@ -862,6 +862,7 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
 router.get('/images/serve/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    console.log(`[ImageServe] Serving image: ${id}`);
 
     const [image] = await db
       .select()
@@ -870,6 +871,7 @@ router.get('/images/serve/:id', async (req: Request, res: Response) => {
       .limit(1);
 
     if (!image) {
+      console.warn(`[ImageServe] Image not found: ${id}`);
       return res.status(404).json({ error: 'Image not found' });
     }
 
@@ -877,6 +879,7 @@ router.get('/images/serve/:id', async (req: Request, res: Response) => {
     if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
       const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
       const key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
+      console.log(`[ImageServe] Streaming from GCS: key=${key}, mimeType=${image.mimeType}`);
 
       res.setHeader('Content-Type', image.mimeType || 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -884,13 +887,14 @@ router.get('/images/serve/:id', async (req: Request, res: Response) => {
       const stream = await getFromS3(key);
       stream.pipe(res);
     } else if (image.storedUrl) {
-      // Redirect to the stored URL
+      console.log(`[ImageServe] Redirecting to: ${image.storedUrl}`);
       res.redirect(image.storedUrl);
     } else {
+      console.warn(`[ImageServe] No storedUrl for image: ${id}`);
       res.status(404).json({ error: 'Image file not found' });
     }
   } catch (error: any) {
-    console.error('Error serving image:', error);
+    console.error('[ImageServe] Error serving image:', error.message || error);
     res.status(500).json({ error: 'Failed to serve image' });
   }
 });

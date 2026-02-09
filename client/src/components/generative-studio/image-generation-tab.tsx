@@ -3,7 +3,6 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Sparkles, Download, Image } from "lucide-react";
+import { Loader2, Sparkles, Download, Image, AlertTriangle } from "lucide-react";
 
 const IMAGE_STYLES = [
   { value: "photorealistic", label: "Photorealistic" },
@@ -50,27 +49,42 @@ export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProp
   const [aspectRatio, setAspectRatio] = useState("1:1");
   const [numberOfImages, setNumberOfImages] = useState("1");
   const [generatedImages, setGeneratedImages] = useState<any[]>([]);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [brokenImages, setBrokenImages] = useState<Set<number>>(new Set());
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/email-builder/images/generate", data);
+      const res = await apiRequest("POST", "/api/email-builder/images/generate", data, { timeout: 120000 });
       return await res.json();
     },
     onSuccess: (data) => {
-      if (data.images) {
-        setGeneratedImages(data.images);
-      } else if (data.job) {
-        toast({ title: "Image generation started", description: "Your images are being generated. Check back shortly." });
+      setGenerationError(null);
+      setBrokenImages(new Set());
+
+      if (data.success === false) {
+        setGenerationError(data.error || "Image generation failed. Please try a different prompt.");
+        toast({ title: "Generation failed", description: data.error || "Please try a different prompt.", variant: "destructive" });
+        return;
       }
-      toast({ title: "Images generated successfully" });
+
+      if (data.images && data.images.length > 0) {
+        setGeneratedImages(data.images);
+        toast({ title: "Images generated successfully" });
+      } else {
+        setGenerationError("No images were returned. The AI may have rejected this prompt — try rephrasing.");
+        toast({ title: "No images generated", description: "Try rephrasing your prompt.", variant: "destructive" });
+      }
     },
     onError: (error: any) => {
+      setGenerationError(error.message || "Request failed. Please try again.");
       toast({ title: "Generation failed", description: error.message, variant: "destructive" });
     },
   });
 
   const handleGenerate = () => {
     if (!prompt) return;
+    setGenerationError(null);
+    setBrokenImages(new Set());
     generateMutation.mutate({
       prompt,
       negativePrompt: negativePrompt || undefined,
@@ -78,6 +92,26 @@ export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProp
       aspectRatio,
       numberOfImages: parseInt(numberOfImages),
     });
+  };
+
+  const handleImageError = (index: number) => {
+    setBrokenImages((prev) => new Set(prev).add(index));
+  };
+
+  const handleDownload = async (imageUrl: string, index: number) => {
+    try {
+      const response = await fetch(imageUrl, { credentials: "include" });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `generated-image-${index + 1}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Download failed", description: "Could not download the image.", variant: "destructive" });
+    }
   };
 
   return (
@@ -175,11 +209,15 @@ export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProp
             </>
           )}
         </Button>
+
+        {generateMutation.isPending && (
+          <p className="text-xs text-center text-muted-foreground">Image generation can take up to 60 seconds</p>
+        )}
       </div>
 
       {/* Right panel - Results */}
       <div className="p-6 overflow-auto">
-        {generatedImages.length === 0 && !generateMutation.isPending && (
+        {generatedImages.length === 0 && !generateMutation.isPending && !generationError && (
           <div className="h-full flex items-center justify-center text-muted-foreground">
             <div className="text-center space-y-2">
               <Image className="w-16 h-16 mx-auto opacity-20" />
@@ -189,45 +227,64 @@ export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProp
           </div>
         )}
 
+        {generationError && !generateMutation.isPending && (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center space-y-3 max-w-md">
+              <AlertTriangle className="w-12 h-12 mx-auto text-amber-500" />
+              <p className="text-lg font-medium">Generation Failed</p>
+              <p className="text-sm text-muted-foreground">{generationError}</p>
+              <Button variant="outline" size="sm" onClick={() => { setGenerationError(null); }}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        )}
+
         {generateMutation.isPending && (
           <div className="h-full flex items-center justify-center">
             <div className="text-center space-y-3">
               <Loader2 className="w-12 h-12 mx-auto animate-spin text-violet-500" />
               <p className="text-lg font-medium">Generating images...</p>
-              <p className="text-sm text-muted-foreground">This may take a moment</p>
+              <p className="text-sm text-muted-foreground">This may take up to 60 seconds</p>
             </div>
           </div>
         )}
 
-        {generatedImages.length > 0 && (
+        {generatedImages.length > 0 && !generationError && !generateMutation.isPending && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {generatedImages.map((img: any, i: number) => (
               <Card key={i} className="overflow-hidden">
                 <div className="relative aspect-square bg-muted">
-                  <img
-                    src={img.url || img.thumbnailUrl}
-                    alt={img.altText || `Generated image ${i + 1}`}
-                    className="w-full h-full object-cover"
-                  />
+                  {brokenImages.has(i) ? (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="text-center space-y-2">
+                        <AlertTriangle className="w-8 h-8 mx-auto text-amber-500" />
+                        <p className="text-xs text-muted-foreground">Image failed to load</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <img
+                      src={img.url || img.thumbnailUrl}
+                      alt={img.altText || `Generated image ${i + 1}`}
+                      className="w-full h-full object-cover"
+                      onError={() => handleImageError(i)}
+                    />
+                  )}
                 </div>
                 <CardContent className="p-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs text-muted-foreground truncate flex-1">
                       {img.altText || prompt.slice(0, 50)}
                     </p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        const a = document.createElement("a");
-                        a.href = img.url;
-                        a.download = `generated-image-${i + 1}.png`;
-                        a.target = "_blank";
-                        a.click();
-                      }}
-                    >
-                      <Download className="w-3 h-3" />
-                    </Button>
+                    {!brokenImages.has(i) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDownload(img.url, i)}
+                      >
+                        <Download className="w-3 h-3" />
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

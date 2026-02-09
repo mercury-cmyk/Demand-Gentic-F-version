@@ -25,6 +25,7 @@ import {
 } from "../utils/business-hours";
 import { processDisposition } from "./disposition-engine";
 import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "./number-pool-integration";
+import { buildUnifiedCallContext } from "./unified-call-context";
 
 const LOG_PREFIX = "[CampaignRunner-WS]";
 
@@ -703,6 +704,30 @@ class CampaignRunnerService {
           console.warn(`${LOG_PREFIX} Number pool selection failed, using legacy caller ID:`, poolError);
         }
 
+        // Use Unified Call Context to ensure consistency with test calls
+        const unifiedCtx = await buildUnifiedCallContext({
+          campaignId,
+          queueItemId: item.queueItem.id,
+          contactId: item.contact.id,
+          calledNumber: phoneResult.phone,
+          fromNumber,
+          callerNumberId,
+          callerNumberDecisionId,
+          contactName: `${item.contact.firstName} ${item.contact.lastName}`,
+          contactFirstName: item.contact.firstName,
+          contactLastName: item.contact.lastName,
+          contactEmail: item.contact.email,
+          contactJobTitle: item.contact.jobTitle,
+          accountName: item.account?.name,
+          isTestCall: false,
+          provider: 'google', // Preferred provider for production
+        });
+
+        if (!unifiedCtx) {
+          console.warn(`${LOG_PREFIX} Failed to build unified context for item ${item.queueItem.id}, skipping`);
+          continue;
+        }
+
         const task: CampaignTask = {
           taskId: `${campaignId}-${item.queueItem.id}-${Date.now()}`,
           campaignId,
@@ -717,10 +742,10 @@ class CampaignRunnerService {
           accountId: item.contact.accountId,
           aiSettings: {
             persona: {
-              name: agent?.name || campaign.name,
-              companyName: agentExt?.companyRepresented || 'Our Company',
-              systemPrompt: agent?.systemPrompt || campaignExt.aiAgentPrompt || '',
-              voice: agent?.voice || 'marin',
+              name: unifiedCtx.agentName,
+              companyName: unifiedCtx.organizationName,
+              systemPrompt: unifiedCtx.systemPrompt || '',
+              voice: unifiedCtx.voice,
             },
             objective: {
               type: agentExt?.primaryGoal || 'qualify',
@@ -739,9 +764,9 @@ class CampaignRunnerService {
           fromNumber,
           callerNumberId,
           callerNumberDecisionId,
-          virtualAgentId: agent?.id || null,
-          agentName: agent?.name || 'AI Agent',
-          agentFullName: agent?.name || 'AI Sales Agent',
+          virtualAgentId: unifiedCtx.virtualAgentId,
+          agentName: unifiedCtx.agentName,
+          agentFullName: unifiedCtx.agentName,
         };
 
         tasks.push(task);

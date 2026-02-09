@@ -66,15 +66,8 @@ async function initializeRedisConnection(): Promise<IORedis | undefined> {
     const options = getRedisConnectionOptions();
     // Force lazy connect to handle initial connection errors ourselves
     options.lazyConnect = true;
-    // Fast fail in dev if cannot connect immediately
-    if (process.env.NODE_ENV !== 'production') {
-      options.connectTimeout = 3000;
-      options.retryStrategy = (times) => {
-        if (times > 2) return null; // Give up fast
-        return 500;
-      };
-    }
 
+    // Use standard connection options (removed aggressive dev timeouts to support remote Redis)
     const connection = new IORedis(REDIS_URL, options);
 
     // Set up error handlers BEFORE connecting

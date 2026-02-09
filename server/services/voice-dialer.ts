@@ -3193,8 +3193,25 @@ Only AFTER completing these steps can you submit the disposition.`
         console.warn(`${LOG_PREFIX} [Gemini] Last agent statement: "${lastAgentText.substring(0, 100)}..."`);
         return {
           success: false,
-          error: 'Before ending the call, you MUST say a brief, warm farewell. Say something like: "Thank you so much for your time today! Have a great day!" Then wait 1-2 seconds for them to respond before calling end_call again. NEVER hang up immediately after confirming appointment details.'
+          error: 'STOP — you have NOT said a proper farewell yet. Before ending the call, you MUST: (1) Confirm the appointment/outcome details, (2) Say "Thank you so much for your time today! Have a great day!", (3) WAIT for the prospect to respond with their goodbye, (4) ONLY THEN call end_call. NEVER hang up immediately after confirming appointment details or email.'
         };
+      }
+
+      // CRITICAL: Prospect-led disconnect — agent said farewell but prospect hasn't responded yet
+      // Must wait for the prospect to say "bye", "thanks", "take care" etc. before disconnecting
+      if (requiresFarewell && hasProperClosingFarewell && !userSaidFarewell) {
+        // Check if the very last transcript entry is the agent's farewell (prospect hasn't spoken since)
+        const allTranscripts = session.transcripts;
+        const lastTranscript = allTranscripts.length > 0 ? allTranscripts[allTranscripts.length - 1] : null;
+        const lastTurnIsAgent = lastTranscript && (lastTranscript.role === 'agent' || lastTranscript.role === 'assistant');
+        if (lastTurnIsAgent) {
+          console.warn(`${LOG_PREFIX} [Gemini] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
+          console.warn(`${LOG_PREFIX} [Gemini] Last agent: "${lastAgentText.substring(0, 80)}" | Last user: "${lastUserText.substring(0, 80)}"`);
+          return {
+            success: false,
+            error: 'WAIT — you said your farewell but the prospect has not responded yet. You MUST wait for them to say "bye", "thank you", "take care" or similar before ending. Pause and listen for 3-5 seconds. Call termination must be prospect-led, not agent-triggered.'
+          };
+        }
       }
 
       if (isPrematureTermination && reasonSuggestsHangup && !isLegitimateEarlyEnd) {
@@ -4358,7 +4375,7 @@ function detectAudioType(transcript: string, session: OpenAIRealtimeSession): { 
     /your\s+call\s+is\s+important/i,         // "Your call is important to us"
     /currently\s+(unavailable|closed)/i,     // "Currently unavailable"
     /business\s+hours/i,                     // "Business hours are"
-    /recorded\s+for\s+quality/i,             // "This call may be recorded"
+    // /recorded\s+for\s+quality/i,             // REMOVED: "This call may be recorded" - often played before human connects, causing false IVR positive
     /thank\s+you\s+for\s+(calling|holding)/i, // "Thank you for calling"
     /please\s+hold/i,                        // "Please hold"
     /transferring\s+your\s+call/i,           // "Transferring your call"
@@ -7480,21 +7497,40 @@ Keep the organization name confidential until identity is confirmed.
 ### Phase 4: Purpose & Qualification (CAMPAIGN-CONTEXT DRIVEN)
 State the call purpose concisely in your own words (do not read a script).
 
-**CRITICAL**: Your qualification approach is defined by the **Campaign Context** section below.
+**CRITICAL**: Your qualification approach is defined ENTIRELY by the **Campaign Context** section below.
 - Use the campaign's **Talking Points** to guide your conversation
 - Work toward the campaign's **Success Criteria** or **Objective**
-- Ask questions that help determine if the prospect matches the campaign's goals
+- The **Campaign Objective** defines what you need to achieve — follow it directly
 
-**QUALIFICATION FLOW:**
+**FLOW FOR CONTENT/WHITE PAPER CAMPAIGNS:**
+If the campaign objective is about sending a white paper, content piece, or resource:
+1. Briefly introduce what the content is about (1-2 sentences)
+2. Ask directly: "Would you like me to send it over?"
+3. If yes → confirm email address and close warmly
+4. Do NOT ask discovery questions like "Are you focused on this?" or qualification questions
+5. Keep it simple — permission and consent to send is the only goal
+
+**FLOW FOR APPOINTMENT/MEETING CAMPAIGNS:**
+If the campaign objective is about scheduling a meeting, demo, or discovery call:
 1. Deliver a key talking point from the campaign context (with specific metrics if available)
-2. Ask a relevant discovery question based on the campaign objective
-3. Listen and qualify based on their response
-4. Only after qualifying interest should you suggest next steps
+2. Ask ONE relevant discovery question to confirm interest (e.g., "Is [pain point] something you're dealing with?")
+3. Listen — if they show interest ("yes", "tell me more", "how does that work?"), move to booking
+4. PROPOSE SPECIFIC TIMES: "Great! Would [next Tuesday] at [10am] or [Thursday] at [2pm] work better for a quick 15-20 minute call?"
+5. Confirm the details: "Perfect, I'll send a calendar invite to [email]. You'll be speaking with [name/team]. Looking forward to it!"
 
-**GATE RULE**: Do NOT propose a meeting until you have:
+**APPOINTMENT BOOKING PHRASES TO USE:**
+- "Would early next week or later in the week work better for you?"
+- "I have availability on [day] at [time] or [day] at [time] — which works best?"
+- "Perfect, let me get that on the calendar for you."
+
+**GATE RULE FOR APPOINTMENTS**: Do NOT propose a meeting until you have:
 - Identified alignment with the campaign's success criteria, OR
 - Discovered relevant interest/pain that matches the campaign objective
 - If prospect immediately asks for a demo without context, say: "Happy to do that! First, let me ask a quick question so I can make sure we focus on what matters most to you..."
+
+**CRITICAL**: An appointment setting call is NOT successful until you have:
+- A specific day/time confirmed OR
+- Explicit agreement to receive a calendar invite
 
 ### Phase 5: Closing
 Complete the full call flow: qualifying questions → confirm email → propose times → get confirmation.
@@ -8066,7 +8102,8 @@ If the person confirms they are ${fullName}:
 If permission is given:
 - Clearly and briefly state the call purpose aligned with the campaign objective
 - Deliver it concisely, naturally, and in a human-sounding tone — NOT scripted
-- Ask one reflective, open-ended question
+- For content/white paper campaigns: simply ask if they'd like to receive it — no discovery questions
+- For meeting/appointment campaigns: ask ONE relevant question, then propose next steps
 - Listen carefully and allow them to speak without interruption
 - Acknowledge their perspective thoughtfully
 - Politely ask whether they would be open to receiving follow-up information
@@ -8137,13 +8174,15 @@ If you hear an automated phone system (IVR), menu prompts, or "press X for...":
 
 ---
 
-### 7. Call Closure — NO PREMATURE DISCONNECTS
+### 7. Call Closure — NO PREMATURE DISCONNECTS (PROSPECT-LED DISCONNECT)
 At the end of the call:
-- Allow the prospect to respond after your closing remarks
+- After booking confirmation: (1) Confirm details, (2) Thank them, (3) Set expectations ("You'll receive a calendar invite"), (4) Say "Have a great day!"
+- WAIT for the prospect to respond after your closing remarks — do NOT call end_call yet
 - The call must NOT be disconnected until:
   * The prospect clearly says "thank you", "bye", "take care", or equivalent
-  * The conversation has naturally ended
+  * The conversation has naturally and MUTUALLY ended
 - NEVER hang up immediately after delivering a closing statement (e.g., "You'll receive an email shortly")
+- Call termination must always be PROSPECT-LED, not agent-triggered
 
 ---
 
@@ -8269,6 +8308,7 @@ Before calling: say "I understand. Let me connect you with someone who can help.
     successCriteria: campaignConfig?.successCriteria,
     brief: campaignConfig?.campaignContextBrief,
     campaignType: campaignConfig?.type,
+    qualificationCriteria: campaignConfig?.qualificationCriteria, // Pass qualification criteria
   });
 
   if (campaignContextSection) {

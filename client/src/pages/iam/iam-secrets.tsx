@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getAuthHeaders } from "@/lib/queryClient";
 import {
   Shield,
   Key,
@@ -121,6 +122,7 @@ export default function IamSecrets() {
       if (filters.service) params.set("service", filters.service);
       if (filters.usageContext) params.set("usageContext", filters.usageContext);
       const response = await fetch(`/api/secrets?${params.toString()}`, {
+        headers: getAuthHeaders(),
         credentials: "include",
       });
       if (!response.ok) {
@@ -158,7 +160,7 @@ export default function IamSecrets() {
     mutationFn: async (payload: typeof createPayload) => {
       const response = await fetch("/api/secrets", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(payload),
       });
@@ -193,6 +195,7 @@ export default function IamSecrets() {
   const detailMutation = useMutation({
     mutationFn: async (id: string) => {
       const response = await fetch(`/api/secrets/${id}`, {
+        headers: getAuthHeaders(),
         credentials: "include",
       });
       if (!response.ok) {
@@ -207,7 +210,7 @@ export default function IamSecrets() {
     mutationFn: async (id: string) => {
       const response = await fetch(`/api/secrets/${id}/rotate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ value: rotateValue }),
       });
@@ -239,7 +242,7 @@ export default function IamSecrets() {
     mutationFn: async (id: string) => {
       const response = await fetch(`/api/secrets/${id}/deactivate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ reason: "Deactivated from dashboard" }),
       });
