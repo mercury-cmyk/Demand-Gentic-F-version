@@ -1067,6 +1067,7 @@ export function registerRoutes(app: Express) {
         user: { ...userWithoutPassword, roles: userRoles }
       });
     } catch (error) {
+      console.error('[LOGIN ERROR]', error);
       res.status(500).json({ message: "Login failed" });
     }
   });
