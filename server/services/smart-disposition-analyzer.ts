@@ -201,14 +201,21 @@ function analyzeTranscriptForQualification(
   const userText = userMessages.map(m => (m.message || m.text || '')).join(' ').toLowerCase();
   const fullText = parsedTranscript.map(t => (t.message || t.text || '')).join(' ').toLowerCase();
 
-  // Detect voicemail/IVR
+  // Detect voicemail/IVR — comprehensive list aligned with isVoicemailTranscript() in voice-dialer.ts
   const voicemailPatterns = [
-    'leave a message',
-    'voicemail',
-    'not available',
-    'after the beep',
-    'after the tone',
-    'record your message',
+    'leave a message', 'leave your message', 'after the beep', 'after the tone',
+    'not available', 'cannot take your call', 'can\'t take your call',
+    'please leave', 'record your message', 'voicemail', 'voice mail',
+    'mailbox', 'answering machine', 'reached the voicemail',
+    'no one is available', 'press pound when finished',
+    'we didn\'t get your message', 'we did not get your message',
+    'you were not speaking', 'because of a bad connection',
+    'maximum time permitted', 'is not available',
+    'your call has been forwarded', 'automatic voice message system',
+    'i\'ll get back to you', 'i will get back to you',
+    'return your call', 'come to the phone',
+    'away from my phone', 'away from the phone',
+    'i\'m unable to', 'unable to take your call',
     'nach dem signalton',
   ];
   

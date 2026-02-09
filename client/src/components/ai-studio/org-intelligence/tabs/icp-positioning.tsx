@@ -67,7 +67,11 @@ function FieldRow({ label, field }: { label: string; field?: IntelligenceField }
   );
 }
 
-export function ICPPositioningTab() {
+interface ICPPositioningTabProps {
+  organizationId?: string | null;
+}
+
+export function ICPPositioningTab({ organizationId }: ICPPositioningTabProps) {
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +81,10 @@ export function ICPPositioningTab() {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch("/api/org-intelligence/profile");
+        const url = organizationId
+          ? `/api/org-intelligence/profile?organizationId=${organizationId}`
+          : "/api/org-intelligence/profile";
+        const response = await fetch(url);
         if (!response.ok) throw new Error("Failed to load organization profile");
         const result = await response.json();
         setProfile(result.profile ?? null);
@@ -89,7 +96,7 @@ export function ICPPositioningTab() {
     };
 
     fetchProfile();
-  }, []);
+  }, [organizationId]);
 
   if (loading) {
     return (

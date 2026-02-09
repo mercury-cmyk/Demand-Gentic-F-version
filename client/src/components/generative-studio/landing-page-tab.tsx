@@ -9,11 +9,14 @@ import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 import PublishDialog from "./shared/publish-dialog";
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface LandingPageTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function LandingPageTab({ brandKits }: LandingPageTabProps) {
+export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPageTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -82,6 +85,7 @@ export default function LandingPageTab({ brandKits }: LandingPageTabProps) {
         <GenerationForm
           contentType="Landing Page"
           brandKits={brandKits}
+          orgIntelligence={orgIntelligence}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Landing Page"

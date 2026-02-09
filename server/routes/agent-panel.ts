@@ -4,11 +4,11 @@
  * Unified agent chat with plan-before-execute functionality
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { eq, and, desc, or, isNull } from 'drizzle-orm';
 import { db } from '../db';
-import { requireAuth } from '../auth';
+import { requireAuth, verifyToken } from '../auth';
 import {
   agentPrompts,
   agentConversations,
@@ -20,11 +20,59 @@ import {
   type AgentExecutionPlan
 } from '@shared/schema';
 import { v4 as uuidv4 } from 'uuid';
+import jwt from 'jsonwebtoken';
 
 const router = Router();
 
-// All routes require authentication
-router.use(requireAuth);
+const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
+
+/**
+ * Dual auth middleware - accepts both main app tokens and client portal tokens.
+ * Sets req.user for main app users, or synthesizes a compatible req.user for client portal users.
+ */
+function requireDualAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+
+  const token = authHeader.substring(7);
+  if (!token || token === 'null' || token === 'undefined') {
+    return res.status(401).json({ message: "Invalid token" });
+  }
+
+  // Try main app auth first
+  const mainPayload = verifyToken(token);
+  if (mainPayload) {
+    req.user = mainPayload;
+    return next();
+  }
+
+  // Try client portal auth
+  try {
+    const clientPayload = jwt.verify(token, JWT_SECRET) as any;
+    if (clientPayload.isClient) {
+      // Synthesize a compatible req.user for agent panel endpoints
+      req.user = {
+        userId: clientPayload.clientUserId,
+        role: 'client',
+        email: clientPayload.email,
+        tenantId: clientPayload.clientAccountId,
+      } as any;
+      // Also set clientUser for boundary checks
+      (req as any).clientUser = clientPayload;
+      return next();
+    }
+  } catch {
+    // Token didn't verify as client token either
+  }
+
+  return res.status(401).json({ message: "Invalid or expired token" });
+}
+
+// All routes require authentication (dual: main app OR client portal)
+router.use(requireDualAuth);
 
 // ==================== Types ====================
 
@@ -452,7 +500,7 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
         status: 'executing',
         approvedBy: userId,
         approvedAt: new Date(),
-        userModifications: data.modifications || null,
+        userModifications: (data.modifications as any) || null,
         executionStartedAt: new Date(),
       })
       .where(eq(agentExecutionPlans.id, planId));

@@ -226,11 +226,16 @@ const aiCallHandler = async (req: any, res: any) => {
   // - "Krisp": Best for background noise (voices, music, traffic)
   // - "Denoiser": Good general-purpose (default)
   // - "DeepFilterNet": Good for static/hiss (newer engine)
+  // Per Telnyx support recommendation (Feb 2026):
+  // Bidirectional suppression eliminates noise on BOTH legs:
+  // - Outbound: our 24kHz→8kHz transcoded audio (AI agent voice)
+  // - Inbound: prospect audio over long international routes
+  // Krisp engine provides best voice isolation for telephony
   const texmlResponse = isInternationalCall
     ? `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Start>
-        <Suppression direction="outbound" noise_suppression_engine="Krisp" />
+        <Suppression direction="both" noise_suppression_engine="Krisp" />
     </Start>
     <Connect>
         <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" codec="${codec}" />
@@ -280,11 +285,12 @@ router.post("/incoming", (req, res) => {
   // This helps with network artifacts on long-distance calls
   const isInternationalIncoming = codec === 'PCMA';
 
+  // Bidirectional suppression for incoming international calls too
   const incomingTexmlResponse = isInternationalIncoming
     ? `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Start>
-        <Suppression direction="inbound" noise_suppression_engine="Krisp" />
+        <Suppression direction="both" noise_suppression_engine="Krisp" />
     </Start>
     <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>

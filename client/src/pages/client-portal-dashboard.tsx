@@ -34,7 +34,7 @@ import {
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
   ArrowLeft, ArrowRight, Eye
 } from 'lucide-react';
-import { ClientAgentButton, ClientAgentPanel } from '@/components/client-portal/agent/client-agent-chat';
+import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
   QualifiedLeadsTable,
   LeadDetailModal,
@@ -204,6 +204,7 @@ const statusColors: Record<string, string> = {
 export default function ClientPortalDashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const agentPanel = useAgentPanelContextOptional();
   const [user, setUser] = useState<ClientUser | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
@@ -285,8 +286,6 @@ export default function ClientPortalDashboard() {
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [showEmailGenerator, setShowEmailGenerator] = useState(false);
-  const [showAgentChat, setShowAgentChat] = useState(false);
-
   // Test AI Agent & Voice Selection state (client-facing)
   const [showClientTestAgent, setShowClientTestAgent] = useState(false);
   const [clientTestCampaignId, setClientTestCampaignId] = useState<string>('');
@@ -1272,7 +1271,7 @@ export default function ClientPortalDashboard() {
             className={`w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all ${
               sidebarCollapsed ? 'px-0' : 'gap-2'
             }`}
-            onClick={() => setShowAgentChat(true)}
+            onClick={() => agentPanel?.openPanel()}
           >
             <Brain className="h-4 w-4" />
             {!sidebarCollapsed && (
@@ -4514,16 +4513,7 @@ export default function ClientPortalDashboard() {
         onOpenChange={setShowEmailGenerator}
       />
 
-      {/* AI Agent Panel - Opens from sidebar */}
-      <ClientAgentPanel
-        open={showAgentChat}
-        onOpenChange={setShowAgentChat}
-        onNavigate={setActiveTab}
-      />
-
-      {/* AI Agent Button - Floating assistant */}
-      <ClientAgentButton onNavigate={setActiveTab} />
-
+      {/* AgentX is now universal - provided by AgentSidePanel in ClientPortalLayout */}
 
       {/* ==================== TEST AI AGENT DIALOG ==================== */}
       <Dialog open={showClientTestAgent} onOpenChange={setShowClientTestAgent}>

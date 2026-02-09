@@ -1051,6 +1051,25 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             calledNumber,
             clientStateAudioFormat
           );
+
+          // CODEC VALIDATION: Detect mismatch between TeXML-requested codec and Telnyx-negotiated codec
+          // Per Telnyx support: media_format.encoding should reflect the negotiated codec
+          const texmlRequestedCodec = normalizeG711Format(clientStateAudioFormat);
+          const telnyxReportedRaw = message?.start?.media_format?.encoding
+            || message?.start?.media_format?.format
+            || message?.start?.media_format?.codec;
+          if (texmlRequestedCodec && telnyxReportedRaw) {
+            const telnyxNormalized = normalizeG711Format(telnyxReportedRaw);
+            if (telnyxNormalized && telnyxNormalized !== texmlRequestedCodec) {
+              console.error(`${LOG_PREFIX} ⚠️ CODEC MISMATCH: TeXML requested ${texmlRequestedCodec} but Telnyx negotiated ${telnyxNormalized} (raw: ${telnyxReportedRaw}). Using Telnyx value to match actual stream.`);
+              // Trust Telnyx-reported format (it's what's actually on the wire)
+            } else if (telnyxNormalized) {
+              console.log(`${LOG_PREFIX} ✅ Codec validated: TeXML=${texmlRequestedCodec}, Telnyx=${telnyxNormalized} — match`);
+            }
+          } else if (texmlRequestedCodec && !telnyxReportedRaw) {
+            console.log(`${LOG_PREFIX} 🎧 Telnyx did not report media_format; using TeXML-selected codec: ${texmlRequestedCodec} (${audioFormatSource})`);
+          }
+
           // Check for test session - either from explicit flag or from ID prefixes
           // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
           const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
@@ -5653,6 +5672,15 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   session.isActive = false;
   session.callOutcome = outcome;
 
+  // Notify bridge that WebSocket is definitely closed/ending
+  try {
+    const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+    const bridge = getTelnyxAiBridge();
+    await bridge.notifyCallEndedByCallId(callId);
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Failed to notify bridge of call end:`, err);
+  }
+
   if (session.realtimeQualityTimer) {
     clearTimeout(session.realtimeQualityTimer);
     session.realtimeQualityTimer = null;
@@ -5774,9 +5802,11 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
     }
   }
 
-  // Check for voicemail in transcript
-  if (disposition === 'no_answer' && fullTranscript && isVoicemailTranscript(fullTranscript)) {
-    console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript, overriding disposition to voicemail`);
+  // Check for voicemail in transcript — catches cases where AMD missed the voicemail
+  // Also catches needs_review when the safeguard at line 5768 overrode not_interested
+  // but the transcript clearly indicates a voicemail system, not a human conversation
+  if ((disposition === 'no_answer' || disposition === 'needs_review') && fullTranscript && isVoicemailTranscript(fullTranscript)) {
+    console.log(`${LOG_PREFIX} Safeguard: voicemail detected in transcript (was ${disposition}), overriding disposition to voicemail`);
     disposition = 'voicemail';
   }
 
@@ -5792,7 +5822,10 @@ async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voi
   // This catches under-classified calls (e.g., no_answer that was actually a conversation)
   // CRITICAL: Smart analysis can only DOWNGRADE or route to needs_review.
   // It can NEVER upgrade to qualified_lead — only the AI's submit_disposition can do that.
-  if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession) {
+  // CRITICAL: Never override a 'voicemail' disposition — transcript-based voicemail detection
+  // (isVoicemailTranscript) is authoritative. The smart analyzer's phrase list is a subset
+  // and would incorrectly reclassify voicemail as needs_review due to transcribed greeting turns.
+  if (session.campaignId && session.transcripts.length > 0 && !session.isTestSession && disposition !== 'voicemail') {
     try {
       const campaignContext = await loadCampaignQualificationContext(session.campaignId);
       

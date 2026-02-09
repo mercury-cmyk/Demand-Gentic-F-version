@@ -1696,7 +1696,59 @@ router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), asyn
  */
 router.get("/profile", requireAuth, async (req: Request, res: Response) => {
   try {
-    // Get the most recent organization intelligence profile
+    const organizationId = req.query.organizationId as string | undefined;
+
+    // If organizationId is provided, fetch from campaignOrganizations
+    if (organizationId) {
+      const [org] = await db.select()
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.id, organizationId))
+        .limit(1);
+
+      if (!org) {
+        return res.json({ profile: null });
+      }
+
+      // Also try to find the matching accountIntelligence record by domain for metadata
+      let metadata: any = { id: org.id, createdAt: org.createdAt, updatedAt: org.updatedAt };
+      if (org.domain) {
+        const [aiProfile] = await db.select()
+          .from(accountIntelligence)
+          .where(eq(accountIntelligence.domain, org.domain))
+          .orderBy(desc(accountIntelligence.createdAt))
+          .limit(1);
+        if (aiProfile) {
+          metadata = {
+            id: aiProfile.id,
+            createdAt: aiProfile.createdAt,
+            updatedAt: aiProfile.updatedAt,
+            confidenceScore: aiProfile.confidenceScore,
+            modelVersion: aiProfile.modelVersion,
+          };
+        }
+      }
+
+      const offerings = (org.offerings && typeof org.offerings === "object") ? org.offerings : {};
+      const normalizedOfferings = {
+        ...offerings,
+        problemsSolved: (offerings as any).problemsSolved || createField("Problems solved pending analysis", "system_default", 0.6),
+      };
+
+      return res.json({
+        success: true,
+        profile: {
+          domain: org.domain,
+          identity: org.identity,
+          offerings: normalizedOfferings,
+          icp: org.icp,
+          positioning: org.positioning,
+          outreach: org.outreach,
+        },
+        metadata,
+      });
+    }
+
+    // Fallback: Get the most recent organization intelligence profile
     const [profile] = await db.select()
       .from(accountIntelligence)
       .orderBy(desc(accountIntelligence.createdAt))
@@ -1800,11 +1852,33 @@ router.post("/enrich", requireAuth, requireRole('admin', 'campaign_manager'), as
  */
 router.get("/prompt-optimization", requireAuth, async (req: Request, res: Response) => {
   try {
-    // Get the most recent organization intelligence profile
-    const [profile] = await db.select()
-      .from(accountIntelligence)
-      .orderBy(desc(accountIntelligence.createdAt))
-      .limit(1);
+    const organizationId = req.query.organizationId as string | undefined;
+
+    // If organizationId is provided, find profile by org's domain
+    let profile: any = null;
+    if (organizationId) {
+      const [org] = await db.select()
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.id, organizationId))
+        .limit(1);
+      if (org?.domain) {
+        const [found] = await db.select()
+          .from(accountIntelligence)
+          .where(eq(accountIntelligence.domain, org.domain))
+          .orderBy(desc(accountIntelligence.createdAt))
+          .limit(1);
+        profile = found || null;
+      }
+    }
+
+    // Fallback: Get the most recent organization intelligence profile
+    if (!profile) {
+      const [found] = await db.select()
+        .from(accountIntelligence)
+        .orderBy(desc(accountIntelligence.createdAt))
+        .limit(1);
+      profile = found || null;
+    }
 
     // Always use database values - no env fallback
     const orgIntelligence = profile?.orgIntelligence || "";

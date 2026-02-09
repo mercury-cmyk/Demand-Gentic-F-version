@@ -17,11 +17,20 @@ $old_secret_vars = @(
     "GEMINI_LIVE_MODEL",
     "BASE_URL",
     "TELNYX_WEBHOOK_URL",
-    "PUBLIC_WEBSOCKET_URL",
-    "PUBLIC_WEBHOOK_HOST",
     "TELNYX_TEXML_APP_ID",
     "ELEVENLABS_API_KEY",
-    "ELEVENLABS_WEBHOOK_SECRET"
+    "ELEVENLABS_WEBHOOK_SECRET",
+    "GOOGLE_CLOUD_PROJECT",
+    "GCP_PROJECT_ID",
+    "GCS_PROJECT_ID",
+    "USE_VERTEX_AI",
+    "TELNYX_NUMBER_POOL_ENABLED",
+    "VOICE_PROVIDER_FALLBACK",
+    "DEEPGRAM_MODEL",
+    "DEEPGRAM_LANGUAGE",
+    "CONVERSATION_QUALITY_MODEL",
+    "VOICE_PROVIDER_FALLBACK_TARGET",
+    "PUBLIC_TEXML_HOST"
 )
 
 $remove_secrets = ($old_secret_vars | ForEach-Object { $_ }) -join ","
@@ -95,6 +104,10 @@ $secrets = @(
     # Transcription
     "DEEPGRAM_API_KEY=DEEPGRAM_API_KEY:latest",
 
+    # Production URLs (from Secrets)
+    "PUBLIC_WEBSOCKET_URL=PUBLIC_WEBSOCKET_URL:latest",
+    "PUBLIC_WEBHOOK_HOST=PUBLIC_WEBHOOK_HOST:latest",
+
     # Org Intelligence Models (stored as secrets for flexibility)
     "ORG_INTELLIGENCE_OPENAI_MODEL=ORG_INTELLIGENCE_OPENAI_MODEL:latest",
     "ORG_INTELLIGENCE_GEMINI_MODEL=ORG_INTELLIGENCE_GEMINI_MODEL:latest",
@@ -140,8 +153,6 @@ $env_vars = @(
     "BASE_URL=https://demandgentic.ai",
     "PUBLIC_TEXML_HOST=demandgentic.ai",
     "TELNYX_WEBHOOK_URL=https://demandgentic.ai/api/webhooks/telnyx",
-    "PUBLIC_WEBSOCKET_URL=wss://demandgentic.ai/voice-dialer",
-    "PUBLIC_WEBHOOK_HOST=demandgentic.ai",
 
     # OpenAI SIP Configuration
     "OPENAI_SIP_MODEL=gpt-realtime",

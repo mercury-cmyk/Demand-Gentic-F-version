@@ -22,7 +22,9 @@ import {
   Cpu,
   Mail,
   Search,
-  Phone
+  Phone,
+  FileText,
+  Trash2,
 } from "lucide-react";
 import { AgentPromptViewer } from "@/components/agent-prompts";
 import { useToast } from "@/hooks/use-toast";
@@ -53,6 +55,14 @@ type TrainingCenter = Record<'generic' | 'general_intelligence' | 'demand_intel'
 interface ComplianceGuardrails {
   dos: string[];
   donts: string[];
+}
+
+interface StrategyDoc {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  isActive: boolean;
 }
 
 // ============== DEFAULTS ==============
@@ -162,6 +172,55 @@ const DEFAULT_COMPLIANCE_GUARDRAILS: ComplianceGuardrails = {
   ],
 };
 
+const DEFAULT_STRATEGY_DOCS: StrategyDoc[] = [
+  {
+    id: "demandgentic-campaign-brief",
+    title: "DemandGentic Campaign Strategy Brief",
+    content: `MISSION: Accelerate pipeline generation for B2B revenue teams by replacing fragmented point solutions with a single, AI-native demand generation platform that autonomously prospects, qualifies, and nurtures at scale.
+
+TARGET MARKET:
+- Company Size: Mid-market to Enterprise ($10M–$500M+ ARR)
+- Industries: SaaS/Cloud, Cybersecurity, FinServ, HealthTech, Enterprise Software, Professional Services
+- Buyers: VP Demand Gen, VP Revenue Ops, Director of Sales Development, CMO, CRO
+- Pain Signal: Teams running 3–5 disconnected tools (dialer + email + ABM + intent data + CRM) with declining connect rates, rising CPL, and no unified intelligence layer
+
+VALUE PROPOSITION: "One platform. AI agents that call, email, and qualify — powered by deep organization intelligence." DemandGentic AI replaces the patchwork of outbound dialers, marketing automation, and ABM tools with an end-to-end demand generation engine.
+
+KEY DIFFERENTIATORS:
+- AI Voice Agents: Autonomous outbound calls with real-time conversation analysis, live transcription, and instant lead scoring
+- Organization Intelligence: Multi-model deep research (Gemini + OpenAI + Anthropic + DeepSeek) builds ICP profiles, competitive positioning, and messaging angles per prospect
+- Generative Studio: Full content suite — landing pages, emails, blogs, eBooks, solution briefs — all enriched with org intelligence context
+- Unified Pipeline: Single platform from top-of-funnel prospecting through AE handoff with built-in verification and QA
+- Real-Time Intelligence: Sentiment analysis, objection detection, and disposition scoring happen during the call, not after
+
+MESSAGING THEMES:
+- Consolidation: "Stop paying for 5 tools that don't talk to each other"
+- AI-Native: "Our AI agents don't just analyze calls — they make them"
+- Intelligence-First: "Every touchpoint is informed by multi-model company research"
+- Speed to Pipeline: "Generate a full campaign — from research to content to calls — in hours, not weeks"
+- Quality Over Quantity: "Verified, qualified leads — not raw lists"
+
+COMPETITIVE POSITIONING:
+- vs Sales Engagement (Salesloft, Outreach, Apollo): We add autonomous AI voice + org intelligence; they require human SDRs
+- vs ABM Platforms (Demandbase, 6sense, Terminus): We execute campaigns end-to-end; they provide intent signals only
+- vs AI Voice (Bland AI, Air AI): We embed voice in a full demand gen platform; they're standalone voice tools
+- vs Marketing Automation (HubSpot, Marketo, Pardot): We're AI-native with real-time intelligence; they're workflow-centric
+
+OUTREACH CHANNELS:
+- AI Voice Calls (60%): AI agents open conversations, qualify interest, and book meetings
+- Email Sequences (30%): Generative Studio creates persona-specific sequences aligned to org intelligence
+- Content & Landing Pages (10%): eBooks, solution briefs, and landing pages as conversion assets
+
+SUCCESS METRICS:
+- Connect Rate: >12% on AI voice outreach
+- Qualified Lead Rate: >25% of connected calls
+- Cost Per Qualified Lead: 40–60% reduction vs. current stack
+- Time to First Meeting: <5 business days from campaign launch`,
+    createdAt: new Date().toISOString(),
+    isActive: true,
+  },
+];
+
 const DEFAULTS_RAW = {
   orgIntelligence: DEFAULT_ORG_INTELLIGENCE.join("\n"),
   compliancePolicy: DEFAULT_COMPLIANCE_POLICY.join("\n"),
@@ -179,7 +238,11 @@ const AGENT_TYPES = [
 
 // ============== COMPONENT ==============
 
-export function PromptOptimizationView() {
+interface PromptOptimizationViewProps {
+  organizationId?: string | null;
+}
+
+export function PromptOptimizationView({ organizationId }: PromptOptimizationViewProps) {
   const { toast } = useToast();
   const [data, setData] = useState<PromptOptimizationData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,10 +270,18 @@ export function PromptOptimizationView() {
   const [newDo, setNewDo] = useState("");
   const [newDont, setNewDont] = useState("");
 
-  // Fetch prompt optimization data on mount
+  // Strategy Docs State
+  const [strategyDocs, setStrategyDocs] = useState<StrategyDoc[]>(DEFAULT_STRATEGY_DOCS);
+  const [strategyDocsHasChanges, setStrategyDocsHasChanges] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState("");
+  const [newDocContent, setNewDocContent] = useState("");
+  const [addingDoc, setAddingDoc] = useState(false);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+
+  // Fetch prompt optimization data when organizationId changes
   useEffect(() => {
     fetchPromptOptimization();
-  }, []);
+  }, [organizationId]);
 
   // Load Training Center from localStorage on mount
   useEffect(() => {
@@ -238,11 +309,29 @@ export function PromptOptimizationView() {
     }
   }, []);
 
+  // Load Strategy Docs from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('org-intelligence-strategy-docs');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setStrategyDocs(parsed);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, []);
+
   const fetchPromptOptimization = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch("/api/org-intelligence/prompt-optimization", {
+      const url = organizationId
+        ? `/api/org-intelligence/prompt-optimization?organizationId=${organizationId}`
+        : "/api/org-intelligence/prompt-optimization";
+      const response = await fetch(url, {
         credentials: "include",
         headers: {
           "Authorization": `Bearer ${localStorage.getItem("authToken") || ""}`,
@@ -407,6 +496,84 @@ export function PromptOptimizationView() {
     setGuardrailsHasChanges(true);
   };
 
+  // Strategy Docs handlers
+  const handleSaveStrategyDocs = async () => {
+    try {
+      localStorage.setItem('org-intelligence-strategy-docs', JSON.stringify(strategyDocs));
+
+      // Also inject active docs into the orgIntelligence field so they flow into buildAgentSystemPrompt
+      const activeDocs = strategyDocs.filter(d => d.isActive);
+      if (activeDocs.length > 0) {
+        const docsContext = activeDocs
+          .map(d => `--- STRATEGY DOC: ${d.title} ---\n${d.content}`)
+          .join('\n\n');
+
+        const currentOI = formData.orgIntelligence || "";
+        // Remove any previously injected strategy doc sections
+        const cleanedOI = currentOI.replace(/\n?\n?--- STRATEGY DOC:[\s\S]*$/m, "").trim();
+        const updatedOI = cleanedOI ? `${cleanedOI}\n\n${docsContext}` : docsContext;
+
+        setFormData(prev => ({ ...prev, orgIntelligence: updatedOI }));
+
+        // Save to backend
+        const response = await fetch("/api/org-intelligence/prompt-optimization", {
+          method: "PUT",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${localStorage.getItem("authToken") || ""}`,
+          },
+          body: JSON.stringify({ orgIntelligence: updatedOI }),
+        });
+        if (!response.ok) throw new Error("Failed to sync docs to org intelligence");
+        await fetchPromptOptimization();
+      }
+
+      setStrategyDocsHasChanges(false);
+      toast({
+        title: 'Strategy Docs saved',
+        description: `${activeDocs.length} active doc(s) synced to Organization Intelligence.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Failed to save',
+        description: error instanceof Error ? error.message : 'Could not save strategy docs',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const addStrategyDoc = () => {
+    if (!newDocTitle.trim() || !newDocContent.trim()) return;
+    const newDoc: StrategyDoc = {
+      id: `doc-${Date.now()}`,
+      title: newDocTitle.trim(),
+      content: newDocContent.trim(),
+      createdAt: new Date().toISOString(),
+      isActive: true,
+    };
+    setStrategyDocs(prev => [...prev, newDoc]);
+    setNewDocTitle("");
+    setNewDocContent("");
+    setAddingDoc(false);
+    setStrategyDocsHasChanges(true);
+  };
+
+  const removeStrategyDoc = (id: string) => {
+    setStrategyDocs(prev => prev.filter(d => d.id !== id));
+    setStrategyDocsHasChanges(true);
+  };
+
+  const toggleStrategyDoc = (id: string) => {
+    setStrategyDocs(prev => prev.map(d => d.id === id ? { ...d, isActive: !d.isActive } : d));
+    setStrategyDocsHasChanges(true);
+  };
+
+  const updateStrategyDoc = (id: string, content: string) => {
+    setStrategyDocs(prev => prev.map(d => d.id === id ? { ...d, content } : d));
+    setStrategyDocsHasChanges(true);
+  };
+
   if (loading) {
     return (
       <Card>
@@ -494,7 +661,7 @@ export function PromptOptimizationView() {
       )}
 
       <Tabs defaultValue="training" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-8">
+        <TabsList className="grid w-full grid-cols-9">
           <TabsTrigger value="training" className="flex items-center gap-1">
             <BookOpen className="h-3 w-3" />
             Training
@@ -502,6 +669,10 @@ export function PromptOptimizationView() {
           <TabsTrigger value="guardrails" className="flex items-center gap-1">
             <Shield className="h-3 w-3" />
             Guardrails
+          </TabsTrigger>
+          <TabsTrigger value="docs" className="flex items-center gap-1">
+            <FileText className="h-3 w-3" />
+            Docs
           </TabsTrigger>
           <TabsTrigger value="org">Organization</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
@@ -700,6 +871,145 @@ export function PromptOptimizationView() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* ============== STRATEGY DOCS TAB ============== */}
+        <TabsContent value="docs" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-6 w-6 text-primary" />
+                  <div>
+                    <CardTitle>Strategy Docs</CardTitle>
+                    <CardDescription>
+                      Campaign briefs, strategy documents, and GTM playbooks that inform all AI agent behavior.
+                      Active docs are injected into Organization Intelligence context.
+                    </CardDescription>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setAddingDoc(true)} disabled={addingDoc}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Document
+                  </Button>
+                  <Button size="sm" onClick={handleSaveStrategyDocs} disabled={!strategyDocsHasChanges}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save & Sync
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+
+          {/* Add new doc form */}
+          {addingDoc && (
+            <Card className="border-blue-200">
+              <CardHeader>
+                <CardTitle className="text-lg">Add New Strategy Document</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Document Title</Label>
+                  <Input
+                    placeholder="e.g., Q1 2026 Campaign Strategy Brief"
+                    value={newDocTitle}
+                    onChange={(e) => setNewDocTitle(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Document Content</Label>
+                  <Textarea
+                    placeholder="Paste your campaign brief, strategy document, or GTM playbook content here..."
+                    value={newDocContent}
+                    onChange={(e) => setNewDocContent(e.target.value)}
+                    className="min-h-[200px] font-mono text-sm"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => { setAddingDoc(false); setNewDocTitle(""); setNewDocContent(""); }}>
+                    Cancel
+                  </Button>
+                  <Button onClick={addStrategyDoc} disabled={!newDocTitle.trim() || !newDocContent.trim()}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Document
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Existing docs list */}
+          {strategyDocs.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <FileText className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
+                <p className="text-lg font-medium text-muted-foreground">No strategy documents yet</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add campaign briefs and strategy docs to inform AI-generated content
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            strategyDocs.map((doc) => (
+              <Card key={doc.id} className={doc.isActive ? "border-green-200" : "border-muted opacity-60"}>
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        {doc.title}
+                        {doc.isActive ? (
+                          <Badge className="bg-green-100 text-green-700 text-[10px]">Active</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">Inactive</Badge>
+                        )}
+                      </CardTitle>
+                      <CardDescription>
+                        Added {new Date(doc.createdAt).toLocaleDateString()} · {doc.content.split('\n').length} lines
+                      </CardDescription>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingDocId(editingDocId === doc.id ? null : doc.id)}
+                      >
+                        {editingDocId === doc.id ? "Collapse" : "Edit"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleStrategyDoc(doc.id)}
+                      >
+                        {doc.isActive ? "Deactivate" : "Activate"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-700"
+                        onClick={() => removeStrategyDoc(doc.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {editingDocId === doc.id ? (
+                    <Textarea
+                      value={doc.content}
+                      onChange={(e) => updateStrategyDoc(doc.id, e.target.value)}
+                      className="min-h-[300px] font-mono text-sm"
+                    />
+                  ) : (
+                    <div className="bg-muted rounded-lg p-4 max-h-[300px] overflow-y-auto">
+                      <pre className="text-sm whitespace-pre-wrap font-mono">{doc.content}</pre>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          )}
         </TabsContent>
 
         {/* ============== ORGANIZATION TAB ============== */}

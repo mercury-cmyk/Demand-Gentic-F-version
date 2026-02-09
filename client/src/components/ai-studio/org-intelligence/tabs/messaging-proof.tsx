@@ -74,7 +74,11 @@ function FieldRow({ label, field }: { label: string; field?: IntelligenceField }
   );
 }
 
-export function MessagingProofTab() {
+interface MessagingProofTabProps {
+  organizationId?: string | null;
+}
+
+export function MessagingProofTab({ organizationId }: MessagingProofTabProps) {
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +88,10 @@ export function MessagingProofTab() {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch("/api/org-intelligence/profile");
+        const url = organizationId
+          ? `/api/org-intelligence/profile?organizationId=${organizationId}`
+          : "/api/org-intelligence/profile";
+        const response = await fetch(url);
         if (!response.ok) throw new Error("Failed to load organization profile");
         const result = await response.json();
         setProfile(result.profile ?? null);
@@ -96,7 +103,7 @@ export function MessagingProofTab() {
     };
 
     fetchProfile();
-  }, []);
+  }, [organizationId]);
 
   if (loading) {
     return (

@@ -15,11 +15,14 @@ import { Mail } from "lucide-react";
 import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface EmailTemplateTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function EmailTemplateTab({ brandKits }: EmailTemplateTabProps) {
+export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTemplateTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -78,6 +81,7 @@ export default function EmailTemplateTab({ brandKits }: EmailTemplateTabProps) {
         <GenerationForm
           contentType="Email Template"
           brandKits={brandKits}
+          orgIntelligence={orgIntelligence}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Email"

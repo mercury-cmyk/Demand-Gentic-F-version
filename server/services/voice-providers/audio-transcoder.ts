@@ -395,20 +395,22 @@ const FILTER_16K_TO_8K = generateLowPassFilter(9, 0.42);
 // A-LAW OPTIMIZATION (Fixed for Anti-aliasing):
 // Issue: Previous "gentle" filter (cutoff 0.38 = 4.5kHz) was ABOVE the Nyquist limit (4kHz),
 // causing severe aliasing noise.
-// Fix: STRICTLY limit bandwidth to 3.0kHz (toll quality) to prevent aliasing.
-// UPDATED Feb 2026: Use minimal taps (5-7) to eliminate ringing artifacts
-// A-law's non-linear quantization makes filter ringing much more audible than µ-law
-const FILTER_24K_TO_8K_ALAW = generateLowPassFilter(5, 0.25); // Cutoff ~3.0kHz, minimal ringing
-const FILTER_16K_TO_8K_ALAW = generateLowPassFilter(5, 0.38); // Cutoff ~3.0kHz, minimal ringing
+// Fix: Bandwidth limited below Nyquist (4kHz) but preserving full toll-quality range.
+// UPDATED Feb 2026: Use minimal taps (5-7) to eliminate ringing artifacts.
+// A-law's non-linear quantization makes filter ringing much more audible than µ-law.
+// Per Telnyx support: Sending A-law directly minimizes transcoding — optimize filter
+// to preserve speech bandwidth up to ~3.4kHz (full ITU-T G.711 toll quality).
+const FILTER_24K_TO_8K_ALAW = generateLowPassFilter(7, 0.28); // Cutoff ~3.4kHz, 7-tap for sharper rolloff before Nyquist
+const FILTER_16K_TO_8K_ALAW = generateLowPassFilter(7, 0.42); // Cutoff ~3.4kHz for 2:1, 7-tap
 
 /**
- * Apply low-pass FIR filter for anti-aliasing before downsampling.
- * Prevents aliasing artifacts (the irritating noise) by removing
- * frequencies above the Nyquist frequency of the target sample rate.
+ * Apply low-pass FIR filter for anti-aliasing with state support.
  * 
- * @param useAlawFilter - Use gentler A-law optimized filter (for UK/Europe)
+ * UPDATED Feb 2026: now supports stateful processing to prevent boundary artifacts.
+ * The `history` buffer from the previous chunk is prepended to the current input
+ * so the filter can separate "ringing" correctly across boundaries.
  */
-function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number, useAlawFilter: boolean = false): Buffer {
+function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number, useAlawFilter: boolean = false, state?: TranscoderState): Buffer {
   const inputSamples = inputBuffer.length / 2;
   const outputBuffer = Buffer.alloc(inputBuffer.length);
 
@@ -421,30 +423,69 @@ function applyLowPassFilter(inputBuffer: Buffer, cutoffRatio: number, useAlawFil
     // 2:1 downsampling (16kHz → 8kHz)
     coeffs = useAlawFilter ? FILTER_16K_TO_8K_ALAW : FILTER_16K_TO_8K;
   } else {
-    // Minor downsampling - use simple averaging
     return inputBuffer;
   }
 
   const filterLen = coeffs.length;
   const halfLen = Math.floor(filterLen / 2);
 
+  // Combine history with input for seamless filtering
+  let sourceBuffer = inputBuffer;
+  let historyOffset = 0;
+
+  if (state && state.history && state.history.length > 0) {
+    // Determine how much history we actually need (filter legth)
+    // We only need enough history to cover the convolution window
+    const usefulHistoryLen = Math.min(state.history.length, filterLen * 2); 
+    const usefulHistory = state.history.slice(state.history.length - usefulHistoryLen);
+    
+    sourceBuffer = Buffer.concat([usefulHistory, inputBuffer]);
+    historyOffset = usefulHistory.length / 2;
+  }
+
+  // Process ONLY the new samples (inputBuffer part)
   for (let i = 0; i < inputSamples; i++) {
     let sum = 0;
-
+    
+    // Convolve with filter
+    // sourceIdx points to the sample in sourceBuffer (which includes history)
+    // i is the index in the *output* (which corresponds to inputBuffer)
+    // So sourceIdx should center around (i + historyOffset)
     for (let j = 0; j < filterLen; j++) {
-      const srcIdx = i - halfLen + j;
+      const coeffIdx = j;
+      const srcIdx = (i + historyOffset) - halfLen + j;
+
       let sample = 0;
-
-      if (srcIdx >= 0 && srcIdx < inputSamples) {
-        sample = inputBuffer.readInt16LE(srcIdx * 2);
+      if (srcIdx >= 0 && srcIdx < (sourceBuffer.length / 2)) {
+        sample = sourceBuffer.readInt16LE(srcIdx * 2);
       }
-
-      sum += sample * coeffs[j];
+      
+      sum += sample * coeffs[coeffIdx];
     }
 
     // Clamp to valid 16-bit range
     const clamped = Math.max(-32768, Math.min(32767, Math.round(sum)));
     outputBuffer.writeInt16LE(clamped, i * 2);
+  }
+
+  // Update State History for next time
+  if (state) {
+    // Keep enough end-samples to cover the filter length for the next chunk
+    // A bit more than filterLen is safe
+    const samplesToKeep = filterLen * 2;
+    const historyBytes = samplesToKeep * 2;
+    
+    if (inputBuffer.length >= historyBytes) {
+      state.history = Buffer.from(inputBuffer.slice(inputBuffer.length - historyBytes));
+    } else {
+      // If input is tiny, append to existing history and trim
+      const combined = Buffer.concat([state.history, inputBuffer]);
+      if (combined.length > historyBytes) {
+        state.history = Buffer.from(combined.slice(combined.length - historyBytes));
+      } else {
+        state.history = combined;
+      }
+    }
   }
 
   return outputBuffer;
@@ -667,31 +708,57 @@ function simpleDecimate3to1(inputBuffer: Buffer): Buffer {
   return outputBuffer;
 }
 
-// State for cross-chunk smoothing (prevents pops/clicks at chunk boundaries)
-let lastOutputSample: number = 0;
+// ==================== STATE MANAGEMENT ====================
+
+export interface TranscoderState {
+  // Buffer of remainder samples from previous chunk (alignment)
+  inputBuffer: Buffer; 
+  
+  // Last few processed samples for filter lookback
+  history: Buffer;
+
+  // Last output sample for smoothing discontinuities
+  lastOutputSample: number;
+  
+  // Counter for noise gate hold time
+  noiseGateHold: number;
+}
+
+export function createTranscoderState(): TranscoderState {
+  return {
+    inputBuffer: Buffer.alloc(0),
+    history: Buffer.alloc(0),
+    lastOutputSample: 0,
+    noiseGateHold: 0
+  };
+}
+
+// Global backup state for backward compatibility (stateless calls)
+// This is still dangerous for concurrency but maintains existing behavior
+const globalBackupState: TranscoderState = createTranscoderState();
 
 /**
- * Apply smooth transition at chunk start to prevent pops/clicks
- * Uses a short crossfade from the last sample of previous chunk
+ * Smoothes the transition from the last output sample of the previous chunk
+ * to the start of the new chunk.
  */
-function smoothChunkBoundary(pcmBuffer: Buffer, fadeInSamples: number = 4): Buffer {
+function smoothChunkBoundary(pcmBuffer: Buffer, state: TranscoderState, fadeInSamples: number = 4): Buffer {
   if (pcmBuffer.length < fadeInSamples * 2) return pcmBuffer;
 
   const output = Buffer.from(pcmBuffer); // Clone
   const samples = output.length / 2;
 
-  // Smooth first few samples to transition from last chunk's end sample
+  // Smooth first few samples to transition from state.lastOutputSample
   for (let i = 0; i < Math.min(fadeInSamples, samples); i++) {
     const currentSample = output.readInt16LE(i * 2);
-    // Linear crossfade from lastOutputSample to current sample
-    const t = (i + 1) / fadeInSamples; // 0.25, 0.5, 0.75, 1.0
-    const blended = Math.round(lastOutputSample * (1 - t) + currentSample * t);
+    // Linear crossfade
+    const t = (i + 1) / fadeInSamples; 
+    const blended = Math.round(state.lastOutputSample * (1 - t) + currentSample * t);
     output.writeInt16LE(Math.max(-32768, Math.min(32767, blended)), i * 2);
   }
 
-  // Remember last sample for next chunk
+  // Update lastOutputSample for next time
   if (samples > 0) {
-    lastOutputSample = output.readInt16LE((samples - 1) * 2);
+    state.lastOutputSample = output.readInt16LE((samples - 1) * 2);
   }
 
   return output;
@@ -710,12 +777,14 @@ function smoothChunkBoundary(pcmBuffer: Buffer, fadeInSamples: number = 4): Buff
  * UPDATED Feb 2026: Increased threshold from 200 to 400 to better suppress
  * static/hissing noise that was bleeding through during pauses.
  */
-function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples: number = 50): Buffer {
+function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples: number = 50, state?: TranscoderState): Buffer {
   const samples = pcmBuffer.length / 2;
   if (samples === 0) return pcmBuffer;
 
+  const activeState = state || globalBackupState;
+  
   const output = Buffer.alloc(pcmBuffer.length);
-  let holdCounter = 0;
+  let holdCounter = activeState.noiseGateHold;
 
   for (let i = 0; i < samples; i++) {
     const sample = pcmBuffer.readInt16LE(i * 2);
@@ -736,6 +805,7 @@ function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples:
     }
   }
 
+  activeState.noiseGateHold = holdCounter;
   return output;
 }
 
@@ -837,34 +907,47 @@ function applyEarlyNoiseSupression(pcmBuffer: Buffer): Buffer {
  * Convert PCM 24kHz (Gemini output) to G.711 (8kHz) for Telnyx
  * This is the main function for Gemini -> Telnyx audio path
  *
- * AUDIO QUALITY IMPROVEMENTS (Feb 2026):
- * 0. Apply early noise suppression at 24kHz to prevent aliasing of HF noise
- * 1. Apply gentle normalization (reduced target to prevent clipping)
- * 2. Apply proper FIR anti-aliasing filter with reduced taps
- * 3. Decimate with weighted averaging instead of point-picking
- * 4. Smooth chunk boundaries to prevent pops/clicks
- * 5. Apply noise gate to eliminate remaining low-level noise
- * 6. Encode to G.711
- *
- * UK/A-LAW FIX (Feb 2026):
- * - Use gentler FIR filter (5 taps) for A-law to eliminate ringing artifacts
- * - Apply soft limiter to prevent harsh clipping distortion
- * - A-law's non-linear quantization makes artifacts much more audible
+ * UPDATED Feb 2026: Added proper state management to fix clicks/pops (noise)
+ * caused by stateless processing boundaries.
  */
-export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
+export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format, state?: TranscoderState): Buffer {
+  const activeState = state || globalBackupState;
   const isAlaw = format === 'alaw';
 
-  // A-LAW SPECIAL PATH: Use simplified processing to eliminate noise artifacts
-  // A-law's non-linear quantization amplifies any processing artifacts into audible noise
+  // A-LAW SPECIAL PATH: Use simplified processing with history tracking to eliminate noise
   if (isAlaw) {
-    return pcm24kToG711Alaw(pcmBuffer);
+    return pcm24kToG711Alaw(pcmBuffer, activeState);
   }
 
   // µ-LAW PATH: Full processing chain (US/Canada)
-  // Step 0: Apply early noise suppression on the high-resolution audio
-  // This removes high-frequency noise BEFORE downsampling, preventing it from
-  // folding into audible frequencies during decimation
-  const denoised = applyEarlyNoiseSupression(pcmBuffer);
+  
+  // 1. Handle Remainder from previous chunk (for 3:1 alignment)
+  // This prevents "time slip" / pitch shifting if chunks aren't multiples of 3
+  let workingBuffer = pcmBuffer;
+  if (activeState.inputBuffer.length > 0) {
+    workingBuffer = Buffer.concat([activeState.inputBuffer, pcmBuffer]);
+  }
+  
+  const inputSamples = workingBuffer.length / 2;
+  const samplesToProcess = Math.floor(inputSamples / 3) * 3;
+  
+  // Save remainder
+  const remainderBytes = (inputSamples * 2) - (samplesToProcess * 2);
+  if (remainderBytes > 0) {
+    const newRemainder = Buffer.alloc(remainderBytes);
+    workingBuffer.copy(newRemainder, samplesToProcess * 2); // Copy from end of valid part
+    activeState.inputBuffer = newRemainder;
+  } else {
+    activeState.inputBuffer = Buffer.alloc(0);
+  }
+  
+  if (samplesToProcess === 0) return Buffer.alloc(0);
+  
+  // Only process the valid aligned portion
+  const bufferToProcess = workingBuffer.slice(0, samplesToProcess * 2);
+
+  // Step 0: Apply early noise suppression
+  const denoised = applyEarlyNoiseSupression(bufferToProcess);
 
   // Step 1: Normalize with reduced target (0.88) to prevent clipping
   const processed = normalizeAudio(denoised, 0.88);
@@ -876,81 +959,74 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const pcm8k = simpleDecimate3to1(filtered);
 
   // Step 4: Smooth chunk boundary to prevent pops/clicks
-  const smoothed = smoothChunkBoundary(pcm8k);
+  const smoothed = smoothChunkBoundary(pcm8k, activeState);
 
   // Step 5: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
-  const gated = applyNoiseGate(smoothed, 400, 60);
+  const gated = applyNoiseGate(smoothed, 400, 60, activeState);
 
   // Step 6: Encode to G.711 µ-law
   return pcm8kToG711(gated, format);
 }
 
 /**
- * DEDICATED A-LAW CONVERSION PATH
- *
- * A-law (used in UK, Europe, UAE, etc.) is EXTREMELY sensitive to processing artifacts.
- * Any ringing, noise, or distortion from filters gets amplified by A-law's non-linear
- * companding into clearly audible static/hissing.
- *
- * This function uses MINIMAL processing:
- * 1. Simple 3-sample averaging for anti-aliasing (no FIR filter ringing)
- * 2. Very aggressive noise gate (600 threshold)
- * 3. Direct A-law encoding
- *
- * Trade-off: Slightly lower audio bandwidth but CLEAN sound without artifacts.
+ * DEDICATED A-LAW CONVERSION PATH WITH STATE
+ * Fixes "noise" (clicks/static) on international calls by utilizing proper
+ * stateful FIR filtering for anti-aliasing.
+ * 
+ * Major Revision Feb 2026:
+ * - Removed manual averaging loop
+ * - Now uses stateful `applyLowPassFilter` (prevents aliasing AND boundary clicks)
+ * - Added DC offset removal
+ * - Added boundary smoothing
  */
-function pcm24kToG711Alaw(pcmBuffer: Buffer): Buffer {
-  const inputSamples = pcmBuffer.length / 2;
-  const outputSamples = Math.floor(inputSamples / 3);
-  const pcm8k = Buffer.alloc(outputSamples * 2);
-
-  // Step 1: Simple 3:1 decimation with averaging (no filter ringing)
-  // Use wider averaging window (5 samples) for better anti-aliasing without ringing
-  for (let i = 0; i < outputSamples; i++) {
-    const srcIdx = i * 3;
-
-    // Get 5 samples centered around the target (with boundary handling)
-    let sum = 0;
-    let count = 0;
-    for (let j = -1; j <= 3; j++) {
-      const idx = srcIdx + j;
-      if (idx >= 0 && idx < inputSamples) {
-        sum += pcmBuffer.readInt16LE(idx * 2);
-        count++;
-      }
-    }
-
-    // Average and apply slight attenuation to prevent any clipping
-    const averaged = Math.round((sum / count) * 0.85);
-    pcm8k.writeInt16LE(Math.max(-32768, Math.min(32767, averaged)), i * 2);
+function pcm24kToG711Alaw(pcmBuffer: Buffer, state: TranscoderState): Buffer {
+  // 1. Handle Remainder (alignment)
+  let workingBuffer = pcmBuffer;
+  if (state.inputBuffer.length > 0) {
+    workingBuffer = Buffer.concat([state.inputBuffer, pcmBuffer]);
   }
-
-  // Step 2: Very aggressive noise gate for A-law (threshold 600)
-  // A-law makes low-level noise very audible, so we gate aggressively
-  const gated = Buffer.alloc(pcm8k.length);
-  let holdCounter = 0;
-  const threshold = 600;
-  const holdSamples = 80; // Longer hold to preserve speech tails
-
-  for (let i = 0; i < outputSamples; i++) {
-    const sample = pcm8k.readInt16LE(i * 2);
-    const abs = Math.abs(sample);
-
-    if (abs >= threshold) {
-      gated.writeInt16LE(sample, i * 2);
-      holdCounter = holdSamples;
-    } else if (holdCounter > 0) {
-      // Fade out during hold period
-      const fade = holdCounter / holdSamples;
-      gated.writeInt16LE(Math.round(sample * fade), i * 2);
-      holdCounter--;
-    } else {
-      // Complete silence below threshold
-      gated.writeInt16LE(0, i * 2);
-    }
+  
+  const inputSamples = workingBuffer.length / 2;
+  const samplesToProcess = Math.floor(inputSamples / 3) * 3;
+  
+  // Save remainder for next time
+  const remainderBytes = (inputSamples * 2) - (samplesToProcess * 2);
+  if (remainderBytes > 0) {
+    const newRemainder = Buffer.alloc(remainderBytes);
+    workingBuffer.copy(newRemainder, samplesToProcess * 2);
+    state.inputBuffer = newRemainder;
+  } else {
+    state.inputBuffer = Buffer.alloc(0);
   }
+  
+  if (samplesToProcess === 0) return Buffer.alloc(0);
+  
+  // 2. Process valid alignment
+  const bufferToProcess = workingBuffer.slice(0, samplesToProcess * 2);
 
-  // Step 3: Encode to A-law
+  // 3. Remove DC Offset (critical for A-law to prevent clicking)
+  const dcCorrected = removeDcOffset(bufferToProcess);
+
+  // 4. Stateful Anti-Aliasing Filter
+  // This uses the "history" in state to filter across boundaries seamlessly
+  // preventing the "ringing" noise at 50Hz (chunk rate)
+  const filtered = applyLowPassFilter(dcCorrected, 0.30, true, state);
+
+  // 5. Decimate 3:1 (24kHz → 8kHz)
+  // simpleDecimate3to1 includes a secondary weighted smooth, which helps
+  // further reduce high-frequency quantisation noise
+  const pcm8k = simpleDecimate3to1(filtered);
+
+  // 6. Smooth Boundaries (Crossfade)
+  // Further ensures no discontinuity between the last sample of previous chunk
+  // and first sample of this chunk
+  const smoothed = smoothChunkBoundary(pcm8k, state);
+
+  // 7. Aggressive Noise Gate (Threshold 600)
+  // A-law is unforgiving of silence noise floor.
+  const gated = applyNoiseGate(smoothed, 600, 80, state);
+
+  // 8. Encode to A-law
   return pcm8kToG711(gated, 'alaw');
 }
 
@@ -964,12 +1040,13 @@ function pcm24kToG711Alaw(pcmBuffer: Buffer): Buffer {
  * 3. Smooth chunk boundaries to prevent pops/clicks
  * 4. Encode to G.711
  */
-export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
+export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format, state?: TranscoderState): Buffer {
+  const activeState = state || globalBackupState;
   const isAlaw = format === 'alaw';
 
-  // A-LAW SPECIAL PATH: Use simplified processing to eliminate noise artifacts
+  // A-LAW SPECIAL PATH: Stateful processing for international call clarity
   if (isAlaw) {
-    return pcm16kToG711Alaw(pcmBuffer);
+    return pcm16kToG711Alaw(pcmBuffer, activeState);
   }
 
   // µ-LAW PATH: Full processing chain (US/Canada)
@@ -980,68 +1057,77 @@ export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format): Buffer {
   const pcm8k = resamplePcmWithFormat(normalizedInput, 16000, 8000, false);
 
   // Step 3: Smooth chunk boundary to prevent pops/clicks
-  const smoothed = smoothChunkBoundary(pcm8k);
+  const smoothed = smoothChunkBoundary(pcm8k, activeState);
 
   // Step 4: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
-  const gated = applyNoiseGate(smoothed, 400, 60);
+  const gated = applyNoiseGate(smoothed, 400, 60, activeState);
 
   // Step 5: Encode to G.711 µ-law
   return pcm8kToG711(gated, 'ulaw');
 }
 
 /**
- * DEDICATED A-LAW CONVERSION PATH FOR 16kHz INPUT
+ * DEDICATED A-LAW CONVERSION PATH FOR 16kHz INPUT (WITH STATE)
  *
- * Same philosophy as pcm24kToG711Alaw - minimal processing to avoid noise artifacts.
+ * Major Revision Feb 2026:
+ * - Now mirrors pcm24kToG711Alaw quality: stateful FIR filtering, DC offset
+ *   removal, boundary smoothing, and proper noise gating.
+ * - Fixes voice clarity issues on international calls (A-law countries)
+ *   caused by simple averaging introducing aliasing artifacts and aggressive
+ *   noise gate (600) clipping consonants/sibilants.
  */
-function pcm16kToG711Alaw(pcmBuffer: Buffer): Buffer {
-  const inputSamples = pcmBuffer.length / 2;
-  const outputSamples = Math.floor(inputSamples / 2);
+function pcm16kToG711Alaw(pcmBuffer: Buffer, state: TranscoderState): Buffer {
+  // 1. Handle Remainder (alignment for 2:1 decimation)
+  let workingBuffer = pcmBuffer;
+  if (state.inputBuffer.length > 0) {
+    workingBuffer = Buffer.concat([state.inputBuffer, pcmBuffer]);
+  }
+
+  const inputSamples = workingBuffer.length / 2;
+  const samplesToProcess = Math.floor(inputSamples / 2) * 2;
+
+  // Save remainder for next chunk
+  const remainderBytes = (inputSamples * 2) - (samplesToProcess * 2);
+  if (remainderBytes > 0) {
+    const newRemainder = Buffer.alloc(remainderBytes);
+    workingBuffer.copy(newRemainder, 0, samplesToProcess * 2);
+    state.inputBuffer = newRemainder;
+  } else {
+    state.inputBuffer = Buffer.alloc(0);
+  }
+
+  if (samplesToProcess === 0) return Buffer.alloc(0);
+
+  // 2. Process valid alignment
+  const bufferToProcess = workingBuffer.slice(0, samplesToProcess * 2);
+
+  // 3. Remove DC Offset (critical for A-law to prevent clicking)
+  const dcCorrected = removeDcOffset(bufferToProcess);
+
+  // 4. Stateful Anti-Aliasing Filter
+  // Uses A-law-specific filter coefficients (FILTER_16K_TO_8K_ALAW)
+  // and state history to filter seamlessly across chunk boundaries
+  const filtered = applyLowPassFilter(dcCorrected, 0.45, true, state);
+
+  // 5. Decimate 2:1 (16kHz → 8kHz) with weighted averaging
+  const outputSamples = Math.floor(samplesToProcess / 2);
   const pcm8k = Buffer.alloc(outputSamples * 2);
-
-  // Step 1: Simple 2:1 decimation with 3-sample averaging (no filter ringing)
   for (let i = 0; i < outputSamples; i++) {
-    const srcIdx = i * 2;
-
-    // Get 3 samples for averaging
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j <= 2; j++) {
-      const idx = srcIdx + j;
-      if (idx < inputSamples) {
-        sum += pcmBuffer.readInt16LE(idx * 2);
-        count++;
-      }
-    }
-
-    // Average and apply slight attenuation to prevent clipping
-    const averaged = Math.round((sum / count) * 0.85);
+    const s0 = filtered.readInt16LE(i * 2 * 2);
+    const s1 = filtered.readInt16LE((i * 2 + 1) * 2);
+    // Weighted average (center-heavy) for smoother downsampling
+    const averaged = Math.round((s0 * 0.4 + s1 * 0.6) * 0.92);
     pcm8k.writeInt16LE(Math.max(-32768, Math.min(32767, averaged)), i * 2);
   }
 
-  // Step 2: Very aggressive noise gate for A-law (threshold 600)
-  const gated = Buffer.alloc(pcm8k.length);
-  let holdCounter = 0;
-  const threshold = 600;
-  const holdSamples = 80;
+  // 6. Smooth Boundaries (Crossfade with previous chunk's last sample)
+  const smoothed = smoothChunkBoundary(pcm8k, state);
 
-  for (let i = 0; i < outputSamples; i++) {
-    const sample = pcm8k.readInt16LE(i * 2);
-    const abs = Math.abs(sample);
+  // 7. Noise Gate — threshold 450 (reduced from 600 to preserve consonants
+  //    on lossy international networks; hold 70 samples for sibilant tails)
+  const gated = applyNoiseGate(smoothed, 450, 70, state);
 
-    if (abs >= threshold) {
-      gated.writeInt16LE(sample, i * 2);
-      holdCounter = holdSamples;
-    } else if (holdCounter > 0) {
-      const fade = holdCounter / holdSamples;
-      gated.writeInt16LE(Math.round(sample * fade), i * 2);
-      holdCounter--;
-    } else {
-      gated.writeInt16LE(0, i * 2);
-    }
-  }
-
-  // Step 3: Encode to A-law
+  // 8. Encode to A-law
   return pcm8kToG711(gated, 'alaw');
 }
 
@@ -1050,10 +1136,12 @@ function pcm16kToG711Alaw(pcmBuffer: Buffer): Buffer {
 export class AudioTranscoder {
   private inputFormat: G711Format;
   private outputFormat: G711Format;
+  private outputState: TranscoderState;
 
   constructor(format: 'g711_ulaw' | 'g711_alaw' = 'g711_ulaw') {
     this.inputFormat = format === 'g711_alaw' ? 'alaw' : 'ulaw';
     this.outputFormat = format === 'g711_alaw' ? 'alaw' : 'ulaw';
+    this.outputState = createTranscoderState();
   }
 
   /**
@@ -1065,12 +1153,14 @@ export class AudioTranscoder {
 
   /**
    * Convert incoming Gemini audio (PCM 24kHz) to Telnyx format (G.711)
+   * Uses per-instance state for seamless cross-chunk processing (fixes
+   * clicks/pops and voice clarity issues on international A-law calls).
    */
   geminiToTelnyx(pcmBuffer: Buffer, sampleRate: 24000 | 16000 = 24000): Buffer {
     if (sampleRate === 24000) {
-      return pcm24kToG711(pcmBuffer, this.outputFormat);
+      return pcm24kToG711(pcmBuffer, this.outputFormat, this.outputState);
     }
-    return pcm16kToG711(pcmBuffer, this.outputFormat);
+    return pcm16kToG711(pcmBuffer, this.outputFormat, this.outputState);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,7 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Sparkles, Brain } from "lucide-react";
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 
 interface BrandKit {
   id: string;
@@ -25,6 +27,7 @@ interface GenerationFormProps {
   isGenerating: boolean;
   extraFields?: React.ReactNode;
   generateLabel?: string;
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
 export default function GenerationForm({
@@ -34,6 +37,7 @@ export default function GenerationForm({
   isGenerating,
   extraFields,
   generateLabel = "Generate",
+  orgIntelligence,
 }: GenerationFormProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -42,6 +46,23 @@ export default function GenerationForm({
   const [tone, setTone] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
+  const [oiApplied, setOiApplied] = useState(false);
+
+  // Auto-populate fields from Organization Intelligence on first load
+  useEffect(() => {
+    if (orgIntelligence && !oiApplied) {
+      const personas = orgIntelligence.icp?.personas?.value;
+      const industries = orgIntelligence.icp?.industries?.value;
+
+      if (personas && !targetAudience) {
+        setTargetAudience(typeof personas === "string" ? personas.split(",")[0]?.trim() || "" : "");
+      }
+      if (industries && !industry) {
+        setIndustry(typeof industries === "string" ? industries.split(",")[0]?.trim() || "" : "");
+      }
+      setOiApplied(true);
+    }
+  }, [orgIntelligence]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,6 +173,23 @@ export default function GenerationForm({
           rows={2}
         />
       </div>
+
+      {orgIntelligence?.identity?.legalName?.value && (
+        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+          <Brain className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-emerald-700">
+              Org Intelligence: {orgIntelligence.identity.legalName.value}
+            </p>
+            <p className="text-[10px] text-emerald-600">
+              ICP, positioning, and brand context will be applied automatically
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-600 shrink-0">
+            Active
+          </Badge>
+        </div>
+      )}
 
       <Button
         type="submit"

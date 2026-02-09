@@ -18,11 +18,14 @@ import ContentPreview from "./shared/content-preview";
 import PublishDialog from "./shared/publish-dialog";
 import ExportDialog from "./shared/export-dialog";
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface BlogPostTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function BlogPostTab({ brandKits }: BlogPostTabProps) {
+export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -105,6 +108,7 @@ export default function BlogPostTab({ brandKits }: BlogPostTabProps) {
         <GenerationForm
           contentType="Blog Post"
           brandKits={brandKits}
+          orgIntelligence={orgIntelligence}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Blog Post"

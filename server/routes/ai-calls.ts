@@ -8,7 +8,7 @@ import { validatePreflight, generatePreflightErrorResponse } from "../services/p
 import { z } from "zod";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "../db";
-import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions, callQualityRecords } from "@shared/schema";
+import { leads, suppressionPhones, campaignSuppressionAccounts, campaignQueue, contacts, virtualAgents, campaigns, callSessions, callQualityRecords, globalDnc } from "@shared/schema";
 import { eq, sql, inArray, and } from "drizzle-orm";
 // Gemini is used for script generation; OpenAI runtime is disabled
 import { isWithinBusinessHours, getNextAvailableTime, BusinessHoursConfig, ContactTimezoneInfo, DEFAULT_BUSINESS_HOURS, US_FEDERAL_HOLIDAYS_2024_2025, getBusinessHoursForCountry } from "../utils/business-hours";
@@ -238,6 +238,52 @@ router.post("/initiate", requireAuth, requireRole("admin"), async (req, res) => 
     const phoneNumber = (contact as any).phone || (contact as any).cavTel || (contact as any).mobilePhone;
     if (!phoneNumber) {
       return res.status(400).json({ message: "Contact has no phone number" });
+    }
+
+    // DNC compliance check — block calls to numbers on Global DNC or phone suppression list
+    {
+      let normalizedInitiatePhone = phoneNumber.replace(/[^\d+]/g, '');
+      if (!normalizedInitiatePhone.startsWith('+')) normalizedInitiatePhone = '+' + normalizedInitiatePhone.replace(/^0+/, '');
+
+      const [dncHit] = await db
+        .select({ id: globalDnc.id })
+        .from(globalDnc)
+        .where(eq(globalDnc.phoneE164, normalizedInitiatePhone))
+        .limit(1);
+
+      if (dncHit) {
+        console.warn(`[AI Calls] BLOCKED initiate: phone ${normalizedInitiatePhone} is on Global DNC list`);
+        if (queueItemId) {
+          await db.execute(sql`
+            UPDATE campaign_queue SET status = 'removed', removed_reason = 'global_dnc', updated_at = NOW()
+            WHERE id = ${queueItemId}
+          `);
+        }
+        return res.status(403).json({
+          message: "Cannot place call: contact's phone number is on the Global Do Not Call list",
+          dncBlocked: true,
+        });
+      }
+
+      const [phoneSuppressionHit] = await db
+        .select({ id: suppressionPhones.id })
+        .from(suppressionPhones)
+        .where(eq(suppressionPhones.phoneE164, normalizedInitiatePhone))
+        .limit(1);
+
+      if (phoneSuppressionHit) {
+        console.warn(`[AI Calls] BLOCKED initiate: phone ${normalizedInitiatePhone} is on phone suppression list`);
+        if (queueItemId) {
+          await db.execute(sql`
+            UPDATE campaign_queue SET status = 'removed', removed_reason = 'phone_suppressed', updated_at = NOW()
+            WHERE id = ${queueItemId}
+          `);
+        }
+        return res.status(403).json({
+          message: "Cannot place call: contact's phone number is on the suppression list",
+          dncBlocked: true,
+        });
+      }
     }
 
       // Build agent name with proper fallback chain (avoid placeholder values)
@@ -807,7 +853,39 @@ const testCallSchema = z.object({
 router.post("/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
   try {
     const { phoneNumber, contactFirstName, contactLastName, contactTitle, companyName, campaignId } = testCallSchema.parse(req.body);
-    
+
+    // DNC compliance check — block calls to numbers on Global DNC or phone suppression list
+    let normalizedTestPhone = phoneNumber.replace(/[^\d+]/g, '');
+    if (!normalizedTestPhone.startsWith('+')) normalizedTestPhone = '+' + normalizedTestPhone.replace(/^0+/, '');
+
+    const [dncMatch] = await db
+      .select({ id: globalDnc.id })
+      .from(globalDnc)
+      .where(eq(globalDnc.phoneE164, normalizedTestPhone))
+      .limit(1);
+
+    if (dncMatch) {
+      console.warn(`[AI Test Call] BLOCKED: phone ${normalizedTestPhone} is on Global DNC list`);
+      return res.status(403).json({
+        message: "Cannot place call: this phone number is on the Global Do Not Call list",
+        dncBlocked: true,
+      });
+    }
+
+    const [suppressionMatch] = await db
+      .select({ id: suppressionPhones.id })
+      .from(suppressionPhones)
+      .where(eq(suppressionPhones.phoneE164, normalizedTestPhone))
+      .limit(1);
+
+    if (suppressionMatch) {
+      console.warn(`[AI Test Call] BLOCKED: phone ${normalizedTestPhone} is on phone suppression list`);
+      return res.status(403).json({
+        message: "Cannot place call: this phone number is on the suppression list",
+        dncBlocked: true,
+      });
+    }
+
     let fromNumber = "";
     let callerNumberId: string | null = null;
     let callerNumberDecisionId: string | null = null;
@@ -1121,6 +1199,38 @@ router.post("/test-gemini-live", requireAuth, requireRole("admin", "campaign_man
       accountName,
       organizationName,
     } = testGeminiLiveSchema.parse(req.body);
+
+    // DNC compliance check — block calls to numbers on Global DNC or phone suppression list
+    let normalizedGeminiPhone = phoneNumber.replace(/[^\d+]/g, '');
+    if (!normalizedGeminiPhone.startsWith('+')) normalizedGeminiPhone = '+' + normalizedGeminiPhone.replace(/^0+/, '');
+
+    const [geminiDncMatch] = await db
+      .select({ id: globalDnc.id })
+      .from(globalDnc)
+      .where(eq(globalDnc.phoneE164, normalizedGeminiPhone))
+      .limit(1);
+
+    if (geminiDncMatch) {
+      console.warn(`[AI Gemini Test Call] BLOCKED: phone ${normalizedGeminiPhone} is on Global DNC list`);
+      return res.status(403).json({
+        message: "Cannot place call: this phone number is on the Global Do Not Call list",
+        dncBlocked: true,
+      });
+    }
+
+    const [geminiSuppressionMatch] = await db
+      .select({ id: suppressionPhones.id })
+      .from(suppressionPhones)
+      .where(eq(suppressionPhones.phoneE164, normalizedGeminiPhone))
+      .limit(1);
+
+    if (geminiSuppressionMatch) {
+      console.warn(`[AI Gemini Test Call] BLOCKED: phone ${normalizedGeminiPhone} is on phone suppression list`);
+      return res.status(403).json({
+        message: "Cannot place call: this phone number is on the suppression list",
+        dncBlocked: true,
+      });
+    }
 
     const telnyxApiKey = process.env.TELNYX_API_KEY;
     let fromNumber = "";

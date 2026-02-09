@@ -39,7 +39,7 @@ export default function OrganizationIntelligencePage() {
         </TabsList>
 
         <TabsContent value="organization-profile" className="space-y-4">
-          <AccountIntelligenceView />
+          <AccountIntelligenceView organizationId={selectedOrgId} />
         </TabsContent>
 
         <TabsContent value="service-catalog" className="space-y-4">
@@ -51,15 +51,15 @@ export default function OrganizationIntelligencePage() {
         </TabsContent>
 
         <TabsContent value="icp-positioning" className="space-y-4">
-          <ICPPositioningTab />
+          <ICPPositioningTab organizationId={selectedOrgId} />
         </TabsContent>
 
         <TabsContent value="messaging-proof" className="space-y-4">
-          <MessagingProofTab />
+          <MessagingProofTab organizationId={selectedOrgId} />
         </TabsContent>
 
         <TabsContent value="prompt-optimization" className="space-y-4">
-          <PromptOptimizationView />
+          <PromptOptimizationView organizationId={selectedOrgId} />
         </TabsContent>
       </Tabs>
     </div>

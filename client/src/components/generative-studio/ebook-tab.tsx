@@ -15,11 +15,14 @@ import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 import ExportDialog from "./shared/export-dialog";
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface EbookTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function EbookTab({ brandKits }: EbookTabProps) {
+export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -116,6 +119,7 @@ export default function EbookTab({ brandKits }: EbookTabProps) {
         <GenerationForm
           contentType="eBook"
           brandKits={brandKits}
+          orgIntelligence={orgIntelligence}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate eBook"

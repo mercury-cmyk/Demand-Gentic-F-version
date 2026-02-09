@@ -13,7 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Sparkles, Download, Image, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Sparkles, Download, Image, AlertTriangle, Brain } from "lucide-react";
 
 const IMAGE_STYLES = [
   { value: "photorealistic", label: "Photorealistic" },
@@ -37,11 +38,14 @@ const ASPECT_RATIOS = [
   { value: "9:16", label: "9:16 (Story)" },
 ];
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface ImageGenerationTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProps) {
+export default function ImageGenerationTab({ brandKits, orgIntelligence }: ImageGenerationTabProps) {
   const { toast } = useToast();
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -212,6 +216,23 @@ export default function ImageGenerationTab({ brandKits }: ImageGenerationTabProp
 
         {generateMutation.isPending && (
           <p className="text-xs text-center text-muted-foreground">Image generation can take up to 60 seconds</p>
+        )}
+
+        {orgIntelligence?.identity?.legalName?.value && (
+          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+            <Brain className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-emerald-700">
+                Org Intelligence: {orgIntelligence.identity.legalName.value}
+              </p>
+              <p className="text-[10px] text-emerald-600">
+                Brand context available for image prompts
+              </p>
+            </div>
+            <Badge variant="outline" className="text-[10px] border-emerald-300 text-emerald-600 shrink-0">
+              Active
+            </Badge>
+          </div>
         )}
       </div>
 

@@ -192,7 +192,8 @@ async function handleTelnyxMessage(
       console.log(`[AiMediaStreaming] Start custom_parameters:`, start?.custom_parameters || {});
       
       // AUTO-DETECT CODEC FROM TELNYX START MESSAGE
-      // CRITICAL: Telnyx WebSocket <Stream> defaults to PCMU (µ-law) regardless of SIP leg codec.
+      // When TeXML <Stream codec="PCMA"> is used, Telnyx reports PCMA in media_format.encoding.
+      // Without an explicit codec attr, Telnyx defaults to PCMU (µ-law).
       // Trust the start message media_format.encoding over phone number heuristics.
       const bridge = getTelnyxAiBridge();
       const activeCall = bridge.getActiveCall(callId);
@@ -311,8 +312,8 @@ async function initializeOpenAISession(session: MediaSession): Promise<void> {
     openaiWs.on("open", () => {
       console.log(`[AiMediaStreaming] OpenAI Realtime connected for call: ${session.callId}`);
       
-      // Use g711_ulaw end-to-end to match Telnyx media streaming format
-      // This eliminates all PCM/resampling conversions
+      // Use g711_ulaw or g711_alaw to match Telnyx WebSocket codec
+      // When TeXML <Stream codec="PCMA"> is used, isALaw=true → g711_alaw
       //
       // TURN DETECTION: Use semantic_vad for natural turn-taking
       // semantic_vad understands speech patterns and provides more natural conversation flow

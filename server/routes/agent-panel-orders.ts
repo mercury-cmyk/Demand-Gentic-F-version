@@ -6,6 +6,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { db } from "../db";
+import { verifyToken } from "../auth";
 import {
   clientAccounts,
   clientBusinessProfiles,
@@ -27,9 +28,10 @@ const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 
 /**
- * Client authentication middleware
+ * Dual auth middleware - accepts both main app tokens and client portal tokens.
+ * Sets req.clientUser for client portal users, or synthesizes one for main app users.
  */
-function requireClientAuth(req: Request, res: Response, next: NextFunction) {
+function requireDualAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -42,33 +44,49 @@ function requireClientAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ success: false, message: "Invalid token" });
   }
 
+  // Try client portal auth first (primary use case for orders)
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-
-    if (!decoded.isClient) {
-      return res.status(403).json({ success: false, message: "Client portal access required" });
+    if (decoded.isClient) {
+      (req as any).clientUser = {
+        id: decoded.clientUserId,
+        clientAccountId: decoded.clientAccountId,
+        clientUserId: decoded.clientUserId,
+        email: decoded.email,
+        firstName: decoded.firstName,
+        lastName: decoded.lastName,
+        tenantId: decoded.tenantId,
+        isClient: true,
+      };
+      return next();
     }
-
-    (req as any).clientUser = {
-      id: decoded.clientUserId,
-      clientAccountId: decoded.clientAccountId,
-      clientUserId: decoded.clientUserId,
-      email: decoded.email,
-      firstName: decoded.firstName,
-      lastName: decoded.lastName,
-      tenantId: decoded.tenantId,
-      isClient: true,
-    };
-
-    next();
-  } catch (err) {
-    console.error("[Agent Order] JWT verification error:", err);
-    return res.status(401).json({ success: false, message: "Invalid or expired token" });
+  } catch {
+    // Not a valid client token, try main app auth
   }
+
+  // Try main app auth
+  const mainPayload = verifyToken(token);
+  if (mainPayload) {
+    req.user = mainPayload;
+    // Synthesize clientUser context for internal admin users
+    (req as any).clientUser = {
+      id: mainPayload.userId,
+      clientAccountId: mainPayload.tenantId || mainPayload.userId,
+      clientUserId: mainPayload.userId,
+      email: mainPayload.email || '',
+      firstName: null,
+      lastName: null,
+      tenantId: mainPayload.tenantId,
+      isClient: false,
+    };
+    return next();
+  }
+
+  return res.status(401).json({ success: false, message: "Invalid or expired token" });
 }
 
-// Apply client auth to all routes
-router.use(requireClientAuth);
+// Apply dual auth to all routes
+router.use(requireDualAuth);
 
 /**
  * Get client context from request

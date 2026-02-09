@@ -158,7 +158,11 @@ const SmartField = ({
   );
 };
 
-export function AccountIntelligenceView() {
+interface AccountIntelligenceViewProps {
+  organizationId?: string | null;
+}
+
+export function AccountIntelligenceView({ organizationId }: AccountIntelligenceViewProps) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<"idle" | "analyzing" | "review">("idle");
   const [domain, setDomain] = useState("");
@@ -310,25 +314,33 @@ export function AccountIntelligenceView() {
     }
   };
 
-  // Load existing profile on mount
+  // Load existing profile when organizationId changes
   useEffect(() => {
     const loadExistingProfile = async () => {
       try {
-        const response = await apiRequest("GET", "/api/org-intelligence/profile");
+        const url = organizationId
+          ? `/api/org-intelligence/profile?organizationId=${organizationId}`
+          : "/api/org-intelligence/profile";
+        const response = await apiRequest("GET", url);
         const data = await response.json();
-        
+
         if (data.profile) {
-          setDomain(data.profile.domain);
+          setDomain(data.profile.domain || "");
           setProfile(data.profile);
           setState("review");
+        } else {
+          // Reset to idle if no profile for this org
+          setProfile(null);
+          setDomain("");
+          setState("idle");
         }
       } catch (err) {
         console.error("Failed to load existing profile:", err);
       }
     };
-    
+
     loadExistingProfile();
-  }, []);
+  }, [organizationId]);
 
   if (state === "idle") {
     return (

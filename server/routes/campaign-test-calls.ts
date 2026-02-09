@@ -246,6 +246,8 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
           testedBy: userId,
         }).returning();
 
+        const testCallId = testCallRecord.id;
+
         // Store session in Redis
         await storeCallSession(ctx);
 

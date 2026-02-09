@@ -9,11 +9,14 @@ import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 import ExportDialog from "./shared/export-dialog";
 
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
 interface SolutionBriefTabProps {
   brandKits?: any[];
+  orgIntelligence?: OrgIntelligenceProfile | null;
 }
 
-export default function SolutionBriefTab({ brandKits }: SolutionBriefTabProps) {
+export default function SolutionBriefTab({ brandKits, orgIntelligence }: SolutionBriefTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -112,6 +115,7 @@ export default function SolutionBriefTab({ brandKits }: SolutionBriefTabProps) {
         <GenerationForm
           contentType="Solution Brief"
           brandKits={brandKits}
+          orgIntelligence={orgIntelligence}
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Solution Brief"

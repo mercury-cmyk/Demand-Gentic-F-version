@@ -21,7 +21,7 @@ import { db } from "../db";
 import { contacts, campaigns, campaignQueue, dialerCallAttempts, callSessions, type CanonicalDisposition } from "@shared/schema";
 import { eq, or } from "drizzle-orm";
 import { audioQualityMonitor } from "./audio-quality-monitor";
-import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format } from "./voice-providers/audio-transcoder";
+import { g711ToPcm16k, pcm24kToG711, pcm16kToG711, detectG711Format, type G711Format, createTranscoderState } from "./voice-providers/audio-transcoder";
 import { peekAmdResult, consumeAmdResult } from "./voice-dialer";
 import { processDisposition } from "./disposition-engine";
 import { analyzeConversationQuality } from "./conversation-quality-analyzer";
@@ -147,8 +147,10 @@ const AMD_CHECK_INTERVAL_MS = 50; // Check for AMD result every 50ms (faster pol
 
 // NATURAL CONVERSATION: Wait for human to speak first, but with timeout
 // If human doesn't speak within this time, AI takes initiative
-// Set to 3 seconds - enough time for human to answer and say "Hello?"
-const WAIT_FOR_HUMAN_SPEECH_MS = 3000; // Wait up to 3 seconds for human to speak first
+// Reduced from 3s to 1.5s to cut premature termination — contacts were hanging up
+// before the AI could speak (~4-5s total latency). At 1.5s + ~1s Gemini generation,
+// total time-to-first-word is ~2.5s which retains natural flow while keeping contacts engaged.
+const WAIT_FOR_HUMAN_SPEECH_MS = 1500; // Wait up to 1.5 seconds for human to speak first
 
 // EARLY AUDIO QUALITY GATE - DISABLED
 // Was causing false-positive disconnects ~6s after answer due to connection_drop
@@ -676,6 +678,9 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let aiTranscript: string = "";
   let callContext: CallContext = {};
   let g711Format: G711Format = 'ulaw'; // Default to ulaw
+  
+  // Audio transcoding state (per-call isolation for noise reduction)
+  const transcoderState = createTranscoderState();
 
   // TRANSCRIPT ACCUMULATION: Capture both agent and contact speech
   // Uses Gemini's output_audio_transcription and input_audio_transcription features
@@ -2271,13 +2276,13 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 // Use the correct transcoding based on detected sample rate
                 let g711Buffer: Buffer;
                 if (geminiSampleRate === 24000) {
-                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format);
+                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format, transcoderState);
                 } else if (geminiSampleRate === 16000) {
-                  g711Buffer = pcm16kToG711(pcmBuffer, g711Format);
+                  g711Buffer = pcm16kToG711(pcmBuffer, g711Format, transcoderState);
                 } else {
                   // For other rates, assume 24kHz (Gemini Live default)
                   console.warn(`[Gemini Live] ⚠️ Unknown sample rate ${geminiSampleRate}, assuming 24kHz`);
-                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format);
+                  g711Buffer = pcm24kToG711(pcmBuffer, g711Format, transcoderState);
                 }
 
                 const g711Base64 = g711Buffer.toString('base64');

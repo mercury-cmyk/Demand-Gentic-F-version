@@ -31,7 +31,13 @@ interface Session {
   createdAt: string;
 }
 
-export default function ChatTab() {
+import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
+
+interface ChatTabProps {
+  orgIntelligence?: OrgIntelligenceProfile | null;
+}
+
+export default function ChatTab({ orgIntelligence }: ChatTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -204,6 +210,11 @@ export default function ChatTab() {
                   Ask me about content ideas, copywriting tips, SEO strategies, or help refining your
                   generated content. I can help you brainstorm and plan your content marketing.
                 </p>
+                {orgIntelligence?.identity?.legalName?.value && (
+                  <p className="text-xs text-emerald-600 mt-1">
+                    Powered by Organization Intelligence for {orgIntelligence.identity.legalName.value}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2 justify-center mt-4">
                   {[
                     "Help me plan a blog series about AI in healthcare",

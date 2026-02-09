@@ -64,6 +64,7 @@ export interface ActiveAiCall {
   slotReleased?: boolean; // Prevent double semaphore release
   amdResult?: string;
   amdConfidence?: number;
+  hasActiveWebSocket?: boolean; // Track if voice-dialer has an active WebSocket connection
 }
 
 export interface QueuedCall {
@@ -876,9 +877,34 @@ export class TelnyxAiBridge extends EventEmitter {
 
         if (!response.ok) {
           if (response.status === 404) {
-            console.log(`[TelnyxAiBridge] Call ${callId} no longer exists (ended)`);
-            // Call ended before we got the webhook - record disposition
             const endedCall = this.activeCalls.get(callId);
+            const callDurationMs = endedCall ? Date.now() - endedCall.startTime.getTime() : 0;
+
+            // SHORT-DURATION FAILURE DETECTION (per Telnyx support):
+            // Sub-500ms call failures with no media exchange indicate carrier/routing issues,
+            // not codec problems. These are common for international destinations (UAE, etc.).
+            // Log specifically so we can identify patterns.
+            if (callDurationMs < 500 && endedCall && !endedCall.isAnswered) {
+              const destination = endedCall.dialedNumber || 'unknown';
+              const isInternational = destination.replace(/\D/g, '').match(/^(?!1)\d{2,3}/);
+              console.error(`[TelnyxAiBridge] ⚠️ SHORT-DURATION CARRIER FAILURE: Call ${callId} to ${destination} ended in ${callDurationMs}ms with no media. ${isInternational ? 'INTERNATIONAL routing issue suspected.' : 'Domestic routing issue.'}`);
+              console.error(`[TelnyxAiBridge] 💡 Telnyx recommends investigating carrier routes for this destination. From: ${endedCall.fromNumber || 'unknown'}, Attempt: ${attempts}`);
+
+              // Emit carrier failure event for potential retry by orchestrator
+              this.emit("call:carrier_failure", {
+                callId,
+                durationMs: callDurationMs,
+                destination,
+                isInternational: !!isInternational,
+                fromNumber: endedCall.fromNumber,
+                campaignId: endedCall.campaignId,
+                queueItemId: endedCall.queueItemId,
+              });
+            } else {
+              console.log(`[TelnyxAiBridge] Call ${callId} no longer exists (ended after ${callDurationMs}ms)`);
+            }
+
+            // Call ended before we got the webhook - record disposition
             if (endedCall) {
               // If never answered, treat as no_answer; otherwise disposition was set during call
               if (!endedCall.isAnswered && !endedCall.disposition) {
@@ -912,12 +938,13 @@ export class TelnyxAiBridge extends EventEmitter {
         const isAnsweredViaWebhook = activeCall?.isAnswered === true;
 
         // Check if WebSocket is connected (definitive proof call is alive for TeXML)
-        const hasMediaConnection = activeCall?.mediaWs !== null;
+        // Also check hasActiveWebSocket flag for Voice-Dialer managed connections
+        const hasMediaConnection = (activeCall?.mediaWs !== null && activeCall?.mediaWs !== undefined) || activeCall?.hasActiveWebSocket === true;
 
         // Log polling status (reduce frequency for answered calls to avoid log spam)
         const shouldLog = !isAnsweredViaWebhook || attempts % 10 === 0 || attempts <= 5;
         if (shouldLog) {
-          console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, attempt: ${attempts}`);
+          console.log(`[TelnyxAiBridge] Call ${callId} is_alive: ${callData.is_alive}, state: ${callState}, webhookAnswered: ${isAnsweredViaWebhook}, hasMedia: ${hasMediaConnection}, voiceWs: ${activeCall?.hasActiveWebSocket}, attempt: ${attempts}`);
         }
 
         // Call is alive if: API says so, OR we have a media WebSocket connection
@@ -1626,11 +1653,30 @@ export class TelnyxAiBridge extends EventEmitter {
     const call = this.activeCalls.get(callId);
     if (call) {
       call.isAnswered = true;
+      call.hasActiveWebSocket = true;
       console.log(`[TelnyxAiBridge] Call ${callId} marked as answered via WebSocket connection`);
       return true;
     }
     console.log(`[TelnyxAiBridge] Could not find call to mark as answered by callId: ${callId}`);
     return false;
+  }
+
+  // Notify that a call ended via WebSocket close (for Voice Dialer)
+  async notifyCallEndedByCallId(callId: string): Promise<void> {
+    const call = this.activeCalls.get(callId);
+    if (call) {
+      console.log(`[TelnyxAiBridge] WebSocket closed for call ${callId} - initiating cleanup`);
+      call.hasActiveWebSocket = false;
+      
+      // Ensure disposition is set if missing
+      if (!call.disposition) {
+        call.disposition = call.isAnswered ? "completed" : "no-answer";
+      }
+
+      await this.handleCallHangup(callId, call);
+      this.releaseSlot(callId, call, 'websocket_close');
+      this.activeCalls.delete(callId);
+    }
   }
 
   async processTranscribedSpeech(callId: string, text: string): Promise<string | null> {
