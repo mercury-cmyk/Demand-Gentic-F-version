@@ -465,6 +465,7 @@ interface BillingConfig {
   taxRate: string;
   autoInvoiceEnabled: boolean;
   invoiceDayOfMonth: number;
+  paymentDueDayOfMonth: number | null;
 }
 
 interface Invoice {
@@ -805,6 +806,10 @@ export default function ClientPortalAdmin() {
       taxExempt: formData.get('taxExempt') === 'on',
       taxRate: parseFloat(formData.get('taxRate') as string) / 100,
       autoInvoiceEnabled: formData.get('autoInvoice') === 'on',
+      invoiceDayOfMonth: parseInt(formData.get('invoiceDayOfMonth') as string) || 1,
+      paymentDueDayOfMonth: formData.get('paymentDueDayOfMonth')
+        ? parseInt(formData.get('paymentDueDayOfMonth') as string)
+        : null,
     });
   };
 
@@ -2008,6 +2013,36 @@ export default function ClientPortalAdmin() {
                       name="autoInvoice"
                       defaultChecked={billingConfig.autoInvoiceEnabled}
                     />
+                  </div>
+                  <div>
+                    <Label htmlFor="invoiceDayOfMonth">Invoice Day of Month</Label>
+                    <Select name="invoiceDayOfMonth" defaultValue={(billingConfig.invoiceDayOfMonth || 1).toString()}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+                          <SelectItem key={day} value={day.toString()}>
+                            {day === 1 ? '1st' : day === 2 ? '2nd' : day === 3 ? '3rd' : `${day}th`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="paymentDueDayOfMonth">Payment Due Day of Month</Label>
+                    <Input
+                      id="paymentDueDayOfMonth"
+                      name="paymentDueDayOfMonth"
+                      type="number"
+                      min="1"
+                      max="28"
+                      defaultValue={billingConfig.paymentDueDayOfMonth || ''}
+                      placeholder="Leave blank to use NET-X days"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Set to e.g. 10 for "due by the 10th". Leave blank to use NET-X days.
+                    </p>
                   </div>
                 </div>
               </div>

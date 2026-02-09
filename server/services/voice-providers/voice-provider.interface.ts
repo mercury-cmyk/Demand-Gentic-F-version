@@ -325,9 +325,10 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
 
 export function mapVoiceToProvider(voice: string, targetProvider: VoiceProviderType): string {
   if (targetProvider === 'google') {
-    // If already a valid Gemini voice, return as-is
-    if (VALID_GEMINI_VOICES.includes(voice)) {
-      return voice;
+    // If already a valid Gemini voice, return as-is (case-insensitive)
+    const matchedVoice = VALID_GEMINI_VOICES.find(v => v.toLowerCase() === voice.toLowerCase());
+    if (matchedVoice) {
+      return matchedVoice;
     }
     // Map from OpenAI voice
     const mapped = OPENAI_TO_GEMINI_VOICE_MAP[voice.toLowerCase()];

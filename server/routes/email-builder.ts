@@ -27,7 +27,7 @@ import {
   getAvailableAspectRatios,
   getPromptSuggestions,
 } from '../services/ai-image-generator';
-import { getPresignedUploadUrl, getPublicUrl, deleteFromS3, generateStorageKey } from '../lib/storage';
+import { getPresignedUploadUrl, getPublicUrl, deleteFromS3, getFromS3, generateStorageKey } from '../lib/storage';
 import multer from 'multer';
 import crypto from 'crypto';
 
@@ -852,6 +852,46 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error deleting image:', error);
     res.status(500).json({ error: 'Failed to delete image' });
+  }
+});
+
+/**
+ * GET /api/email-builder/images/serve/:id
+ * Serve an image by proxying from GCS (permanent, no-expiry URL)
+ */
+router.get('/images/serve/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const [image] = await db
+      .select()
+      .from(emailBuilderImages)
+      .where(eq(emailBuilderImages.id, id))
+      .limit(1);
+
+    if (!image) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    // If storedUrl is a GCS URL, extract the key and stream from GCS
+    if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
+      const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
+      const key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
+
+      res.setHeader('Content-Type', image.mimeType || 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+      const stream = await getFromS3(key);
+      stream.pipe(res);
+    } else if (image.storedUrl) {
+      // Redirect to the stored URL
+      res.redirect(image.storedUrl);
+    } else {
+      res.status(404).json({ error: 'Image file not found' });
+    }
+  } catch (error: any) {
+    console.error('Error serving image:', error);
+    res.status(500).json({ error: 'Failed to serve image' });
   }
 });
 

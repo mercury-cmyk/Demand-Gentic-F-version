@@ -85,6 +85,10 @@ export const campaignTypeEnum = pgEnum('campaign_type', [
   'executive_dinner',
   'leadership_forum',
   'conference',
+  // Event registration campaigns
+  'event_registration_digital_ungated',
+  'event_registration_digital_gated',
+  'in_person_event',
   // Lead generation campaigns
   'content_syndication',
   'high_quality_leads',
@@ -485,7 +489,18 @@ export const contentAssetTypeEnum = pgEnum('content_asset_type', [
   'video',
   'call_script',
   'sales_sequence',
-  'blog_post'
+  'blog_post',
+  'ebook',
+  'solution_brief'
+]);
+
+export const generativeStudioContentStatusEnum = pgEnum('generative_studio_content_status', [
+  'generating',
+  'generated',
+  'editing',
+  'previewing',
+  'published',
+  'failed',
 ]);
 
 export const contentApprovalStatusEnum = pgEnum('content_approval_status', [
@@ -7152,6 +7167,7 @@ export const clientBillingConfig = pgTable("client_billing_config", {
   // Auto Invoice Settings
   autoInvoiceEnabled: boolean("auto_invoice_enabled").default(true),
   invoiceDayOfMonth: integer("invoice_day_of_month").default(1),
+  paymentDueDayOfMonth: integer("payment_due_day_of_month"),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -13048,3 +13064,122 @@ export const insertBookingTypeSchema = createInsertSchema(bookingTypes);
 export const insertAvailabilitySlotSchema = createInsertSchema(availabilitySlots);
 export const insertBookingSchema = createInsertSchema(bookings);
 export const insertGoogleCalendarIntegrationSchema = createInsertSchema(googleCalendarIntegrations);
+
+// ============================================
+// GENERATIVE STUDIO TABLES
+// ============================================
+
+export const generativeStudioProjects = pgTable("generative_studio_projects", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  contentType: contentAssetTypeEnum("content_type").notNull(),
+  status: generativeStudioContentStatusEnum("status").notNull().default('generating'),
+
+  // Generation input
+  prompt: text("prompt").notNull(),
+  targetAudience: text("target_audience"),
+  industry: text("industry"),
+  tone: contentToneEnum("tone"),
+  brandKitId: varchar("brand_kit_id"),
+  additionalContext: text("additional_context"),
+  generationParams: jsonb("generation_params"),
+
+  // Generated output
+  generatedContent: text("generated_content"),
+  generatedContentHtml: text("generated_content_html"),
+  variants: jsonb("variants"),
+
+  // Content-type specific metadata (SEO, chapters, sections, subject lines, etc.)
+  metadata: jsonb("metadata"),
+
+  // Linked content asset when saved/published
+  contentAssetId: varchar("content_asset_id"),
+  exportedFileUrl: text("exported_file_url"),
+  thumbnailUrl: text("thumbnail_url"),
+
+  // AI tracking
+  aiModel: text("ai_model"),
+  tokensUsed: integer("tokens_used"),
+  generationDurationMs: integer("generation_duration_ms"),
+
+  // Ownership
+  ownerId: varchar("owner_id").notNull(),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  contentTypeIdx: index("gen_studio_projects_content_type_idx").on(table.contentType),
+  statusIdx: index("gen_studio_projects_status_idx").on(table.status),
+  ownerIdx: index("gen_studio_projects_owner_idx").on(table.ownerId),
+  createdAtIdx: index("gen_studio_projects_created_at_idx").on(table.createdAt),
+}));
+
+export const generativeStudioChatMessages = pgTable("generative_studio_chat_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull(),
+  role: text("role").notNull(), // 'user' | 'assistant' | 'system'
+  content: text("content").notNull(),
+  projectId: varchar("project_id"),
+  model: text("model"),
+  tokensUsed: integer("tokens_used"),
+  ownerId: varchar("owner_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  sessionIdx: index("gen_studio_chat_session_idx").on(table.sessionId),
+  ownerIdx: index("gen_studio_chat_owner_idx").on(table.ownerId),
+  createdAtIdx: index("gen_studio_chat_created_at_idx").on(table.createdAt),
+}));
+
+export const generativeStudioPublishedPages = pgTable("generative_studio_published_pages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull(),
+  contentType: contentAssetTypeEnum("content_type").notNull(),
+  title: text("title").notNull(),
+  slug: text("slug").notNull(),
+  htmlContent: text("html_content").notNull(),
+  cssContent: text("css_content"),
+  metaTitle: text("meta_title"),
+  metaDescription: text("meta_description"),
+  ogImageUrl: text("og_image_url"),
+  isPublished: boolean("is_published").notNull().default(false),
+  publishedAt: timestamp("published_at"),
+  unpublishedAt: timestamp("unpublished_at"),
+  viewCount: integer("view_count").notNull().default(0),
+  ownerId: varchar("owner_id").notNull(),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  slugIdx: index("gen_studio_published_slug_idx").on(table.slug),
+  contentTypeIdx: index("gen_studio_published_type_idx").on(table.contentType),
+  isPublishedIdx: index("gen_studio_published_is_published_idx").on(table.isPublished),
+}));
+
+// Generative Studio insert schemas
+export const insertGenerativeStudioProjectSchema = createInsertSchema(generativeStudioProjects).omit({
+  id: true,
+  ownerId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertGenerativeStudioChatMessageSchema = createInsertSchema(generativeStudioChatMessages).omit({
+  id: true,
+  ownerId: true,
+  createdAt: true,
+});
+
+export const insertGenerativeStudioPublishedPageSchema = createInsertSchema(generativeStudioPublishedPages).omit({
+  id: true,
+  ownerId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+// Generative Studio types
+export type GenerativeStudioProject = typeof generativeStudioProjects.$inferSelect;
+export type InsertGenerativeStudioProject = z.infer<typeof insertGenerativeStudioProjectSchema>;
+export type GenerativeStudioChatMessage = typeof generativeStudioChatMessages.$inferSelect;
+export type InsertGenerativeStudioChatMessage = z.infer<typeof insertGenerativeStudioChatMessageSchema>;
+export type GenerativeStudioPublishedPage = typeof generativeStudioPublishedPages.$inferSelect;
+export type InsertGenerativeStudioPublishedPage = z.infer<typeof insertGenerativeStudioPublishedPageSchema>;

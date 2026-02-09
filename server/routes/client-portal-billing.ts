@@ -446,6 +446,7 @@ router.get('/config', async (req: Request, res: Response) => {
         currency: clientBillingConfig.currency,
         autoInvoiceEnabled: clientBillingConfig.autoInvoiceEnabled,
         invoiceDayOfMonth: clientBillingConfig.invoiceDayOfMonth,
+        paymentDueDayOfMonth: clientBillingConfig.paymentDueDayOfMonth,
       })
       .from(clientBillingConfig)
       .where(eq(clientBillingConfig.clientAccountId, clientAccountId))
@@ -460,6 +461,7 @@ router.get('/config', async (req: Request, res: Response) => {
         currency: 'USD',
         autoInvoiceEnabled: true,
         invoiceDayOfMonth: 1,
+        paymentDueDayOfMonth: null,
       });
     }
 
@@ -492,6 +494,9 @@ const DEFAULT_CAMPAIGN_PRICING: Record<string, { label: string; defaultPrice: nu
   conference: { label: 'Conference/Event', defaultPrice: 175 },
   email: { label: 'Email-Only Campaign', defaultPrice: 50 },
   data_validation: { label: 'Data Validation & Enrichment', defaultPrice: 25 },
+  event_registration_digital_ungated: { label: 'Event Registration - Digital (Ungated/Click)', defaultPrice: 10 },
+  event_registration_digital_gated: { label: 'Event Registration - Digital (Gated)', defaultPrice: 30 },
+  in_person_event: { label: 'In-Person Events Program', defaultPrice: 80 },
 };
 
 // Get campaign pricing for the current client (for order panel)

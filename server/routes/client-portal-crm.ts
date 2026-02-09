@@ -96,7 +96,7 @@ router.use(requireAccountsContactsFeature);
 router.get('/accounts', async (req: Request, res: Response) => {
   try {
     const clientAccountId = req.clientUser?.clientAccountId;
-    const { search, status, limit = '50', offset = '0', sortBy = 'name', sortOrder = 'asc' } = req.query;
+    const { search, status, limit = '50', offset = '0', sortBy = 'name', sortOrder = 'asc', campaignId } = req.query;
 
     let query = db
       .select()
@@ -118,6 +118,17 @@ router.get('/accounts', async (req: Request, res: Response) => {
     
     if (status && status !== 'all') {
       conditions.push(eq(clientCrmAccounts.status, status as string));
+    }
+
+    if (campaignId) {
+      // This assumes a linking table between campaigns and accounts exists.
+      // Let's say it's `campaignCrmAccounts`
+      const subquery = db
+        .select({ accountId: sql`"campaign_audience"."account_id"` })
+        .from(sql`"campaign_audience"`)
+        .where(sql`"campaign_audience"."campaign_id" = ${campaignId}`);
+      
+      conditions.push(inArray(clientCrmAccounts.id, subquery));
     }
 
     const accounts = await db
@@ -347,6 +358,7 @@ router.get('/contacts', async (req: Request, res: Response) => {
       search, 
       status, 
       accountId,
+      campaignId,
       limit = '50', 
       offset = '0',
       sortBy = 'lastName',
@@ -373,6 +385,15 @@ router.get('/contacts', async (req: Request, res: Response) => {
 
     if (accountId) {
       conditions.push(eq(clientCrmContacts.crmAccountId, accountId as string));
+    }
+
+    if (campaignId) {
+      const subquery = db
+        .select({ contactId: sql`"campaign_audience"."contact_id"` })
+        .from(sql`"campaign_audience"`)
+        .where(sql`"campaign_audience"."campaign_id" = ${campaignId}`);
+
+      conditions.push(inArray(clientCrmContacts.id, subquery));
     }
 
     const contacts = await db

@@ -50,6 +50,7 @@ import CampaignSuppressionsPage from "@/pages/campaign-suppressions";
 import LeadsPage from "@/pages/leads";
 import LeadDetailPage from "@/pages/lead-detail";
 import ContentStudioPage from "@/pages/content-studio";
+import GenerativeStudioPage from "@/pages/generative-studio";
 import AIContentGeneratorPage from "@/pages/ai-content-generator";
 import SocialMediaPublisherPage from "@/pages/social-media-publisher";
 import SuppressionsPage from "@/pages/suppressions";
@@ -368,7 +369,8 @@ function AuthenticatedApp() {
               <Route path="/content-studio/social-publisher" component={SocialMediaPublisherPage} />
               <Route path="/ai-content-generator" component={AIContentGeneratorPage} />
               <Route path="/social-media-publisher" component={SocialMediaPublisherPage} />
-              
+              <Route path="/generative-studio" component={GenerativeStudioPage} />
+
               {/* Suppressions */}
               <Route path="/suppressions" component={SuppressionsPage} />
               <Route path="/telemarketing/suppressions" component={TelemarketingSuppressionListPage} />

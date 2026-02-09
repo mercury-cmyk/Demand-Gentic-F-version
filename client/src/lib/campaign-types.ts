@@ -85,6 +85,43 @@ export const UNIFIED_CAMPAIGN_TYPES: CampaignType[] = [
   },
 
   // ============================================
+  // EVENT REGISTRATION CAMPAIGNS
+  // ============================================
+  {
+    value: 'event_registration_digital_ungated',
+    label: 'Event Registration - Digital (Ungated)',
+    description: 'Drive click-based event registrations without form gating',
+    strategicIntent: 'Generate high-volume event awareness and registrations through frictionless click-to-register flows. Focus on compelling event value propositions to maximize registration volume.',
+    emailTone: 'conversational',
+    voicePersonality: ['friendly', 'brief', 'encouraging'],
+    primaryGoal: 'awareness',
+    supportsEmail: true,
+    supportsVoice: false,
+  },
+  {
+    value: 'event_registration_digital_gated',
+    label: 'Event Registration - Digital (Gated)',
+    description: 'Drive form-based event registrations with lead capture',
+    strategicIntent: 'Generate qualified event registrations through form-based sign-ups. Emphasize the event value to justify the registration form and capture attendee details for follow-up.',
+    emailTone: 'professional',
+    voicePersonality: ['persuasive', 'informative', 'action-oriented'],
+    primaryGoal: 'conversion',
+    supportsEmail: true,
+    supportsVoice: true,
+  },
+  {
+    value: 'in_person_event',
+    label: 'In-Person Events Program',
+    description: 'Drive registrations for executive dinners, conferences, roundtables, and other in-person formats',
+    strategicIntent: 'Secure attendance for high-value in-person events by emphasizing exclusivity, networking opportunities, and the quality of attendees. Position as a must-attend opportunity for key decision-makers.',
+    emailTone: 'professional',
+    voicePersonality: ['polished', 'executive-level', 'concise'],
+    primaryGoal: 'engagement',
+    supportsEmail: true,
+    supportsVoice: true,
+  },
+
+  // ============================================
   // LEAD GENERATION CAMPAIGNS
   // ============================================
   {

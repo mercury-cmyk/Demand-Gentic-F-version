@@ -150,10 +150,9 @@ const AMD_CHECK_INTERVAL_MS = 50; // Check for AMD result every 50ms (faster pol
 // Set to 5 seconds - enough time for human to answer and say "Hello?"
 const WAIT_FOR_HUMAN_SPEECH_MS = 5000; // Wait up to 5 seconds for human to speak first
 
-// EARLY AUDIO QUALITY GATE
-// Check quality within first 10 seconds and end call if degraded
-const AUDIO_QUALITY_INITIAL_CHECK_SECONDS = 10;
-const AUDIO_QUALITY_MIN_SCORE = 60;
+// EARLY AUDIO QUALITY GATE - DISABLED
+// Was causing false-positive disconnects ~6s after answer due to connection_drop
+// issues during Gemini voice negotiation being counted against quality score.
 
 // ==================== PLACEHOLDER SUBSTITUTION ====================
 
@@ -524,6 +523,15 @@ ${talkingPointsStr ? `
 ${talkingPointsStr}
 ` : ''}
 
+## SPEECH PACING (IMPORTANT)
+
+**Speak at a calm, measured pace — especially at the start of the call.**
+- Your opening words should be deliberate and unhurried, like a professional making a business call
+- Pause briefly after greeting and after asking for the contact by name
+- Do NOT rush through your introduction or value proposition
+- Match the prospect's speaking pace once the conversation is flowing
+- Use natural pauses between sentences for clarity
+
 ## RECORDING CALL OUTCOME (CRITICAL)
 
 BEFORE ending any call, you MUST call \`submit_disposition\` to record the call outcome:
@@ -739,10 +747,8 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   let keepaliveInterval: NodeJS.Timeout | null = null;
   let audioTimeoutTimer: NodeJS.Timeout | null = null;
   let maxCallDurationTimer: NodeJS.Timeout | null = null;
-  let initialQualityCheckTimer: NodeJS.Timeout | null = null;
   let reconnectAttempts = 0;
   let geminiConnected = false;
-  let qualityGateTriggered = false;
 
   // DIAGNOSTIC: Log state to debug silent agent issues
   let diagnosticTimer: NodeJS.Timeout | null = null;
@@ -758,7 +764,6 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (maxCallDurationTimer) clearTimeout(maxCallDurationTimer);
     if (amdWaitTimer) clearTimeout(amdWaitTimer);
     if (humanSpeechWaitTimer) clearTimeout(humanSpeechWaitTimer);
-    if (initialQualityCheckTimer) clearTimeout(initialQualityCheckTimer);
     if (diagnosticTimer) clearInterval(diagnosticTimer);
     if (geminiWs) {
       geminiWs.close();
@@ -797,65 +802,6 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
         console.log(`[Gemini Live] ⏱️ Human speech timer fired but conditions not met: humanHasSpoken=${humanHasSpoken}, openingMessageSent=${openingMessageSent}`);
       }
     }, WAIT_FOR_HUMAN_SPEECH_MS);
-  }
-
-  function scheduleInitialQualityCheck() {
-    if (initialQualityCheckTimer || qualityGateTriggered) return;
-    if (!callId) return;
-
-    initialQualityCheckTimer = setTimeout(async () => {
-      if (qualityGateTriggered || !callAnswered) return;
-      const snapshot = audioQualityMonitor.getQualitySnapshot(callId);
-      if (!snapshot) return;
-
-      const isDegraded =
-        snapshot.score < AUDIO_QUALITY_MIN_SCORE ||
-        snapshot.rating === 'poor' ||
-        snapshot.rating === 'degraded' ||
-        snapshot.issues.includes('audio_timeout') ||
-        snapshot.issues.includes('connection_drop');
-
-      if (!isDegraded) return;
-
-      qualityGateTriggered = true;
-      console.warn(
-        `[Gemini Live] ⚠️ Early audio quality gate triggered (score=${snapshot.score}, rating=${snapshot.rating}). Ending call.`
-      );
-
-      if (callContext.callAttemptId && !dispositionProcessed) {
-        try {
-          callContext.disposition = 'no_answer';
-          await processDisposition(callContext.callAttemptId, 'no_answer', 'technical_quality');
-          dispositionProcessed = true;
-
-          if (callContext.queueItemId) {
-            await db.update(campaignQueue)
-              .set({
-                status: 'queued',
-                updatedAt: new Date(),
-                enqueuedReason: `Technical quality issue (score ${snapshot.score}, rating ${snapshot.rating})`,
-              })
-              .where(eq(campaignQueue.id, callContext.queueItemId));
-          }
-        } catch (error) {
-          console.error('[Gemini Live] ❌ Failed to process technical quality disposition:', error);
-        }
-      }
-
-      if (callControlId) {
-        try {
-          await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/hangup`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
-              'Content-Type': 'application/json'
-            }
-          });
-        } catch (error) {
-          console.error('[Gemini Live] ❌ Failed to hang up after quality gate:', error);
-        }
-      }
-    }, AUDIO_QUALITY_INITIAL_CHECK_SECONDS * 1000);
   }
 
   // CRITICAL: Only send opening message when ALL conditions are met:
@@ -1160,8 +1106,6 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               }
               logDiagnosticState('waiting_for_opening');
             }, 3000);
-
-            scheduleInitialQualityCheck();
 
             // Start max call duration timer if configured
             if (callContext.maxCallDurationSeconds && callContext.maxCallDurationSeconds > 0) {
@@ -2671,6 +2615,7 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
             // This works with audio-only mode since Gemini explicitly calls this function
             if (call.name === 'end_call') {
               const { reason } = call.args;
+              const reasonLower = (reason || 'Call ended by AI').toLowerCase();
 
               // CRITICAL: Prevent duplicate end_call processing
               // Gemini can sometimes call end_call multiple times in a loop
@@ -2694,8 +2639,76 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                 return; // Skip processing
               }
 
+              // CRITICAL: Prevent premature call termination
+              // AI sometimes incorrectly assumes prospect hung up after brief silences
+              const callDurationSeconds = Math.round((Date.now() - metrics.startTime) / 1000);
+              const userTurnCount = transcriptTurns.filter(t => t.speaker === 'user' && t.text.trim().length > 0).length;
+              const MINIMUM_CONVERSATION_DURATION = 25; // seconds
+              const MINIMUM_USER_TURNS = 3;
+              const isPrematureTermination = callDurationSeconds < MINIMUM_CONVERSATION_DURATION && userTurnCount < MINIMUM_USER_TURNS;
+              const reasonSuggestsHangup = reasonLower.includes('hung up') || reasonLower.includes('disconnected') || reasonLower.includes('no response') || reasonLower.includes('no interaction');
+
+              // Check if prospect is actively saying "hello" (indicates audio issue, NOT disengagement)
+              const recentUserTexts = transcriptTurns
+                .filter(t => t.speaker === 'user')
+                .slice(-3)
+                .map(t => t.text.toLowerCase().trim());
+              const prospectSayingHello = recentUserTexts.some(text =>
+                text.includes('hello') || text.includes('hi') || text.includes('hey') || text === 'yes' || text === 'yeah'
+              );
+              const isAudioIssueScenario = prospectSayingHello &&
+                (reasonLower.includes('hello') || reasonLower.includes('no engagement') || reasonLower.includes('no interaction') || reasonLower.includes('no meaningful'));
+
+              if (isAudioIssueScenario) {
+                console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - AUDIO ISSUE DETECTED: Prospect saying hello but AI thinks no engagement`);
+                console.warn(`[Gemini Live] 📢 Recent user transcripts: ${JSON.stringify(recentUserTexts)}`);
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [{
+                      name: call.name,
+                      id: call.id,
+                      response: {
+                        error: 'AUDIO ISSUE DETECTED: The prospect IS responding (saying hello). This indicates they cannot hear you clearly. DO NOT end the call. Instead: (1) Say "I apologize, can you hear me?" (2) Wait for their response (3) If they confirm, restart your greeting. Only end after 60+ seconds of COMPLETE silence with zero response.'
+                      }
+                    }]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return;
+              }
+
+              // Check for legitimate early endings (voicemail, explicit goodbye, wrong number)
+              const isLegitimateEarlyEnd =
+                reasonLower.includes('voicemail') ||
+                reasonLower.includes('goodbye') ||
+                reasonLower.includes('wrong number') ||
+                reasonLower.includes('do not call') ||
+                reasonLower.includes('stop calling') ||
+                (submittedDisposition?.disposition === 'voicemail');
+
+              if (isPrematureTermination && reasonSuggestsHangup && !isLegitimateEarlyEnd) {
+                console.warn(`[Gemini Live] 🚫 BLOCKING PREMATURE END_CALL: duration=${callDurationSeconds}s, userTurns=${userTurnCount}, reason="${reason}"`);
+                const toolResponse = {
+                  toolResponse: {
+                    functionResponses: [{
+                      name: call.name,
+                      id: call.id,
+                      response: {
+                        error: 'Call cannot be ended yet - continue the conversation. The prospect may still be listening. Only end the call after they explicitly say goodbye or after 30+ seconds of confirmed silence.'
+                      }
+                    }]
+                  }
+                };
+                if (geminiWs?.readyState === WebSocket.OPEN) {
+                  geminiWs.send(JSON.stringify(toolResponse));
+                }
+                return;
+              }
+
               endCallRequested = true;
-              console.log(`[Gemini Live] 📞 end_call tool invoked. Reason: ${reason}`);
+              console.log(`[Gemini Live] 📞 end_call tool invoked. Reason: ${reason} (duration: ${callDurationSeconds}s, userTurns: ${userTurnCount})`);
 
               // Send acknowledgment back to Gemini
               // CRITICAL: Gemini API uses camelCase for all properties

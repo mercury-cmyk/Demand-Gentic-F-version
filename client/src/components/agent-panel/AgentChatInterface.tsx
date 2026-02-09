@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -15,6 +15,7 @@ import {
   Wrench,
   Copy,
   Check,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,9 +27,20 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentPlanViewer } from './AgentPlanViewer';
 import { AgentQuickActions } from './AgentQuickActions';
+import {
+  OrderContextPanel,
+  OrderConfigurationCard,
+  OrderCostEstimate,
+  type UploadedFile,
+  type OrderConfiguration,
+  type OrderRecommendation,
+  type PricingBreakdown,
+  type OrderAgentState,
+} from './order-agent';
 
 interface Message {
   id: string;
@@ -38,6 +50,11 @@ interface Message {
   thoughtProcess?: string[];
   toolsExecuted?: Array<{ tool: string; args: any; result: any }>;
   planId?: string;
+  // Order-specific message data
+  orderRecommendation?: OrderRecommendation;
+  orderConfiguration?: OrderConfiguration;
+  pricingBreakdown?: PricingBreakdown;
+  orderResult?: { orderId: string; orderNumber: string };
 }
 
 interface ExecutionPlan {
@@ -68,6 +85,7 @@ export function AgentChatInterface({
   isClientPortal,
   userRole,
 }: AgentChatInterfaceProps) {
+  const { toast } = useToast();
   const { setConversationId, setAgentStatus } = useAgentPanelContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -76,8 +94,47 @@ export function AgentChatInterface({
   const [isListening, setIsListening] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
 
+  // Order mode state
+  const [orderMode, setOrderMode] = useState(false);
+  const [orderState, setOrderState] = useState<OrderAgentState>('idle');
+  const [contextUrls, setContextUrls] = useState<string[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [targetAccountFiles, setTargetAccountFiles] = useState<UploadedFile[]>([]);
+  const [suppressionFiles, setSuppressionFiles] = useState<UploadedFile[]>([]);
+  const [templateFiles, setTemplateFiles] = useState<UploadedFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [currentRecommendation, setCurrentRecommendation] = useState<OrderRecommendation | null>(null);
+  const [currentConfiguration, setCurrentConfiguration] = useState<OrderConfiguration | null>(null);
+  const [currentPricing, setCurrentPricing] = useState<PricingBreakdown | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Detect order intent from messages
+  const detectOrderIntent = useCallback((message: string) => {
+    const orderKeywords = [
+      'create a new campaign order',
+      'new order',
+      'place an order',
+      'order campaign',
+      'want to order',
+      'need leads',
+      'generate leads',
+      'qualified leads',
+      'appointment setting',
+    ];
+    return orderKeywords.some(keyword =>
+      message.toLowerCase().includes(keyword.toLowerCase())
+    );
+  }, []);
+
+  // Check if we're in order mode based on messages
+  useEffect(() => {
+    const lastUserMessage = messages.findLast(m => m.role === 'user');
+    if (lastUserMessage && detectOrderIntent(lastUserMessage.content)) {
+      setOrderMode(true);
+    }
+  }, [messages, detectOrderIntent]);
 
   useEffect(() => {
     if (isExecutingPlan) {
@@ -122,6 +179,158 @@ export function AgentChatInterface({
     return localStorage.getItem(isClientPortal ? 'clientPortalToken' : 'token');
   }, [isClientPortal]);
 
+  // File upload handler for order context
+  const handleFileUpload = useCallback(async (files: FileList, category: 'context' | 'target_accounts' | 'suppression' | 'template') => {
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    const newUploadedFiles: UploadedFile[] = [];
+
+    try {
+      const token = getAuthToken();
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        // Get presigned URL
+        const res = await fetch('/api/s3/upload-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type,
+            folder: category === 'context' ? 'campaign-orders' : `campaign-orders/${category}`
+          }),
+        });
+
+        if (!res.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
+        const { url, key } = await res.json();
+
+        // Upload to S3
+        const uploadRes = await fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type },
+          body: file,
+        });
+
+        if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+
+        newUploadedFiles.push({
+          name: file.name,
+          key: key,
+          type: file.type
+        });
+      }
+
+      // Update appropriate state
+      if (category === 'context') {
+        setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
+      } else if (category === 'target_accounts') {
+        setTargetAccountFiles(prev => [...prev, ...newUploadedFiles]);
+      } else if (category === 'suppression') {
+        setSuppressionFiles(prev => [...prev, ...newUploadedFiles]);
+      } else if (category === 'template') {
+        setTemplateFiles(prev => [...prev, ...newUploadedFiles]);
+      }
+
+      toast({ title: 'Files uploaded successfully' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Upload failed', description: (error as Error).message, variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+    }
+  }, [getAuthToken, toast]);
+
+  // Remove file handler
+  const handleRemoveFile = useCallback((key: string, category: 'context' | 'target_accounts' | 'suppression' | 'template') => {
+    if (category === 'context') {
+      setUploadedFiles(prev => prev.filter(f => f.key !== key));
+    } else if (category === 'target_accounts') {
+      setTargetAccountFiles(prev => prev.filter(f => f.key !== key));
+    } else if (category === 'suppression') {
+      setSuppressionFiles(prev => prev.filter(f => f.key !== key));
+    } else if (category === 'template') {
+      setTemplateFiles(prev => prev.filter(f => f.key !== key));
+    }
+  }, []);
+
+  // Handle order configuration change
+  const handleConfigurationChange = useCallback((updates: Partial<OrderConfiguration>) => {
+    setCurrentConfiguration(prev => prev ? { ...prev, ...updates } : null);
+  }, []);
+
+  // Handle order approval - proceed to plan generation
+  const handleOrderApprove = useCallback(async () => {
+    if (!currentConfiguration) return;
+
+    setIsLoading(true);
+    setOrderState('plan_pending');
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch('/api/agent-panel/orders/generate-plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          configuration: currentConfiguration,
+          contextUrls,
+          contextFiles: uploadedFiles,
+          targetAccountFiles,
+          suppressionFiles,
+          templateFiles,
+          conversationId,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to generate plan');
+
+      const data = await response.json();
+
+      if (data.plan) {
+        setCurrentPlan(data.plan);
+        setCurrentPricing(data.pricingBreakdown);
+
+        const planMessage: Message = {
+          id: `msg-${Date.now()}`,
+          role: 'assistant',
+          content: `I've prepared an execution plan for your order. Please review the steps below and approve to proceed.`,
+          timestamp: new Date().toISOString(),
+          pricingBreakdown: data.pricingBreakdown,
+        };
+        setMessages(prev => [...prev, planMessage]);
+      }
+    } catch (error) {
+      console.error('Error generating plan:', error);
+      toast({ title: 'Failed to generate plan', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentConfiguration, contextUrls, uploadedFiles, targetAccountFiles, suppressionFiles, templateFiles, conversationId, getAuthToken, toast]);
+
+  // Handle order cancellation
+  const handleOrderCancel = useCallback(() => {
+    setOrderMode(false);
+    setOrderState('idle');
+    setCurrentRecommendation(null);
+    setCurrentConfiguration(null);
+    setCurrentPricing(null);
+
+    const cancelMessage: Message = {
+      id: `msg-${Date.now()}`,
+      role: 'assistant',
+      content: 'Order cancelled. How else can I help you?',
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, cancelMessage]);
+  }, []);
+
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
 
@@ -144,18 +353,47 @@ export function AgentChatInterface({
         throw new Error('Authentication required. Please log in.');
       }
 
-      const response = await fetch(`/api/agent-panel/chat?clientPortal=${isClientPortal}`, {
+      // Check if this is an order-related message
+      const isOrderIntent = detectOrderIntent(userMessage.content);
+      const endpoint = isOrderIntent && isClientPortal
+        ? '/api/agent-panel/orders/analyze-goal'
+        : `/api/agent-panel/chat?clientPortal=${isClientPortal}`;
+
+      const requestBody = isOrderIntent && isClientPortal
+        ? {
+            goal: userMessage.content,
+            contextUrls,
+            contextFiles: uploadedFiles,
+            targetAccountFiles,
+            suppressionFiles,
+            templateFiles,
+            sessionId,
+            conversationId,
+          }
+        : {
+            message: userMessage.content,
+            sessionId,
+            conversationId,
+            planMode: true,
+            // Include order context if in order mode
+            ...(orderMode && {
+              orderContext: {
+                contextUrls,
+                contextFiles: uploadedFiles,
+                targetAccountFiles,
+                suppressionFiles,
+                templateFiles,
+              },
+            }),
+          };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          message: userMessage.content,
-          sessionId,
-          conversationId,
-          planMode: true,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -169,16 +407,50 @@ export function AgentChatInterface({
         setConversationId(data.conversationId);
       }
 
-      // Add assistant message
-      const assistantMessage: Message = {
-        ...data.message,
-        timestamp: data.message.timestamp || new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      // Handle order recommendation response
+      if (data.recommendation) {
+        setOrderMode(true);
+        setOrderState('strategy_review');
+        setCurrentRecommendation(data.recommendation);
 
-      // Set plan if returned
-      if (data.plan) {
-        setCurrentPlan(data.plan);
+        // Create configuration from recommendation
+        const config: OrderConfiguration = {
+          campaignType: data.recommendation.campaignType || 'high_quality_leads',
+          volume: data.recommendation.suggestedVolume || 100,
+          industries: data.recommendation.targetAudience?.industries?.join(', ') || '',
+          jobTitles: data.recommendation.targetAudience?.titles?.join(', ') || '',
+          companySizeMin: data.recommendation.targetAudience?.companySizeMin,
+          companySizeMax: data.recommendation.targetAudience?.companySizeMax,
+          geographies: data.recommendation.geographies?.join(', ') || '',
+          deliveryTimeline: data.recommendation.deliveryTimeline || 'standard',
+          channels: data.recommendation.channels || ['voice', 'email'],
+        };
+        setCurrentConfiguration(config);
+        setCurrentPricing(data.pricingBreakdown);
+
+        // Add recommendation message
+        const recMessage: Message = {
+          id: `msg-${Date.now()}`,
+          role: 'assistant',
+          content: data.message?.content || `Based on your goal and organization intelligence, here's my recommended strategy:`,
+          timestamp: new Date().toISOString(),
+          orderRecommendation: data.recommendation,
+          orderConfiguration: config,
+          pricingBreakdown: data.pricingBreakdown,
+        };
+        setMessages((prev) => [...prev, recMessage]);
+      } else {
+        // Regular message handling
+        const assistantMessage: Message = {
+          ...data.message,
+          timestamp: data.message?.timestamp || new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        // Set plan if returned
+        if (data.plan) {
+          setCurrentPlan(data.plan);
+        }
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -192,7 +464,7 @@ export function AgentChatInterface({
     } finally {
       setIsLoading(false);
     }
-  }, [conversationId, getAuthToken, inputValue, isClientPortal, isLoading, sessionId, setConversationId]);
+  }, [conversationId, getAuthToken, inputValue, isClientPortal, isLoading, sessionId, setConversationId, detectOrderIntent, orderMode, contextUrls, uploadedFiles, targetAccountFiles, suppressionFiles, templateFiles]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -276,18 +548,48 @@ export function AgentChatInterface({
           ) : (
             <AnimatePresence mode="popLayout">
               {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+                <React.Fragment key={message.id}>
+                  <MessageBubble message={message} />
+                  {/* Render order configuration card for recommendation messages */}
+                  {message.orderRecommendation && message.orderConfiguration && orderState === 'strategy_review' && (
+                    <div className="space-y-3 ml-12">
+                      <OrderConfigurationCard
+                        recommendation={message.orderRecommendation}
+                        configuration={currentConfiguration || message.orderConfiguration}
+                        onConfigurationChange={handleConfigurationChange}
+                        onApprove={handleOrderApprove}
+                        onCancel={handleOrderCancel}
+                        rationale={message.orderRecommendation.rationale}
+                      />
+                      {currentPricing && (
+                        <OrderCostEstimate
+                          pricingBreakdown={currentPricing}
+                          volume={currentConfiguration?.volume || message.orderConfiguration.volume}
+                        />
+                      )}
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
             </AnimatePresence>
           )}
 
           {/* Current Plan */}
           {currentPlan && (
-            <AgentPlanViewer
-              plan={currentPlan}
-              onApprove={() => handlePlanApprove(currentPlan.id)}
-              onReject={() => handlePlanReject(currentPlan.id)}
-            />
+            <div className="space-y-3">
+              <AgentPlanViewer
+                plan={currentPlan}
+                onApprove={() => handlePlanApprove(currentPlan.id)}
+                onReject={() => handlePlanReject(currentPlan.id)}
+              />
+              {currentPricing && (
+                <OrderCostEstimate
+                  pricingBreakdown={currentPricing}
+                  volume={currentConfiguration?.volume || 100}
+                  compact
+                />
+              )}
+            </div>
           )}
 
           {/* Loading Indicator */}
@@ -305,6 +607,24 @@ export function AgentChatInterface({
 
       {/* Input Area */}
       <div className="p-4 border-t border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        {/* Order Context Panel - shown when in order mode */}
+        {orderMode && isClientPortal && (
+          <div className="mb-3">
+            <OrderContextPanel
+              contextUrls={contextUrls}
+              onAddUrl={(url) => setContextUrls(prev => [...prev, url])}
+              onRemoveUrl={(url) => setContextUrls(prev => prev.filter(u => u !== url))}
+              uploadedFiles={uploadedFiles}
+              targetAccountFiles={targetAccountFiles}
+              suppressionFiles={suppressionFiles}
+              templateFiles={templateFiles}
+              onUploadFiles={handleFileUpload}
+              onRemoveFile={handleRemoveFile}
+              isUploading={isUploading}
+            />
+          </div>
+        )}
+
         <div className="relative">
           <div className="relative flex items-center rounded-xl border border-input bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring transition-all">
             <Textarea
@@ -312,7 +632,7 @@ export function AgentChatInterface({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Tell AgentX what you want done…"
+              placeholder={orderMode ? "Describe your campaign goal..." : "Tell AgentX what you want done…"}
               className="min-h-[50px] max-h-[200px] w-full resize-none border-0 shadow-none focus-visible:ring-0 py-3.5 pl-4 pr-12 bg-transparent leading-relaxed"
               rows={1}
             />
@@ -336,10 +656,35 @@ export function AgentChatInterface({
             </div>
           </div>
         </div>
-        
-        <div className="mt-4 mb-2">
-           <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
-        </div>
+
+        {/* Order mode indicator */}
+        {orderMode && (
+          <div className="mt-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Package className="h-3.5 w-3.5 text-primary" />
+              <span>Order Creation Mode</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() => {
+                setOrderMode(false);
+                setOrderState('idle');
+                setCurrentRecommendation(null);
+                setCurrentConfiguration(null);
+              }}
+            >
+              Exit
+            </Button>
+          </div>
+        )}
+
+        {!orderMode && (
+          <div className="mt-4 mb-2">
+             <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
+          </div>
+        )}
 
         <p className="text-[10px] text-muted-foreground/60 mt-2 text-center select-none">
           AgentX can make mistakes. Check important info.

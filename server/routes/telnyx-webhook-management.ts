@@ -14,6 +14,10 @@ const router = Router();
 // Telnyx API base URL
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
 
+// Hardcoded production URL - this must NOT come from env vars since they get
+// overwritten by dev-with-ngrok scripts. Must match switch-to-prod.ts.
+const PRODUCTION_URL = 'https://demandgentic.ai';
+
 interface TexmlApplication {
   id: string;
   friendly_name: string;
@@ -52,9 +56,17 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
     }
 
     // Get current environment URLs
-    const currentNgrokUrl = process.env.PUBLIC_WEBHOOK_HOST || '';
-    const productionUrl = env.PUBLIC_TEXML_HOST || env.TELNYX_WEBHOOK_URL || '';
+    let currentNgrokUrl = process.env.PUBLIC_WEBHOOK_HOST || '';
+    // Use hardcoded production URL - env vars get overwritten by dev scripts
+    const productionUrl = PRODUCTION_URL;
     const currentWebsocketUrl = process.env.PUBLIC_WEBSOCKET_URL || '';
+
+    // Sanitize ngrok URL: If it matches production URL, it's likely pulled from .env inappropriately
+    // or we are running in a mode where PUBLIC_WEBHOOK_HOST is set to prod.
+    // In this case, we shouldn't present it as the "ngrok/dev" option.
+    if (currentNgrokUrl.includes('demandgentic.ai') || currentNgrokUrl === productionUrl) {
+      currentNgrokUrl = '';
+    }
 
     // Fetch TeXML application details
     let texmlApp: any = null;
@@ -289,6 +301,31 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
     // Get ngrok URL from request body or environment
     let ngrokUrl = req.body.ngrokUrl || process.env.PUBLIC_WEBHOOK_HOST;
 
+    // Safety check: If the resolved URL is actually production (misconfigured environment),
+    // try to auto-discover the running ngrok tunnel from localhost
+    if (ngrokUrl && (ngrokUrl.includes('demandgentic.ai') || ngrokUrl === PRODUCTION_URL)) {
+       console.log('[Telnyx Webhook] PUBLIC_WEBHOOK_HOST points to prod. Attempting to discover local ngrok tunnel...');
+       try {
+         // Attempt to query standard ngrok local API
+         const tunnelRes = await fetch('http://127.0.0.1:4040/api/tunnels');
+         if (tunnelRes.ok) {
+           const tunnelData: any = await tunnelRes.json();
+           const tunnel = tunnelData.tunnels?.find((t: any) => t.proto === 'https');
+           if (tunnel?.public_url) {
+             ngrokUrl = tunnel.public_url;
+             console.log('[Telnyx Webhook] Auto-discovered local ngrok tunnel:', ngrokUrl);
+           }
+         }
+       } catch (e) {
+         console.warn('[Telnyx Webhook] Failed to auto-discover local ngrok tunnel. Aborting switch to ensure we do not set Prod URL as Dev.');
+         // Explicitly fail if we couldn't find a real dev URL and were about to use Prod
+         return res.status(400).json({
+           success: false,
+           message: 'Could not detect a development (ngrok) URL. Please ensure ngrok is running.',
+         });
+       }
+    }
+
     if (!ngrokUrl) {
       return res.status(400).json({
         success: false,
@@ -410,15 +447,9 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       });
     }
 
-    // Get production URL from request body or environment
-    let prodUrl = req.body.productionUrl || env.PUBLIC_TEXML_HOST || env.TELNYX_WEBHOOK_URL;
-
-    if (!prodUrl) {
-      return res.status(400).json({
-        success: false,
-        message: 'Production URL not provided and PUBLIC_TEXML_HOST/TELNYX_WEBHOOK_URL not set. Please provide productionUrl in the request body.',
-      });
-    }
+    // Get production URL from request body or hardcoded constant
+    // Don't use env vars as fallback - they get overwritten by dev scripts
+    let prodUrl = req.body.productionUrl || PRODUCTION_URL;
 
     // Clean up URL - remove any existing protocol first, then add https://
     // This prevents double-protocol issues like https://https://...
