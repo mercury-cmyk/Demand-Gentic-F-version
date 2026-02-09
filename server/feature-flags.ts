@@ -17,6 +17,11 @@ export const FEATURE_FLAGS = {
     description: 'Enable queue management system with replace, clear operations',
     default: true  // Enabled for production use
   },
+  argyle_event_drafts: {
+    name: 'argyle_event_drafts',
+    description: 'Enable Argyle event-sourced campaign drafts (client-gated to Argyle only)',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
   // Add more feature flags here as needed
 } as const;
 

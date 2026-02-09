@@ -33,6 +33,7 @@ export class LogStreamingService {
   private pubsub: PubSub;
   private logging: Logging;
   private wss: WebSocketServer;
+  private consoleInterceptActive = false;
 
   constructor(server: any) {
     this.pubsub = new PubSub({ projectId: PROJECT_ID });
@@ -41,6 +42,8 @@ export class LogStreamingService {
     this.wss = new WebSocketServer({ noServer: true });
 
     this.setupWebSocketServer();
+    // Always start console-intercept as a baseline — Pub/Sub enhances it if available
+    this.interceptConsole();
   }
 
   /**
@@ -167,5 +170,44 @@ export class LogStreamingService {
     this.wss.handleUpgrade(request, socket, head, ws => {
       this.wss.emit('connection', ws, request);
     });
+  }
+
+  /**
+   * Intercepts console.log/warn/error and broadcasts to WebSocket clients.
+   * This provides a zero-config fallback when Pub/Sub is not available.
+   */
+  private interceptConsole() {
+    if (this.consoleInterceptActive) return;
+    this.consoleInterceptActive = true;
+
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origError = console.error;
+
+    const self = this;
+
+    const makeInterceptor = (original: (...args: any[]) => void, severity: string) => {
+      return function (...args: any[]) {
+        original.apply(console, args);
+        // Only broadcast if there are connected clients
+        if (self.wss.clients.size > 0) {
+          const message = args
+            .map((a: any) => (typeof a === 'string' ? a : JSON.stringify(a)))
+            .join(' ');
+          // Skip internal log-streaming messages to avoid infinite recursion
+          if (message.includes('[LogStreaming]') || message.includes('log stream')) return;
+          self.broadcast({
+            timestamp: new Date().toISOString(),
+            severity,
+            message,
+            resource: 'console-intercept',
+          });
+        }
+      };
+    };
+
+    console.log = makeInterceptor(origLog, 'DEFAULT');
+    console.warn = makeInterceptor(origWarn, 'WARNING');
+    console.error = makeInterceptor(origError, 'ERROR');
   }
 }

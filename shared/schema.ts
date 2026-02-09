@@ -13183,3 +13183,74 @@ export type GenerativeStudioChatMessage = typeof generativeStudioChatMessages.$i
 export type InsertGenerativeStudioChatMessage = z.infer<typeof insertGenerativeStudioChatMessageSchema>;
 export type GenerativeStudioPublishedPage = typeof generativeStudioPublishedPages.$inferSelect;
 export type InsertGenerativeStudioPublishedPage = z.infer<typeof insertGenerativeStudioPublishedPageSchema>;
+
+// ============================================
+// EXTERNAL EVENTS (Argyle Event-Sourced Campaign Drafts)
+// ============================================
+export const externalEvents = pgTable("external_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientId: varchar("client_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  sourceProvider: varchar("source_provider").notNull().default('argyle'),
+  externalId: varchar("external_id").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  sourceHash: varchar("source_hash"),
+  title: text("title").notNull(),
+  community: varchar("community"),
+  eventType: varchar("event_type"),
+  location: text("location"),
+  startAtIso: timestamp("start_at_iso", { withTimezone: true }),
+  startAtHuman: varchar("start_at_human"),
+  needsDateReview: boolean("needs_date_review").default(false),
+  overviewExcerpt: text("overview_excerpt"),
+  agendaExcerpt: text("agenda_excerpt"),
+  speakersExcerpt: text("speakers_excerpt"),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull().defaultNow(),
+  syncStatus: varchar("sync_status").default('synced'),
+  syncError: text("sync_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("external_events_client_idx").on(table.clientId),
+  providerIdx: index("external_events_provider_idx").on(table.sourceProvider),
+  startAtIdx: index("external_events_start_at_idx").on(table.startAtIso),
+  uniqueKey: unique("external_events_unique_key").on(table.clientId, table.sourceProvider, table.externalId),
+}));
+
+export const insertExternalEventSchema = createInsertSchema(externalEvents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ExternalEvent = typeof externalEvents.$inferSelect;
+export type InsertExternalEvent = z.infer<typeof insertExternalEventSchema>;
+
+// ============================================
+// WORK ORDER DRAFTS (Event-linked campaign drafts)
+// ============================================
+export const workOrderDrafts = pgTable("work_order_drafts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'set null' }),
+  externalEventId: varchar("external_event_id").references(() => externalEvents.id, { onDelete: 'set null' }),
+  status: varchar("status").notNull().default('draft'),
+  sourceFields: jsonb("source_fields").$type<Record<string, any>>().notNull().default({}),
+  draftFields: jsonb("draft_fields").$type<Record<string, any>>().notNull().default({}),
+  editedFields: jsonb("edited_fields").$type<string[]>().notNull().default([]),
+  leadCount: integer("lead_count"),
+  workOrderId: varchar("work_order_id").references(() => workOrders.id, { onDelete: 'set null' }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("work_order_drafts_client_idx").on(table.clientAccountId),
+  eventIdx: index("work_order_drafts_event_idx").on(table.externalEventId),
+  statusIdx: index("work_order_drafts_status_idx").on(table.status),
+}));
+
+export const insertWorkOrderDraftSchema = createInsertSchema(workOrderDrafts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type WorkOrderDraft = typeof workOrderDrafts.$inferSelect;
+export type InsertWorkOrderDraft = z.infer<typeof insertWorkOrderDraftSchema>;

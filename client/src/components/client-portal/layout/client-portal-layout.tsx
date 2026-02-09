@@ -7,7 +7,7 @@
  * 3. Campaign-bound templates and voice stimulation
  * 4. Clean, intentional navigation structure
  */
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'wouter';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -50,7 +50,9 @@ import {
   Mail,
   ClipboardList,
   Brain,
+  CalendarDays,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
 import { AgentPanelProvider, AgentSidePanel, useAgentPanelContextOptional } from '@/components/agent-panel';
@@ -84,7 +86,7 @@ const agenticOperator = {
 };
 
 // Main navigation - organized by priority
-const navigation = [
+const baseNavigation = [
   { name: 'Dashboard', href: '/client-portal/dashboard', icon: LayoutDashboard },
   { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
   { name: 'Order Requests', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList, description: 'AI-powered campaign ordering' },
@@ -97,6 +99,9 @@ const navigation = [
   { name: 'Billing', href: '/client-portal/billing', icon: CreditCard },
   { name: 'Settings', href: '/client-portal/settings', icon: Settings },
 ];
+
+// Conditionally added nav items
+const argyleEventsNavItem = { name: 'Upcoming Events', href: '/client-portal/argyle-events', icon: CalendarDays, description: 'Event-sourced campaign drafts' };
 
 // Toggle button for the header - must be inside AgentPanelProvider
 function ClientPortalAgentToggleButton() {
@@ -142,6 +147,37 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   const storedUser = localStorage.getItem('clientPortalUser');
   const user: ClientUser | null = storedUser ? JSON.parse(storedUser) : null;
+
+  // Check if Argyle events feature is available for this client
+  const getToken = () => localStorage.getItem('clientPortalToken');
+  const { data: argyleFeatureStatus } = useQuery({
+    queryKey: ['/api/client-portal/argyle-events/feature-status'],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) return { available: false };
+      try {
+        const res = await fetch('/api/client-portal/argyle-events/feature-status', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return { available: false };
+        return await res.json();
+      } catch {
+        return { available: false };
+      }
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
+  // Build navigation dynamically based on feature availability
+  const navigation = React.useMemo(() => {
+    const nav = [...baseNavigation];
+    if (argyleFeatureStatus?.enabled) {
+      // Insert before Analytics
+      const analyticsIdx = nav.findIndex(n => n.name === 'Analytics');
+      nav.splice(analyticsIdx >= 0 ? analyticsIdx : nav.length, 0, argyleEventsNavItem);
+    }
+    return nav;
+  }, [argyleFeatureStatus?.enabled]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {

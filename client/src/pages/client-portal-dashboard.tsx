@@ -22,7 +22,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, Legend
 } from 'recharts';
 import {
-  Building2, LogOut, Package, Plus, FileText, Users, Calendar, ChevronRight,
+  Building2, LogOut, Package, Plus, FileText, Users, Calendar, CalendarDays, ChevronRight,
   LayoutDashboard, Target, BarChart3, Download, CreditCard, MessageSquare,
   Phone, Mail, Send, Clock, CheckCircle, AlertCircle, TrendingUp, TrendingDown, Brain,
   FileDown, Headphones, Loader2, ArrowUpRight, ArrowDownRight, Sparkles,
@@ -50,6 +50,7 @@ import {
 } from '@/components/client-portal/campaigns';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
+import { ArgyleEventsContent } from '@/pages/client-portal/argyle-events';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
@@ -512,6 +513,22 @@ export default function ClientPortalDashboard() {
       setEnabledFeatures(featuresData.enabledFeatures);
     }
   }, [featuresData]);
+
+  // Argyle events feature status check
+  const { data: argyleFeatureStatus } = useQuery<{ enabled: boolean }>({
+    queryKey: ['argyle-events-feature-status'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/client-portal/argyle-events/feature-status', authHeaders);
+        if (!res.ok) return { enabled: false };
+        return await res.json();
+      } catch {
+        return { enabled: false };
+      }
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Business profile query
   const { data: businessProfileData, isLoading: profileLoading } = useQuery<{
@@ -1170,6 +1187,18 @@ export default function ClientPortalDashboard() {
     { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
   ];
+
+  // Conditionally add Argyle events nav item (as a dashboard tab, not a separate page)
+  if (argyleFeatureStatus?.enabled) {
+    // Insert before Billing
+    const billingIdx = navItems.findIndex(i => i.id === 'billing');
+    navItems.splice(billingIdx >= 0 ? billingIdx : navItems.length - 2, 0, {
+      id: 'argyle-events',
+      label: 'Upcoming Events',
+      icon: CalendarDays,
+      color: 'from-emerald-500 to-teal-500',
+    });
+  }
 
   return (
     <div className="flex h-screen bg-[#F8F9FA] dark:bg-[#0B1120] font-sans">
@@ -2053,6 +2082,13 @@ export default function ClientPortalDashboard() {
                 </CardContent>
               </Card>
             </div>
+          </div>
+        )}
+
+        {/* ==================== ARGYLE EVENTS TAB ==================== */}
+        {activeTab === 'argyle-events' && argyleFeatureStatus?.enabled && (
+          <div className="space-y-6">
+            <ArgyleEventsContent />
           </div>
         )}
 

@@ -247,29 +247,23 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Campaign Runner WS initialization failed (non-blocking):', err);
   }
 
-  // Initialize Log Streaming Service (optional - requires GCP Pub/Sub permissions)
-  // Disabled by default since cloud-logs API endpoints work without it
-  const enableLogStreaming = process.env.ENABLE_LOG_STREAMING === 'true';
-  let logStreamingService: LogStreamingService | null = null;
-  if (enableLogStreaming) {
-    logStreamingService = new LogStreamingService(server);
+  // Initialize Log Streaming Service
+  // Always create the service so WebSocket connections succeed.
+  // Pub/Sub streaming is optional; console-intercept fallback is always active.
+  const logStreamingService = new LogStreamingService(server);
+  if (process.env.ENABLE_LOG_STREAMING === 'true') {
     logStreamingService.initialize().catch((err) => {
-      console.warn('[LogStreaming] Service initialization failed (non-blocking):', err.message);
+      console.warn('[LogStreaming] Pub/Sub init failed (console fallback active):', err.message);
     });
-  } else {
-    console.log('[LogStreaming] Disabled (set ENABLE_LOG_STREAMING=true to enable)');
   }
   
   // Manually handle WebSocket upgrades since path-based routing doesn't work reliably
   server.on('upgrade', (req, socket, head) => {
-    // FORCE LOGGING TO STDERR TO BYPASS ANY CONSOLE INTERCEPTION
-    process.stderr.write(`[DEBUG-UPGRADE] Upgrade request for URL: ${req.url}\n`);
-    process.stderr.write(`[DEBUG-UPGRADE] Headers: ${JSON.stringify(req.headers)}\n`);
-
     const pathname = new URL(req.url || '', `ws://${req.headers.host}`).pathname;
-    console.log(`[WebSocket Upgrade] URL: ${req.url}`);
-    console.log(`[WebSocket Upgrade] Headers:`, JSON.stringify(req.headers, null, 2));
-    console.log(`[WebSocket Upgrade] Socket state: { readable: ${socket.readable}, writable: ${socket.writable}, destroyed: ${socket.destroyed} }`);
+    // Only log non-trivial upgrade requests (skip /log-stream to reduce noise)
+    if (pathname !== '/log-stream') {
+      console.log(`[WebSocket Upgrade] ${pathname}`);
+    }
     
     socket.on('error', (err: any) => {
       // ECONNRESET is common when clients disconnect abruptly; treat as warn to reduce noise
@@ -391,14 +385,7 @@ app.use((req, res, next) => {
         campaignRunnerWss.emit('connection', ws, req);
       });
     } else if (pathname === '/log-stream') {
-      console.log('[WebSocket Upgrade] Handling Log Stream connection');
-      
-      if (logStreamingService) {
-        logStreamingService.handleUpgrade(req, socket, head);
-      } else {
-        console.warn('[WebSocket Upgrade] Log streaming service not initialized');
-        socket.destroy();
-      }
+      logStreamingService.handleUpgrade(req, socket, head);
     } else {
       // Block ALL vite-hmr WebSocket connections - they cause frame corruption
       const protocol = req.headers['sec-websocket-protocol'];

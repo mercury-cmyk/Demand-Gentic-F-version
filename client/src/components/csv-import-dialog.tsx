@@ -297,8 +297,8 @@ export function CSVImportDialog({
       console.log('[CSV-IMPORT] Is unified format:', isUnifiedFormat);
 
       // Process in batches for better performance with large files
-      // Increased from 50 to 2500 to avoid production timeouts on large imports
-      const BATCH_SIZE = 2500;
+      // Reduced to 500 rows per batch to avoid client-side timeout on large imports
+      const BATCH_SIZE = 500;
       const totalBatches = Math.ceil(csvData.length / BATCH_SIZE);
       
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -380,7 +380,8 @@ export function CSVImportDialog({
                 { 
                   records: records.map(r => ({ contact: r.contact, account: r.account })),
                   listId: targetListId,
-                }
+                },
+                { timeout: 120000 }
               );
               
               const result = await response.json() as {
@@ -466,7 +467,8 @@ export function CSVImportDialog({
                 { 
                   records: records.map(r => ({ contact: r.contact, account: r.account })),
                   listId: targetListId,
-                }
+                },
+                { timeout: 120000 }
               );
               
               const result = await response.json() as {

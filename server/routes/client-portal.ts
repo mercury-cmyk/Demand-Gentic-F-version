@@ -43,6 +43,7 @@ import clientPortalSettingsRouter from './client-portal-settings';
 import clientPortalCrmRouter from './client-portal-crm';
 import clientPortalCampaignsRouter from './client-portal-campaigns';
 import clientPortalBookingsRouter from './client-portal-bookings';
+import argyleEventsRouter from '../integrations/argyle_events/routes';
 
 const router = Router();
 
@@ -182,6 +183,9 @@ router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
 router.use('/settings', requireClientAuth, clientPortalSettingsRouter);
 router.use('/crm', requireClientAuth, clientPortalCrmRouter);
 router.use('/bookings', requireClientAuth, clientPortalBookingsRouter);
+
+// Argyle event-sourced campaign drafts (feature-flagged, client-gated)
+router.use('/argyle-events', requireClientAuth, argyleEventsRouter);
 
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);
