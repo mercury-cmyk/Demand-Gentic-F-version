@@ -660,33 +660,38 @@ ${briefContent ? `UPLOADED BRIEF:\n${briefContent}\n` : ""}
 ${extractedUrlContent ? `WEB CONTEXT:\n${extractedUrlContent}\n` : ""}
 
 TASKS:
-1. Parse campaign objective (Lead Gen, Webinar, SQL, etc.)
-2. Define Target Audience (ICP) based on context
-3. Extract Messaging Context (Value props, pain points) from brief/web
-4. Create Voice Agent Persona
-5. Draft Strategy
+1.  **Parse Campaign Objective**: Determine the primary goal (e.g., Lead Generation, Appointment Setting, Webinar Registrations).
+2.  **Define Target Audience (ICP)**: Extract **all** specific industries, job titles/roles, company sizes, and geographic locations from the provided context. This is critical.
+3.  **Extract Messaging Context**: Identify key value propositions, pain points, and the core offer from the brief and web context.
+4.  **Create Voice Agent Persona**: Define a suitable persona for voice outreach.
+5.  **Draft Strategy**: Formulate a high-level strategy description.
+6.  **Recommend Channels**: Suggest the most effective outreach channels (e.g., Voice, Email).
 
 Return JSON:
 {
   "campaignOrder": {
-    "objective": "Objective extracted",
-    "type": "campaign type",
+    "objective": "Objective extracted from goal",
+    "type": "Type of campaign (e.g., Appointment Setting)",
     "targetAudience": {
-        "industries": ["..."],
-        "roles": ["..."],
-        "locations": ["..."]
+        "industries": ["List of industries extracted from context"],
+        "roles": ["List of job titles/roles extracted from context"],
+        "companySize": ["Min-Max employee count, if specified"],
+        "locations": ["List of geographies extracted from context"]
     },
     "messagingContext": {
-        "valuePropositions": ["..."],
-        "painPoints": ["..."],
-        "offer": "..."
+        "valuePropositions": ["Value props from context"],
+        "painPoints": ["Pain points from context"],
+        "offer": "The core offer or call-to-action"
     }
   },
-  "strategy": "Strategy description",
+  "strategy": "High-level strategy description",
   "channels": ["voice", "email"],
-  "voicePersona": { "name": "", "role": "", "style": "", "instructions": "..." },
-  "emailStrategy": { "touchPoints": 5, "theme": "" },
-  "filters": { "industry": [], "role": [] }
+  "voicePersona": { "name": "Persona Name", "role": "Persona Role", "style": "professional", "instructions": "Key instructions for the voice agent" },
+  "emailStrategy": { "touchPoints": 5, "theme": "Theme of the email sequence" },
+  "filters": {
+      "industry": ["List of industries for filtering"],
+      "role": ["List of roles for filtering"]
+  }
 }`;
 
     const result = await generateJSON(prompt);

@@ -111,7 +111,8 @@ function formatForGoogle(blocks: KnowledgeBlock[], providerOverrides: Map<number
 3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
 4. Do NOT assume, predict, or continue speaking after asking a question.
 5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
-6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+6. The person must confirm their identity before you proceed with any context. "Yes" in response to "May I speak with [Name]?" counts as confirmed. Do NOT re-ask after receiving "Yes".
+7. **NEVER ask the same identity question twice.** If they said "Yes" to "May I speak with [Name]?", identity is confirmed — proceed immediately to your introduction.
 </critical_instructions>
 `);
 

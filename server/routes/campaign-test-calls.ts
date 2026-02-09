@@ -383,12 +383,21 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       console.error(`[Campaign Test Call] Telnyx API error: ${telnyxResponse.status} - ${errorText}`);
 
       let friendlyMessage = `Telnyx API error: ${telnyxResponse.status}`;
+      let diagnosticHints: string[] = [];
       try {
         const errorJson = JSON.parse(errorText);
         if (errorJson.errors && errorJson.errors.length > 0) {
            const firstError = errorJson.errors[0];
            if (firstError.code === '90041') {
              friendlyMessage = "Call limit reached. Your Telnyx account has exceeded its concurrent call limit. Please try again later or upgrade your plan.";
+           } else if (firstError.code === '10010') {
+             friendlyMessage = `International routing error: Destination country (+${callInfo.countryCode} ${callInfo.region}) is not in your Telnyx whitelisted countries.`;
+             diagnosticHints.push("Add this country to your Telnyx International Dialing whitelist in Mission Control");
+             diagnosticHints.push("Check your Telnyx Messaging Profile for international permissions");
+           } else if (firstError.code === '40300' || firstError.code === '40301') {
+             friendlyMessage = `Carrier routing failure to ${callInfo.region} (+${callInfo.countryCode}). The destination carrier rejected the call.`;
+             diagnosticHints.push("This may be a temporary carrier issue - retry in a few minutes");
+             diagnosticHints.push("Contact Telnyx support for alternate routing options to this region");
            } else {
              friendlyMessage = firstError.detail || firstError.title || friendlyMessage;
            }
@@ -397,11 +406,22 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
         // ignore parse error
       }
 
+      // Add international-specific diagnostics
+      if (callInfo.isInternational && diagnosticHints.length === 0) {
+        diagnosticHints.push(`International call to ${callInfo.region} (+${callInfo.countryCode})`);
+        diagnosticHints.push("Ensure your Telnyx account has international calling enabled for this country");
+        diagnosticHints.push("Short-duration failures (<500ms) typically indicate routing/carrier issues, not codec problems");
+      }
+
+      const failureNotes = diagnosticHints.length > 0
+        ? `${friendlyMessage}\n\nDiagnostics:\n- ${diagnosticHints.join('\n- ')}`
+        : friendlyMessage;
+
       // Update test call status to failed
       await db.update(campaignTestCalls)
         .set({
           status: 'failed',
-          testNotes: friendlyMessage,
+          testNotes: failureNotes,
           updatedAt: new Date()
         })
         .where(eq(campaignTestCalls.id, testCallId));
@@ -409,7 +429,13 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       return res.status(400).json({
         message: friendlyMessage,
         error: errorText,
-        status: telnyxResponse.status
+        status: telnyxResponse.status,
+        diagnostics: diagnosticHints.length > 0 ? diagnosticHints : undefined,
+        callInfo: callInfo.isInternational ? {
+          region: callInfo.region,
+          countryCode: callInfo.countryCode,
+          codec: callInfo.codec,
+        } : undefined,
       });
     }
 
@@ -430,12 +456,21 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
 
     res.json({
       success: true,
-      message: "Test call initiated - your phone should ring shortly",
+      message: callInfo.isInternational
+        ? `Test call initiated to ${callInfo.region} (+${callInfo.countryCode}) - your phone should ring shortly. Using ${callInfo.codec === 'PCMA' ? 'A-law' : 'µ-law'} codec with Krisp noise suppression.`
+        : "Test call initiated - your phone should ring shortly",
       testCallId,
       callControlId,
       phoneNumber: normalizedPhone,
       campaignName: campaign.name,
       agentName: assignment?.agentName || ctx?.agentName || campaign?.name || 'AI Agent',
+      callInfo: callInfo.isInternational ? {
+        region: callInfo.region,
+        countryCode: callInfo.countryCode,
+        codec: callInfo.codec,
+        isInternational: true,
+        noiseSuppression: 'Krisp',
+      } : undefined,
     });
 
   } catch (error) {
@@ -850,7 +885,7 @@ router.post("/webhook", async (req, res) => {
 
         // Calculate duration
         const [testCall] = await db
-          .select({ answeredAt: campaignTestCalls.answeredAt })
+          .select({ answeredAt: campaignTestCalls.answeredAt, testPhoneNumber: campaignTestCalls.testPhoneNumber })
           .from(campaignTestCalls)
           .where(eq(campaignTestCalls.id, testCallId))
           .limit(1);
@@ -860,11 +895,34 @@ router.post("/webhook", async (req, res) => {
           durationSeconds = Math.floor((Date.now() - new Date(testCall.answeredAt).getTime()) / 1000);
         }
 
+        // Detect short-duration international call failures (sub-500ms / no media exchange)
+        // These indicate routing or carrier issues, not codec problems
+        const hangupCause = payload?.hangup_cause || payload?.sip_hangup_cause || '';
+        const sipCode = payload?.sip_response_code || '';
+        const endedCallInfo = getInternationalCallInfo(testCall?.testPhoneNumber || '');
+
+        let failureNote = '';
+        if (durationSeconds === 0 && !testCall?.answeredAt) {
+          // Call never answered - routing failure
+          failureNote = `Call failed without being answered.`;
+          if (endedCallInfo.isInternational) {
+            failureNote += ` International call to ${endedCallInfo.region} (+${endedCallInfo.countryCode}).`;
+            failureNote += ` This typically indicates a carrier routing issue. SIP cause: ${hangupCause || sipCode || 'unknown'}.`;
+            failureNote += ` Recommendation: Contact Telnyx support with this call ID for routing investigation.`;
+          }
+          if (hangupCause) failureNote += ` Hangup cause: ${hangupCause}.`;
+          console.warn(`[Test Call Webhook] ⚠️ Short-duration failure for ${testCallId}: ${failureNote}`);
+        }
+
         await db.update(campaignTestCalls)
           .set({
             status: 'completed',
             endedAt: new Date(),
             durationSeconds,
+            testNotes: failureNote || undefined,
+            disposition: durationSeconds === 0 && !testCall?.answeredAt
+              ? (endedCallInfo.isInternational ? 'routing_failure' : 'no_answer')
+              : undefined,
             updatedAt: new Date(),
           })
           .where(eq(campaignTestCalls.id, testCallId));

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { storePendingCallState } from "../services/pending-call-state";
+import { getPreferredCodecForDestination } from "../services/audio-configuration";
 
 const router = Router();
 
@@ -135,17 +136,19 @@ const aiCallHandler = async (req: any, res: any) => {
     try {
       // Decode base64 client_state to extract call_id, provider, and store full context
       const decoded = Buffer.from(clientState, 'base64').toString('utf-8');
-      contextData = JSON.parse(decoded);
-      actualCallId = contextData.call_id;
+      const parsed = JSON.parse(decoded);
+      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid client_state JSON');
+      contextData = parsed;
+      actualCallId = contextData!.call_id;
 
       // Extract phone number from context for codec selection
       // This is more reliable than the TeXML params for outbound calls
       if (!phoneNumberForCodec) {
-        phoneNumberForCodec = contextData.phone_number || contextData.to_number ||
-                              contextData.destination || contextData.dialed_number || null;
+        phoneNumberForCodec = contextData!.phone_number || contextData!.to_number ||
+                              contextData!.destination || contextData!.dialed_number || null;
       }
 
-      const provider = contextData.provider?.toLowerCase() || 'gemini_live';
+      const provider = contextData!.provider?.toLowerCase() || 'gemini_live';
       dialerPath = '/voice-dialer';
       console.log(`[TeXML] Provider: ${provider} → routing to /voice-dialer (Gemini-only)`);
 
@@ -193,6 +196,29 @@ const aiCallHandler = async (req: any, res: any) => {
   const codec = getCodecForDestination(phoneNumberForCodec || undefined);
   const codecDescription = getCodecDescription(codec, phoneNumberForCodec || undefined);
 
+  // BIDIRECTIONAL CODEC FIX (Feb 2026):
+  // Telnyx has TWO separate codec parameters on <Stream>:
+  //   - codec="PCMA"             → controls the INBOUND track (callee → us)
+  //   - bidirectionalCodec="PCMA" → controls the BIDIRECTIONAL WebSocket stream (both directions)
+  // Previously we only set `codec`, so the bidirectional stream defaulted to PCMU.
+  // This caused double transcoding on UK/UAE calls: PCMA↔PCMU at Telnyx + wrong decoder on our side.
+  // Now we set BOTH to ensure the WebSocket stream matches the SIP leg codec.
+  //
+  // FUTURE: Consider using bidirectionalCodec="L16" (Linear PCM 16kHz) which:
+  //   - Eliminates ALL G.711 encoding/decoding on our server
+  //   - Only requires linear resampling (16kHz ↔ 24kHz for Gemini)
+  //   - Telnyx handles L16↔G.711 conversion on their media servers
+  //   - Doubles bandwidth (256kbps vs 128kbps) — acceptable for WebSocket
+  // To enable: set UNIFIED_AUDIO_CONFIG.enableL16Bidirectional = true
+  const bidirectionalCodec = codec; // Match SIP leg codec for zero-transcoding path
+
+  // FUTURE: G.722 / OPUS support (per Telnyx support recommendation Feb 2026)
+  // Telnyx bidirectional supports: PCMU, PCMA, G722, OPUS, AMR-WB, L16
+  const preferredWideband = getPreferredCodecForDestination(phoneNumberForCodec || undefined);
+  if (preferredWideband) {
+    console.log(`[TeXML] 🎵 Wideband codec available: ${preferredWideband} (using ${codec} until L16/wideband enabled)`);
+  }
+
   // Persist codec selection into pending call state so the dialer can
   // use it if Telnyx omits media_format in the start message.
   if (contextData && actualCallId) {
@@ -214,37 +240,32 @@ const aiCallHandler = async (req: any, res: any) => {
   const isInternationalCall = codec === 'PCMA'; // A-law = international (UK, EU, UAE, etc.)
 
   // Build the TeXML response with dynamic codec
-  // The codec attribute tells Telnyx which G.711 variant to use on the WebSocket
-  // This MUST match the destination carrier's codec to avoid double transcoding
+  // TWO codec attributes on <Stream>:
+  //   - codec: Controls inbound track (callee audio sent to us)
+  //   - bidirectionalCodec: Controls bidirectional WebSocket stream (both directions)
+  // BOTH must be set, otherwise bidirectional defaults to PCMU regardless of SIP codec.
   //
   // For INTERNATIONAL CALLS: Add Telnyx Suppression verb to reduce noise from:
   // - Network latency/jitter on long routes
-  // - Multiple codec transcodings (AI 24kHz → G.711 8kHz → carrier)
-  // - Background noise that becomes more audible after compression
+  // - Background noise on the prospect's side that becomes more audible after compression
   //
-  // Suppression engines:
-  // - "Krisp": Best for background noise (voices, music, traffic)
-  // - "Denoiser": Good general-purpose (default)
-  // - "DeepFilterNet": Good for static/hiss (newer engine)
-  // Per Telnyx support recommendation (Feb 2026):
-  // Bidirectional suppression eliminates noise on BOTH legs:
-  // - Outbound: our 24kHz→8kHz transcoded audio (AI agent voice)
-  // - Inbound: prospect audio over long international routes
-  // Krisp engine provides best voice isolation for telephony
+  // CRITICAL FIX (Feb 2026): Use direction="inbound" (NOT "both")
+  // The AI agent's outbound audio is already clean synthesized speech from Gemini.
+  // Only suppress the inbound (prospect) side.
   const texmlResponse = isInternationalCall
     ? `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Start>
-        <Suppression direction="both" noise_suppression_engine="Krisp" />
+        <Suppression direction="inbound" noise_suppression_engine="Krisp" />
     </Start>
     <Connect>
-        <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" codec="${codec}" />
+        <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" codec="${codec}" bidirectionalCodec="${bidirectionalCodec}" />
     </Connect>
 </Response>`
     : `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" codec="${codec}" />
+        <Stream url="${escapedWsUrl}" bidirectionalMode="rtp" codec="${codec}" bidirectionalCodec="${bidirectionalCodec}" />
     </Connect>
 </Response>`;
 
@@ -285,23 +306,27 @@ router.post("/incoming", (req, res) => {
   // This helps with network artifacts on long-distance calls
   const isInternationalIncoming = codec === 'PCMA';
 
-  // Bidirectional suppression for incoming international calls too
+  // CRITICAL FIX (Feb 2026): Use direction="inbound" for incoming calls too.
+  // For incoming calls: inbound = caller audio, outbound = our AI response.
+  // Our AI response is clean synthesized speech; running Krisp on it causes
+  // artifacts (same issue as outbound AI calls).
+  // Only suppress the international caller's audio (network noise, background).
   const incomingTexmlResponse = isInternationalIncoming
     ? `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Start>
-        <Suppression direction="both" noise_suppression_engine="Krisp" />
+        <Suppression direction="inbound" noise_suppression_engine="Krisp" />
     </Start>
     <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>
-        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" codec="${codec}" />
+        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" codec="${codec}" bidirectionalCodec="${codec}" />
     </Connect>
 </Response>`
     : `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say>Connecting you to the DemandGentic.ai By Pivotal B2B assistant.</Say>
     <Connect>
-        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" codec="${codec}" />
+        <Stream url="wss://${req.get('host')}/voice-dialer" bidirectionalMode="rtp" codec="${codec}" bidirectionalCodec="${codec}" />
     </Connect>
 </Response>`;
 

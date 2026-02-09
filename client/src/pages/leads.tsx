@@ -707,9 +707,49 @@ export default function LeadsPage() {
     },
   });
 
+  // Push to Client Dashboard - generic push for any campaign
+  const [pushDashboardDialogOpen, setPushDashboardDialogOpen] = useState(false);
+  const [pushDashboardAutoPublish, setPushDashboardAutoPublish] = useState(true);
+
+  const pushToDashboardMutation = useMutation({
+    mutationFn: async ({ campaignId, leadIds, autoPublish }: { campaignId?: string; leadIds?: string[]; autoPublish?: boolean }) => {
+      const res = await apiRequest('POST', '/api/leads/push-to-client-dashboard', { campaignId, leadIds, autoPublish });
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
+      setPushDashboardDialogOpen(false);
+      setSelectedLeads([]);
+      toast({
+        title: "Pushed to Client Dashboard",
+        description: data.message || `${data.pushed} lead(s) pushed to client dashboard`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error.message || "Failed to push leads to client dashboard",
+      });
+    },
+  });
+
+  const handlePushToDashboard = () => {
+    setPushDashboardDialogOpen(true);
+  };
+
+  const handleConfirmPushToDashboard = () => {
+    if (selectedLeads.length > 0) {
+      pushToDashboardMutation.mutate({ leadIds: selectedLeads, autoPublish: pushDashboardAutoPublish });
+    } else if (filterCampaign) {
+      pushToDashboardMutation.mutate({ campaignId: filterCampaign, autoPublish: pushDashboardAutoPublish });
+    }
+  };
+
   const syncRecordingMutation = useMutation({
     mutationFn: async (leadId: string) => {
-      return await apiRequest('POST', `/api/leads/${leadId}/sync-recording`, {});
+      const res = await apiRequest('POST', `/api/leads/${leadId}/sync-recording`, {});
+      return await res.json();
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
@@ -737,7 +777,8 @@ export default function LeadsPage() {
 
   const reEvaluateQAMutation = useMutation({
     mutationFn: async (campaignId: string) => {
-      return await apiRequest('POST', `/api/campaigns/${campaignId}/reevaluate-qa`, {});
+      const res = await apiRequest('POST', `/api/campaigns/${campaignId}/reevaluate-qa`, {});
+      return await res.json();
     },
     onSuccess: (data: any) => {
       // Show success message for background processing
@@ -763,7 +804,8 @@ export default function LeadsPage() {
 
   const consolidatedProcessMutation = useMutation({
     mutationFn: async (campaignId: string) => {
-      return await apiRequest('POST', `/api/campaigns/${campaignId}/process-all`, {});
+      const res = await apiRequest('POST', `/api/campaigns/${campaignId}/process-all`, {});
+      return await res.json();
     },
     onSuccess: (data: any) => {
       toast({
@@ -1420,6 +1462,20 @@ export default function LeadsPage() {
                           >
                             <Send className="mr-1 h-4 w-4" />
                             Submit to Client
+                          </Button>
+                        )}
+                        {/* Push to Client Dashboard - for approved/published leads not yet on dashboard */}
+                        {(lead.qaStatus === 'approved' || lead.qaStatus === 'published') && !lead.submittedToClient && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => pushToDashboardMutation.mutate({ leadIds: [lead.id], autoPublish: true })}
+                            disabled={pushToDashboardMutation.isPending}
+                            data-testid={`button-push-dashboard-${lead.id}`}
+                          >
+                            <Globe className="mr-1 h-4 w-4" />
+                            Push to Dashboard
                           </Button>
                         )}
                         {(lead.qaStatus === 'approved' || lead.qaStatus === 'published') && !lead.deliveredAt && (
@@ -2176,6 +2232,20 @@ export default function LeadsPage() {
                 Submit to Client ({selectedLeads.length})
               </Button>
               <Button
+                onClick={handlePushToDashboard}
+                disabled={pushToDashboardMutation.isPending}
+                variant="default"
+                className="bg-emerald-600 hover:bg-emerald-700"
+                data-testid="button-bulk-push-dashboard"
+              >
+                {pushToDashboardMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Globe className="mr-2 h-4 w-4" />
+                )}
+                Push to Client Dashboard ({selectedLeads.length})
+              </Button>
+              <Button
                 onClick={handleMarkDeliveredBulk}
                 disabled={markDeliveredBulkMutation.isPending}
                 variant="outline"
@@ -2188,8 +2258,8 @@ export default function LeadsPage() {
                 )}
                 Mark as Delivered ({selectedLeads.length})
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setBulkUpdateDialogOpen(true)}
                 data-testid="button-bulk-update-approved"
               >
@@ -2220,6 +2290,33 @@ export default function LeadsPage() {
                 </Button>
               )}
             </div>
+          )}
+          {/* Campaign-level Push to Dashboard - shown when campaign is filtered */}
+          {!isAgentOnly && filterCampaign && selectedLeads.length === 0 && (
+            <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20">
+              <CardContent className="py-3 px-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-emerald-600" />
+                  <span className="text-sm text-emerald-800 dark:text-emerald-200">
+                    Push all qualified leads for this campaign to the client dashboard
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={handlePushToDashboard}
+                  disabled={pushToDashboardMutation.isPending}
+                  data-testid="button-campaign-push-dashboard"
+                >
+                  {pushToDashboardMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Globe className="mr-2 h-4 w-4" />
+                  )}
+                  Push All to Client Dashboard
+                </Button>
+              </CardContent>
+            </Card>
           )}
           {renderLeadsTable(approvedLeads, !isAgentOnly, false)}
         </TabsContent>
@@ -3208,6 +3305,62 @@ export default function LeadsPage() {
               )}
               <Send className="mr-2 h-4 w-4" />
               Submit to Client
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Push to Client Dashboard Dialog */}
+      <Dialog open={pushDashboardDialogOpen} onOpenChange={setPushDashboardDialogOpen}>
+        <DialogContent data-testid="dialog-push-dashboard">
+          <DialogHeader>
+            <DialogTitle>Push Leads to Client Dashboard</DialogTitle>
+            <DialogDescription>
+              {selectedLeads.length > 0
+                ? `This will push ${selectedLeads.length} selected lead(s) to the client dashboard, making them visible in the client portal.`
+                : filterCampaign
+                  ? "This will push all qualified leads for the selected campaign to the client dashboard."
+                  : "Select leads or filter by campaign to push leads to the client dashboard."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">What this does:</p>
+              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                <li>Marks leads as submitted so they appear in the client portal</li>
+                <li>Auto-creates client campaign access if needed</li>
+                <li>Works for any campaign — no external form required</li>
+              </ul>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="autoPublish"
+                checked={pushDashboardAutoPublish}
+                onCheckedChange={(checked) => setPushDashboardAutoPublish(checked === true)}
+              />
+              <label htmlFor="autoPublish" className="text-sm cursor-pointer">
+                Auto-publish approved leads first (publish + push in one step)
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPushDashboardDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmPushToDashboard}
+              disabled={pushToDashboardMutation.isPending || (!selectedLeads.length && !filterCampaign)}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {pushToDashboardMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              <Globe className="mr-2 h-4 w-4" />
+              Push to Client Dashboard
             </Button>
           </DialogFooter>
         </DialogContent>

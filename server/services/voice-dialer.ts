@@ -516,22 +516,25 @@ function resolveAudioFormat(
       || startFormat?.name
       || startFormat?.media_type;
 
-  // CRITICAL: Telnyx WebSocket <Stream> defaults to PCMU regardless of SIP leg codec.
-  // The start message media_format.encoding tells us the ACTUAL WebSocket codec.
-  // If Telnyx doesn't report a codec, prefer client_state (TeXML-selected) when available,
-  // otherwise assume PCMU to avoid A-law noise on international calls.
+  // CODEC RESOLUTION (Feb 2026 fix):
+  // TeXML now sets BOTH codec AND bidirectionalCodec on <Stream>, so the
+  // start message media_format.encoding should report the ACTUAL bidirectional
+  // WebSocket codec (PCMA for international, PCMU for US).
+  //
+  // If Telnyx omits media_format, trust client_state — it now matches
+  // bidirectionalCodec (set in TeXML), NOT just the SIP leg codec.
+  //
+  // Previously: codec="PCMA" only controlled inbound track; bidirectional
+  // defaulted to PCMU. Client_state said A-law but wire was µ-law → garbled audio.
+  // Now both attributes are set, so client_state is trustworthy.
   if (!rawFormat) {
     const clientOverride = normalizeG711Format(clientStateFormat);
     if (clientOverride) {
-      console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing; using client_state override ${clientOverride} for WebSocket stream${telnyxTo ? ` (to: ${telnyxTo})` : ''}.`);
+      console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing; using bidirectionalCodec from TeXML: ${clientOverride}${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
       return { format: clientOverride, source: 'client_state' };
     }
     const source = telnyxTo ? 'telnyx' : 'default';
-    if (telnyxTo) {
-      console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing; defaulting to g711_ulaw (PCMU) for WebSocket stream (to: ${telnyxTo}).`);
-    } else {
-      console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing; defaulting to g711_ulaw (PCMU) for WebSocket stream.`);
-    }
+    console.warn(`${LOG_PREFIX} 🎧 Telnyx media_format missing, no client_state; defaulting to g711_ulaw (PCMU)${telnyxTo ? ` (to: ${telnyxTo})` : ''}`);
     return { format: 'g711_ulaw', source };
   }
 
@@ -1052,8 +1055,9 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             clientStateAudioFormat
           );
 
-          // CODEC VALIDATION: Detect mismatch between TeXML-requested codec and Telnyx-negotiated codec
-          // Per Telnyx support: media_format.encoding should reflect the negotiated codec
+          // CODEC VALIDATION: Verify bidirectionalCodec matches actual Telnyx stream
+          // With the Feb 2026 fix, TeXML sets bidirectionalCodec=codec, so these should match.
+          // If they don't match, trust Telnyx (it's what's on the wire).
           const texmlRequestedCodec = normalizeG711Format(clientStateAudioFormat);
           const telnyxReportedRaw = message?.start?.media_format?.encoding
             || message?.start?.media_format?.format
@@ -1061,13 +1065,13 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
           if (texmlRequestedCodec && telnyxReportedRaw) {
             const telnyxNormalized = normalizeG711Format(telnyxReportedRaw);
             if (telnyxNormalized && telnyxNormalized !== texmlRequestedCodec) {
-              console.error(`${LOG_PREFIX} ⚠️ CODEC MISMATCH: TeXML requested ${texmlRequestedCodec} but Telnyx negotiated ${telnyxNormalized} (raw: ${telnyxReportedRaw}). Using Telnyx value to match actual stream.`);
+              console.error(`${LOG_PREFIX} ⚠️ CODEC MISMATCH: bidirectionalCodec=${texmlRequestedCodec} but Telnyx stream=${telnyxNormalized} (raw: ${telnyxReportedRaw}). Using Telnyx value. Check if bidirectionalCodec attribute is supported on <Stream>.`);
               // Trust Telnyx-reported format (it's what's actually on the wire)
             } else if (telnyxNormalized) {
-              console.log(`${LOG_PREFIX} ✅ Codec validated: TeXML=${texmlRequestedCodec}, Telnyx=${telnyxNormalized} — match`);
+              console.log(`${LOG_PREFIX} ✅ Codec validated: bidirectionalCodec=${texmlRequestedCodec}, Telnyx stream=${telnyxNormalized} — match`);
             }
           } else if (texmlRequestedCodec && !telnyxReportedRaw) {
-            console.log(`${LOG_PREFIX} 🎧 Telnyx did not report media_format; using TeXML-selected codec: ${texmlRequestedCodec} (${audioFormatSource})`);
+            console.log(`${LOG_PREFIX} 🎧 Telnyx did not report media_format; trusting bidirectionalCodec: ${texmlRequestedCodec} (${audioFormatSource})`);
           }
 
           // Check for test session - either from explicit flag or from ID prefixes
@@ -2352,7 +2356,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     console.log(`${LOG_PREFIX} Starting parallel initialization (Gemini + DB)...`);
     console.log(`${LOG_PREFIX} 🔍 [Gemini] Session IDs: campaignId=${session.campaignId || 'EMPTY'}, contactId=${session.contactId || 'EMPTY'}, virtualAgentId=${session.virtualAgentId || 'EMPTY'}`);
 
-    const [geminiConnected, campaignConfig, contactInfoResult, agentConfig] = await Promise.all([
+    const [geminiConnected, campaignConfig, contactInfoResult, agentConfig, agentDefaultsRecord] = await Promise.all([
       // Gemini connection
       (async () => {
         console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
@@ -2360,10 +2364,11 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
         console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API (+${Date.now() - initStartTime}ms)`);
         return true;
       })(),
-      // Database calls - all in parallel
+      // Database calls - all in parallel (including agent defaults for voice fallback)
       getCampaignConfig(session.campaignId),
       getContactInfo(session.contactId),
       session.virtualAgentId ? getVirtualAgentConfig(session.virtualAgentId) : Promise.resolve(null),
+      db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1).then(r => r[0] || null),
     ]);
 
     console.log(`${LOG_PREFIX} Parallel init complete (+${Date.now() - initStartTime}ms)`);
@@ -2481,8 +2486,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       hasContactInfo: systemPrompt.includes('Prospect Information') || systemPrompt.includes(contactInfo?.firstName || 'N/A'),
     });
 
-    // Configure Gemini provider - get Agent Defaults voice as fallback
-    const [agentDefaultsRecord] = await db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1);
+    // Agent Defaults voice fallback (already fetched in parallel init block above)
     const globalDefaultVoice = agentDefaultsRecord?.defaultVoice || "Kore";
     // Voice priority: session override → virtual agent → campaign → agent defaults → fallback
     const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || globalDefaultVoice;
@@ -2756,15 +2760,19 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     // - Fallback timer (4s) → triggers greeting if no speech detected
     (session as any).greetingTriggeredByCallerSpeech = false;
 
-    // Fallback: If caller doesn't speak within 4s of audio flowing, send greeting anyway
+    // Fallback: If caller doesn't speak, send greeting.
     // This handles: silent pickups, voicemail that doesn't announce, etc.
+    // LATENCY FIX (Feb 2026): Reverted from 2s to 4.5s. The 2s timer was too
+    // aggressive, causing the agent to interrupt the prospect's initial "Hello?".
+    // This interruption broke the identity confirmation flow. 4.5s provides a
+    // safe buffer for the prospect to finish their initial greeting.
     const fallbackGreetingTimer = setTimeout(() => {
       if (session.isActive && !session.audioDetection.hasGreetingSent) {
-        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4s - sending greeting (fallback)`);
+        console.log(`${LOG_PREFIX} ⏱️ No caller speech detected after 4.5s - sending greeting (fallback)`);
         session.audioDetection.hasGreetingSent = true;
         provider.sendOpeningMessage(openingScript);
       }
-    }, 4000);
+    }, 4500);
     (session as any).fallbackGreetingTimer = fallbackGreetingTimer; // Store to clear it later
 
     console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized - TOTAL TIME: ${Date.now() - initStartTime}ms`);
@@ -5467,6 +5475,11 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
               }
 
               // Send greeting after a short delay to allow prospect to finish "Hello?"
+              // LATENCY FIX (Feb 2026): Reduced from 800ms to 400ms.
+              // 800ms felt sluggish — Gemini still needs ~300-500ms to generate
+              // the first audio chunk, so total delay was 1.3s+ after "Hello?".
+              // 400ms is enough for a typical greeting utterance to complete,
+              // and Gemini's VAD will handle barge-in if the prospect keeps talking.
               setTimeout(() => {
                 if (session.isActive && !session.audioDetection.hasGreetingSent) {
                   session.audioDetection.hasGreetingSent = true;
@@ -5477,7 +5490,7 @@ async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): 
                     provider.sendOpeningMessage(script);
                   }
                 }
-              }, 800);
+              }, 400);
             }
           },
           onTranscript: (segment) => {

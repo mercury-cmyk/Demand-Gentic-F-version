@@ -26,6 +26,7 @@ import {
   contacts,
   accounts,
   lists,
+  users,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -86,6 +87,7 @@ export interface ClientJWTPayload {
   firstName: string | null;
   lastName: string | null;
   isClient: true;
+  isOwner?: boolean;
 }
 
 declare global {
@@ -119,7 +121,7 @@ function buildJoinUrl(slug: string) {
   return '/client-portal/join/' + slug;
 }
 
-function generateClientToken(clientUser: typeof clientUsers.$inferSelect): string {
+function generateClientToken(clientUser: typeof clientUsers.$inferSelect, isOwner = false): string {
   const payload: ClientJWTPayload = {
     clientUserId: clientUser.id,
     clientAccountId: clientUser.clientAccountId,
@@ -127,6 +129,7 @@ function generateClientToken(clientUser: typeof clientUsers.$inferSelect): strin
     firstName: clientUser.firstName,
     lastName: clientUser.lastName,
     isClient: true,
+    ...(isOwner && { isOwner: true }),
   };
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
@@ -348,7 +351,15 @@ router.post('/auth/login', async (req, res) => {
       .set({ lastLoginAt: new Date() })
       .where(eq(clientUsers.id, clientUser.id));
 
-    const token = generateClientToken(clientUser);
+    // Check if this client user is also a platform admin (super admin / owner)
+    const [platformUser] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.email, clientUser.email.toLowerCase()))
+      .limit(1);
+    const isOwner = platformUser?.role === 'admin';
+
+    const token = generateClientToken(clientUser, isOwner);
 
     const [account] = await db
       .select()
@@ -365,6 +376,7 @@ router.post('/auth/login', async (req, res) => {
         lastName: clientUser.lastName,
         clientAccountId: clientUser.clientAccountId,
         clientAccountName: account?.name || 'Unknown',
+        isOwner,
       },
     });
   } catch (error) {
@@ -398,6 +410,7 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
         firstName: clientUser.firstName,
         lastName: clientUser.lastName,
         clientAccount: account,
+        isOwner: req.clientUser!.isOwner || false,
       },
     });
   } catch (error) {

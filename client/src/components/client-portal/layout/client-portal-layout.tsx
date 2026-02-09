@@ -51,6 +51,8 @@ import {
   ClipboardList,
   Brain,
   CalendarDays,
+  Crown,
+  ArrowLeft,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -64,6 +66,7 @@ interface ClientUser {
   lastName: string | null;
   clientAccountId: string;
   clientAccountName: string;
+  isOwner?: boolean;
 }
 
 interface ClientPortalLayoutProps {
@@ -89,7 +92,6 @@ const agenticOperator = {
 const baseNavigation = [
   { name: 'Dashboard', href: '/client-portal/dashboard', icon: LayoutDashboard },
   { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
-  { name: 'Order Requests', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList, description: 'AI-powered campaign ordering' },
   { name: 'Projects', href: '/client-portal/projects', icon: FolderKanban },
   { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain, description: 'AI research & analysis' },
   { name: 'Preview Studio', href: '/preview-studio', icon: Sparkles },
@@ -289,11 +291,19 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         )}
       >
         <div className="flex h-16 items-center justify-between px-4 border-b">
-          <Link href="/client-portal/dashboard">
-            <span className="text-lg font-semibold text-primary cursor-pointer">
-              Client Portal
-            </span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/client-portal/dashboard">
+              <span className="text-lg font-semibold text-primary cursor-pointer">
+                Client Portal
+              </span>
+            </Link>
+            {user?.isOwner && (
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 gap-1">
+                <Crown className="h-3 w-3" />
+                Owner
+              </Badge>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="icon"
@@ -360,6 +370,21 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             );
           })}
         </nav>
+
+        {/* Owner: Back to Admin Dashboard */}
+        {user?.isOwner && (
+          <div className="px-2 pb-2">
+            <Link href="/">
+              <span
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Admin Dashboard
+              </span>
+            </Link>
+          </div>
+        )}
 
         {/* Account info at bottom */}
         {user && (

@@ -21,6 +21,7 @@ import {
   Loader2,
   AlertCircle,
   BarChart,
+  RefreshCw,
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -31,6 +32,8 @@ export interface QueueStats {
   queued: number;
   inProgress: number;
   completed: number;
+  removed: number;
+  removedBreakdown: Record<string, number>;
   agents: number;
   suppression?: {
     totalSuppressed: number;
@@ -69,6 +72,35 @@ export function PhoneCampaignPanel({
   const queryClient = useQueryClient();
 
   const isAiAgent = campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql';
+
+  // Sync Queue mutation - re-populates queue from assigned audience list
+  const syncQueueMutation = useMutation({
+    mutationFn: async (campaignId: string) => {
+      const res = await apiRequest('POST', `/api/campaigns/${campaignId}/queue/populate`);
+      return await res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/campaigns/queue-stats'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaign.id}/queue`] });
+      toast({
+        title: 'Queue Synced',
+        description: data.message || `Enqueued ${data.enqueuedCount || 0} contacts.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Queue Sync Failed',
+        description: error.message || 'Failed to sync queue from audience list',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleSyncQueue = () => {
+    if (confirm('Sync queue from audience list? This will add any missing contacts to the queue.')) {
+      syncQueueMutation.mutate(campaign.id.toString());
+    }
+  };
 
   // AI Calls mutation
   const startAiCallsMutation = useMutation({
@@ -111,7 +143,7 @@ export function PhoneCampaignPanel({
   return (
     <div className={className}>
       {/* Queue Statistics Grid */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-4 gap-3 mb-4">
         <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">In Queue</p>
           <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">
@@ -130,7 +162,39 @@ export function PhoneCampaignPanel({
             {queueStats?.completed || 0}
           </p>
         </div>
+        <div className="p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-900">
+          <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">Filtered Out</p>
+          <p className="text-2xl font-bold text-orange-700 dark:text-orange-300">
+            {queueStats?.removed || 0}
+          </p>
+        </div>
       </div>
+
+      {/* Removed/Filtered Breakdown */}
+      {queueStats?.removed > 0 && queueStats.removedBreakdown && Object.keys(queueStats.removedBreakdown).length > 0 && (
+        <div className="p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-900 mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+            <span className="text-sm font-semibold text-orange-700 dark:text-orange-300">
+              Filtered Contacts Breakdown
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {Object.entries(queueStats.removedBreakdown)
+              .sort(([, a], [, b]) => b - a)
+              .map(([reason, count]) => (
+                <div key={reason} className="flex items-center justify-between">
+                  <span className="text-orange-600/80 dark:text-orange-400/80 capitalize">
+                    {reason.replace(/_/g, ' ')}:
+                  </span>
+                  <span className="font-medium text-orange-700 dark:text-orange-300">
+                    {count}
+                  </span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Progress Bar */}
       <div className="mb-4 space-y-1.5">
@@ -151,7 +215,7 @@ export function PhoneCampaignPanel({
         </div>
         <div className="flex items-center gap-2">
           <Users className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium">{queueStats?.total || 0} Total Contacts</span>
+          <span className="text-sm font-medium">{queueStats?.total || 0} Total in Queue Table</span>
         </div>
       </div>
 
@@ -267,6 +331,20 @@ export function PhoneCampaignPanel({
             Test AI Agent
           </Button>
         )}
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleSyncQueue}
+          disabled={syncQueueMutation.isPending}
+        >
+          {syncQueueMutation.isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <RefreshCw className="w-4 h-4 mr-2" />
+          )}
+          Sync Queue
+        </Button>
 
         <Button
           size="sm"

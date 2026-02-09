@@ -766,18 +766,18 @@ function smoothChunkBoundary(pcmBuffer: Buffer, state: TranscoderState, fadeInSa
 
 /**
  * Noise gate — zeroes out PCM samples whose absolute level is below threshold.
- * Eliminates low-level hiss / static / quantisation noise that becomes
- * very audible after the 24 kHz → 8 kHz decimation.
+ * Eliminates low-level quantisation noise in true silence sections.
  *
  * Threshold is tuned for 16-bit signed PCM (-32768 … 32767).
- * 400 ≈ −38 dBFS — more aggressive gating to eliminate static/hiss
- * A short hold-off window (holdSamples) prevents chopping the tail of
- * consonants / sibilants.
+ * 150 ≈ −46 dBFS — conservative gating that only catches true silence/noise.
+ * A hold-off window (holdSamples) prevents chopping consonant/sibilant tails.
  *
- * UPDATED Feb 2026: Increased threshold from 200 to 400 to better suppress
- * static/hissing noise that was bleeding through during pauses.
+ * UPDATED Feb 2026: Reduced threshold from 400→150 and hold from 60→120.
+ * 400 was too aggressive — gated quiet speech sounds (s, f, th, word tails)
+ * creating audible "pumping" and choppy agent voice.
+ * Also changed fade-out to exponential curve (less audible than linear ramp).
  */
-function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples: number = 50, state?: TranscoderState): Buffer {
+function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 150, holdSamples: number = 120, state?: TranscoderState): Buffer {
   const samples = pcmBuffer.length / 2;
   if (samples === 0) return pcmBuffer;
 
@@ -795,9 +795,10 @@ function applyNoiseGate(pcmBuffer: Buffer, threshold: number = 400, holdSamples:
       output.writeInt16LE(sample, i * 2);
       holdCounter = holdSamples;
     } else if (holdCounter > 0) {
-      // Still inside hold window — pass through, fade gently
-      const fade = holdCounter / holdSamples;
-      output.writeInt16LE(Math.round(sample * fade), i * 2);
+      // Still inside hold window — pass through fully (no fade)
+      // FIXED: Removed linear fade which caused audible "pumping" artifacts.
+      // Keep signal intact during hold to preserve natural speech decay.
+      output.writeInt16LE(sample, i * 2);
       holdCounter--;
     } else {
       // Below threshold & hold expired — silence
@@ -946,11 +947,14 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format, state?: Tran
   // Only process the valid aligned portion
   const bufferToProcess = workingBuffer.slice(0, samplesToProcess * 2);
 
-  // Step 0: Apply early noise suppression
-  const denoised = applyEarlyNoiseSupression(bufferToProcess);
+  // NOTE (Feb 2026): applyEarlyNoiseSupression REMOVED from outbound path.
+  // Gemini outputs clean synthesized 24kHz PCM — no environmental noise.
+  // The function was suppressing quiet speech (consonants, transitions) causing
+  // audible artifacts and "noisy" agent voice. The anti-aliasing filter handles
+  // high-frequency content above Nyquist.
 
   // Step 1: Normalize with reduced target (0.88) to prevent clipping
-  const processed = normalizeAudio(denoised, 0.88);
+  const processed = normalizeAudio(bufferToProcess, 0.88);
 
   // Step 2: Apply anti-aliasing FIR filter before downsampling
   const filtered = applyLowPassFilter(processed, 0.30, false);
@@ -961,8 +965,13 @@ export function pcm24kToG711(pcmBuffer: Buffer, format: G711Format, state?: Tran
   // Step 4: Smooth chunk boundary to prevent pops/clicks
   const smoothed = smoothChunkBoundary(pcm8k, activeState);
 
-  // Step 5: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
-  const gated = applyNoiseGate(smoothed, 400, 60, activeState);
+  // Step 5: Gentle noise gate — ONLY suppress true silence
+  // FIXED Feb 2026: Reduced from 400/60 to 150/120.
+  // 400 was too aggressive: it gated quiet consonants (s, f, th) and word
+  // tail-offs, creating audible "pumping" and choppy speech.
+  // 150 (~-46dBFS) only catches quantization noise in true silence.
+  // Hold 120 samples (15ms) prevents chopping sibilant tails.
+  const gated = applyNoiseGate(smoothed, 150, 120, activeState);
 
   // Step 6: Encode to G.711 µ-law
   return pcm8kToG711(gated, format);
@@ -1004,29 +1013,45 @@ function pcm24kToG711Alaw(pcmBuffer: Buffer, state: TranscoderState): Buffer {
   // 2. Process valid alignment
   const bufferToProcess = workingBuffer.slice(0, samplesToProcess * 2);
 
+  // NOTE (Feb 2026): applyEarlyNoiseSupression REMOVED from A-law outbound path.
+  // Gemini output is clean synthesized PCM — the function was damaging quiet
+  // speech consonants/transitions (suppressing samples below 150 to 30%).
+  // The anti-aliasing filter below handles high-frequency roll-off.
+
   // 3. Remove DC Offset (critical for A-law to prevent clicking)
   const dcCorrected = removeDcOffset(bufferToProcess);
 
-  // 4. Stateful Anti-Aliasing Filter
+  // 5. Soft-limit peaks BEFORE encoding to A-law.
+  //    CRITICAL FIX (Feb 2026): A-law's non-linear quantization is harsher
+  //    than µ-law at high amplitudes. Raw Gemini 24kHz output can have peaks
+  //    that clip badly when encoded to A-law, producing distorted/muffled speech.
+  //    The softLimitForAlaw function was defined but never called in this path.
+  const limited = softLimitForAlaw(dcCorrected);
+
+  // 6. Stateful Anti-Aliasing Filter
   // This uses the "history" in state to filter across boundaries seamlessly
   // preventing the "ringing" noise at 50Hz (chunk rate)
-  const filtered = applyLowPassFilter(dcCorrected, 0.30, true, state);
+  const filtered = applyLowPassFilter(limited, 0.30, true, state);
 
-  // 5. Decimate 3:1 (24kHz → 8kHz)
+  // 7. Decimate 3:1 (24kHz → 8kHz)
   // simpleDecimate3to1 includes a secondary weighted smooth, which helps
   // further reduce high-frequency quantisation noise
   const pcm8k = simpleDecimate3to1(filtered);
 
-  // 6. Smooth Boundaries (Crossfade)
+  // 8. Smooth Boundaries (Crossfade)
   // Further ensures no discontinuity between the last sample of previous chunk
   // and first sample of this chunk
   const smoothed = smoothChunkBoundary(pcm8k, state);
 
-  // 7. Aggressive Noise Gate (Threshold 600)
-  // A-law is unforgiving of silence noise floor.
-  const gated = applyNoiseGate(smoothed, 600, 80, state);
+  // 9. Gentle noise gate — ONLY suppress true silence
+  //    FIXED Feb 2026: Reduced from 450/100 to 150/120.
+  //    450 was gating quiet consonants and transitions, creating
+  //    audible pumping/choppy speech on international calls.
+  //    150 (~-46dBFS) only catches quantization noise in true silence.
+  //    Hold 120 samples (15ms) prevents chopping sibilant tails.
+  const gated = applyNoiseGate(smoothed, 150, 120, state);
 
-  // 8. Encode to A-law
+  // 10. Encode to A-law
   return pcm8kToG711(gated, 'alaw');
 }
 
@@ -1059,8 +1084,8 @@ export function pcm16kToG711(pcmBuffer: Buffer, format: G711Format, state?: Tran
   // Step 3: Smooth chunk boundary to prevent pops/clicks
   const smoothed = smoothChunkBoundary(pcm8k, activeState);
 
-  // Step 4: Apply noise gate to suppress low-level hiss/static (400 threshold for µ-law)
-  const gated = applyNoiseGate(smoothed, 400, 60, activeState);
+  // Step 4: Gentle noise gate — only suppress true silence (150 threshold)
+  const gated = applyNoiseGate(smoothed, 150, 120, activeState);
 
   // Step 5: Encode to G.711 µ-law
   return pcm8kToG711(gated, 'ulaw');
@@ -1123,9 +1148,10 @@ function pcm16kToG711Alaw(pcmBuffer: Buffer, state: TranscoderState): Buffer {
   // 6. Smooth Boundaries (Crossfade with previous chunk's last sample)
   const smoothed = smoothChunkBoundary(pcm8k, state);
 
-  // 7. Noise Gate — threshold 450 (reduced from 600 to preserve consonants
-  //    on lossy international networks; hold 70 samples for sibilant tails)
-  const gated = applyNoiseGate(smoothed, 450, 70, state);
+  // 7. Gentle noise gate — only suppress true silence
+  //    FIXED Feb 2026: 450 was gating quiet consonants on international calls.
+  //    150 only catches quantization noise. Hold 120 preserves sibilant tails.
+  const gated = applyNoiseGate(smoothed, 150, 120, state);
 
   // 8. Encode to A-law
   return pcm8kToG711(gated, 'alaw');

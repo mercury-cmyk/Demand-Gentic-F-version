@@ -71,6 +71,7 @@ interface ClientUser {
   lastName: string;
   clientAccountId: string;
   clientAccountName: string;
+  isOwner?: boolean;
 }
 
 interface Campaign {
@@ -1276,7 +1277,15 @@ export default function ClientPortalDashboard() {
               </div>
               {!sidebarCollapsed && (
                 <div className="flex-1 min-w-0">
-                  <h1 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white leading-none">Client Portal</h1>
+                  <div className="flex items-center gap-1.5">
+                    <h1 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white leading-none">Client Portal</h1>
+                    {user.isOwner && (
+                      <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[9px] font-semibold px-1.5 py-0.5 rounded-full dark:bg-amber-900/30 dark:text-amber-300">
+                        <Crown className="h-2.5 w-2.5" />
+                        Owner
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-500 font-medium truncate mt-1">{user.clientAccountName}</p>
                 </div>
               )}
@@ -1328,6 +1337,19 @@ export default function ClientPortalDashboard() {
             </button>
           ))}
         </nav>
+
+        {/* Owner: Back to Admin Dashboard */}
+        {user.isOwner && (
+          <div className="px-3 pt-3">
+            <a
+              href="/"
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {!sidebarCollapsed && "Admin Dashboard"}
+            </a>
+          </div>
+        )}
 
         {/* Pinned CTA - Talk to AI Agent */}
         <div className="p-3 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30">

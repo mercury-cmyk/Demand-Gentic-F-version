@@ -100,17 +100,21 @@ export async function registerContent(
 
   // Log the registration
   if (context.clientAccountId) {
-    await db.insert(activityLog).values({
-      action: 'qa_content_registered',
-      entityType: 'qa_gated_content',
-      entityId: newContent.id,
-      userId: context.createdBy,
-      payload: {
-        contentType,
-        contentId,
-        clientAccountId: context.clientAccountId,
-      },
-    });
+    try {
+      await db.insert(activityLog).values({
+        eventType: 'qa_analysis_started',
+        entityType: 'lead',
+        entityId: newContent.id,
+        createdBy: context.createdBy,
+        payload: {
+          contentType,
+          contentId,
+          clientAccountId: context.clientAccountId,
+        },
+      });
+    } catch (logErr) {
+      console.error('[QA-Gate] Failed to log content registration:', logErr);
+    }
   }
 
   return newContent;
@@ -193,17 +197,21 @@ export async function analyzeContent(
     .where(eq(qaGatedContent.id, qaContentId));
 
   // Log the analysis
-  await db.insert(activityLog).values({
-    action: autoApproved ? 'qa_auto_approved' : 'qa_analysis_completed',
-    entityType: 'qa_gated_content',
-    entityId: qaContentId,
-    payload: {
-      score: analysisResult.score,
-      status: newStatus,
-      autoApproved,
-      contentType: content.contentType,
-    },
-  });
+  try {
+    await db.insert(activityLog).values({
+      eventType: autoApproved ? 'qa_auto_approved' : 'qa_analysis_completed',
+      entityType: 'lead',
+      entityId: qaContentId,
+      payload: {
+        score: analysisResult.score,
+        status: newStatus,
+        autoApproved,
+        contentType: content.contentType,
+      },
+    });
+  } catch (logErr) {
+    console.error('[QA-Gate] Failed to log analysis:', logErr);
+  }
 
   return analysisResult;
 }
@@ -457,18 +465,23 @@ export async function submitReview(
     .returning();
 
   // Log the review
-  await db.insert(activityLog).values({
-    action: `qa_manual_${review.status}`,
-    entityType: 'qa_gated_content',
-    entityId: qaContentId,
-    userId: review.reviewerId,
-    payload: {
-      status: review.status,
-      score: review.score,
-      notes: review.notes,
-      contentType: content.contentType,
-    },
-  });
+  try {
+    await db.insert(activityLog).values({
+      eventType: 'qa_analysis_completed',
+      entityType: 'lead',
+      entityId: qaContentId,
+      createdBy: review.reviewerId,
+      payload: {
+        action: `qa_manual_${review.status}`,
+        status: review.status,
+        score: review.score,
+        notes: review.notes,
+        contentType: content.contentType,
+      },
+    });
+  } catch (logErr) {
+    console.error('[QA-Gate] Failed to log review:', logErr);
+  }
 
   return updated;
 }
@@ -501,17 +514,22 @@ export async function publishToClient(qaContentId: string, publisherId?: string)
     .where(eq(qaGatedContent.id, qaContentId));
 
   // Log the publication
-  await db.insert(activityLog).values({
-    action: 'qa_content_published',
-    entityType: 'qa_gated_content',
-    entityId: qaContentId,
-    userId: publisherId,
-    payload: {
-      contentType: content.contentType,
-      contentId: content.contentId,
-      clientAccountId: content.clientAccountId,
-    },
-  });
+  try {
+    await db.insert(activityLog).values({
+      eventType: 'qa_auto_approved',
+      entityType: 'lead',
+      entityId: qaContentId,
+      createdBy: publisherId,
+      payload: {
+        action: 'qa_content_published',
+        contentType: content.contentType,
+        contentId: content.contentId,
+        clientAccountId: content.clientAccountId,
+      },
+    });
+  } catch (logErr) {
+    console.error('[QA-Gate] Failed to log publication:', logErr);
+  }
 
   return true;
 }
