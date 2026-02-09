@@ -13,9 +13,11 @@ import {
   clientAccounts,
   clientUsers,
   campaigns,
+  campaignIntakeRequests,
   virtualAgents,
 } from '@shared/schema';
 import { z } from 'zod';
+import { isFeatureEnabled } from '../feature-flags';
 
 const router = Router();
 
@@ -115,7 +117,114 @@ router.get('/', async (req: Request, res: Response) => {
       .where(eq(workOrders.clientAccountId, clientAccountId))
       .orderBy(desc(campaigns.createdAt));
 
-    res.json(clientCampaigns);
+    const campaignIds = new Set(clientCampaigns.map((c) => c.id));
+
+    // Also include campaigns created from approved intake requests (agentic orders)
+    const approvedIntakeStatuses = ['approved', 'qso_approved', 'in_progress', 'completed'] as const;
+
+    const intakeCampaigns = await db
+      .select({
+        id: campaigns.id,
+        name: campaigns.name,
+        status: campaigns.status,
+        type: campaigns.type,
+        campaignType: campaigns.type,
+        dialMode: campaigns.dialMode,
+        startDate: campaigns.startDate,
+        endDate: campaigns.endDate,
+        targetQualifiedLeads: campaigns.targetQualifiedLeads,
+        costPerLead: campaigns.costPerLead,
+        intakeStatus: campaignIntakeRequests.status,
+        intakeRequestId: campaignIntakeRequests.id,
+        requestedLeadCount: campaignIntakeRequests.requestedLeadCount,
+      })
+      .from(campaigns)
+      .innerJoin(campaignIntakeRequests, eq(campaigns.id, campaignIntakeRequests.campaignId))
+      .where(and(
+        eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+        inArray(campaignIntakeRequests.status, approvedIntakeStatuses as any)
+      ))
+      .orderBy(desc(campaigns.createdAt));
+
+    const mappedIntakeCampaigns = intakeCampaigns
+      .filter((c) => !campaignIds.has(c.id))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        type: c.type,
+        campaignType: c.campaignType,
+        dialMode: c.dialMode,
+        startDate: c.startDate,
+        endDate: c.endDate,
+        targetQualifiedLeads: c.targetQualifiedLeads,
+        costPerLead: c.costPerLead,
+        orderNumber: null,
+        estimatedBudget: null,
+        approvedBudget: null,
+        eligibleCount: c.requestedLeadCount || 0,
+        verifiedCount: 0,
+        deliveredCount: 0,
+        totalContacts: 0,
+        intakeStatus: c.intakeStatus,
+        intakeRequestId: c.intakeRequestId,
+        clientStatus: c.status === 'draft' ? 'approved_pending_setup' : null,
+      }));
+
+    // V2: Also include campaigns linked directly via campaigns.clientAccountId
+    // This catches campaigns created by admins without workOrders or intakeRequests
+    let directCampaigns: typeof clientCampaigns = [];
+    if (isFeatureEnabled('client_campaign_listing_v2')) {
+      // Add intake campaign IDs to the dedup set
+      for (const ic of mappedIntakeCampaigns) {
+        campaignIds.add(ic.id);
+      }
+
+      const directLinked = await db
+        .select({
+          id: campaigns.id,
+          name: campaigns.name,
+          status: campaigns.status,
+          type: campaigns.type,
+          campaignType: campaigns.type,
+          dialMode: campaigns.dialMode,
+          startDate: campaigns.startDate,
+          endDate: campaigns.endDate,
+          targetQualifiedLeads: campaigns.targetQualifiedLeads,
+          costPerLead: campaigns.costPerLead,
+          approvalStatus: campaigns.approvalStatus,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.clientAccountId, clientAccountId))
+        .orderBy(desc(campaigns.createdAt));
+
+      directCampaigns = directLinked
+        .filter((c) => !campaignIds.has(c.id))
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          type: c.type,
+          campaignType: c.campaignType,
+          dialMode: c.dialMode,
+          startDate: c.startDate,
+          endDate: c.endDate,
+          targetQualifiedLeads: c.targetQualifiedLeads,
+          costPerLead: c.costPerLead,
+          orderNumber: null as any,
+          estimatedBudget: null as any,
+          approvedBudget: null as any,
+          eligibleCount: 0,
+          verifiedCount: 0,
+          deliveredCount: 0,
+          totalContacts: 0,
+          clientStatus: c.status === 'draft'
+            ? 'approved_pending_setup'
+            : (c.approvalStatus as string) || null,
+        }));
+    }
+
+    res.json([...clientCampaigns, ...mappedIntakeCampaigns, ...directCampaigns]);
   } catch (error) {
      console.error('[CLIENT CAMPAIGNS] List error:', error);
      res.status(500).json({ message: 'Failed to list campaigns' });
@@ -340,7 +449,51 @@ router.get('/my-campaigns', async (req: Request, res: Response) => {
       .where(eq(workOrders.clientAccountId, clientAccountId))
       .orderBy(desc(workOrders.createdAt));
 
-    res.json({ campaigns: orders });
+    // V2: Also include campaigns linked directly via campaigns.clientAccountId
+    let directLinkedCampaigns: any[] = [];
+    if (isFeatureEnabled('client_campaign_listing_v2')) {
+      const woLinkedCampaignIds = new Set(
+        orders.map(o => (o as any).campaignId).filter(Boolean)
+      );
+
+      const directCampaigns = await db
+        .select({
+          id: campaigns.id,
+          name: campaigns.name,
+          status: campaigns.status,
+          type: campaigns.type,
+          startDate: campaigns.startDate,
+          endDate: campaigns.endDate,
+          targetQualifiedLeads: campaigns.targetQualifiedLeads,
+          approvalStatus: campaigns.approvalStatus,
+          createdAt: campaigns.createdAt,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.clientAccountId, clientAccountId))
+        .orderBy(desc(campaigns.createdAt));
+
+      directLinkedCampaigns = directCampaigns
+        .filter(c => !woLinkedCampaignIds.has(c.id))
+        .map(c => ({
+          id: c.id,
+          orderNumber: null,
+          title: c.name,
+          description: null,
+          orderType: c.type || 'lead_generation',
+          priority: 'normal',
+          status: c.status === 'draft' ? 'approved_pending_setup' : c.status,
+          targetLeadCount: c.targetQualifiedLeads,
+          leadsGenerated: 0,
+          leadsDelivered: 0,
+          progressPercent: 0,
+          campaignConfig: null,
+          submittedAt: null,
+          createdAt: c.createdAt,
+          source: 'direct', // Indicates came from direct client link, not workOrder
+        }));
+    }
+
+    res.json({ campaigns: [...orders, ...directLinkedCampaigns] });
   } catch (error) {
     console.error('[CLIENT CAMPAIGNS] Get my campaigns error:', error);
     res.status(500).json({ message: 'Failed to fetch campaigns' });

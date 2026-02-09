@@ -22,6 +22,21 @@ export const FEATURE_FLAGS = {
     description: 'Enable Argyle event-sourced campaign drafts (client-gated to Argyle only)',
     default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
   },
+  ukef_campaign_reports: {
+    name: 'ukef_campaign_reports',
+    description: 'Enable UKEF campaign reports with lead evidence, recordings, and QA (client-gated to Lightcast/UKEF only)',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
+  ukef_transcript_qa: {
+    name: 'ukef_transcript_qa',
+    description: 'Enable UKEF Transcript Quality + Disposition Validation Pipeline (client-gated to Lightcast/UKEF only)',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
+  client_campaign_listing_v2: {
+    name: 'client_campaign_listing_v2',
+    description: 'Fix client portal campaign listing to include campaigns linked directly via clientAccountId (not only via workOrders/intakeRequests)',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
   // Add more feature flags here as needed
 } as const;
 

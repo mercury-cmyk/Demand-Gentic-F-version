@@ -44,6 +44,8 @@ import clientPortalCrmRouter from './client-portal-crm';
 import clientPortalCampaignsRouter from './client-portal-campaigns';
 import clientPortalBookingsRouter from './client-portal-bookings';
 import argyleEventsRouter from '../integrations/argyle_events/routes';
+import { ukefReportsRouter } from '../integrations/ukef_reports';
+import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 
 const router = Router();
 
@@ -186,6 +188,12 @@ router.use('/bookings', requireClientAuth, clientPortalBookingsRouter);
 
 // Argyle event-sourced campaign drafts (feature-flagged, client-gated)
 router.use('/argyle-events', requireClientAuth, argyleEventsRouter);
+
+// UKEF campaign reports with lead evidence & QA (feature-flagged, client-gated)
+router.use('/ukef-reports', requireClientAuth, ukefReportsRouter);
+
+// UKEF transcript quality + disposition validation (feature-flagged, client-gated)
+router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
 
 // Campaigns (Client wizard and management)
 router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);

@@ -203,6 +203,31 @@ router.post('/campaign-intake/:id/approve', requireAuth, async (req: Request, re
       return res.status(404).json({ success: false, message: 'Intake request not found' });
     }
 
+    // Ensure campaign linkage is fully populated for client portal visibility
+    if (updated.campaignId) {
+      const [campaign] = await db
+        .select({
+          clientAccountId: campaigns.clientAccountId,
+          intakeRequestId: campaigns.intakeRequestId,
+          creationMode: campaigns.creationMode,
+        })
+        .from(campaigns)
+        .where(eq(campaigns.id, updated.campaignId))
+        .limit(1);
+
+      if (campaign) {
+        await db
+          .update(campaigns)
+          .set({
+            clientAccountId: campaign.clientAccountId || updated.clientAccountId || undefined,
+            intakeRequestId: campaign.intakeRequestId || updated.id,
+            creationMode: campaign.creationMode || 'intake',
+            updatedAt: new Date(),
+          })
+          .where(eq(campaigns.id, updated.campaignId));
+      }
+    }
+
     res.json({ success: true, data: updated });
   } catch (error: any) {
     console.error('[Admin Agentic] Approve intake error:', error);
