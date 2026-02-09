@@ -14,15 +14,23 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface LandingPageTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPageTabProps) {
+export default function LandingPageTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: LandingPageTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ctaGoal, setCtaGoal] = useState("");
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -32,7 +40,7 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
     onSuccess: (data) => {
       setResult(data.content);
       setProjectId(data.projectId);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
       toast({ title: "Landing page generated!" });
     },
     onError: (error: any) => {
@@ -42,7 +50,11 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
 
   const publishMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", `/api/generative-studio/publish/${projectId}`, data);
+      const res = await apiRequest("POST", `/api/generative-studio/publish/${projectId}`, {
+        ...data,
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: (data) => {
@@ -56,7 +68,10 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
 
   const saveAsAssetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`);
+      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`, {
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: () => {
@@ -65,7 +80,12 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
   });
 
   const handleGenerate = (params: Record<string, any>) => {
-    generateMutation.mutate({ ...params, ctaGoal: ctaGoal || undefined });
+    generateMutation.mutate({
+      ...params,
+      ctaGoal: ctaGoal || undefined,
+      organizationId,
+      clientProjectId,
+    });
   };
 
   return (
@@ -89,6 +109,7 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Landing Page"
+          disabled={!organizationId}
           extraFields={
             <div className="space-y-2">
               <Label>CTA Goal</Label>
@@ -96,6 +117,7 @@ export default function LandingPageTab({ brandKits, orgIntelligence }: LandingPa
                 placeholder="e.g., Book a demo, Sign up for free trial"
                 value={ctaGoal}
                 onChange={(e) => setCtaGoal(e.target.value)}
+                disabled={!organizationId}
               />
             </div>
           }

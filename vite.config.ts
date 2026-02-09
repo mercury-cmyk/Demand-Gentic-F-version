@@ -12,28 +12,6 @@ export default defineConfig({
   plugins: [
     react(),
     // runtimeErrorOverlay(), // Temporarily disabled to reduce noise
-    {
-      name: "disable-vite-client",
-      enforce: "post",
-      transformIndexHtml(html) {
-        // Remove Vite client injection to prevent websocket attempts in dev.
-        // Handles relative and absolute URLs (e.g. when behind a tunnel/proxy).
-        return html
-          .replace(
-            /<script\b[^>]*src=(["'])[^"']*\/\@vite\/client\1[^>]*>\s*<\/script>/gi,
-            "",
-          )
-          .replace(
-            /<script\b[^>]*>\s*import\s+(["'])[^"']*\/\@vite\/client\1;?\s*<\/script>/gi,
-            "",
-          )
-          .replace(
-            /<script\b[^>]*>\s*import\(\s*(["'])[^"']*\/\@vite\/client\1\s*\)\s*;?\s*<\/script>/gi,
-            "",
-          )
-          .replace(/\/\@vite\/client\b/gi, "/__vite_client_disabled__");
-      },
-    },
   ],
   resolve: {
     alias: {
@@ -50,6 +28,7 @@ export default defineConfig({
   server: {
     port: 5000,
     strictPort: true,
+    host: "0.0.0.0",
     fs: {
       strict: true,
       deny: ["**/.*"],
@@ -74,9 +53,9 @@ export default defineConfig({
       usePolling: false,
       interval: 1000,
     },
-    // Disable HMR - WebSocket frames getting corrupted
-    hmr: false,
-    // Disable Vite websocket server entirely
-    ws: false,
+    // Configure HMR for ngrok usage
+    hmr: {
+      clientPort: 443,
+    },
   },
 });

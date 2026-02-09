@@ -54,7 +54,7 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Led Intelligence, AI Led Execution — By Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human Led Intelligence, AI Led Execution — By DemandGentic</span>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-8">
@@ -1102,7 +1102,7 @@ export default function LandingPage() {
                 <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Built for Truth.</span>
               </h2>
               <blockquote className="text-xl text-muted-foreground mb-6 border-l-4 border-violet-500 pl-6 italic">
-                "Starting Pivotal B2B in Afghanistan in 2017 taught me that every interaction counts and every mistake is public.
+                "Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public.
                 We built DemandGentic.ai to be The Agentic Steward — a system that reasons before it acts, remembers every interaction,
                 and puts truth, human connection, and compliance above everything else."
               </blockquote>
@@ -1116,7 +1116,7 @@ export default function LandingPage() {
                 </div>
               </div>
               <p className="mt-6 text-muted-foreground">
-                DemandGentic.ai is built by Pivotal B2B — a B2B marketing and demand team trained on 11+ years
+                DemandGentic.ai is built by DemandGentic — a B2B marketing and demand team trained on 11+ years
                 of first-hand front-line experience. We love to be called The Problem Solvers.
                 From Afghanistan to enterprise clients worldwide, we didn't build theory. We built what actually works.
               </p>
@@ -1189,17 +1189,17 @@ export default function LandingPage() {
                 </div>
                 <div className="flex flex-col">
                   <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-                  <span className="text-[10px] text-slate-400 font-medium">Human Led Intelligence, AI Led Execution — By Pivotal B2B</span>
+                  <span className="text-[10px] text-slate-400 font-medium">Human Led Intelligence, AI Led Execution — By DemandGentic</span>
                 </div>
               </div>
               <p className="text-slate-400 text-sm mb-4">
                 Your entire revenue engine. Voice, content, pipeline, data — one intelligent platform.
               </p>
               <div className="text-slate-500 text-xs space-y-1">
-                <p className="font-medium text-slate-400">Pivotal B2B LLC</p>
+                <p className="font-medium text-slate-400">DemandGentic LLC</p>
                 <p>Lewes, Delaware</p>
                 <p><a href="tel:+14179003844" className="hover:text-white transition-colors">(417) 900-3844</a></p>
-                <p><a href="https://pivotal-b2b.com/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">pivotal-b2b.com</a></p>
+                <p><a href="https://demandgentic.ai/" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">demandgentic.ai</a></p>
               </div>
             </div>
 
@@ -1240,14 +1240,14 @@ export default function LandingPage() {
               <ul className="space-y-2 text-slate-400 text-sm">
                 <li><a href="/login" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
                 <li><a href="/login" className="hover:text-white transition-colors">Request a Proposal</a></li>
-                <li><a href="mailto:contact@pivotal-b2b.com" className="hover:text-white transition-colors">Contact Us</a></li>
+                <li><a href="mailto:contact@demandgentic.ai" className="hover:text-white transition-colors">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
           <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-slate-500 text-sm">
-              © 2026 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+              © 2026 DemandGentic LLC. All rights reserved. DemandGentic.ai is a product of DemandGentic LLC.
             </p>
             <div className="flex gap-6 text-slate-500 text-sm">
               <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

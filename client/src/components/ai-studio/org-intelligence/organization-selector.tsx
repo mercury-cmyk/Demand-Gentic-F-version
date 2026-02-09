@@ -39,9 +39,10 @@ interface Organization {
 interface OrganizationSelectorProps {
   selectedOrgId: string | null;
   onOrgChange: (orgId: string) => void;
+  allowCreation?: boolean;
 }
 
-export function OrganizationSelector({ selectedOrgId, onOrgChange }: OrganizationSelectorProps) {
+export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation = true }: OrganizationSelectorProps) {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
@@ -178,6 +179,7 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange }: Organizatio
         </SelectContent>
       </Select>
 
+      {allowCreation && (
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm" onClick={() => resetForm()}>
@@ -261,6 +263,7 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange }: Organizatio
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
     </div>
   );
 }

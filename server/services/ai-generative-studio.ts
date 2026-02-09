@@ -11,6 +11,7 @@ import {
   generativeStudioProjects,
   generativeStudioChatMessages,
   brandKits,
+  campaignOrganizations,
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
@@ -34,6 +35,8 @@ interface GenerationParams {
   additionalContext?: string;
   ownerId: string;
   tenantId?: string;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
 interface LandingPageParams extends GenerationParams {
@@ -65,6 +68,7 @@ interface ChatParams {
   message: string;
   projectId?: string;
   ownerId: string;
+  organizationId?: string;
 }
 
 interface GenerationResult {
@@ -104,13 +108,64 @@ async function getBrandContext(brandKitId?: string): Promise<string> {
   }
 }
 
-function buildBaseContext(params: GenerationParams): string {
+function buildBaseContext(params: GenerationParams, orgContext?: string): string {
   const parts: string[] = [];
+  if (orgContext) parts.push(`Organization Context:\n${orgContext}`);
   if (params.targetAudience) parts.push(`Target Audience: ${params.targetAudience}`);
   if (params.industry) parts.push(`Industry: ${params.industry}`);
   if (params.tone) parts.push(`Tone: ${params.tone}`);
   if (params.additionalContext) parts.push(`Additional Context: ${params.additionalContext}`);
   return parts.join('\n');
+}
+
+function resolveFieldValue(field: any): string | null {
+  if (!field) return null;
+  if (typeof field === 'string') return field.trim() || null;
+  if (typeof field === 'object' && typeof field.value === 'string') return field.value.trim() || null;
+  return null;
+}
+
+async function getOrganizationContext(organizationId?: string): Promise<string> {
+  if (!organizationId) return '';
+
+  const [org] = await db
+    .select({
+      name: campaignOrganizations.name,
+      domain: campaignOrganizations.domain,
+      industry: campaignOrganizations.industry,
+      identity: campaignOrganizations.identity,
+      offerings: campaignOrganizations.offerings,
+      icp: campaignOrganizations.icp,
+      positioning: campaignOrganizations.positioning,
+      outreach: campaignOrganizations.outreach,
+    })
+    .from(campaignOrganizations)
+    .where(eq(campaignOrganizations.id, organizationId))
+    .limit(1);
+
+  if (!org) return '';
+
+  const identity = (org.identity || {}) as any;
+  const offerings = (org.offerings || {}) as any;
+  const icp = (org.icp || {}) as any;
+  const positioning = (org.positioning || {}) as any;
+
+  const parts: string[] = [];
+  if (org.name) parts.push(`Organization: ${org.name}`);
+  if (org.domain) parts.push(`Domain: ${org.domain}`);
+  if (org.industry) parts.push(`Industry: ${org.industry}`);
+  const description = resolveFieldValue(identity.description);
+  if (description) parts.push(`Description: ${description}`);
+  const personas = resolveFieldValue(icp.personas);
+  if (personas) parts.push(`Target Personas: ${personas}`);
+  const industries = resolveFieldValue(icp.industries);
+  if (industries) parts.push(`Target Industries: ${industries}`);
+  const oneLiner = resolveFieldValue(positioning.oneLiner);
+  if (oneLiner) parts.push(`Positioning: ${oneLiner}`);
+  const differentiators = resolveFieldValue(offerings.differentiators);
+  if (differentiators) parts.push(`Differentiators: ${differentiators}`);
+
+  return parts.length > 0 ? parts.join('\n') : '';
 }
 
 // ============================================================================
@@ -120,7 +175,8 @@ function buildBaseContext(params: GenerationParams): string {
 export async function generateLandingPage(params: LandingPageParams): Promise<GenerationResult> {
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
-  const baseContext = buildBaseContext(params);
+  const orgContext = await getOrganizationContext(params.organizationId);
+  const baseContext = buildBaseContext(params, orgContext);
 
   let systemPrompt: string;
   try {
@@ -196,6 +252,8 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
       css: result.css,
       sections: result.sections,
       ctaGoal: params.ctaGoal,
+      organizationId: params.organizationId,
+      clientProjectId: params.clientProjectId,
     },
     aiModel: 'gpt-4.1-mini',
     tokensUsed,
@@ -214,7 +272,8 @@ Make the HTML fully self-contained with inline styles. Use modern, clean design.
 export async function generateEmailTemplate(params: EmailTemplateParams): Promise<GenerationResult> {
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
-  const baseContext = buildBaseContext(params);
+  const orgContext = await getOrganizationContext(params.organizationId);
+  const baseContext = buildBaseContext(params, orgContext);
 
   let systemPrompt: string;
   try {
@@ -287,6 +346,8 @@ Output as JSON:
       plainText: result.plainText,
       tips: result.tips,
       emailType: params.emailType,
+      organizationId: params.organizationId,
+      clientProjectId: params.clientProjectId,
     },
     aiModel: 'gpt-4.1-mini',
     tokensUsed,
@@ -305,7 +366,8 @@ Output as JSON:
 export async function generateBlogPost(params: BlogPostParams): Promise<GenerationResult> {
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
-  const baseContext = buildBaseContext(params);
+  const orgContext = await getOrganizationContext(params.organizationId);
+  const baseContext = buildBaseContext(params, orgContext);
 
   const lengthMap = { short: '800-1200 words', medium: '1500-2500 words', long: '3000-5000 words' };
   const targetLength = lengthMap[params.targetLength || 'medium'];
@@ -388,6 +450,8 @@ Output as JSON:
       tags: result.tags,
       keywords: params.keywords,
       targetLength: params.targetLength,
+      organizationId: params.organizationId,
+      clientProjectId: params.clientProjectId,
     },
     aiModel: 'gpt-4.1-mini',
     tokensUsed,
@@ -406,7 +470,8 @@ Output as JSON:
 export async function generateEbook(params: EbookParams): Promise<GenerationResult> {
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
-  const baseContext = buildBaseContext(params);
+  const orgContext = await getOrganizationContext(params.organizationId);
+  const baseContext = buildBaseContext(params, orgContext);
   const chapterCount = params.chapterCount || 5;
 
   let systemPrompt: string;
@@ -504,6 +569,8 @@ Output as JSON:
       estimatedPageCount: result.estimatedPageCount,
       tags: result.tags,
       chapterCount,
+      organizationId: params.organizationId,
+      clientProjectId: params.clientProjectId,
     },
     aiModel: 'gpt-4.1-mini',
     tokensUsed,
@@ -522,7 +589,8 @@ Output as JSON:
 export async function generateSolutionBrief(params: SolutionBriefParams): Promise<GenerationResult> {
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
-  const baseContext = buildBaseContext(params);
+  const orgContext = await getOrganizationContext(params.organizationId);
+  const baseContext = buildBaseContext(params, orgContext);
 
   let systemPrompt: string;
   try {
@@ -614,6 +682,8 @@ Output as JSON:
       callToAction: result.callToAction,
       problemStatement: params.problemStatement,
       tags: result.tags,
+      organizationId: params.organizationId,
+      clientProjectId: params.clientProjectId,
     },
     aiModel: 'gpt-4.1-mini',
     tokensUsed,
@@ -635,7 +705,7 @@ export async function chat(params: ChatParams): Promise<{
   sessionId: string;
   tokensUsed: number;
 }> {
-  const sessionId = params.sessionId || crypto.randomUUID();
+  const sessionId = params.sessionId || (params.organizationId ? `${params.organizationId}::${crypto.randomUUID()}` : crypto.randomUUID());
 
   // Get previous messages for context
   const previousMessages = params.sessionId
@@ -658,7 +728,11 @@ export async function chat(params: ChatParams): Promise<{
     systemPrompt = '';
   }
 
+  const orgContext = await getOrganizationContext(params.organizationId);
+
   const fullSystemPrompt = `${systemPrompt}
+
+${orgContext ? `Organization Context:\n${orgContext}\n` : ''}
 
 You are an AI content strategy assistant in the Generative Studio. Help users:
 - Brainstorm content ideas for landing pages, emails, blogs, eBooks, and solution briefs

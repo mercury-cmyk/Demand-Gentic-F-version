@@ -19,7 +19,7 @@ export default function GDPRPolicyPage() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg leading-tight">DemandGentic.ai</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By Pivotal B2B</span>
+              <span className="text-[10px] text-muted-foreground font-medium">Human Intel, AI Execute By DemandGentic</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -45,14 +45,14 @@ export default function GDPRPolicyPage() {
             <section className="mb-8">
               <h2 className="text-2xl font-semibold mb-4">1. Our Commitment to GDPR</h2>
               <p className="text-muted-foreground mb-4">
-                Pivotal B2B LLC ("Company," "we," "us," or "our"), operating as DemandGentic.ai, is committed to complying with the General Data Protection Regulation (GDPR) and protecting the personal data of individuals in the European Economic Area (EEA) and United Kingdom (UK).
+                DemandGentic LLC ("Company," "we," "us," or "our"), operating as DemandGentic.ai, is committed to complying with the General Data Protection Regulation (GDPR) and protecting the personal data of individuals in the European Economic Area (EEA) and United Kingdom (UK).
               </p>
               <p className="text-muted-foreground mb-4">
                 <strong>Data Controller Information:</strong><br />
-                Pivotal B2B LLC<br />
+                DemandGentic LLC<br />
                 Lewes, Delaware, United States<br />
                 Phone: (417) 900-3844<br />
-                Email: <a href="mailto:privacy@pivotal-b2b.com" className="text-violet-600 hover:underline">privacy@pivotal-b2b.com</a>
+                Email: <a href="mailto:privacy@demandgentic.ai" className="text-violet-600 hover:underline">privacy@demandgentic.ai</a>
               </p>
             </section>
 
@@ -164,7 +164,7 @@ export default function GDPRPolicyPage() {
               </p>
               <div className="bg-violet-50 p-6 rounded-lg mb-4">
                 <p className="text-muted-foreground">
-                  <strong>Email:</strong> <a href="mailto:privacy@pivotal-b2b.com" className="text-violet-600 hover:underline">privacy@pivotal-b2b.com</a><br />
+                  <strong>Email:</strong> <a href="mailto:privacy@demandgentic.ai" className="text-violet-600 hover:underline">privacy@demandgentic.ai</a><br />
                   <strong>Phone:</strong> <a href="tel:+14179003844" className="text-violet-600 hover:underline">(417) 900-3844</a><br />
                   <strong>Subject Line:</strong> "GDPR Rights Request"
                 </p>
@@ -249,8 +249,8 @@ export default function GDPRPolicyPage() {
               </p>
               <p className="text-muted-foreground">
                 <strong>Data Protection Contact</strong><br />
-                Pivotal B2B LLC<br />
-                Email: <a href="mailto:privacy@pivotal-b2b.com" className="text-violet-600 hover:underline">privacy@pivotal-b2b.com</a><br />
+                DemandGentic LLC<br />
+                Email: <a href="mailto:privacy@demandgentic.ai" className="text-violet-600 hover:underline">privacy@demandgentic.ai</a><br />
                 Phone: <a href="tel:+14179003844" className="text-violet-600 hover:underline">(417) 900-3844</a>
               </p>
             </section>
@@ -281,7 +281,7 @@ export default function GDPRPolicyPage() {
       <footer className="py-8 px-6 bg-slate-900 text-white">
         <div className="max-w-4xl mx-auto text-center">
           <p className="text-slate-500 text-sm">
-            © 2024 Pivotal B2B LLC. All rights reserved. DemandGentic.ai is a product of Pivotal B2B LLC.
+            © 2024 DemandGentic LLC. All rights reserved. DemandGentic.ai is a product of DemandGentic LLC.
           </p>
           <div className="flex justify-center gap-6 mt-4 text-slate-500 text-sm">
             <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>

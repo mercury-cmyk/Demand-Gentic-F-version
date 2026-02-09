@@ -37,7 +37,10 @@ import {
   AlertCircle,
   Loader2,
   Tag,
+  Sparkles,
 } from 'lucide-react';
+import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
+import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 
 const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -121,14 +124,18 @@ function EventTypeBadge({ type }: { type: string | null }) {
 }
 
 export default function ArgyleEventsPage() {
-  return <ArgyleEventsContent />;
+  return (
+    <ClientPortalLayout>
+      <ArgyleEventsContent />
+    </ClientPortalLayout>
+  );
 }
 
 /**
  * Embeddable content component — can be rendered inside the dashboard tab
  * or as a standalone page. No layout wrapper.
  */
-export function ArgyleEventsContent() {
+export function ArgyleEventsContent({ organizationId }: { organizationId?: string }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
@@ -314,6 +321,22 @@ export function ArgyleEventsContent() {
   return (
     <>
       <div className="space-y-6">
+        {/* Unified AgentX Component */}
+        <Card className="border-indigo-100 dark:border-indigo-900 bg-indigo-50/30 dark:bg-indigo-950/10">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg font-medium flex items-center gap-2 text-indigo-700 dark:text-indigo-400">
+              <Sparkles className="h-5 w-5" />
+              AgentX Intelligence
+            </CardTitle>
+            <CardDescription>
+              AI-powered insights and recommendations for your event strategy.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+             <AccountIntelligenceView organizationId={organizationId} />
+          </CardContent>
+        </Card>
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

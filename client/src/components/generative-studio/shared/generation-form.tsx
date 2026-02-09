@@ -28,6 +28,8 @@ interface GenerationFormProps {
   extraFields?: React.ReactNode;
   generateLabel?: string;
   orgIntelligence?: OrgIntelligenceProfile | null;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export default function GenerationForm({
@@ -38,6 +40,8 @@ export default function GenerationForm({
   extraFields,
   generateLabel = "Generate",
   orgIntelligence,
+  disabled,
+  disabledReason,
 }: GenerationFormProps) {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -47,6 +51,11 @@ export default function GenerationForm({
   const [brandKitId, setBrandKitId] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
   const [oiApplied, setOiApplied] = useState(false);
+  const isDisabled = !!disabled;
+
+  useEffect(() => {
+    setOiApplied(false);
+  }, [orgIntelligence?.identity?.legalName?.value]);
 
   // Auto-populate fields from Organization Intelligence on first load
   useEffect(() => {
@@ -79,6 +88,11 @@ export default function GenerationForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {isDisabled && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          {disabledReason || "Select an organization to start generating content."}
+        </div>
+      )}
       <div className="space-y-2">
         <Label htmlFor="title">Title</Label>
         <Input
@@ -86,6 +100,7 @@ export default function GenerationForm({
           placeholder={`Enter ${contentType} title...`}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
+          disabled={isDisabled}
           required
         />
       </div>
@@ -98,6 +113,7 @@ export default function GenerationForm({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={5}
+          disabled={isDisabled}
           required
         />
       </div>
@@ -110,6 +126,7 @@ export default function GenerationForm({
             placeholder="e.g., B2B SaaS CTOs"
             value={targetAudience}
             onChange={(e) => setTargetAudience(e.target.value)}
+            disabled={isDisabled}
           />
         </div>
 
@@ -120,6 +137,7 @@ export default function GenerationForm({
             placeholder="e.g., Technology, Healthcare"
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
+            disabled={isDisabled}
           />
         </div>
       </div>
@@ -127,7 +145,7 @@ export default function GenerationForm({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Tone</Label>
-          <Select value={tone} onValueChange={setTone}>
+          <Select value={tone} onValueChange={setTone} disabled={isDisabled}>
             <SelectTrigger>
               <SelectValue placeholder="Select tone..." />
             </SelectTrigger>
@@ -143,7 +161,7 @@ export default function GenerationForm({
 
         <div className="space-y-2">
           <Label>Brand Kit</Label>
-          <Select value={brandKitId} onValueChange={setBrandKitId}>
+          <Select value={brandKitId} onValueChange={setBrandKitId} disabled={isDisabled}>
             <SelectTrigger>
               <SelectValue placeholder="Select brand kit..." />
             </SelectTrigger>
@@ -171,6 +189,7 @@ export default function GenerationForm({
           value={additionalContext}
           onChange={(e) => setAdditionalContext(e.target.value)}
           rows={2}
+          disabled={isDisabled}
         />
       </div>
 
@@ -194,7 +213,7 @@ export default function GenerationForm({
       <Button
         type="submit"
         className="w-full"
-        disabled={isGenerating || !title || !prompt}
+        disabled={isGenerating || !title || !prompt || isDisabled}
         size="lg"
       >
         {isGenerating ? (

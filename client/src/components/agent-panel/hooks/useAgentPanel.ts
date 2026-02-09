@@ -1,7 +1,13 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 const STORAGE_KEY = 'agent-panel-state';
 const COLLAPSED_WIDTH_PX = 48;
+const ORDER_MODE_WIDTH = 850;
+const MIN_WIDTH = 350;
+const MAX_WIDTH_NORMAL = 600;
+const MAX_WIDTH_ORDER = 900;
+
+export type OrderStep = 'idle' | 'goal' | 'strategy_review' | 'configure' | 'review' | 'submitted';
 
 export interface AgentPanelState {
   isOpen: boolean;
@@ -9,6 +15,8 @@ export interface AgentPanelState {
   isCollapsed: boolean;
   conversationId: string | null;
   sessionId: string;
+  orderMode: boolean;
+  orderStep: OrderStep;
 }
 
 interface UseAgentPanelReturn {
@@ -20,6 +28,9 @@ interface UseAgentPanelReturn {
   toggleCollapse: () => void;
   setConversationId: (id: string | null) => void;
   resetSession: () => void;
+  enterOrderMode: () => void;
+  exitOrderMode: () => void;
+  setOrderStep: (step: OrderStep) => void;
 }
 
 const generateSessionId = () => {
@@ -34,6 +45,8 @@ const getInitialState = (): AgentPanelState => {
       isCollapsed: false,
       conversationId: null,
       sessionId: generateSessionId(),
+      orderMode: false,
+      orderStep: 'idle',
     };
   }
 
@@ -49,6 +62,9 @@ const getInitialState = (): AgentPanelState => {
         sessionId: parsed.sessionId && (Date.now() - parseInt(parsed.sessionId.split('-')[1])) < 3600000
           ? parsed.sessionId
           : generateSessionId(),
+        // Always reset order mode on page load
+        orderMode: false,
+        orderStep: 'idle',
       };
     }
   } catch {
@@ -61,25 +77,30 @@ const getInitialState = (): AgentPanelState => {
     isCollapsed: false,
     conversationId: null,
     sessionId: generateSessionId(),
+    orderMode: false,
+    orderStep: 'idle',
   };
 };
 
 export function useAgentPanel(): UseAgentPanelReturn {
   const [state, setState] = useState<AgentPanelState>(getInitialState);
+  const preOrderWidthRef = useRef(state.width);
 
   // Expose panel geometry via CSS vars so the app can reserve a consistent side region.
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const root = document.documentElement;
-    const offsetPx = state.isOpen ? (state.isCollapsed ? COLLAPSED_WIDTH_PX : state.width) : 0;
+    const effectiveWidth = state.orderMode ? Math.max(state.width, ORDER_MODE_WIDTH) : state.width;
+    const offsetPx = state.isOpen ? (state.isCollapsed ? COLLAPSED_WIDTH_PX : effectiveWidth) : 0;
 
     root.style.setProperty('--agentx-panel-offset', `${offsetPx}px`);
-    root.style.setProperty('--agentx-panel-width', `${state.width}px`);
+    root.style.setProperty('--agentx-panel-width', `${effectiveWidth}px`);
     root.style.setProperty('--agentx-panel-collapsed-width', `${COLLAPSED_WIDTH_PX}px`);
     root.dataset.agentxPanelOpen = state.isOpen ? 'true' : 'false';
     root.dataset.agentxPanelCollapsed = state.isCollapsed ? 'true' : 'false';
-  }, [state.isCollapsed, state.isOpen, state.width]);
+    root.dataset.agentxOrderMode = state.orderMode ? 'true' : 'false';
+  }, [state.isCollapsed, state.isOpen, state.width, state.orderMode]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -91,13 +112,15 @@ export function useAgentPanel(): UseAgentPanelReturn {
       root.style.removeProperty('--agentx-panel-collapsed-width');
       root.removeAttribute('data-agentx-panel-open');
       root.removeAttribute('data-agentx-panel-collapsed');
+      root.removeAttribute('data-agentx-order-mode');
     };
   }, []);
 
-  // Persist state to localStorage
+  // Persist state to localStorage (exclude orderMode — always resets)
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      const { orderMode, orderStep, ...persistable } = state;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
     } catch {
       // Ignore storage errors
     }
@@ -125,11 +148,20 @@ export function useAgentPanel(): UseAgentPanelReturn {
   }, []);
 
   const closePanel = useCallback(() => {
-    setState(prev => ({ ...prev, isOpen: false }));
+    setState(prev => ({
+      ...prev,
+      isOpen: false,
+      // Reset order mode when closing
+      orderMode: false,
+      orderStep: 'idle',
+    }));
   }, []);
 
   const setWidth = useCallback((width: number) => {
-    setState(prev => ({ ...prev, width: Math.min(Math.max(width, 350), 600) }));
+    setState(prev => {
+      const max = prev.orderMode ? MAX_WIDTH_ORDER : MAX_WIDTH_NORMAL;
+      return { ...prev, width: Math.min(Math.max(width, MIN_WIDTH), max) };
+    });
   }, []);
 
   const toggleCollapse = useCallback(() => {
@@ -145,7 +177,41 @@ export function useAgentPanel(): UseAgentPanelReturn {
       ...prev,
       sessionId: generateSessionId(),
       conversationId: null,
+      orderMode: false,
+      orderStep: 'idle',
     }));
+  }, []);
+
+  const enterOrderMode = useCallback(() => {
+    setState(prev => {
+      // Store current width so we can restore it later
+      preOrderWidthRef.current = prev.width;
+      const expandedWidth = Math.min(
+        typeof window !== 'undefined' ? window.innerWidth * 0.85 : ORDER_MODE_WIDTH,
+        ORDER_MODE_WIDTH
+      );
+      return {
+        ...prev,
+        isOpen: true,
+        isCollapsed: false,
+        orderMode: true,
+        orderStep: 'goal',
+        width: expandedWidth,
+      };
+    });
+  }, []);
+
+  const exitOrderMode = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      orderMode: false,
+      orderStep: 'idle',
+      width: preOrderWidthRef.current,
+    }));
+  }, []);
+
+  const setOrderStep = useCallback((step: OrderStep) => {
+    setState(prev => ({ ...prev, orderStep: step }));
   }, []);
 
   return {
@@ -157,5 +223,8 @@ export function useAgentPanel(): UseAgentPanelReturn {
     toggleCollapse,
     setConversationId,
     resetSession,
+    enterOrderMode,
+    exitOrderMode,
+    setOrderStep,
   };
 }

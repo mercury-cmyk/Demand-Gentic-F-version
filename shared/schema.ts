@@ -7199,6 +7199,27 @@ export const clientCampaignPricing = pgTable("client_campaign_pricing", {
   uniqueClientCampaignType: unique().on(table.clientAccountId, table.campaignType),
 }));
 
+// Client Pricing Documents (uploaded PDFs/files for custom pricing agreements)
+export const clientPricingDocuments = pgTable("client_pricing_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  fileKey: varchar("file_key", { length: 500 }).notNull(), // GCS storage key
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileType: varchar("file_type", { length: 100 }).notNull(), // MIME type
+  fileSize: integer("file_size"), // bytes
+  uploadedBy: varchar("uploaded_by", { length: 255 }), // admin name/email
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  clientIdx: index("client_pricing_docs_client_idx").on(table.clientAccountId),
+}));
+
+export type ClientPricingDocument = typeof clientPricingDocuments.$inferSelect;
+export type InsertClientPricingDocument = typeof clientPricingDocuments.$inferInsert;
+
 // Client Activity Costs (Real-time tracking)
 export const clientActivityCosts = pgTable("client_activity_costs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

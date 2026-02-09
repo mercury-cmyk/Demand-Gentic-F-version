@@ -20,9 +20,16 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface EbookTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) {
+export default function EbookTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: EbookTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -30,6 +37,7 @@ export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) 
   const [exportOpen, setExportOpen] = useState(false);
   const [chapterCount, setChapterCount] = useState("5");
   const [fullHtml, setFullHtml] = useState("");
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -39,7 +47,7 @@ export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) 
     onSuccess: (data) => {
       setResult(data.content);
       setProjectId(data.projectId);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
 
       // Build preview HTML
       const chapters = data.content?.chapters || [];
@@ -87,7 +95,10 @@ export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) 
 
   const saveAsAssetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`);
+      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`, {
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: () => {
@@ -99,6 +110,8 @@ export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) 
     generateMutation.mutate({
       ...params,
       chapterCount: parseInt(chapterCount),
+      organizationId,
+      clientProjectId,
     });
   };
 
@@ -123,10 +136,11 @@ export default function EbookTab({ brandKits, orgIntelligence }: EbookTabProps) 
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate eBook"
+          disabled={!organizationId}
           extraFields={
             <div className="space-y-2">
               <Label>Number of Chapters</Label>
-              <Select value={chapterCount} onValueChange={setChapterCount}>
+              <Select value={chapterCount} onValueChange={setChapterCount} disabled={!organizationId}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

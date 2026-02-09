@@ -1,19 +1,20 @@
 /**
  * Client Portal Layout
  *
- * DESIGN PRINCIPLES (aligned with main dashboard):
+ * DESIGN PRINCIPLES:
  * 1. Single, centralized AgentX entry point - prominently placed at TOP
- * 2. Unified campaign management hub
- * 3. Campaign-bound templates and voice stimulation
+ * 2. Grouped sidebar navigation: Dashboard / Campaigns / AI & Intelligence / Account
+ * 3. Collapsible sections with auto-expand for active items
  * 4. Clean, intentional navigation structure
  */
-import React, { useState, useEffect, useMemo } from 'react';
-import { Link, useLocation } from 'wouter';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation, useSearch } from 'wouter';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,30 +30,29 @@ import {
 } from '@/components/ui/tooltip';
 import {
   LayoutDashboard,
-  FolderKanban,
   Megaphone,
-  ShoppingCart,
   CreditCard,
   Settings,
   LogOut,
   Menu,
   X,
   ChevronRight,
-  MessageSquare,
+  ChevronDown,
   Sparkles,
   TrendingUp,
   FileText,
   HelpCircle,
   Phone,
   BotMessageSquare,
-  BarChart3,
   PhoneCall,
-  Mail,
   ClipboardList,
   Brain,
   CalendarDays,
   Crown,
   ArrowLeft,
+  Target,
+  UserCheck,
+  Headphones,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -73,37 +73,87 @@ interface ClientPortalLayoutProps {
   children: React.ReactNode;
 }
 
-/**
- * Navigation Structure
- *
- * DESIGN: Centralized AgentX at TOP, then unified campaign hub
- */
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+interface NavGroup {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
 
 // Primary action - AgentX (centralized AI entry point)
 const agenticOperator = {
   name: 'AgentX',
-  href: '/client-portal/dashboard?tab=agent',
+  href: '#', // Changed from navigation to action
   icon: BotMessageSquare,
   badge: 'AI',
   description: 'Unified agentic operations panel',
 };
 
-// Main navigation - organized by priority
-const baseNavigation = [
-  { name: 'Dashboard', href: '/client-portal/dashboard', icon: LayoutDashboard },
-  { name: 'Campaigns', href: '/client-portal/campaigns', icon: Megaphone, description: 'Email & voice campaigns' },
-  { name: 'Projects', href: '/client-portal/projects', icon: FolderKanban },
-  { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain, description: 'AI research & analysis' },
-  { name: 'Preview Studio', href: '/preview-studio', icon: Sparkles },
-  { name: 'Voice Simulation', href: '/client-portal/voice-simulation', icon: PhoneCall },
-  { name: 'Email Simulation', href: '/client-portal/email-simulation', icon: Mail },
-  { name: 'Analytics', href: '/client-portal/dashboard?tab=reports', icon: BarChart3 },
-  { name: 'Billing', href: '/client-portal/billing', icon: CreditCard },
-  { name: 'Settings', href: '/client-portal/settings', icon: Settings },
+// Grouped navigation structure
+const baseNavigationGroups: NavGroup[] = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    items: [
+      { name: 'Overview', href: '/client-portal/dashboard?tab=overview', icon: LayoutDashboard },
+    ],
+  },
+  {
+    id: 'campaigns',
+    label: 'Campaigns',
+    items: [
+      { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
+      { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
+      { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
+    ],
+  },
+  {
+    id: 'ai-intelligence',
+    label: 'AI & Intelligence',
+    items: [
+      { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain },
+      { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
+      { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
+      { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
+    ],
+  },
+  {
+    id: 'account',
+    label: 'Account',
+    items: [
+      { name: 'Billing', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
+      { name: 'Support', href: '/client-portal/dashboard?tab=support', icon: Headphones },
+      { name: 'Settings', href: '/client-portal/dashboard?tab=settings', icon: Settings },
+    ],
+  },
 ];
 
-// Conditionally added nav items
-const argyleEventsNavItem = { name: 'Upcoming Events', href: '/client-portal/argyle-events', icon: CalendarDays, description: 'Event-sourced campaign drafts' };
+function isItemActive(item: NavItem, currentPath: string, currentSearch: string): boolean {
+  const itemUrl = new URL(item.href, 'http://localhost');
+  const itemPath = itemUrl.pathname;
+  const itemTab = itemUrl.searchParams.get('tab');
+
+  // For dashboard tab items, check both path and tab param
+  if (itemPath === '/client-portal/dashboard' && itemTab) {
+    const currentTab = new URLSearchParams(currentSearch).get('tab');
+    return currentPath === '/client-portal/dashboard' && currentTab === itemTab;
+  }
+
+  // For separate pages, check path match
+  if (currentPath === itemPath) return true;
+  if (itemPath !== '/client-portal/dashboard' && currentPath.startsWith(itemPath)) return true;
+
+  return false;
+}
+
+function groupHasActiveItem(group: NavGroup, currentPath: string, currentSearch: string): boolean {
+  return group.items.some(item => isItemActive(item, currentPath, currentSearch));
+}
 
 // Toggle button for the header - must be inside AgentPanelProvider
 function ClientPortalAgentToggleButton() {
@@ -141,6 +191,7 @@ function ClientPortalAgentToggleButton() {
 
 export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [location, setLocation] = useLocation();
+  const searchString = useSearch();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [simulationOpen, setSimulationOpen] = useState(false);
@@ -167,19 +218,57 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         return { available: false };
       }
     },
-    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    staleTime: 5 * 60 * 1000,
   });
 
+  // Check client features for feature-gated nav items
+  const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
+    queryKey: ['/api/client-portal/features'],
+    queryFn: async () => {
+      const token = getToken();
+      if (!token) return { enabledFeatures: [] };
+      try {
+        const res = await fetch('/api/client-portal/features', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return { enabledFeatures: [] };
+        return await res.json();
+      } catch {
+        return { enabledFeatures: [] };
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const enabledFeatures = featuresData?.enabledFeatures || [];
+
   // Build navigation dynamically based on feature availability
-  const navigation = React.useMemo(() => {
-    const nav = [...baseNavigation];
-    if (argyleFeatureStatus?.enabled) {
-      // Insert before Analytics
-      const analyticsIdx = nav.findIndex(n => n.name === 'Analytics');
-      nav.splice(analyticsIdx >= 0 ? analyticsIdx : nav.length, 0, argyleEventsNavItem);
+  const navigationGroups = React.useMemo(() => {
+    const groups = baseNavigationGroups.map(group => ({ ...group, items: [...group.items] }));
+
+    // Add conditional items to Campaigns group
+    const campaignsGroup = groups.find(g => g.id === 'campaigns');
+    if (campaignsGroup) {
+      // Add Bookings if calendar_booking feature enabled
+      if (enabledFeatures.includes('calendar_booking')) {
+        campaignsGroup.items.push({
+          name: 'Bookings',
+          href: '/client-portal/dashboard?tab=bookings',
+          icon: CalendarDays,
+        });
+      }
+      // Add Upcoming Events if Argyle enabled
+      if (argyleFeatureStatus?.enabled) {
+        campaignsGroup.items.push({
+          name: 'Upcoming Events',
+          href: '/client-portal/argyle-events',
+          icon: CalendarDays,
+        });
+      }
     }
-    return nav;
-  }, [argyleFeatureStatus?.enabled]);
+
+    return groups;
+  }, [argyleFeatureStatus?.enabled, enabledFeatures]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {
@@ -188,13 +277,13 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       setHasInteracted(true);
       return;
     }
-    
+
     const timer = setTimeout(() => {
       if (!voiceOpen) {
         setShowSuggestions(true);
       }
     }, 3000);
-    
+
     return () => clearTimeout(timer);
   }, [voiceOpen]);
 
@@ -205,8 +294,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       { icon: FileText, text: "Show my pending invoices", action: "Show my pending invoices" },
       { icon: HelpCircle, text: "How do I create a new order?", action: "How do I create a new order?" },
     ];
-    
-    // Page-specific suggestions
+
     if (location.includes('/dashboard')) {
       return [
         { icon: TrendingUp, text: "Summarize my account", action: "Give me a summary of my account status and recent activity" },
@@ -214,18 +302,11 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         ...baseSuggestions.slice(0, 1),
       ];
     }
-    if (location.includes('/projects')) {
-      return [
-        { icon: FolderKanban, text: "Check project status", action: "What's the status of my active projects?" },
-        { icon: Sparkles, text: "Request more leads", action: "I want to request additional leads for my project" },
-        ...baseSuggestions.slice(0, 1),
-      ];
-    }
     if (location.includes('/campaigns')) {
       return [
         { icon: TrendingUp, text: "Campaign analytics", action: "Show me detailed analytics for my campaigns" },
         { icon: Megaphone, text: "Best performing campaign", action: "Which campaign is performing the best?" },
-        { icon: Phone, text: "🎯 Try AI Simulation", action: "__SIMULATION__", isSimulation: true },
+        { icon: Phone, text: "Try AI Simulation", action: "__SIMULATION__", isSimulation: true },
       ];
     }
     if (location.includes('/billing')) {
@@ -235,23 +316,21 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         ...baseSuggestions.slice(0, 1),
       ];
     }
-    
+
     return baseSuggestions;
   };
 
   const handleOpenAssistant = (initialPrompt?: string) => {
-    // Check if this is a simulation action
     if (initialPrompt === '__SIMULATION__') {
       setShowSuggestions(false);
       setSimulationOpen(true);
       return;
     }
-    
+
     setShowSuggestions(false);
     setHasInteracted(true);
     localStorage.setItem('demandAssistantInteracted', 'true');
     setVoiceOpen(true);
-    // If there's an initial prompt, we could pass it - for now just open
   };
 
   const handleLogout = () => {
@@ -286,13 +365,13 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
         <div className="flex h-16 items-center justify-between px-4 border-b">
           <div className="flex items-center gap-2">
-            <Link href="/client-portal/dashboard">
+            <Link href="/client-portal/dashboard?tab=overview">
               <span className="text-lg font-semibold text-primary cursor-pointer">
                 Client Portal
               </span>
@@ -314,14 +393,14 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           </Button>
         </div>
 
-        <nav className="flex-1 px-2 py-4 space-y-1">
+        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
           {/* AGENTIC OPERATOR - Centralized AI Entry Point */}
           <div className="px-2 mb-4">
-            <Link href={agenticOperator.href}>
+            <Link href="/client-portal/dashboard?tab=overview">
               <button
                 onClick={() => {
                   setSidebarOpen(false);
-                  handleOpenAssistant();
+                  // handleOpenAssistant(); 
                 }}
                 className={cn(
                   'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold cursor-pointer transition-all',
@@ -347,26 +426,41 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
           <Separator className="my-3 mx-2" />
 
-          {/* Main Navigation */}
-          {navigation.map((item) => {
-            const isActive = location === item.href ||
-              (item.href !== '/client-portal/dashboard' && location.startsWith(item.href.split('?')[0]));
+          {/* Grouped Navigation */}
+          {navigationGroups.map((group) => {
+            const isGroupActive = groupHasActiveItem(group, location, searchString);
+
             return (
-              <Link key={item.name} href={item.href}>
-                <span
-                  className={cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors',
-                    isActive
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  )}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <item.icon className="h-5 w-5" />
-                  {item.name}
-                  {isActive && <ChevronRight className="h-4 w-4 ml-auto" />}
-                </span>
-              </Link>
+              <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'dashboard'}>
+                <CollapsibleTrigger asChild>
+                  <button className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors group/trigger">
+                    <span>{group.label}</span>
+                    <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180" />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-0.5 pb-2">
+                  {group.items.map((item) => {
+                    const isActive = isItemActive(item, location, searchString);
+                    return (
+                      <Link key={item.name} href={item.href}>
+                        <span
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors',
+                            isActive
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          )}
+                          onClick={() => setSidebarOpen(false)}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          {item.name}
+                          {isActive && <ChevronRight className="h-4 w-4 ml-auto" />}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </nav>
@@ -410,8 +504,9 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
           <div className="flex-1" />
 
-          {/* AgentX Button in Header - Opens Side Panel */}
+          {/* AgentX Button in Header - REMOVED (Replaced by Dashboard Action)
           <ClientPortalAgentToggleButton />
+          */}
 
           {/* User Menu */}
           <DropdownMenu>
@@ -435,7 +530,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
               </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href="/client-portal/settings">
+                <Link href="/client-portal/dashboard?tab=settings">
                   <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </Link>
@@ -460,8 +555,9 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         onNavigate={handleVoiceNavigation}
       />
 
-      {/* Global AI Agent Side Panel */}
+      {/* Global AI Agent Side Panel - REMOVED per user request
       <AgentSidePanel />
+      */}
 
       {/* Campaign Simulation Panel */}
       <CampaignSimulationPanel

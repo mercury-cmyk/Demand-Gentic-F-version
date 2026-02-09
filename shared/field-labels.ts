@@ -143,9 +143,9 @@ export const ACCOUNT_FIELD_LABELS = {
   linkedinSpecialties: "LinkedIn Specialties",
   
   // Contact Information
-  mainPhone: "account_hq_phone",
-  mainPhoneE164: "account_hq_phone (E164)",
-  mainPhoneExtension: "HQ Phone Extension",
+  mainPhone: "Account Phone",
+  mainPhoneE164: "Account Phone (E164)",
+  mainPhoneExtension: "Account Phone Extension",
   
   // Technology & Intent
   intentTopics: "Intent Topics",

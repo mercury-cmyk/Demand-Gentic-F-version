@@ -8,6 +8,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,7 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Sparkles, ArrowRight, CheckCircle2, AlertTriangle, Plus, Save, BookmarkCheck, Trash2 } from "lucide-react";
+import { Sparkles, ArrowRight, CheckCircle2, AlertTriangle, Plus, Save, BookmarkCheck, Trash2, ChevronDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CustomFieldDefinition, CsvMappingTemplate } from "@shared/schema";
@@ -307,6 +313,16 @@ export function CSVFieldMapper({
       "siccode": { csvColumn, targetField: "sicCode", targetEntity: "account" },
       "naicscode": { csvColumn, targetField: "naicsCode", targetEntity: "account" },
 
+      // Missing aliases requested by user
+      "companyphone1": { csvColumn, targetField: "mainPhone", targetEntity: "account" },
+      "accountphone": { csvColumn, targetField: "mainPhone", targetEntity: "account" },
+      "accounthqphone": { csvColumn, targetField: "mainPhone", targetEntity: "account" }, 
+      "hqphone": { csvColumn, targetField: "mainPhone", targetEntity: "account" },  
+      "companystaffcount": { csvColumn, targetField: "staffCount", targetEntity: "account" },
+      "pastjob": { csvColumn, targetField: "formerPosition", targetEntity: "contact" },
+      "timeinrole": { csvColumn, targetField: "timeInCurrentPosition", targetEntity: "contact" },
+      "timeatcompany": { csvColumn, targetField: "timeInCurrentCompany", targetEntity: "contact" },
+
       // Generic fallbacks
       "name": { csvColumn, targetField: "fullName", targetEntity: "contact" },
       "organization": { csvColumn, targetField: "name", targetEntity: "account" },
@@ -536,24 +552,24 @@ export function CSVFieldMapper({
         <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/30">
           <BookmarkCheck className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">Apply saved template:</span>
-          <Select
-            value=""
-            onValueChange={(templateId) => {
-              const template = templates.find(t => t.id === templateId);
-              if (template) applyTemplate(template);
-            }}
-          >
-            <SelectTrigger className="w-[250px]" data-testid="select-template">
-              <SelectValue placeholder="Select a template..." />
-            </SelectTrigger>
-            <SelectContent position="popper" sideOffset={4}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-[250px] justify-between font-normal" data-testid="select-template">
+                Select a template...
+                <ChevronDown className="h-4 w-4 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[250px]">
               {templates.map((template) => (
-                <SelectItem key={template.id} value={template.id}>
+                <DropdownMenuItem 
+                  key={template.id} 
+                  onClick={() => applyTemplate(template)}
+                >
                   {template.name}
-                </SelectItem>
+                </DropdownMenuItem>
               ))}
-            </SelectContent>
-          </Select>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 

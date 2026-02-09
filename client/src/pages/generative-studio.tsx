@@ -1,9 +1,16 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -23,6 +30,7 @@ import {
   Brain,
   CheckCircle2,
   AlertCircle,
+  FolderKanban,
 } from "lucide-react";
 import ImageGenerationTab from "@/components/generative-studio/image-generation-tab";
 import LandingPageTab from "@/components/generative-studio/landing-page-tab";
@@ -32,6 +40,7 @@ import BlogPostTab from "@/components/generative-studio/blog-post-tab";
 import EbookTab from "@/components/generative-studio/ebook-tab";
 import SolutionBriefTab from "@/components/generative-studio/solution-brief-tab";
 import ProjectHistoryPanel from "@/components/generative-studio/shared/project-history-panel";
+import { OrganizationSelector } from "@/components/ai-studio/org-intelligence/organization-selector";
 
 export interface OrgIntelligenceProfile {
   domain?: string;
@@ -67,6 +76,8 @@ export interface OrgIntelligenceProfile {
 export default function GenerativeStudioPage() {
   const [activeTab, setActiveTab] = useState("image");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   const { data: brandKitsData } = useQuery<{ brandKits?: any[] }>({
     queryKey: ["/api/email-builder/brand-kits"],
@@ -74,18 +85,66 @@ export default function GenerativeStudioPage() {
 
   const brandKits = brandKitsData?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
+  useEffect(() => {
+    const storedOrgId = localStorage.getItem("generativeStudioOrgId");
+    if (storedOrgId) {
+      setSelectedOrgId(storedOrgId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedOrgId) {
+      localStorage.setItem("generativeStudioOrgId", selectedOrgId);
+      const storedProjectId = localStorage.getItem(`generativeStudioProjectId:${selectedOrgId}`);
+      setSelectedProjectId(storedProjectId || null);
+    } else {
+      localStorage.removeItem("generativeStudioOrgId");
+      setSelectedProjectId(null);
+    }
+  }, [selectedOrgId]);
+
+  useEffect(() => {
+    if (!selectedOrgId) return;
+    if (selectedProjectId) {
+      localStorage.setItem(`generativeStudioProjectId:${selectedOrgId}`, selectedProjectId);
+    } else {
+      localStorage.removeItem(`generativeStudioProjectId:${selectedOrgId}`);
+    }
+  }, [selectedOrgId, selectedProjectId]);
+
+  const { data: orgProjectsData, isLoading: orgProjectsLoading } = useQuery<{
+    projects: { id: string; name: string; status?: string }[];
+  }>({
+    queryKey: [
+      `/api/generative-studio/org-projects?organizationId=${selectedOrgId || ""}`,
+    ],
+    enabled: !!selectedOrgId,
+  });
+
+  const orgProjects = orgProjectsData?.projects || [];
+
+  useEffect(() => {
+    if (!selectedOrgId) return;
+    if (selectedProjectId && orgProjects.some((p) => p.id === selectedProjectId)) return;
+    setSelectedProjectId(orgProjects[0]?.id || null);
+  }, [selectedOrgId, selectedProjectId, orgProjects]);
+
   // Fetch Organization Intelligence profile
   const { data: orgIntelData, isLoading: orgIntelLoading } = useQuery<{
     success?: boolean;
     profile: OrgIntelligenceProfile | null;
     metadata?: { confidenceScore?: number; modelVersion?: string; updatedAt?: string };
   }>({
-    queryKey: ["/api/org-intelligence/profile"],
+    queryKey: [
+      `/api/org-intelligence/profile?organizationId=${selectedOrgId || ""}`,
+    ],
     staleTime: 5 * 60 * 1000,
+    enabled: !!selectedOrgId,
   });
 
   const orgProfile = orgIntelData?.profile || null;
   const hasOrgIntel = !!orgProfile?.identity?.legalName?.value;
+  const needsOrgSelection = !selectedOrgId;
 
   // Build a summary string for tooltip
   const orgSummary = orgProfile
@@ -96,6 +155,13 @@ export default function GenerativeStudioPage() {
         orgProfile.positioning?.oneLiner?.value && `Positioning: ${orgProfile.positioning.oneLiner.value}`,
       ].filter(Boolean).join("\n")
     : "";
+
+  const selectedProject = useMemo(
+    () => orgProjects.find((project) => project.id === selectedProjectId),
+    [orgProjects, selectedProjectId]
+  );
+
+  const hasScope = !!selectedOrgId;
 
   return (
     <div className="h-full flex flex-col">
@@ -125,7 +191,12 @@ export default function GenerativeStudioPage() {
                       : "bg-amber-50 text-amber-600 hover:bg-amber-50 border-amber-200"
                   }`}
                 >
-                  {orgIntelLoading ? (
+                  {needsOrgSelection ? (
+                    <>
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Select Organization
+                    </>
+                  ) : orgIntelLoading ? (
                     <>
                       <Brain className="w-3.5 h-3.5 animate-pulse" />
                       Loading OI...
@@ -144,7 +215,11 @@ export default function GenerativeStudioPage() {
                 </Badge>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-sm">
-                {hasOrgIntel ? (
+                {needsOrgSelection ? (
+                  <p className="text-xs">
+                    Select an organization to activate organization-specific intelligence.
+                  </p>
+                ) : hasOrgIntel ? (
                   <div className="space-y-1">
                     <p className="font-medium text-xs">Organization Intelligence is enhancing all generations</p>
                     <p className="text-xs whitespace-pre-line text-muted-foreground">{orgSummary}</p>
@@ -166,10 +241,66 @@ export default function GenerativeStudioPage() {
               </Button>
             </SheetTrigger>
             <SheetContent className="w-[400px]">
-              <ProjectHistoryPanel />
+              <ProjectHistoryPanel
+                organizationId={selectedOrgId || undefined}
+                clientProjectId={selectedProjectId || undefined}
+                organizationName={orgProfile?.identity?.legalName?.value}
+                projectName={selectedProject?.name}
+              />
             </SheetContent>
           </Sheet>
         </div>
+      </div>
+
+      {/* Organization/Project Context */}
+      <div className="border-b px-6 py-4 bg-gradient-to-r from-slate-50 to-white">
+        <div className="flex flex-wrap items-center gap-4 justify-between">
+          <OrganizationSelector
+            selectedOrgId={selectedOrgId}
+            onOrgChange={setSelectedOrgId}
+          />
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <FolderKanban className="h-4 w-4" />
+              Project:
+            </div>
+            <Select
+              value={selectedProjectId || ""}
+              onValueChange={(value) => setSelectedProjectId(value || null)}
+              disabled={!selectedOrgId || orgProjectsLoading}
+            >
+              <SelectTrigger className="w-[240px]">
+                <SelectValue
+                  placeholder={
+                    orgProjectsLoading
+                      ? "Loading projects..."
+                      : selectedOrgId
+                      ? "Select project"
+                      : "Select organization first"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {orgProjects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+                {orgProjects.length === 0 && (
+                  <SelectItem value="none" disabled>
+                    No projects available
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        {!hasScope && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Select an organization to unlock Generative Studio content creation.
+          </div>
+        )}
       </div>
 
       {/* Tabbed Content */}
@@ -206,25 +337,58 @@ export default function GenerativeStudioPage() {
 
         <div className="flex-1 overflow-auto">
           <TabsContent value="image" className="h-full mt-0 p-0">
-            <ImageGenerationTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <ImageGenerationTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="landing-page" className="h-full mt-0 p-0">
-            <LandingPageTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <LandingPageTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="email" className="h-full mt-0 p-0">
-            <EmailTemplateTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <EmailTemplateTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="blog" className="h-full mt-0 p-0">
-            <BlogPostTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <BlogPostTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="ebook" className="h-full mt-0 p-0">
-            <EbookTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <EbookTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="solution-brief" className="h-full mt-0 p-0">
-            <SolutionBriefTab brandKits={brandKits} orgIntelligence={orgProfile} />
+            <SolutionBriefTab
+              brandKits={brandKits}
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+              clientProjectId={selectedProjectId || undefined}
+            />
           </TabsContent>
           <TabsContent value="chat" className="h-full mt-0 p-0">
-            <ChatTab orgIntelligence={orgProfile} />
+            <ChatTab
+              orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+            />
           </TabsContent>
         </div>
       </Tabs>

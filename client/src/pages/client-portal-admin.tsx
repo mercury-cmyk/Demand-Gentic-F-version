@@ -29,6 +29,7 @@ import {
   CreditCard,
   Send,
   Download,
+  Upload,
   Loader2,
   CheckCircle,
   AlertCircle,
@@ -447,6 +448,272 @@ const ClientCampaignPricingEditor = ({ clientId }: { clientId: string }) => {
   );
 };
 
+// Pricing Documents Manager Component
+const ClientPricingDocumentsManager = ({ clientId }: { clientId: string }) => {
+  const { toast } = useToast();
+  const [isUploading, setIsUploading] = useState(false);
+  const [docName, setDocName] = useState('');
+  const [docDescription, setDocDescription] = useState('');
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  const { data: docsData, isLoading, refetch } = useQuery({
+    queryKey: ['client-pricing-documents', clientId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents`);
+      if (!res.ok) throw new Error('Failed to fetch pricing documents');
+      return res.json();
+    },
+    enabled: !!clientId,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (docId: string) => {
+      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents/${docId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete document');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: 'Document removed' });
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to remove document', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    setDocName(file.name.replace(/\.[^.]+$/, ''));
+    setShowUploadDialog(true);
+  };
+
+  const handleUpload = async () => {
+    if (!pendingFile || !docName.trim()) return;
+
+    setIsUploading(true);
+    try {
+      // Get presigned upload URL
+      const urlRes = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: pendingFile.name,
+          contentType: pendingFile.type,
+          folder: 'pricing-documents',
+        }),
+      });
+
+      if (!urlRes.ok) throw new Error('Failed to get upload URL');
+      const { url, key } = await urlRes.json();
+
+      // Upload file to GCS
+      await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': pendingFile.type },
+        body: pendingFile,
+      });
+
+      // Save document metadata
+      const saveRes = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: docName.trim(),
+          description: docDescription.trim() || null,
+          fileKey: key,
+          fileName: pendingFile.name,
+          fileType: pendingFile.type,
+          fileSize: pendingFile.size,
+        }),
+      });
+
+      if (!saveRes.ok) throw new Error('Failed to save document');
+
+      toast({ title: 'Pricing document uploaded successfully' });
+      setShowUploadDialog(false);
+      setPendingFile(null);
+      setDocName('');
+      setDocDescription('');
+      refetch();
+    } catch (error) {
+      toast({ title: 'Upload failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDownload = async (docId: string) => {
+    try {
+      const res = await fetch(`/api/admin/billing/clients/${clientId}/pricing-documents/${docId}/download`);
+      if (!res.ok) throw new Error('Failed to get download URL');
+      const { downloadUrl, fileName } = await res.json();
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      toast({ title: 'Download failed', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
+    }
+  };
+
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return '-';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="space-y-4 pt-6">
+      <Separator />
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Pricing Documents
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Upload custom pricing agreements, rate cards, or contract documents. Clients can view and download these.
+          </p>
+        </div>
+        <div>
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.txt"
+            onChange={handleFileSelect}
+            id={`pricing-doc-upload-${clientId}`}
+          />
+          <Button
+            size="sm"
+            onClick={() => document.getElementById(`pricing-doc-upload-${clientId}`)?.click()}
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Document
+          </Button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : docsData?.documents?.length > 0 ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Document</TableHead>
+              <TableHead>File</TableHead>
+              <TableHead className="text-right">Size</TableHead>
+              <TableHead>Uploaded</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {docsData.documents.map((doc: any) => (
+              <TableRow key={doc.id}>
+                <TableCell>
+                  <div>
+                    <div className="font-medium">{doc.name}</div>
+                    {doc.description && <div className="text-xs text-muted-foreground">{doc.description}</div>}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">
+                    {doc.fileName}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right text-sm">{formatFileSize(doc.fileSize)}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {new Date(doc.createdAt).toLocaleDateString()}
+                  {doc.uploadedBy && <span className="block text-xs">by {doc.uploadedBy}</span>}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex gap-1 justify-end">
+                    <Button size="sm" variant="ghost" onClick={() => handleDownload(doc.id)}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-500 hover:text-red-700"
+                      onClick={() => deleteMutation.mutate(doc.id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <div className="text-center py-6 text-muted-foreground border rounded-lg">
+          <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p>No pricing documents uploaded yet.</p>
+          <p className="text-sm">Upload rate cards, contracts, or pricing agreements.</p>
+        </div>
+      )}
+
+      {/* Upload Dialog */}
+      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload Pricing Document</DialogTitle>
+            <DialogDescription>
+              Add a name and optional description for this pricing document.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Document Name</Label>
+              <Input
+                value={docName}
+                onChange={(e) => setDocName(e.target.value)}
+                placeholder="e.g., Argyle Custom Pricing Q1 2026"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description (Optional)</Label>
+              <Textarea
+                value={docDescription}
+                onChange={(e) => setDocDescription(e.target.value)}
+                placeholder="Brief description of the pricing agreement..."
+                rows={3}
+              />
+            </div>
+            {pendingFile && (
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-lg text-sm">
+                <FileText className="h-4 w-4" />
+                <span>{pendingFile.name}</span>
+                <span className="text-muted-foreground">({formatFileSize(pendingFile.size)})</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowUploadDialog(false); setPendingFile(null); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleUpload} disabled={isUploading || !docName.trim()}>
+              {isUploading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {isUploading ? 'Uploading...' : 'Upload'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 interface BillingConfig {
   clientAccountId: string;
   defaultBillingModel: string;
@@ -656,7 +923,8 @@ export default function ClientPortalAdmin() {
   const updateClientMutation = useMutation({
     mutationFn: async (payload: Partial<any>) => {
       if (!selectedClient) throw new Error('No client selected');
-      return apiRequest('PATCH', `/api/client-portal/admin/clients/${selectedClient.id}`, payload);
+      const res = await apiRequest('PATCH', `/api/client-portal/admin/clients/${selectedClient.id}`, payload);
+      return res.json();
     },
     onSuccess: (updatedClient) => {
       setSelectedClient((prev) => prev ? { ...prev, ...updatedClient } : updatedClient);
@@ -798,13 +1066,13 @@ export default function ClientPortalAdmin() {
     const formData = new FormData(e.currentTarget);
     updateBillingMutation.mutate({
       defaultBillingModel: formData.get('billingModel') as any,
-      defaultRatePerLead: parseFloat(formData.get('ratePerLead') as string),
-      defaultRatePerContact: parseFloat(formData.get('ratePerContact') as string),
-      defaultRatePerCallMinute: parseFloat(formData.get('ratePerCallMinute') as string),
+      defaultRatePerLead: (formData.get('ratePerLead') as string) || '0',
+      defaultRatePerContact: (formData.get('ratePerContact') as string) || '0',
+      defaultRatePerCallMinute: (formData.get('ratePerCallMinute') as string) || '0',
       paymentTermsDays: parseInt(formData.get('paymentTerms') as string),
       billingEmail: formData.get('billingEmail') as string,
       taxExempt: formData.get('taxExempt') === 'on',
-      taxRate: parseFloat(formData.get('taxRate') as string) / 100,
+      taxRate: ((parseFloat(formData.get('taxRate') as string) || 0) / 100).toString(),
       autoInvoiceEnabled: formData.get('autoInvoice') === 'on',
       invoiceDayOfMonth: parseInt(formData.get('invoiceDayOfMonth') as string) || 1,
       paymentDueDayOfMonth: formData.get('paymentDueDayOfMonth')
@@ -1048,7 +1316,8 @@ export default function ClientPortalAdmin() {
                     </TabsContent>
 
                     <TabsContent value="pricing">
-                        <ClientCampaignPricingEditor clientId={selectedClient} />
+                        <ClientCampaignPricingEditor clientId={selectedClient.id} />
+                        <ClientPricingDocumentsManager clientId={selectedClient.id} />
                     </TabsContent>
 
                     <TabsContent value="overview">
@@ -1845,7 +2114,7 @@ export default function ClientPortalAdmin() {
                     {/* Group campaigns by type */}
                     {allCampaigns && allCampaigns.length > 0 ? (
                       Object.entries(
-                        allCampaigns.reduce((acc: any, campaign) => {
+                        allCampaigns.reduce<Record<string, any[]>>((acc, campaign) => {
                           const type = campaign.type || 'other';
                           if (!acc[type]) acc[type] = [];
                           acc[type].push(campaign);

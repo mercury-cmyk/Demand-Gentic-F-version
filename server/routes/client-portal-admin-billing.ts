@@ -5,6 +5,7 @@ import {
   clientAccounts,
   clientBillingConfig,
   clientCampaignPricing,
+  clientPricingDocuments,
   clientActivityCosts,
   clientInvoices,
   clientInvoiceItems,
@@ -893,6 +894,114 @@ router.delete('/clients/:clientId/campaign-pricing/:campaignType', async (req: R
   } catch (error) {
     console.error('[ADMIN] Delete campaign pricing error:', error);
     res.status(500).json({ message: 'Failed to delete campaign pricing' });
+  }
+});
+
+// ==================== CLIENT PRICING DOCUMENTS ====================
+
+// Get all pricing documents for a client
+router.get('/clients/:clientId/pricing-documents', async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params;
+
+    const docs = await db
+      .select()
+      .from(clientPricingDocuments)
+      .where(eq(clientPricingDocuments.clientAccountId, clientId))
+      .orderBy(desc(clientPricingDocuments.createdAt));
+
+    res.json({ clientId, documents: docs });
+  } catch (error) {
+    console.error('[ADMIN] Get pricing documents error:', error);
+    res.status(500).json({ message: 'Failed to get pricing documents' });
+  }
+});
+
+// Upload a pricing document (metadata only - file already uploaded to GCS via presigned URL)
+router.post('/clients/:clientId/pricing-documents', async (req: Request, res: Response) => {
+  try {
+    const { clientId } = req.params;
+
+    const docSchema = z.object({
+      name: z.string().min(1, 'Document name is required'),
+      description: z.string().optional().nullable(),
+      fileKey: z.string().min(1, 'File key is required'),
+      fileName: z.string().min(1, 'File name is required'),
+      fileType: z.string().min(1, 'File type is required'),
+      fileSize: z.number().optional(),
+      uploadedBy: z.string().optional(),
+    });
+
+    const data = docSchema.parse(req.body);
+
+    const [doc] = await db
+      .insert(clientPricingDocuments)
+      .values({
+        clientAccountId: clientId,
+        name: data.name,
+        description: data.description || null,
+        fileKey: data.fileKey,
+        fileName: data.fileName,
+        fileType: data.fileType,
+        fileSize: data.fileSize || null,
+        uploadedBy: data.uploadedBy || null,
+      })
+      .returning();
+
+    res.json({ message: 'Pricing document uploaded', document: doc });
+  } catch (error) {
+    console.error('[ADMIN] Upload pricing document error:', error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: error.errors });
+    }
+    res.status(500).json({ message: 'Failed to upload pricing document' });
+  }
+});
+
+// Delete a pricing document
+router.delete('/clients/:clientId/pricing-documents/:docId', async (req: Request, res: Response) => {
+  try {
+    const { clientId, docId } = req.params;
+
+    await db
+      .delete(clientPricingDocuments)
+      .where(and(
+        eq(clientPricingDocuments.id, docId),
+        eq(clientPricingDocuments.clientAccountId, clientId)
+      ));
+
+    res.json({ message: 'Pricing document removed' });
+  } catch (error) {
+    console.error('[ADMIN] Delete pricing document error:', error);
+    res.status(500).json({ message: 'Failed to delete pricing document' });
+  }
+});
+
+// Get download URL for a pricing document
+router.get('/clients/:clientId/pricing-documents/:docId/download', async (req: Request, res: Response) => {
+  try {
+    const { clientId, docId } = req.params;
+
+    const [doc] = await db
+      .select()
+      .from(clientPricingDocuments)
+      .where(and(
+        eq(clientPricingDocuments.id, docId),
+        eq(clientPricingDocuments.clientAccountId, clientId)
+      ))
+      .limit(1);
+
+    if (!doc) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const { getPresignedDownloadUrl } = await import('../lib/storage');
+    const downloadUrl = await getPresignedDownloadUrl(doc.fileKey, 3600); // 1 hour
+
+    res.json({ downloadUrl, fileName: doc.fileName });
+  } catch (error) {
+    console.error('[ADMIN] Download pricing document error:', error);
+    res.status(500).json({ message: 'Failed to generate download URL' });
   }
 });
 

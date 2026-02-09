@@ -154,7 +154,7 @@ export default function LoginPage() {
           <CardTitle className="text-3xl font-bold bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
             DemandGentic.ai
           </CardTitle>
-          <div className="text-muted-foreground font-medium text-xs uppercase tracking-widest mt-1 mb-2">Human Intel, AI Execute By Pivotal B2B</div>
+          <div className="text-muted-foreground font-medium text-xs uppercase tracking-widest mt-1 mb-2">Human Intel, AI Execute By DemandGentic</div>
           <CardDescription className="text-base">
             Intelligent B2B demand generation platform
           </CardDescription>

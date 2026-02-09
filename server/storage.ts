@@ -2001,100 +2001,118 @@ export class DatabaseStorage implements IStorage {
       return { enqueued: 0 };
     }
 
-    return await db.transaction(async (tx) => {
-      // Fetch all contacts in bulk to get phone numbers
-      const contactIds = contactsToEnqueue.map(c => c.contactId);
-      const contactData = await tx.select().from(contacts).where(inArray(contacts.id, contactIds));
+    // Process in batches to handle large audiences (10k+ contacts)
+    const BATCH_SIZE = 500;
+    let totalEnqueued = 0;
+    const totalAccountCounts = new Map<string, number>();
+    const totalBatches = Math.ceil(contactsToEnqueue.length / BATCH_SIZE);
+
+    for (let batchStart = 0; batchStart < contactsToEnqueue.length; batchStart += BATCH_SIZE) {
+      const batch = contactsToEnqueue.slice(batchStart, batchStart + BATCH_SIZE);
+      const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+
+      if (totalBatches > 1) {
+        console.log(`[Bulk Enqueue] Processing batch ${batchNum}/${totalBatches} (${batch.length} contacts)`);
+      }
+
+      // Fetch contacts in this batch to get phone numbers (outside transaction for speed)
+      const batchContactIds = batch.map(c => c.contactId);
+      const contactData = await db.select().from(contacts).where(inArray(contacts.id, batchContactIds));
       const contactMap = new Map(contactData.map(c => [c.id, c]));
 
-      // AUTO-NORMALIZE: Batch update phone numbers and timezones for all contacts
+      // AUTO-NORMALIZE: Compute updates locally, then batch-write in small transactions
       const contactUpdates: Array<{ id: string; updates: Record<string, any> }> = [];
-      
+
       for (const contact of contactData) {
         const countryCode = normalizeCountryToCode(contact.country);
         const updates: Record<string, any> = {};
-        
-        // Normalize phone numbers if country is known
+
         if (countryCode) {
           if (contact.directPhone && !contact.directPhoneE164) {
             const normalized = normalizePhoneWithCountryCode(contact.directPhone, countryCode);
-            if (normalized.e164) {
-              updates.directPhoneE164 = normalized.e164;
-            }
+            if (normalized.e164) updates.directPhoneE164 = normalized.e164;
           }
           if (contact.mobilePhone && !contact.mobilePhoneE164) {
             const normalized = normalizePhoneWithCountryCode(contact.mobilePhone, countryCode);
-            if (normalized.e164) {
-              updates.mobilePhoneE164 = normalized.e164;
-            }
+            if (normalized.e164) updates.mobilePhoneE164 = normalized.e164;
           }
         }
-        
-        // Auto-detect timezone if not set
+
         if (!contact.timezone) {
           const detectedTimezone = detectContactTimezone(contact);
-          if (detectedTimezone) {
-            updates.timezone = detectedTimezone;
-          }
+          if (detectedTimezone) updates.timezone = detectedTimezone;
         }
-        
+
         if (Object.keys(updates).length > 0) {
           contactUpdates.push({ id: contact.id, updates });
-          // Update local map for accurate phone selection
           Object.assign(contact, updates);
         }
       }
-      
-      // Apply all contact updates
-      for (const { id, updates } of contactUpdates) {
-        await tx.update(contacts).set(updates).where(eq(contacts.id, id));
-      }
-      
+
+      // Write normalization updates in small batches to avoid Neon connection timeouts
       if (contactUpdates.length > 0) {
+        const NORM_BATCH = 50;
+        for (let i = 0; i < contactUpdates.length; i += NORM_BATCH) {
+          const normBatch = contactUpdates.slice(i, i + NORM_BATCH);
+          await db.transaction(async (tx) => {
+            for (const { id, updates } of normBatch) {
+              await tx.update(contacts).set(updates).where(eq(contacts.id, id));
+            }
+          });
+        }
         console.log(`[Bulk Enqueue] Auto-normalized ${contactUpdates.length} contacts (phones/timezone)`);
       }
 
-      // Batch insert all queue items with dialed numbers
-      const queueValues = contactsToEnqueue.map(c => {
+      // Insert queue items with dialed numbers (separate small transaction)
+      const queueValues = batch.map(c => {
         const contact = contactMap.get(c.contactId);
         const dialedNumber = contact ? getBestPhoneForContact(contact).phone || null : null;
-        
+
         return {
           campaignId,
           contactId: c.contactId,
           accountId: c.accountId,
-          dialedNumber, // CRITICAL: Store exact dialed number for Telnyx recording sync
+          dialedNumber,
           priority: c.priority ?? 0,
           status: 'queued' as const,
         };
       });
 
-      await tx.insert(campaignQueue).values(queueValues);
+      await db.insert(campaignQueue).values(queueValues).onConflictDoNothing();
+      totalEnqueued += batch.length;
 
-      // Count contacts per account for batch stats update
-      const accountCounts = new Map<string, number>();
-      for (const item of contactsToEnqueue) {
-        accountCounts.set(item.accountId, (accountCounts.get(item.accountId) || 0) + 1);
+      // Accumulate account counts
+      for (const item of batch) {
+        totalAccountCounts.set(item.accountId, (totalAccountCounts.get(item.accountId) || 0) + 1);
       }
+    }
 
-      // Batch upsert account stats
-      for (const [accountId, count] of Array.from(accountCounts.entries())) {
-        await tx.insert(campaignAccountStats).values({
-          campaignId,
-          accountId,
-          queuedCount: count,
-          connectedCount: 0,
-          positiveDispCount: 0,
-        }).onConflictDoUpdate({
-          target: [campaignAccountStats.campaignId, campaignAccountStats.accountId],
-          set: {
-            queuedCount: sql`${campaignAccountStats.queuedCount} + ${count}`,
-          },
+    // Update account stats in small batches
+    if (totalAccountCounts.size > 0) {
+      const accountEntries = Array.from(totalAccountCounts.entries());
+      const STATS_BATCH = 50;
+      for (let i = 0; i < accountEntries.length; i += STATS_BATCH) {
+        const statsBatch = accountEntries.slice(i, i + STATS_BATCH);
+        await db.transaction(async (tx) => {
+          for (const [accountId, count] of statsBatch) {
+            await tx.insert(campaignAccountStats).values({
+              campaignId,
+              accountId,
+              queuedCount: count,
+              connectedCount: 0,
+              positiveDispCount: 0,
+            }).onConflictDoUpdate({
+              target: [campaignAccountStats.campaignId, campaignAccountStats.accountId],
+              set: {
+                queuedCount: sql`${campaignAccountStats.queuedCount} + ${count}`,
+              },
+            });
+          }
         });
       }
+    }
 
-      return { enqueued: contactsToEnqueue.length };
-    });
+    return { enqueued: totalEnqueued };
   }
 
   async updateQueueStatus(id: string, status: string, removedReason?: string, isPositiveDisposition?: boolean): Promise<any> {

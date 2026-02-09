@@ -284,9 +284,9 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
             <div className="h-20 w-20 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center mb-6">
               <Sparkles className="h-10 w-10 text-indigo-500" />
             </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">AgentX Ready</h3>
-            <p className="text-sm text-slate-500 max-w-xs mb-8 leading-relaxed">
-              I can assist with campaign management, billing inquiries, and order processing. All actions are verified securely.
+            <h3 className="text-xl font-bold text-slate-900 mb-2">AgentX: Agentic Operator</h3>
+            <p className="text-sm text-slate-500 max-w-sm mb-8 leading-relaxed">
+              Agentic Operator with Agentic CRM Actions, ImageGen, Organization Aware Chat Bot, and Creative Content capabilities.
             </p>
 
             <div className="w-full max-w-sm grid grid-cols-2 gap-3 mb-8">

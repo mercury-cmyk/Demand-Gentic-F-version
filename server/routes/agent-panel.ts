@@ -101,7 +101,7 @@ interface PlannedStep {
 const chatRequestSchema = z.object({
   message: z.string().min(1),
   sessionId: z.string().optional(),
-  conversationId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().nullable().optional(),
   context: z.record(z.any()).optional(),
   planMode: z.boolean().optional().default(true), // Enable plan-before-execute by default
 });

@@ -20,15 +20,23 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface EmailTemplateTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTemplateTabProps) {
+export default function EmailTemplateTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: EmailTemplateTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [subjectHint, setSubjectHint] = useState("");
   const [emailType, setEmailType] = useState("");
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -38,7 +46,7 @@ export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTe
     onSuccess: (data) => {
       setResult(data.content);
       setProjectId(data.projectId);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
       toast({ title: "Email template generated!" });
     },
     onError: (error: any) => {
@@ -48,7 +56,10 @@ export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTe
 
   const saveAsAssetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`);
+      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`, {
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: () => {
@@ -61,6 +72,8 @@ export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTe
       ...params,
       subjectHint: subjectHint || undefined,
       emailType: emailType || undefined,
+      organizationId,
+      clientProjectId,
     });
   };
 
@@ -85,11 +98,12 @@ export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTe
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Email"
+          disabled={!organizationId}
           extraFields={
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Email Type</Label>
-                <Select value={emailType} onValueChange={setEmailType}>
+                <Select value={emailType} onValueChange={setEmailType} disabled={!organizationId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type..." />
                   </SelectTrigger>
@@ -111,6 +125,7 @@ export default function EmailTemplateTab({ brandKits, orgIntelligence }: EmailTe
                   placeholder="e.g., focus on ROI, create urgency"
                   value={subjectHint}
                   onChange={(e) => setSubjectHint(e.target.value)}
+                  disabled={!organizationId}
                 />
               </div>
             </div>

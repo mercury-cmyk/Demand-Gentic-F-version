@@ -5,6 +5,7 @@ import { ClientPortalLayout } from '@/components/client-portal/layout/client-por
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
@@ -18,12 +19,21 @@ import {
   DollarSign,
   TrendingUp,
   FileText,
-  CreditCard,
   ChevronRight,
   Loader2,
   Download,
   AlertCircle,
   Tag,
+  Calendar,
+  Clock,
+  Banknote,
+  Users,
+  MousePointerClick,
+  ClipboardCheck,
+  Handshake,
+  Sparkles,
+  CheckCircle2,
+  Shield,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -155,6 +165,45 @@ export default function ClientPortalBilling() {
       return res.json();
     },
   });
+
+  const { data: pricingDocsData } = useQuery<{
+    documents: Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      fileName: string;
+      fileSize: number | null;
+      createdAt: string;
+    }>;
+  }>({
+    queryKey: ['client-portal-pricing-documents'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/pricing-documents', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch pricing documents');
+      return res.json();
+    },
+  });
+
+  const handlePricingDocDownload = async (docId: string) => {
+    try {
+      const res = await fetch(`/api/client-portal/billing/pricing-documents/${docId}/download`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error('Failed to get download URL');
+      const { downloadUrl, fileName } = await res.json();
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  };
 
   const formatCurrency = (amount: number, currency = 'USD') => {
     return new Intl.NumberFormat('en-US', {
@@ -518,91 +567,238 @@ export default function ClientPortalBilling() {
           </TabsContent>
 
           {/* Pricing & Terms Tab */}
-          <TabsContent value="pricing" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* Your Pricing */}
-              <Card className="md:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Tag className="h-5 w-5" />
-                    Your Pricing
-                  </CardTitle>
-                  <CardDescription>Per-unit rates for each service type</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {campaignPricingData?.pricing ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Service</TableHead>
-                          <TableHead className="text-right">Price Per Lead</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {Object.entries(campaignPricingData.pricing)
-                          .filter(([, config]) => config.isEnabled)
-                          .map(([type, config]) => (
-                            <TableRow key={type}>
-                              <TableCell className="font-medium">{config.label}</TableCell>
-                              <TableCell className="text-right">
-                                {formatCurrency(config.pricePerLead)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="flex items-center justify-center py-8 text-muted-foreground">
-                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                      Loading pricing...
-                    </div>
-                  )}
+          <TabsContent value="pricing" className="space-y-6">
+            {/* Hero Banner */}
+            <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-8">
+              <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PHBhdGggZD0iTTM2IDE4YzEuNjU3IDAgMy0xLjM0MyAzLTNzLTEuMzQzLTMtMy0zLTMgMS4zNDMtMyAzIDEuMzQzIDMgMyAzem0xMiAxOGMxLjY1NyAwIDMtMS4zNDMgMy0zcy0xLjM0My0zLTMtMy0zIDEuMzQzLTMgMyAxLjM0MyAzIDMgM3pNMTIgMzZjMS42NTcgMCAzLTEuMzQzIDMtM3MtMS4zNDMtMy0zLTMtMyAxLjM0My0zIDMgMS4zNDMgMyAzIDN6Ii8+PC9nPjwvZz48L3N2Zz4=')] opacity-50" />
+              <div className="relative">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
+                    <Sparkles className="h-6 w-6 text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Your Pricing Plan</h2>
+                    <p className="text-slate-300 text-sm">Custom pricing tailored to your programs</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/30">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    Active Agreement
+                  </Badge>
+                  <Badge className="bg-white/10 text-slate-300 border-white/20 hover:bg-white/20">
+                    Cost Per Lead (CPL)
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            {/* Pricing Cards */}
+            {campaignPricingData?.pricing ? (
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Tag className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="text-lg font-semibold">Service Pricing</h3>
+                  <Badge variant="secondary" className="ml-auto">
+                    {Object.values(campaignPricingData.pricing).filter(c => c.isEnabled).length} active services
+                  </Badge>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {Object.entries(campaignPricingData.pricing)
+                    .filter(([, config]) => config.isEnabled)
+                    .sort(([, a], [, b]) => a.pricePerLead - b.pricePerLead)
+                    .map(([type, config], index) => {
+                      // Map campaign types to icons and accent colors
+                      const serviceConfig: Record<string, { icon: React.ReactNode; color: string; bgColor: string; borderColor: string; description: string }> = {
+                        event_registration_digital_ungated: {
+                          icon: <MousePointerClick className="h-6 w-6" />,
+                          color: 'text-blue-600',
+                          bgColor: 'bg-blue-50',
+                          borderColor: 'border-blue-200 hover:border-blue-300',
+                          description: 'No form required — click-through registrations',
+                        },
+                        event_registration_digital_gated: {
+                          icon: <ClipboardCheck className="h-6 w-6" />,
+                          color: 'text-violet-600',
+                          bgColor: 'bg-violet-50',
+                          borderColor: 'border-violet-200 hover:border-violet-300',
+                          description: 'Form-based registration with lead capture',
+                        },
+                        in_person_event: {
+                          icon: <Users className="h-6 w-6" />,
+                          color: 'text-amber-600',
+                          bgColor: 'bg-amber-50',
+                          borderColor: 'border-amber-200 hover:border-amber-300',
+                          description: 'Executive dinners, conferences & roundtables',
+                        },
+                        appointment_generation: {
+                          icon: <Handshake className="h-6 w-6" />,
+                          color: 'text-emerald-600',
+                          bgColor: 'bg-emerald-50',
+                          borderColor: 'border-emerald-200 hover:border-emerald-300',
+                          description: 'Confirmed meetings with your target audience',
+                        },
+                      };
+
+                      const svc = serviceConfig[type] || {
+                        icon: <Tag className="h-6 w-6" />,
+                        color: 'text-slate-600',
+                        bgColor: 'bg-slate-50',
+                        borderColor: 'border-slate-200 hover:border-slate-300',
+                        description: '',
+                      };
+
+                      return (
+                        <Card
+                          key={type}
+                          className={`relative overflow-hidden transition-all duration-200 ${svc.borderColor} hover:shadow-md`}
+                        >
+                          <CardContent className="p-6">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start gap-4">
+                                <div className={`p-3 rounded-xl ${svc.bgColor} ${svc.color}`}>
+                                  {svc.icon}
+                                </div>
+                                <div className="space-y-1">
+                                  <h4 className="font-semibold text-base">{config.label}</h4>
+                                  {svc.description && (
+                                    <p className="text-sm text-muted-foreground leading-snug">{svc.description}</p>
+                                  )}
+                                  {config.minimumOrderSize > 0 && (
+                                    <div className="flex items-center gap-1 mt-2">
+                                      <Badge variant="outline" className="text-xs font-normal">
+                                        Min. order: {config.minimumOrderSize}
+                                      </Badge>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0 ml-4">
+                                <div className="text-2xl font-bold tracking-tight">
+                                  {formatCurrency(config.pricePerLead)}
+                                </div>
+                                <p className="text-xs text-muted-foreground">per lead</p>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                </div>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                  Loading pricing...
                 </CardContent>
               </Card>
+            )}
 
-              {/* Billing Terms */}
-              <Card className="md:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5" />
-                    Billing Terms
-                  </CardTitle>
-                  <CardDescription>Your billing schedule and payment terms</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Billing Cycle</p>
-                        <p className="font-medium">Monthly (based on previous month's activity)</p>
+            {/* Billing Terms - Redesigned */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Shield className="h-5 w-5 text-muted-foreground" />
+                <h3 className="text-lg font-semibold">Billing Terms</h3>
+              </div>
+              <Card>
+                <CardContent className="p-0">
+                  <div className="grid md:grid-cols-4 divide-y md:divide-y-0 md:divide-x">
+                    <div className="p-6 flex flex-col items-center text-center space-y-2">
+                      <div className="p-3 rounded-full bg-blue-50">
+                        <Calendar className="h-5 w-5 text-blue-600" />
                       </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Invoice Generated</p>
-                        <p className="font-medium">
-                          {billingConfig?.invoiceDayOfMonth
-                            ? `${ordinalSuffix(billingConfig.invoiceDayOfMonth)} of each month`
-                            : '1st of each month'}
-                        </p>
-                      </div>
+                      <p className="text-sm font-medium">Billing Cycle</p>
+                      <p className="text-sm text-muted-foreground">Monthly</p>
                     </div>
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Payment Due</p>
-                        <p className="font-medium">
-                          {billingConfig?.paymentDueDayOfMonth
-                            ? `By the ${ordinalSuffix(billingConfig.paymentDueDayOfMonth)} of each month`
-                            : `NET ${billingConfig?.paymentTermsDays || 30} days from invoice date`}
-                        </p>
+                    <div className="p-6 flex flex-col items-center text-center space-y-2">
+                      <div className="p-3 rounded-full bg-violet-50">
+                        <FileText className="h-5 w-5 text-violet-600" />
                       </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Currency</p>
-                        <p className="font-medium">{billingConfig?.currency || 'USD'}</p>
+                      <p className="text-sm font-medium">Invoice Date</p>
+                      <p className="text-sm text-muted-foreground">
+                        {billingConfig?.invoiceDayOfMonth
+                          ? `${ordinalSuffix(billingConfig.invoiceDayOfMonth)} of month`
+                          : '1st of month'}
+                      </p>
+                    </div>
+                    <div className="p-6 flex flex-col items-center text-center space-y-2">
+                      <div className="p-3 rounded-full bg-amber-50">
+                        <Clock className="h-5 w-5 text-amber-600" />
                       </div>
+                      <p className="text-sm font-medium">Payment Due</p>
+                      <p className="text-sm text-muted-foreground">
+                        {billingConfig?.paymentDueDayOfMonth
+                          ? `By the ${ordinalSuffix(billingConfig.paymentDueDayOfMonth)}`
+                          : `NET ${billingConfig?.paymentTermsDays || 30}`}
+                      </p>
+                    </div>
+                    <div className="p-6 flex flex-col items-center text-center space-y-2">
+                      <div className="p-3 rounded-full bg-emerald-50">
+                        <Banknote className="h-5 w-5 text-emerald-600" />
+                      </div>
+                      <p className="text-sm font-medium">Currency</p>
+                      <p className="text-sm text-muted-foreground">{billingConfig?.currency || 'USD'}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Pricing Documents - Redesigned */}
+            {pricingDocsData?.documents && pricingDocsData.documents.length > 0 && (
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="text-lg font-semibold">Pricing Documents</h3>
+                </div>
+                <div className="grid gap-3">
+                  {pricingDocsData.documents.map((doc) => (
+                    <Card key={doc.id} className="hover:shadow-md transition-all duration-200">
+                      <CardContent className="p-5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl text-white shadow-sm">
+                              <FileText className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-semibold">{doc.name}</p>
+                              {doc.description && (
+                                <p className="text-sm text-muted-foreground mt-0.5">{doc.description}</p>
+                              )}
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <span className="text-xs text-muted-foreground">{doc.fileName}</span>
+                                {doc.fileSize && (
+                                  <>
+                                    <Separator orientation="vertical" className="h-3" />
+                                    <span className="text-xs text-muted-foreground">
+                                      {(doc.fileSize / 1024).toFixed(1)} KB
+                                    </span>
+                                  </>
+                                )}
+                                <Separator orientation="vertical" className="h-3" />
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handlePricingDocDownload(doc.id)}
+                            className="shrink-0"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

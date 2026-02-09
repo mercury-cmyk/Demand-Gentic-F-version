@@ -5,7 +5,7 @@ import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, sql, desc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { storage } from "./storage";
-import { comparePassword, generateToken, requireAuth, requireRole, hashPassword } from "./auth";
+import { comparePassword, generateToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
@@ -81,6 +81,7 @@ import iamRouter from './routes/iam';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
+import agentPanelOrdersRouter from './routes/agent-panel-orders'; // Register the missing orders router
 import agentDefaultsRouter from './routes/agent-defaults';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import researchAnalysisRouter from './routes/research-analysis-routes';
@@ -649,6 +650,123 @@ async function ensureMailboxTokens(userId: string) {
   }
 
   return { mailbox, tokens } as const;
+}
+
+/**
+ * Resolves audience contacts from a campaign's audienceRefs (lists, segments, filterGroups).
+ * Deduplicates, filters for accountId presence, validates callable phones,
+ * and returns contacts ready to enqueue — excluding any already in the queue.
+ */
+async function resolveAudienceContactsForQueue(
+  campaignId: string,
+  audienceRefs: any,
+  logPrefix: string = '[Queue Populate]'
+): Promise<Array<{ contactId: string; accountId: string; priority: number }>> {
+  let audienceContacts: any[] = [];
+
+  // 1. Resolve contacts from filterGroup (Advanced Filters)
+  if (audienceRefs.filterGroup) {
+    console.log(`${logPrefix} Resolving contacts from filterGroup for campaign ${campaignId}`);
+    const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
+    if (filterSQL) {
+      const filterContacts = await db.select().from(contactsTable).where(filterSQL);
+      audienceContacts.push(...filterContacts);
+      console.log(`${logPrefix} Found ${filterContacts.length} contacts from filterGroup`);
+    }
+  }
+
+  // 2. Resolve contacts from lists (batch for large lists)
+  const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
+  if (Array.isArray(listIds) && listIds.length > 0) {
+    for (const listId of listIds) {
+      const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
+      if (list && list.recordIds && list.recordIds.length > 0) {
+        const batchSize = 1000;
+        for (let i = 0; i < list.recordIds.length; i += batchSize) {
+          const batch = list.recordIds.slice(i, i + batchSize);
+          const listContacts = await storage.getContactsByIds(batch);
+          audienceContacts.push(...listContacts);
+        }
+        console.log(`${logPrefix} Resolved ${list.recordIds.length} contacts from list ${listId}`);
+      }
+    }
+  }
+
+  // 3. Resolve contacts from segments (check both keys)
+  const segmentIds = [
+    ...(audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : []),
+    ...(audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments) ? audienceRefs.selectedSegments : []),
+  ];
+  const uniqueSegmentIds = [...new Set(segmentIds)];
+  for (const segmentId of uniqueSegmentIds) {
+    const segment = await storage.getSegment(segmentId);
+    if (segment && segment.definitionJson) {
+      const segmentContacts = await storage.getContacts(segment.definitionJson as any);
+      audienceContacts.push(...segmentContacts);
+    }
+  }
+
+  // 4. Deduplicate + filter for accountId
+  const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
+  const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
+  const skippedNoAccount = uniqueContacts.length - contactsWithAccount.length;
+
+  console.log(`${logPrefix} Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${skippedNoAccount} dropped: no accountId)`);
+
+  if (contactsWithAccount.length === 0) {
+    return [];
+  }
+
+  // 5. Phone validation: batch-fetch with account data
+  const contactIds = contactsWithAccount.map(c => c.id);
+  const fullContacts: any[] = [];
+  const batchSize = 500;
+  for (let i = 0; i < contactIds.length; i += batchSize) {
+    const batch = contactIds.slice(i, i + batchSize);
+    const batchResults = await db.select()
+      .from(contactsTable)
+      .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
+      .where(inArray(contactsTable.id, batch));
+    fullContacts.push(...batchResults);
+  }
+
+  const contactsWithCallablePhones = fullContacts.filter(row => {
+    const contact = row.contacts;
+    const account = row.accounts;
+    return getBestPhoneForContact({
+      directPhone: contact.directPhone,
+      directPhoneE164: contact.directPhoneE164,
+      mobilePhone: contact.mobilePhone,
+      mobilePhoneE164: contact.mobilePhoneE164,
+      country: contact.country,
+      hqPhone: account?.mainPhone,
+      hqPhoneE164: account?.mainPhoneE164,
+    }).phone !== null;
+  });
+
+  const skippedNoPhone = fullContacts.length - contactsWithCallablePhones.length;
+  console.log(`${logPrefix} Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} have callable phones (${skippedNoPhone} dropped: no valid phone)`);
+
+  // 6. Dedup against existing queue entries
+  const existingQueueItems = await db.select({ contactId: campaignQueue.contactId })
+    .from(campaignQueue)
+    .where(eq(campaignQueue.campaignId, campaignId));
+  const existingContactIds = new Set(existingQueueItems.map(q => q.contactId));
+
+  const newContacts = contactsWithCallablePhones.filter(row => !existingContactIds.has(row.contacts.id));
+  const alreadyQueued = contactsWithCallablePhones.length - newContacts.length;
+
+  if (alreadyQueued > 0) {
+    console.log(`${logPrefix} Skipped ${alreadyQueued} contacts already in queue`);
+  }
+
+  console.log(`${logPrefix} SUMMARY: ${uniqueContacts.length} audience -> ${skippedNoAccount} no account -> ${skippedNoPhone} no phone -> ${alreadyQueued} already queued -> ${newContacts.length} ready to enqueue`);
+
+  return newContacts.map(row => ({
+    contactId: row.contacts.id,
+    accountId: row.contacts.accountId!,
+    priority: 0,
+  }));
 }
 
 export function registerRoutes(app: Express) {
@@ -4973,105 +5091,23 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      // Auto-populate queue from audience if defined
-      if (campaign.audienceRefs && campaign.type === 'call') {
-        const audienceRefs = campaign.audienceRefs as any;
-        let contacts: any[] = [];
+      // Auto-populate queue from audience if defined (all campaign types with audience)
+      if (campaign.audienceRefs) {
+        try {
+          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+            campaign.id,
+            campaign.audienceRefs as any,
+            '[Campaign Creation]'
+          );
 
-        // Resolve contacts from filterGroup (Advanced Filters)
-        if (audienceRefs.filterGroup) {
-          console.log(`[Campaign Creation] Resolving contacts from filterGroup for campaign ${campaign.id}`);
-          const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
-          contacts.push(...filterContacts);
-          console.log(`[Campaign Creation] Found ${filterContacts.length} contacts from filterGroup`);
-        }
-
-        // Resolve contacts from segments
-        if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
-          for (const segmentId of audienceRefs.selectedSegments) {
-            const segment = await storage.getSegment(segmentId);
-            if (segment && segment.definitionJson) {
-              const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-              contacts.push(...segmentContacts);
-            }
+          if (contactsToEnqueue.length > 0) {
+            const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
+            console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
+          } else {
+            console.log(`[Campaign Creation] No eligible contacts found for campaign ${campaign.id}`);
           }
-        }
-
-        // Resolve contacts from lists (with batching for large lists)
-        const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-        if (Array.isArray(listIds) && listIds.length > 0) {
-          for (const listId of listIds) {
-            const list = await storage.getList(listId);
-            if (list && list.recordIds && list.recordIds.length > 0) {
-              // Batch large lists to avoid SQL query limits
-              const batchSize = 1000;
-              for (let i = 0; i < list.recordIds.length; i += batchSize) {
-                const batch = list.recordIds.slice(i, i + batchSize);
-                const listContacts = await storage.getContactsByIds(batch);
-                contacts.push(...listContacts);
-              }
-            }
-          }
-        }
-
-        // Remove duplicates and filter contacts with accountId
-        const uniqueContacts = Array.from(
-          new Map(contacts.map(c => [c.id, c])).values()
-        );
-        const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-        const contactsWithoutAccount = uniqueContacts.length - contactsWithAccount.length;
-
-        console.log(`[Campaign Creation] Audience breakdown: ${contacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${contactsWithoutAccount} dropped: no accountId)`);
-
-        // PHONE VALIDATION: Filter contacts with callable phone numbers
-        // Fetch full contact data with account/HQ phone info if not already present
-        const contactIds = contactsWithAccount.map(c => c.id);
-        if (contactIds.length === 0) {
-          console.log(`[Campaign Creation] No contacts with account found for campaign ${campaign.id} (${uniqueContacts.length} unique contacts, all missing accountId)`);
-        } else {
-          // Batch to avoid PostgreSQL parameter limits
-          const fullContacts: any[] = [];
-          const batchSize = 500;
-          for (let i = 0; i < contactIds.length; i += batchSize) {
-            const batch = contactIds.slice(i, i + batchSize);
-            const batchResults = await db
-              .select()
-              .from(contactsTable)
-              .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-              .where(inArray(contactsTable.id, batch));
-            fullContacts.push(...batchResults);
-          }
-
-          const contactsWithCallablePhones = fullContacts.filter(row => {
-            const contact = row.contacts;
-            const account = row.accounts;
-
-            const bestPhone = getBestPhoneForContact({
-              directPhone: contact.directPhone,
-              directPhoneE164: contact.directPhoneE164,
-              mobilePhone: contact.mobilePhone,
-              mobilePhoneE164: contact.mobilePhoneE164,
-              country: contact.country,
-              hqPhone: account?.mainPhone,
-              hqPhoneE164: account?.mainPhoneE164,
-            });
-
-            return bestPhone.phone !== null;
-          });
-
-          const noPhoneCount = fullContacts.length - contactsWithCallablePhones.length;
-          console.log(`[Campaign Creation] Phone validation: ${contactsWithCallablePhones.length}/${contactIds.length} have callable phones (${noPhoneCount} dropped: no valid phone)`);
-
-          // Bulk enqueue all contacts with callable phones
-          const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
-            contactId: row.contacts.id,
-            accountId: row.contacts.accountId!,
-            priority: 0
-          }));
-
-          const { enqueued } = await storage.bulkEnqueueContacts(campaign.id, contactsToEnqueue);
-          console.log(`[Campaign Creation] Auto-populated ${enqueued} contacts to queue for campaign ${campaign.id}`);
-          console.log(`[Campaign Creation] SUMMARY: ${uniqueContacts.length} audience -> ${contactsWithoutAccount} no account -> ${noPhoneCount} no phone -> ${enqueued} enqueued`);
+        } catch (queueErr) {
+          console.error(`[Campaign Creation] Queue auto-populate error (non-fatal):`, queueErr);
         }
       }
 
@@ -5177,12 +5213,11 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: 'Campaign not found' });
       }
 
-      // === AUTO-POPULATE QUEUE WHEN AUDIENCE/STATUS CHANGES ON AI AGENT CAMPAIGNS ===
-      const isAiAgentCampaign = campaign.dialMode === 'ai_agent';
+      // === AUTO-POPULATE QUEUE WHEN AUDIENCE/STATUS CHANGES (all campaign types) ===
       const audienceChanged = 'audienceRefs' in updateData;
       const statusChangedToActive = updateData.status === 'active';
 
-      if (isAiAgentCampaign && campaign.audienceRefs && (audienceChanged || statusChangedToActive)) {
+      if (campaign.audienceRefs && (audienceChanged || statusChangedToActive)) {
         try {
           // Check if queue already has items (avoid re-populating on status toggle)
           const existingQueueCount = await db.select({ count: sql<number>`count(*)::int` })
@@ -5193,99 +5228,19 @@ export function registerRoutes(app: Express) {
             ));
           const queuedCount = existingQueueCount[0]?.count || 0;
 
-          // Auto-populate if: audience changed (always repopulate), or status->active with empty queue
+          // Auto-populate if: audience changed (always add new contacts), or status->active with empty queue
           if (audienceChanged || (statusChangedToActive && queuedCount === 0)) {
-            console.log(`[Campaign Update] AI agent campaign — auto-populating queue (audienceChanged=${audienceChanged}, statusActive=${statusChangedToActive}, currentQueued=${queuedCount})`);
-            const audienceRefs = campaign.audienceRefs as any;
-            let audienceContacts: any[] = [];
+            console.log(`[Campaign Update] Auto-populating queue (audienceChanged=${audienceChanged}, statusActive=${statusChangedToActive}, currentQueued=${queuedCount})`);
 
-            // Resolve contacts from filterGroup
-            if (audienceRefs.filterGroup) {
-              const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
-              if (filterSQL) {
-                const filterContacts = await db.select().from(contactsTable).where(filterSQL);
-                audienceContacts.push(...filterContacts);
-              }
-            }
+            const contactsToEnqueue = await resolveAudienceContactsForQueue(
+              req.params.id,
+              campaign.audienceRefs as any,
+              '[Campaign Update]'
+            );
 
-            // Resolve contacts from lists
-            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-            if (Array.isArray(listIds) && listIds.length > 0) {
-              for (const listId of listIds) {
-                const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
-                if (list && list.recordIds && list.recordIds.length > 0) {
-                  const batchSize = 1000;
-                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
-                    const batch = list.recordIds.slice(i, i + batchSize);
-                    const listContacts = await storage.getContactsByIds(batch);
-                    audienceContacts.push(...listContacts);
-                  }
-                }
-              }
-            }
-
-            // Resolve from segments
-            if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
-              for (const segmentId of audienceRefs.segments) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment && segment.definitionJson) {
-                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-                  audienceContacts.push(...segmentContacts);
-                }
-              }
-            }
-
-            // Resolve from selectedSegments
-            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
-              for (const segmentId of audienceRefs.selectedSegments) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment && segment.definitionJson) {
-                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-                  audienceContacts.push(...segmentContacts);
-                }
-              }
-            }
-
-            // Deduplicate + filter contacts with accountId
-            const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
-            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-
-            if (contactsWithAccount.length > 0) {
-              // Phone validation: batch-fetch with account data
-              const contactIds = contactsWithAccount.map(c => c.id);
-              const fullContacts: any[] = [];
-              const batchSize = 500;
-              for (let i = 0; i < contactIds.length; i += batchSize) {
-                const batch = contactIds.slice(i, i + batchSize);
-                const batchResults = await db.select()
-                  .from(contactsTable)
-                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-                  .where(inArray(contactsTable.id, batch));
-                fullContacts.push(...batchResults);
-              }
-
-              const contactsWithCallablePhones = fullContacts.filter(row => {
-                const contact = row.contacts;
-                const account = row.accounts;
-                return getBestPhoneForContact({
-                  directPhone: contact.directPhone,
-                  directPhoneE164: contact.directPhoneE164,
-                  mobilePhone: contact.mobilePhone,
-                  mobilePhoneE164: contact.mobilePhoneE164,
-                  country: contact.country,
-                  hqPhone: account?.mainPhone,
-                  hqPhoneE164: account?.mainPhoneE164,
-                }).phone !== null;
-              });
-
-              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
-                contactId: row.contacts.id,
-                accountId: row.contacts.accountId!,
-                priority: 0
-              }));
-
+            if (contactsToEnqueue.length > 0) {
               const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
-              console.log(`[Campaign Update] Auto-populated ${enqueued} contacts to queue (${contactsWithCallablePhones.length} with phones)`);
+              console.log(`[Campaign Update] Auto-populated ${enqueued} contacts to queue`);
             }
           } else {
             console.log(`[Campaign Update] Queue already has ${queuedCount} items — skipping auto-populate`);
@@ -5474,125 +5429,20 @@ export function registerRoutes(app: Express) {
 
       console.log(`[LAUNCH CAMPAIGN] Successfully launched campaign ${req.params.id}`);
 
-      // === AUTO-POPULATE QUEUE FOR AI AGENT CAMPAIGNS ===
-      // When launching an AI agent campaign with audience, auto-populate campaign_queue
-      // so the orchestrator can start calling immediately — no agent assignment needed
-      const dialMode = updated.dialMode || 'manual';
-      if (dialMode === 'ai_agent' && updated.audienceRefs) {
+      // === AUTO-POPULATE QUEUE ON LAUNCH (all campaign types with audience) ===
+      if (updated.audienceRefs) {
         try {
-          // Check if queue already has items (avoid re-populating)
-          const existingQueueCount = await db.select({ count: sql<number>`count(*)::int` })
-            .from(campaignQueue)
-            .where(and(
-              eq(campaignQueue.campaignId, req.params.id),
-              eq(campaignQueue.status, 'queued')
-            ));
-          const queuedCount = existingQueueCount[0]?.count || 0;
+          const contactsToEnqueue = await resolveAudienceContactsForQueue(
+            req.params.id,
+            updated.audienceRefs as any,
+            '[LAUNCH CAMPAIGN]'
+          );
 
-          if (queuedCount === 0) {
-            console.log(`[LAUNCH CAMPAIGN] AI agent campaign with empty queue — auto-populating from audience...`);
-            const audienceRefs = updated.audienceRefs as any;
-            let audienceContacts: any[] = [];
-
-            // Resolve contacts from filterGroup
-            if (audienceRefs.filterGroup) {
-              const filterSQL = buildFilterQuery(audienceRefs.filterGroup as FilterGroup, contacts);
-              if (filterSQL) {
-                const filterContacts = await db.select().from(contactsTable).where(filterSQL);
-                audienceContacts.push(...filterContacts);
-              }
-            }
-
-            // Resolve contacts from lists
-            const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-            if (Array.isArray(listIds) && listIds.length > 0) {
-              for (const listId of listIds) {
-                const [list] = await db.select().from(lists).where(eq(lists.id, listId)).limit(1);
-                if (list && list.recordIds && list.recordIds.length > 0) {
-                  const batchSize = 1000;
-                  for (let i = 0; i < list.recordIds.length; i += batchSize) {
-                    const batch = list.recordIds.slice(i, i + batchSize);
-                    const listContacts = await storage.getContactsByIds(batch);
-                    audienceContacts.push(...listContacts);
-                  }
-                }
-              }
-            }
-
-            // Resolve from segments
-            if (audienceRefs.segments && Array.isArray(audienceRefs.segments)) {
-              for (const segmentId of audienceRefs.segments) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment && segment.definitionJson) {
-                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-                  audienceContacts.push(...segmentContacts);
-                }
-              }
-            }
-
-            // Resolve from selectedSegments
-            if (audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments)) {
-              for (const segmentId of audienceRefs.selectedSegments) {
-                const segment = await storage.getSegment(segmentId);
-                if (segment && segment.definitionJson) {
-                  const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-                  audienceContacts.push(...segmentContacts);
-                }
-              }
-            }
-
-            // Deduplicate + filter contacts with accountId
-            const uniqueContacts = Array.from(new Map(audienceContacts.map(c => [c.id, c])).values());
-            const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-            const contactsWithoutAccount = uniqueContacts.length - contactsWithAccount.length;
-
-            console.log(`[LAUNCH CAMPAIGN] Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${contactsWithoutAccount} dropped: no accountId)`);
-
-            if (contactsWithAccount.length > 0) {
-              // Phone validation: batch-fetch with account data
-              const contactIds = contactsWithAccount.map(c => c.id);
-              const fullContacts: any[] = [];
-              const batchSize = 500;
-              for (let i = 0; i < contactIds.length; i += batchSize) {
-                const batch = contactIds.slice(i, i + batchSize);
-                const batchResults = await db.select()
-                  .from(contactsTable)
-                  .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-                  .where(inArray(contactsTable.id, batch));
-                fullContacts.push(...batchResults);
-              }
-
-              const contactsWithCallablePhones = fullContacts.filter(row => {
-                const contact = row.contacts;
-                const account = row.accounts;
-                return getBestPhoneForContact({
-                  directPhone: contact.directPhone,
-                  directPhoneE164: contact.directPhoneE164,
-                  mobilePhone: contact.mobilePhone,
-                  mobilePhoneE164: contact.mobilePhoneE164,
-                  country: contact.country,
-                  hqPhone: account?.mainPhone,
-                  hqPhoneE164: account?.mainPhoneE164,
-                }).phone !== null;
-              });
-
-              const noPhoneCount = fullContacts.length - contactsWithCallablePhones.length;
-              console.log(`[LAUNCH CAMPAIGN] Phone validation: ${contactsWithCallablePhones.length}/${fullContacts.length} have callable phones (${noPhoneCount} dropped: no valid phone)`);
-
-              const contactsToEnqueue = contactsWithCallablePhones.map(row => ({
-                contactId: row.contacts.id,
-                accountId: row.contacts.accountId!,
-                priority: 0
-              }));
-
-              const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
-              console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue`);
-              console.log(`[LAUNCH CAMPAIGN] SUMMARY: ${uniqueContacts.length} audience -> ${contactsWithoutAccount} no account -> ${noPhoneCount} no phone -> ${enqueued} enqueued`);
-            } else {
-              console.log(`[LAUNCH CAMPAIGN] No contacts with accounts found in audience (${uniqueContacts.length} unique contacts, all missing accountId)`);
-            }
+          if (contactsToEnqueue.length > 0) {
+            const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+            console.log(`[LAUNCH CAMPAIGN] Auto-populated ${enqueued} contacts to queue`);
           } else {
-            console.log(`[LAUNCH CAMPAIGN] Queue already has ${queuedCount} items — skipping auto-populate`);
+            console.log(`[LAUNCH CAMPAIGN] No new contacts to enqueue (all already queued or no eligible contacts)`);
           }
         } catch (queueErr) {
           // Non-fatal: campaign is launched, queue population is best-effort
@@ -6113,134 +5963,30 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Campaign not found" });
       }
 
-      // Get audience refs from campaign
       const audienceRefs = campaign.audienceRefs as any;
       if (!audienceRefs) {
         return res.status(400).json({ message: "Campaign has no audience defined" });
       }
 
-      let audienceContacts: any[] = [];
-
-      // Resolve contacts from filterGroup (Advanced Filters)
-      if (audienceRefs.filterGroup) {
-        console.log(`[Queue Populate] Resolving contacts from filterGroup for campaign ${req.params.id}`);
-        const filterContacts = await storage.getContacts(audienceRefs.filterGroup);
-        audienceContacts.push(...filterContacts);
-        console.log(`[Queue Populate] Found ${filterContacts.length} contacts from filterGroup`);
-      }
-
-      // Resolve contacts from segments (check both keys)
-      const segmentIds = [
-        ...(audienceRefs.segments && Array.isArray(audienceRefs.segments) ? audienceRefs.segments : []),
-        ...(audienceRefs.selectedSegments && Array.isArray(audienceRefs.selectedSegments) ? audienceRefs.selectedSegments : []),
-      ];
-      const uniqueSegmentIds = [...new Set(segmentIds)];
-      for (const segmentId of uniqueSegmentIds) {
-        const segment = await storage.getSegment(segmentId);
-        if (segment && segment.definitionJson) {
-          const segmentContacts = await storage.getContacts(segment.definitionJson as any);
-          audienceContacts.push(...segmentContacts);
-        }
-      }
-
-      // Resolve contacts from lists (check both keys, batch for large lists)
-      const listIds = audienceRefs.lists || audienceRefs.selectedLists || [];
-      if (Array.isArray(listIds) && listIds.length > 0) {
-        for (const listId of listIds) {
-          const list = await storage.getList(listId);
-          if (list && list.recordIds && list.recordIds.length > 0) {
-            // Batch large lists to avoid PostgreSQL parameter limits
-            const batchSize = 1000;
-            for (let i = 0; i < list.recordIds.length; i += batchSize) {
-              const batch = list.recordIds.slice(i, i + batchSize);
-              const listContacts = await storage.getContactsByIds(batch);
-              audienceContacts.push(...listContacts);
-            }
-          }
-        }
-      }
-
-      // Remove duplicates and filter contacts with accountId
-      const uniqueContacts = Array.from(
-        new Map(audienceContacts.map(c => [c.id, c])).values()
+      // Use shared helper: resolves audience, deduplicates, phone-validates, skips already-queued
+      const contactsToEnqueue = await resolveAudienceContactsForQueue(
+        req.params.id,
+        audienceRefs,
+        '[Queue Populate]'
       );
 
-      if (uniqueContacts.length === 0) {
-        return res.status(400).json({ message: "No contacts found in campaign audience" });
-      }
-
-      const contactsWithAccount = uniqueContacts.filter(c => c.accountId);
-      const skippedNoAccount = uniqueContacts.length - contactsWithAccount.length;
-
-      console.log(`[Queue Populate] Audience breakdown: ${audienceContacts.length} raw -> ${uniqueContacts.length} unique -> ${contactsWithAccount.length} with account (${skippedNoAccount} dropped: no accountId)`);
-
-      if (contactsWithAccount.length === 0) {
-        return res.status(400).json({
-          message: "No contacts with account IDs found. All contacts must be associated with an account."
-        });
-      }
-
-      // PHONE VALIDATION: Filter contacts with callable phone numbers (batch to avoid parameter limits)
-      const contactIds = contactsWithAccount.map(c => c.id);
-      const fullContacts: any[] = [];
-      const batchSize = 500;
-      for (let i = 0; i < contactIds.length; i += batchSize) {
-        const batch = contactIds.slice(i, i + batchSize);
-        const batchResults = await db
-          .select()
-          .from(contactsTable)
-          .leftJoin(accountsTable, eq(contactsTable.accountId, accountsTable.id))
-          .where(inArray(contactsTable.id, batch));
-        fullContacts.push(...batchResults);
-      }
-
-      const contactsWithCallablePhones = fullContacts.filter(row => {
-        const contact = row.contacts;
-        const account = row.accounts;
-
-        const bestPhone = getBestPhoneForContact({
-          directPhone: contact.directPhone,
-          directPhoneE164: contact.directPhoneE164,
-          mobilePhone: contact.mobilePhone,
-          mobilePhoneE164: contact.mobilePhoneE164,
-          country: contact.country,
-          hqPhone: account?.mainPhone,
-          hqPhoneE164: account?.mainPhoneE164,
-        });
-
-        return bestPhone.phone !== null;
-      });
-
-      const skippedNoPhone = contactsWithAccount.length - contactsWithCallablePhones.length;
-      console.log(`[Queue Populate] Phone validation: ${contactsWithCallablePhones.length}/${contactsWithAccount.length} have callable phones (${skippedNoPhone} dropped: no valid phone)`);
-
-      // Check which contacts are already in the queue (any status) to avoid duplicates
-      const existingQueueItems = await db.select({ contactId: campaignQueue.contactId })
-        .from(campaignQueue)
-        .where(eq(campaignQueue.campaignId, req.params.id));
-      const existingContactIds = new Set(existingQueueItems.map(q => q.contactId));
-
-      const newContacts = contactsWithCallablePhones.filter(row => !existingContactIds.has(row.contacts.id));
-      const alreadyQueued = contactsWithCallablePhones.length - newContacts.length;
-
-      // Use bulk enqueue for efficiency
-      const contactsToEnqueue = newContacts.map(row => ({
-        contactId: row.contacts.id,
-        accountId: row.contacts.accountId!,
-        priority: 100, // HIGH priority for fresh contacts (voicemail retries get 0-50)
-      }));
+      // Override priority to HIGH for manually-triggered populate (voicemail retries get 0-50)
+      const contactsWithPriority = contactsToEnqueue.map(c => ({ ...c, priority: 100 }));
 
       let enqueuedCount = 0;
-      if (contactsToEnqueue.length > 0) {
-        const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsToEnqueue);
+      if (contactsWithPriority.length > 0) {
+        const { enqueued } = await storage.bulkEnqueueContacts(req.params.id, contactsWithPriority);
         enqueuedCount = enqueued;
       }
 
-      console.log(`[Queue Populate] SUMMARY: ${uniqueContacts.length} audience -> ${skippedNoAccount} no account -> ${skippedNoPhone} no phone -> ${alreadyQueued} already queued -> ${enqueuedCount} newly enqueued`);
-
       // Get agents assigned to this campaign
-      const campaignAgents = await storage.getCampaignAgents(req.params.id);
-      const agentIds = campaignAgents.map(a => a.agentId);
+      const campaignAgentsList = await storage.getCampaignAgents(req.params.id);
+      const agentIds = campaignAgentsList.map(a => a.agentId);
 
       // Automatically assign queue items to agents if agents are assigned
       let assignResult = { assigned: 0 };
@@ -6249,12 +5995,8 @@ export function registerRoutes(app: Express) {
       }
 
       res.json({
-        message: `Successfully enqueued ${enqueuedCount} contacts${skippedNoAccount > 0 ? ` (${skippedNoAccount} skipped without account)` : ''}${skippedNoPhone > 0 ? ` (${skippedNoPhone} skipped without phone)` : ''}${alreadyQueued > 0 ? ` (${alreadyQueued} already in queue)` : ''}`,
+        message: `Successfully enqueued ${enqueuedCount} contacts`,
         enqueuedCount,
-        totalContacts: uniqueContacts.length,
-        skippedNoAccount,
-        skippedNoPhone,
-        alreadyQueued,
         queueItemsAssigned: assignResult.assigned,
       });
     } catch (error) {
@@ -13860,6 +13602,7 @@ Provide JSON response with:
   // Legacy agent prompts routes (deprecated - use /api/prompts instead)
   app.use("/api/agent-prompts", agentPromptsRouter);
   app.use("/api/agent-panel", agentPanelRouter);
+  app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
   app.use("/api/agent-defaults", agentDefaultsRouter);
 
   // ==================== KNOWLEDGE BLOCKS ====================
@@ -14226,7 +13969,7 @@ Provide JSON response with:
   app.use('/api/email', requireAuth, unifiedEmailRoutes);
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
-  app.use('/api/email-builder', requireAuth, emailBuilderRouter);
+  app.use('/api/email-builder', requireDualAuth, emailBuilderRouter);
 
   // ==================== ADMIN DATA MANAGEMENT ====================
 

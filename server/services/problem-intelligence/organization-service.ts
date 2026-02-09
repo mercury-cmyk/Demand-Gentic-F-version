@@ -12,18 +12,51 @@
 import { db } from "../../db";
 import {
   campaignOrganizations,
+  organizationMembers,
   type CampaignOrganization,
   type InsertCampaignOrganization,
 } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { canDeleteOrganization } from "../super-organization-service";
 
 // ==================== ORGANIZATION CRUD ====================
 
 /**
  * Get all active organizations
+ * Optionally filter by userId (returns orgs where user is a member)
  */
-export async function getOrganizations(): Promise<CampaignOrganization[]> {
+export async function getOrganizations(userId?: string): Promise<CampaignOrganization[]> {
+  if (userId) {
+    // 1. Get organizations where user is a member
+    const memberOrgs = await db
+      .select({ orgId: organizationMembers.organizationId })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, userId));
+
+    const orgIds = memberOrgs.map(m => m.orgId);
+
+    // 2. Also check if user Created any orgs (in case membership record missing for creator)
+    const createdOrgs = await db
+        .select({ id: campaignOrganizations.id })
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.createdBy, userId));
+    
+    createdOrgs.forEach(o => {
+        if (!orgIds.includes(o.id)) orgIds.push(o.id);
+    });
+
+    if (orgIds.length === 0) return [];
+
+    return db
+      .select()
+      .from(campaignOrganizations)
+      .where(and(
+        eq(campaignOrganizations.isActive, true),
+        inArray(campaignOrganizations.id, orgIds)
+      ))
+      .orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name);
+  }
+
   return db
     .select()
     .from(campaignOrganizations)
@@ -271,7 +304,7 @@ ${getValue(outreach, "emailAngles") ? `Email Angles: ${getValue(outreach, "email
  * Get organizations for campaign dropdown
  * Returns simplified list for UI selection
  */
-export async function getOrganizationsForDropdown(): Promise<
+export async function getOrganizationsForDropdown(userId?: string): Promise<
   Array<{
     id: string;
     name: string;
@@ -280,7 +313,7 @@ export async function getOrganizationsForDropdown(): Promise<
     isDefault: boolean;
   }>
 > {
-  const orgs = await db
+  let query = db
     .select({
       id: campaignOrganizations.id,
       name: campaignOrganizations.name,
@@ -289,8 +322,42 @@ export async function getOrganizationsForDropdown(): Promise<
       isDefault: campaignOrganizations.isDefault,
     })
     .from(campaignOrganizations)
-    .where(eq(campaignOrganizations.isActive, true))
-    .orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name);
+    .where(eq(campaignOrganizations.isActive, true));
 
-  return orgs;
+  if (userId) {
+     const memberOrgs = await db
+      .select({ orgId: organizationMembers.organizationId })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, userId));
+     
+    const orgIds = memberOrgs.map(m => m.orgId);
+    
+    // Also include created orgs
+    const createdOrgs = await db
+        .select({ id: campaignOrganizations.id })
+        .from(campaignOrganizations)
+        .where(eq(campaignOrganizations.createdBy, userId));
+    
+    createdOrgs.forEach(o => {
+        if (!orgIds.includes(o.id)) orgIds.push(o.id);
+    });
+
+    if (orgIds.length === 0) return [];
+    
+    query = db
+        .select({
+            id: campaignOrganizations.id,
+            name: campaignOrganizations.name,
+            domain: campaignOrganizations.domain,
+            industry: campaignOrganizations.industry,
+            isDefault: campaignOrganizations.isDefault,
+        })
+        .from(campaignOrganizations)
+        .where(and(
+            eq(campaignOrganizations.isActive, true),
+            inArray(campaignOrganizations.id, orgIds)
+        ));
+  }
+
+  return query.orderBy(desc(campaignOrganizations.isDefault), campaignOrganizations.name);
 }

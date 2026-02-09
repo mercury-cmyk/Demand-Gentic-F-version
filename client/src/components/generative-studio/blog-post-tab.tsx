@@ -23,9 +23,16 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface BlogPostTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabProps) {
+export default function BlogPostTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: BlogPostTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -35,6 +42,7 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [targetLength, setTargetLength] = useState("medium");
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -44,7 +52,7 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
     onSuccess: (data) => {
       setResult(data.content);
       setProjectId(data.projectId);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
       toast({ title: "Blog post generated!" });
     },
     onError: (error: any) => {
@@ -54,7 +62,11 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
 
   const publishMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", `/api/generative-studio/publish/${projectId}`, data);
+      const res = await apiRequest("POST", `/api/generative-studio/publish/${projectId}`, {
+        ...data,
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: (data) => {
@@ -68,7 +80,10 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
 
   const saveAsAssetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`);
+      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`, {
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: () => {
@@ -81,6 +96,8 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
       ...params,
       keywords: keywords.length > 0 ? keywords : undefined,
       targetLength: targetLength || undefined,
+      organizationId,
+      clientProjectId,
     });
   };
 
@@ -112,11 +129,12 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Blog Post"
+          disabled={!organizationId}
           extraFields={
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Target Length</Label>
-                <Select value={targetLength} onValueChange={setTargetLength}>
+                <Select value={targetLength} onValueChange={setTargetLength} disabled={!organizationId}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -135,6 +153,7 @@ export default function BlogPostTab({ brandKits, orgIntelligence }: BlogPostTabP
                     value={keywordInput}
                     onChange={(e) => setKeywordInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
+                    disabled={!organizationId}
                   />
                 </div>
                 {keywords.length > 0 && (

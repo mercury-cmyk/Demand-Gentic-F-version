@@ -4,6 +4,7 @@ import { eq, and, desc, sql, between, isNull, gte, lte } from 'drizzle-orm';
 import {
   clientBillingConfig,
   clientCampaignPricing,
+  clientPricingDocuments,
   clientActivityCosts,
   clientInvoices,
   clientInvoiceItems,
@@ -641,6 +642,59 @@ router.post('/calculate-order-price', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT PORTAL] Calculate order price error:', error);
     res.status(500).json({ message: 'Failed to calculate order price' });
+  }
+});
+
+// ==================== PRICING DOCUMENTS (Client-facing) ====================
+
+// Get pricing documents for the authenticated client
+router.get('/pricing-documents', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+
+    const docs = await db
+      .select()
+      .from(clientPricingDocuments)
+      .where(and(
+        eq(clientPricingDocuments.clientAccountId, clientAccountId),
+        eq(clientPricingDocuments.isActive, true)
+      ))
+      .orderBy(desc(clientPricingDocuments.createdAt));
+
+    res.json({ documents: docs });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Get pricing documents error:', error);
+    res.status(500).json({ message: 'Failed to get pricing documents' });
+  }
+});
+
+// Get download URL for a specific pricing document
+router.get('/pricing-documents/:docId/download', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser!.clientAccountId;
+    const { docId } = req.params;
+
+    const [doc] = await db
+      .select()
+      .from(clientPricingDocuments)
+      .where(and(
+        eq(clientPricingDocuments.id, docId),
+        eq(clientPricingDocuments.clientAccountId, clientAccountId),
+        eq(clientPricingDocuments.isActive, true)
+      ))
+      .limit(1);
+
+    if (!doc) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const { getPresignedDownloadUrl } = await import('../lib/storage');
+    const downloadUrl = await getPresignedDownloadUrl(doc.fileKey, 3600);
+
+    res.json({ downloadUrl, fileName: doc.fileName });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Download pricing document error:', error);
+    res.status(500).json({ message: 'Failed to generate download URL' });
   }
 });
 

@@ -107,3 +107,33 @@ export function requireRole(...allowedRoles: string[]) {
     next();
   };
 }
+
+// Dual Auth Middleware (Supports both Internal Users and Client Portal Users)
+export function requireDualAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+
+  const token = authHeader.substring(7);
+  
+  // Use existing verification (assumes shared secret or compatible signing)
+  const payload = verifyToken(token) as any;
+
+  if (!payload) {
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+
+  // Normalize user object
+  // Client tokens might use different field names (e.g. sub vs userId)
+  req.user = {
+    ...payload,
+    userId: payload.userId || payload.sub || payload.id,
+    role: payload.role || (payload.tenantId ? 'client' : 'user'),
+    roles: payload.roles || (payload.tenantId ? ['client'] : [payload.role || 'user']),
+    tenantId: payload.tenantId // Ensure this is preserved
+  };
+
+  next();
+}

@@ -108,6 +108,8 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
   const [goalDescription, setGoalDescription] = useState('');
   const [recommendation, setRecommendation] = useState<any>(null);
   const [showAiReview, setShowAiReview] = useState(false);
+  const [extractedDocFields, setExtractedDocFields] = useState<any>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   // Organization Intelligence - provides client context for smarter recommendations
   const { 
@@ -290,6 +292,8 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
       // Update category-specific file state
       if (category === 'context') {
         setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
+        // Auto-extract order fields from context documents (non-blocking)
+        extractDocumentFields(newUploadedFiles);
       } else if (category === 'target_accounts') {
         setTargetAccountFiles(prev => [...prev, ...newUploadedFiles]);
       } else if (category === 'suppression') {
@@ -299,7 +303,7 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
       }
 
       console.log(`[Upload:${correlationId}] All files uploaded successfully. Count=${newUploadedFiles.length}`);
-      toast({ 
+      toast({
         title: 'Files uploaded successfully',
         description: `${newUploadedFiles.length} file(s) attached`
       });
@@ -335,6 +339,69 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
       setSuppressionFiles(suppressionFiles.filter(f => f.key !== key));
     } else if (category === 'template') {
       setTemplateFiles(templateFiles.filter(f => f.key !== key));
+    }
+  };
+
+  // Extract order fields from uploaded context documents using AI
+  const extractDocumentFields = async (files: { name: string; key: string; type: string }[]) => {
+    // Only extract from context documents (PDF, DOCX, TXT)
+    const extractable = files.filter(f => {
+      const ext = f.name.toLowerCase().split('.').pop() || '';
+      return ['pdf', 'docx', 'doc', 'txt', 'md'].includes(ext);
+    });
+    if (extractable.length === 0) return;
+
+    setIsExtracting(true);
+    try {
+      // Extract from first extractable document
+      const file = extractable[0];
+      const res = await fetch('/api/client-portal/agentic/orders/extract-document', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          fileKey: file.key,
+          fileName: file.name,
+          fileType: file.type,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.data?.extractedFields) {
+          const fields = data.data.extractedFields;
+          setExtractedDocFields(fields);
+
+          // Pre-fill form fields with extracted data
+          if (fields.industries?.length) {
+            setIndustries(fields.industries.join(', '));
+          }
+          if (fields.jobTitles?.length) {
+            setJobTitles(fields.jobTitles.join(', '));
+          }
+          if (fields.companySizeMin) {
+            setCompanySizeMin(fields.companySizeMin);
+          }
+          if (fields.companySizeMax) {
+            setCompanySizeMax(fields.companySizeMax);
+          }
+          if (fields.geographies?.length) {
+            setGeographies(fields.geographies.join(', '));
+          }
+
+          toast({
+            title: 'Document Analyzed',
+            description: `Extracted targeting data from ${file.name}. Fields will be pre-filled in the next step.`,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Extract] Document extraction failed:', err);
+      // Non-blocking - extraction failure shouldn't block the order flow
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -385,14 +452,35 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
           rationale: data.data.rationale || rec.rationale || 'AI analysis complete. Please review the recommended strategy below.'
         });
 
-        // Pre-fill form with recommendations (but DO NOT advance - wait for user confirmation)
-        // NOTE: Industries and Job Titles are NOT pre-filled - client must explicitly enter these for accuracy
-        setCampaignType(rec.campaignType || 'high_quality_leads');
-        setVolume(rec.suggestedVolume || 100);
+        // Pre-fill form with recommendations
+        const recType = rec.campaignType || 'high_quality_leads';
+        setCampaignType(recType);
+        // Cap high_quality_leads at 100 max
+        const recVolume = rec.suggestedVolume || 100;
+        setVolume(recType === 'high_quality_leads' ? Math.min(recVolume, 100) : recVolume);
         if (rec.channels) {
           setChannels(rec.channels);
         }
         setEstimatedCost(rec.estimatedCost);
+
+        // Pre-fill targeting fields from AI recommendation if document extraction hasn't already filled them
+        if (rec.targetAudience) {
+          if (rec.targetAudience.industries?.length && !industries) {
+            setIndustries(rec.targetAudience.industries.join(', '));
+          }
+          if (rec.targetAudience.titles?.length && !jobTitles) {
+            setJobTitles(rec.targetAudience.titles.join(', '));
+          }
+          if (rec.targetAudience.companySizeMin && !companySizeMin) {
+            setCompanySizeMin(rec.targetAudience.companySizeMin);
+          }
+          if (rec.targetAudience.companySizeMax && !companySizeMax) {
+            setCompanySizeMax(rec.targetAudience.companySizeMax);
+          }
+        }
+        if (rec.geographies?.length && !geographies) {
+          setGeographies(Array.isArray(rec.geographies) ? rec.geographies.join(', ') : rec.geographies);
+        }
 
         // CRITICAL: Show AI strategy review screen - user MUST review and approve before proceeding
         // This blocks any campaign/order creation until explicit user approval
@@ -518,6 +606,13 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     },
   });
 
+  // Clamp volume when switching to high_quality_leads
+  useEffect(() => {
+    if (campaignType === 'high_quality_leads' && volume > 100) {
+      setVolume(100);
+    }
+  }, [campaignType]);
+
   // Recalculate estimate when key fields change
   useEffect(() => {
     if (step === 'configure' && volume > 0) {
@@ -550,6 +645,8 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
     setTemplateFiles([]);
     setDeliveryMethod('');
     setNewUrl('');
+    setExtractedDocFields(null);
+    setIsExtracting(false);
   };
 
   const handleGoalSubmit = () => {
@@ -931,6 +1028,19 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                           </div>
                         </ScrollArea>
                       )}
+                      {/* Document extraction indicator */}
+                      {isExtracting && (
+                        <div className="flex items-center gap-2 mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+                          <Brain className="h-4 w-4 animate-pulse" />
+                          <span>AI is analyzing your document to pre-fill targeting fields...</span>
+                        </div>
+                      )}
+                      {extractedDocFields && !isExtracting && (
+                        <div className="flex items-center gap-2 mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+                          <Check className="h-4 w-4" />
+                          <span>Targeting data extracted from document. Fields will be pre-filled.</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1220,20 +1330,23 @@ export function AgenticCampaignOrderPanel({ open, onOpenChange, onOrderCreated }
                     <div className="space-y-3">
                       <Label className="text-base font-medium text-slate-700">
                         Lead Volume: <span className="text-emerald-600 font-bold">{volume}</span>
+                        {campaignType === 'high_quality_leads' && (
+                          <span className="text-xs text-amber-600 ml-2">(max 100 for HQL)</span>
+                        )}
                       </Label>
                       <div className="pt-2">
                         <Slider
                           value={[volume]}
                           onValueChange={(v) => setVolume(v[0])}
                           min={25}
-                          max={1000}
+                          max={campaignType === 'high_quality_leads' ? 100 : 1000}
                           step={25}
                           className="mt-2"
                         />
                       </div>
                       <div className="flex justify-between text-sm text-slate-500 pt-1">
                         <span>25 leads</span>
-                        <span>1,000 leads</span>
+                        <span>{campaignType === 'high_quality_leads' ? '100' : '1,000'} leads</span>
                       </div>
                     </div>
                   </div>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, ReactNode, useCallback, useMemo, useState } from 'react';
-import { useAgentPanel, type AgentPanelState } from './hooks/useAgentPanel';
+import { useAgentPanel, type AgentPanelState, type OrderStep } from './hooks/useAgentPanel';
 
 export type AgentXStatus = 'idle' | 'thinking' | 'awaiting_review' | 'executing';
 
@@ -17,6 +17,10 @@ interface AgentPanelContextValue {
   // User role context
   userRole: string;
   isClientPortal: boolean;
+  // Order mode
+  enterOrderMode: () => void;
+  exitOrderMode: () => void;
+  setOrderStep: (step: OrderStep) => void;
 }
 
 const AgentPanelContext = createContext<AgentPanelContextValue | null>(null);

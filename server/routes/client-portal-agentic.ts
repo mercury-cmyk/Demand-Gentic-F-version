@@ -134,6 +134,108 @@ function getClientContext(req: Request): ClientAgenticContext {
 // ==================== CAMPAIGN ORDER ENDPOINTS ====================
 
 /**
+ * Extract order-relevant fields from uploaded context documents (PDF, DOCX, TXT)
+ * Fetches the file from GCS, parses it, and uses AI to extract:
+ * industries, job titles, company size, geographies, and other order fields.
+ * The extracted data is used to pre-fill Step 2 of the order form.
+ */
+router.post("/orders/extract-document", async (req: Request, res: Response) => {
+  try {
+    const context = getClientContext(req);
+    const { fileKey, fileName, fileType } = req.body;
+
+    if (!fileKey || !fileName) {
+      return res.status(400).json({ success: false, message: "fileKey and fileName are required" });
+    }
+
+    console.log(`[Client Agentic] Extracting order fields from document: ${fileName} (key: ${fileKey})`);
+
+    // Fetch file from GCS
+    const { getFromS3 } = await import("../lib/storage");
+    const stream = await getFromS3(fileKey);
+
+    // Collect stream into buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks);
+
+    // Parse document text based on type
+    let documentText = "";
+    const mimeType = fileType || "";
+    const ext = fileName.toLowerCase().split(".").pop() || "";
+
+    if (ext === "pdf" || mimeType.includes("pdf")) {
+      const { createRequire } = await import("module");
+      const require = createRequire(import.meta.url);
+      const pdfParse = require("pdf-parse");
+      const data = await pdfParse(buffer);
+      documentText = data.text;
+    } else if (ext === "docx" || mimeType.includes("wordprocessingml")) {
+      const mammoth = await import("mammoth").then((m: any) => m.default || m);
+      const result = await mammoth.extractRawText({ buffer });
+      documentText = result.value;
+    } else if (ext === "txt" || ext === "md" || ext === "csv" || mimeType.includes("text")) {
+      documentText = buffer.toString("utf-8");
+    } else {
+      return res.status(400).json({ success: false, message: `Unsupported file type: ${ext}` });
+    }
+
+    if (!documentText || documentText.trim().length < 20) {
+      return res.status(400).json({ success: false, message: "Document is empty or too short to extract meaningful content." });
+    }
+
+    console.log(`[Client Agentic] Extracted ${documentText.length} chars from ${fileName}`);
+
+    // Use AI to extract order-relevant fields
+    const extractionPrompt = `You are an expert B2B campaign analyst. Analyze this document and extract all information relevant to a demand generation campaign order.
+
+DOCUMENT CONTENT:
+---
+${documentText.substring(0, 25000)}
+---
+
+Extract the following fields from the document. Return ONLY valid JSON, no markdown.
+If a field is not found in the document, use null for that field.
+
+{
+  "industries": ["array of target industries mentioned, e.g. Technology, Healthcare, Financial Services"],
+  "jobTitles": ["array of target job titles/roles mentioned, e.g. CTO, VP Engineering, IT Director"],
+  "companySizeMin": number or null (minimum employee count if mentioned),
+  "companySizeMax": number or null (maximum employee count if mentioned),
+  "companySize": "human-readable company size description if mentioned, e.g. 500-5000 employees",
+  "geographies": ["array of target regions/countries mentioned, e.g. United States, EMEA, Canada"],
+  "campaignObjective": "the main campaign goal or objective if stated",
+  "specialRequirements": "any special requirements, compliance needs, or constraints mentioned"
+}
+
+IMPORTANT:
+- Extract ACTUAL values from the document, not generic guesses
+- For industries: look for explicit industry names, verticals, or market segments
+- For job titles: look for specific roles, seniority levels, or department names
+- For company size: look for employee counts, revenue ranges, or terms like "mid-market", "enterprise" (mid-market = 100-1000, enterprise = 1000+)
+- For geographies: look for country names, regions, states, or terms like "North America", "EMEA"
+- Return ONLY valid JSON`;
+
+    const result = await generateJSON(extractionPrompt, { temperature: 0.2 });
+
+    console.log(`[Client Agentic] Document extraction complete for ${fileName}`);
+
+    res.json({
+      success: true,
+      data: {
+        fileName,
+        extractedFields: result,
+      },
+    });
+  } catch (error: any) {
+    console.error("[Client Agentic] Document extraction error:", error);
+    res.status(500).json({ success: false, message: error.message || "Failed to extract document content" });
+  }
+});
+
+/**
  * Get AI recommendation for campaign order based on goal
  * ENHANCED: Uses organization intelligence to generate personalized recommendations
  * based on client's ICP, business profile, and value proposition
@@ -249,7 +351,7 @@ Based on this goal AND THE CLIENT'S ORGANIZATION INTELLIGENCE, provide a recomme
 {
   "recommendation": {
     "campaignType": "high_quality_leads|bant_leads|sql|appointment_generation|lead_qualification|content_syndication|webinar_invite|live_webinar|on_demand_webinar|executive_dinner|leadership_forum|conference|combo|call|email|data_validation",
-    "suggestedVolume": number (realistic lead count based on goal),
+    "suggestedVolume": number (realistic lead count based on goal; IMPORTANT: for high_quality_leads max is 100),
     "targetAudience": {
       "industries": ["industry1", "industry2"] (USE ICP INDUSTRIES IF AVAILABLE),
       "titles": ["title1", "title2"] (USE ICP PERSONAS IF AVAILABLE),
@@ -320,6 +422,11 @@ router.post("/orders/create", async (req: Request, res: Response) => {
 
     if (!volumeRequested || volumeRequested < 1) {
       return res.status(400).json({ success: false, message: "Volume must be at least 1" });
+    }
+
+    // Enforce max volume cap for high_quality_leads
+    if (campaignType === 'high_quality_leads' && volumeRequested > 100) {
+      return res.status(400).json({ success: false, message: "High Quality Leads (HQL) orders are limited to a maximum of 100 leads." });
     }
 
     console.log(`[Client Agentic] Creating order for client ${context.clientAccountId} via AgentX`);

@@ -179,7 +179,7 @@ ${additionalContext}
 
 Based on this goal and context, recommend a campaign configuration. Return a JSON object with:
 - campaignType: one of [high_quality_leads, bant_leads, sql, appointment_generation, lead_qualification, content_syndication, webinar_invite, email, data_validation]
-- suggestedVolume: number between 25-1000
+- suggestedVolume: number between 25-1000 (IMPORTANT: for high_quality_leads, max volume is 100)
 - targetAudience: { industries: string[], titles: string[], companySize: string, companySizeMin: number, companySizeMax: number }
 - channels: array of ["voice", "email"]
 - deliveryTimeline: one of [standard, 2_weeks, 1_week, immediate]

@@ -49,22 +49,37 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
 
 interface ProjectHistoryPanelProps {
   onSelectProject?: (project: Project) => void;
+  organizationId?: string;
+  clientProjectId?: string;
+  organizationName?: string;
+  projectName?: string;
 }
 
-export default function ProjectHistoryPanel({ onSelectProject }: ProjectHistoryPanelProps) {
+export default function ProjectHistoryPanel({
+  onSelectProject,
+  organizationId,
+  clientProjectId,
+  organizationName,
+  projectName,
+}: ProjectHistoryPanelProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const { data, isLoading } = useQuery<{ projects: Project[] }>({
-    queryKey: ["/api/generative-studio/projects"],
+    queryKey: [projectsQueryKey],
+    enabled: !!organizationId,
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/generative-studio/projects/${id}`);
+      await apiRequest(
+        "DELETE",
+        `/api/generative-studio/projects/${id}?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`
+      );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
       toast({ title: "Project deleted" });
     },
   });
@@ -76,7 +91,19 @@ export default function ProjectHistoryPanel({ onSelectProject }: ProjectHistoryP
       <SheetHeader>
         <SheetTitle>Generation History</SheetTitle>
         <SheetDescription>
-          {projects.length} projects generated
+          {organizationId ? (
+            <span>
+              {projects.length} projects generated
+              {organizationName && (
+                <span className="block text-xs text-muted-foreground">Org: {organizationName}</span>
+              )}
+              {projectName && (
+                <span className="block text-xs text-muted-foreground">Project: {projectName}</span>
+              )}
+            </span>
+          ) : (
+            "Select an organization to view history"
+          )}
         </SheetDescription>
       </SheetHeader>
 
@@ -88,7 +115,9 @@ export default function ProjectHistoryPanel({ onSelectProject }: ProjectHistoryP
 
           {!isLoading && projects.length === 0 && (
             <div className="text-center py-8 text-muted-foreground">
-              No projects yet. Start generating content!
+              {organizationId
+                ? "No projects yet. Start generating content!"
+                : "Select an organization to view history."}
             </div>
           )}
 
@@ -97,7 +126,7 @@ export default function ProjectHistoryPanel({ onSelectProject }: ProjectHistoryP
             return (
               <div
                 key={project.id}
-                className="flex items-start gap-3 p-3 rounded-lg border hover:bg-accent/50 cursor-pointer transition-colors"
+                className="group flex items-start gap-3 p-3 rounded-lg border hover:bg-accent/50 cursor-pointer transition-colors"
                 onClick={() => onSelectProject?.(project)}
               >
                 <div className="mt-0.5">

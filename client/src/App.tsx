@@ -110,6 +110,7 @@ import ClientPortalVoiceSimulation from "@/pages/client-portal-voice-simulation"
 import ClientPortalEmailSimulation from "@/pages/client-portal-email-simulation";
 import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
+import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 import QAReviewCenter from "@/pages/qa-review-center";
@@ -634,6 +635,11 @@ function Router() {
       <Route path="/client-portal/intelligence">
         <ProtectedRoute>
           <ClientPortalIntelligence />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/client-portal/generative-studio">
+        <ProtectedRoute>
+          <ClientPortalGenerativeStudio />
         </ProtectedRoute>
       </Route>
       <Route path="/client-portal/argyle-events">

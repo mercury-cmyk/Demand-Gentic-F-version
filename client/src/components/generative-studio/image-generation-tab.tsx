@@ -43,9 +43,16 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface ImageGenerationTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function ImageGenerationTab({ brandKits, orgIntelligence }: ImageGenerationTabProps) {
+export default function ImageGenerationTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: ImageGenerationTabProps) {
   const { toast } = useToast();
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -55,6 +62,7 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
   const [generatedImages, setGeneratedImages] = useState<any[]>([]);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<number>>(new Set());
+  const isDisabled = !organizationId;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -95,6 +103,8 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
       style,
       aspectRatio,
       numberOfImages: parseInt(numberOfImages),
+      organizationId,
+      clientProjectId,
     });
   };
 
@@ -139,6 +149,7 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
+            disabled={isDisabled}
           />
         </div>
 
@@ -149,13 +160,14 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
             value={negativePrompt}
             onChange={(e) => setNegativePrompt(e.target.value)}
             rows={2}
+            disabled={isDisabled}
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Style</Label>
-            <Select value={style} onValueChange={setStyle}>
+            <Select value={style} onValueChange={setStyle} disabled={isDisabled}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -169,7 +181,7 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
 
           <div className="space-y-2">
             <Label>Aspect Ratio</Label>
-            <Select value={aspectRatio} onValueChange={setAspectRatio}>
+            <Select value={aspectRatio} onValueChange={setAspectRatio} disabled={isDisabled}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -184,7 +196,7 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
 
         <div className="space-y-2">
           <Label>Number of Images</Label>
-          <Select value={numberOfImages} onValueChange={setNumberOfImages}>
+          <Select value={numberOfImages} onValueChange={setNumberOfImages} disabled={isDisabled}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -200,7 +212,7 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
         <Button
           className="w-full"
           onClick={handleGenerate}
-          disabled={generateMutation.isPending || !prompt}
+          disabled={generateMutation.isPending || !prompt || isDisabled}
           size="lg"
         >
           {generateMutation.isPending ? (
@@ -216,6 +228,12 @@ export default function ImageGenerationTab({ brandKits, orgIntelligence }: Image
 
         {generateMutation.isPending && (
           <p className="text-xs text-center text-muted-foreground">Image generation can take up to 60 seconds</p>
+        )}
+
+        {isDisabled && (
+          <p className="text-xs text-center text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            Select an organization to generate images.
+          </p>
         )}
 
         {orgIntelligence?.identity?.legalName?.value && (

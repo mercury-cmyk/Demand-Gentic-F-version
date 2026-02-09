@@ -1,21 +1,25 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
-  Mic,
-  MicOff,
   Loader2,
   Bot,
   User,
   ChevronDown,
   ChevronUp,
   CheckCircle,
-  XCircle,
-  AlertCircle,
   Wrench,
   Copy,
   Check,
   Package,
+  BarChart3,
+  FileText,
+  CreditCard,
+  Sparkles,
+  Brain,
+  Building2,
+  Rocket,
+  Target,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,16 +35,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentPlanViewer } from './AgentPlanViewer';
 import { AgentQuickActions } from './AgentQuickActions';
-import {
-  OrderContextPanel,
-  OrderConfigurationCard,
-  OrderCostEstimate,
-  type UploadedFile,
-  type OrderConfiguration,
-  type OrderRecommendation,
-  type PricingBreakdown,
-  type OrderAgentState,
-} from './order-agent';
 
 interface Message {
   id: string;
@@ -50,11 +44,6 @@ interface Message {
   thoughtProcess?: string[];
   toolsExecuted?: Array<{ tool: string; args: any; result: any }>;
   planId?: string;
-  // Order-specific message data
-  orderRecommendation?: OrderRecommendation;
-  orderConfiguration?: OrderConfiguration;
-  pricingBreakdown?: PricingBreakdown;
-  orderResult?: { orderId: string; orderNumber: string };
 }
 
 interface ExecutionPlan {
@@ -86,26 +75,12 @@ export function AgentChatInterface({
   userRole,
 }: AgentChatInterfaceProps) {
   const { toast } = useToast();
-  const { setConversationId, setAgentStatus } = useAgentPanelContext();
+  const { setConversationId, setAgentStatus, enterOrderMode } = useAgentPanelContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<ExecutionPlan | null>(null);
-  const [isListening, setIsListening] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
-
-  // Order mode state
-  const [orderMode, setOrderMode] = useState(false);
-  const [orderState, setOrderState] = useState<OrderAgentState>('idle');
-  const [contextUrls, setContextUrls] = useState<string[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [targetAccountFiles, setTargetAccountFiles] = useState<UploadedFile[]>([]);
-  const [suppressionFiles, setSuppressionFiles] = useState<UploadedFile[]>([]);
-  const [templateFiles, setTemplateFiles] = useState<UploadedFile[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [currentRecommendation, setCurrentRecommendation] = useState<OrderRecommendation | null>(null);
-  const [currentConfiguration, setCurrentConfiguration] = useState<OrderConfiguration | null>(null);
-  const [currentPricing, setCurrentPricing] = useState<PricingBreakdown | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -128,13 +103,13 @@ export function AgentChatInterface({
     );
   }, []);
 
-  // Check if we're in order mode based on messages
+  // Check if user message triggers order mode → enter order mode via context
   useEffect(() => {
     const lastUserMessage = messages.findLast(m => m.role === 'user');
-    if (lastUserMessage && detectOrderIntent(lastUserMessage.content)) {
-      setOrderMode(true);
+    if (lastUserMessage && detectOrderIntent(lastUserMessage.content) && isClientPortal) {
+      enterOrderMode();
     }
-  }, [messages, detectOrderIntent]);
+  }, [messages, detectOrderIntent, enterOrderMode, isClientPortal]);
 
   useEffect(() => {
     if (isExecutingPlan) {
@@ -176,160 +151,78 @@ export function AgentChatInterface({
   }, []);
 
   const getAuthToken = useCallback(() => {
-    return localStorage.getItem(isClientPortal ? 'clientPortalToken' : 'token');
+    return localStorage.getItem(isClientPortal ? 'clientPortalToken' : 'authToken');
   }, [isClientPortal]);
 
-  // File upload handler for order context
-  const handleFileUpload = useCallback(async (files: FileList, category: 'context' | 'target_accounts' | 'suppression' | 'template') => {
-    if (!files || files.length === 0) return;
+  const WelcomeHero = () => (
+    <div className="flex flex-col items-center justify-center py-10 px-6 text-center space-y-6 animate-in fade-in zoom-in duration-500">
+      <div className="relative">
+        <div className="absolute -inset-4 bg-gradient-to-r from-primary/20 to-purple-500/20 blur-xl rounded-full opacity-50" />
+        <div className="bg-gradient-to-br from-primary/10 to-background p-4 rounded-2xl border border-primary/10 shadow-xl relative backdrop-blur-sm">
+          <Bot className="w-12 h-12 text-primary" />
+        </div>
+      </div>
+      <div className="space-y-2 max-w-sm">
+        <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-600">
+          How can I help you?
+        </h3>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          I can help you analyze leads, optimize campaigns, or process new orders.
+        </p>
+      </div>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md">
+        <QuickActionCard 
+          icon={Package} 
+          label="New Campaign" 
+          desc="Create a new lead order"
+          onClick={() => {
+            enterOrderMode();
+          }}
+        />
+        <QuickActionCard 
+          icon={BarChart3} 
+          label="Analyze Leads" 
+          desc="Review recent performance"
+          onClick={() => {
+             setInputValue("Analyze my recent lead performance");
+             inputRef.current?.focus();
+          }}
+        />
+        <QuickActionCard 
+          icon={Sparkles} 
+          label="Optimize" 
+          desc="Improve conversion rates"
+          onClick={() => {
+             setInputValue("How can I optimize my current campaigns?");
+             inputRef.current?.focus();
+          }}
+        />
+        <QuickActionCard 
+          icon={FileText} 
+          label="Reports" 
+          desc="Generate summary report"
+          onClick={() => {
+             setInputValue("Generate a summary report for this week");
+             inputRef.current?.focus();
+          }}
+        />
+      </div>
+    </div>
+  );
 
-    setIsUploading(true);
-    const newUploadedFiles: UploadedFile[] = [];
-
-    try {
-      const token = getAuthToken();
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-
-        // Get presigned URL
-        const res = await fetch('/api/s3/upload-url', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            contentType: file.type,
-            folder: category === 'context' ? 'campaign-orders' : `campaign-orders/${category}`
-          }),
-        });
-
-        if (!res.ok) throw new Error(`Failed to get upload URL for ${file.name}`);
-        const { url, key } = await res.json();
-
-        // Upload to S3
-        const uploadRes = await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type },
-          body: file,
-        });
-
-        if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
-
-        newUploadedFiles.push({
-          name: file.name,
-          key: key,
-          type: file.type
-        });
-      }
-
-      // Update appropriate state
-      if (category === 'context') {
-        setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
-      } else if (category === 'target_accounts') {
-        setTargetAccountFiles(prev => [...prev, ...newUploadedFiles]);
-      } else if (category === 'suppression') {
-        setSuppressionFiles(prev => [...prev, ...newUploadedFiles]);
-      } else if (category === 'template') {
-        setTemplateFiles(prev => [...prev, ...newUploadedFiles]);
-      }
-
-      toast({ title: 'Files uploaded successfully' });
-    } catch (error) {
-      console.error(error);
-      toast({ title: 'Upload failed', description: (error as Error).message, variant: 'destructive' });
-    } finally {
-      setIsUploading(false);
-    }
-  }, [getAuthToken, toast]);
-
-  // Remove file handler
-  const handleRemoveFile = useCallback((key: string, category: 'context' | 'target_accounts' | 'suppression' | 'template') => {
-    if (category === 'context') {
-      setUploadedFiles(prev => prev.filter(f => f.key !== key));
-    } else if (category === 'target_accounts') {
-      setTargetAccountFiles(prev => prev.filter(f => f.key !== key));
-    } else if (category === 'suppression') {
-      setSuppressionFiles(prev => prev.filter(f => f.key !== key));
-    } else if (category === 'template') {
-      setTemplateFiles(prev => prev.filter(f => f.key !== key));
-    }
-  }, []);
-
-  // Handle order configuration change
-  const handleConfigurationChange = useCallback((updates: Partial<OrderConfiguration>) => {
-    setCurrentConfiguration(prev => prev ? { ...prev, ...updates } : null);
-  }, []);
-
-  // Handle order approval - proceed to plan generation
-  const handleOrderApprove = useCallback(async () => {
-    if (!currentConfiguration) return;
-
-    setIsLoading(true);
-    setOrderState('plan_pending');
-
-    try {
-      const token = getAuthToken();
-      const response = await fetch('/api/agent-panel/orders/generate-plan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          configuration: currentConfiguration,
-          contextUrls,
-          contextFiles: uploadedFiles,
-          targetAccountFiles,
-          suppressionFiles,
-          templateFiles,
-          conversationId,
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to generate plan');
-
-      const data = await response.json();
-
-      if (data.plan) {
-        setCurrentPlan(data.plan);
-        setCurrentPricing(data.pricingBreakdown);
-
-        const planMessage: Message = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: `I've prepared an execution plan for your order. Please review the steps below and approve to proceed.`,
-          timestamp: new Date().toISOString(),
-          pricingBreakdown: data.pricingBreakdown,
-        };
-        setMessages(prev => [...prev, planMessage]);
-      }
-    } catch (error) {
-      console.error('Error generating plan:', error);
-      toast({ title: 'Failed to generate plan', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentConfiguration, contextUrls, uploadedFiles, targetAccountFiles, suppressionFiles, templateFiles, conversationId, getAuthToken, toast]);
-
-  // Handle order cancellation
-  const handleOrderCancel = useCallback(() => {
-    setOrderMode(false);
-    setOrderState('idle');
-    setCurrentRecommendation(null);
-    setCurrentConfiguration(null);
-    setCurrentPricing(null);
-
-    const cancelMessage: Message = {
-      id: `msg-${Date.now()}`,
-      role: 'assistant',
-      content: 'Order cancelled. How else can I help you?',
-      timestamp: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, cancelMessage]);
-  }, []);
+  const QuickActionCard = ({ icon: Icon, label, desc, onClick }: any) => (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-start p-3 rounded-xl border border-border/50 bg-card/50 hover:bg-primary/5 hover:border-primary/20 transition-all duration-300 text-left group"
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Icon className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+        <span className="font-medium text-sm text-foreground/80 group-hover:text-primary transition-colors">{label}</span>
+      </div>
+      <span className="text-[10px] text-muted-foreground">{desc}</span>
+    </button>
+  );
 
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -348,44 +241,19 @@ export function AgentChatInterface({
 
     try {
       const token = getAuthToken();
-      
+
       if (!token) {
         throw new Error('Authentication required. Please log in.');
       }
 
-      // Check if this is an order-related message
-      const isOrderIntent = detectOrderIntent(userMessage.content);
-      const endpoint = isOrderIntent && isClientPortal
-        ? '/api/agent-panel/orders/analyze-goal'
-        : `/api/agent-panel/chat?clientPortal=${isClientPortal}`;
+      const endpoint = `/api/agent-panel/chat?clientPortal=${isClientPortal}`;
 
-      const requestBody = isOrderIntent && isClientPortal
-        ? {
-            goal: userMessage.content,
-            contextUrls,
-            contextFiles: uploadedFiles,
-            targetAccountFiles,
-            suppressionFiles,
-            templateFiles,
-            sessionId,
-            conversationId,
-          }
-        : {
-            message: userMessage.content,
-            sessionId,
-            conversationId,
-            planMode: true,
-            // Include order context if in order mode
-            ...(orderMode && {
-              orderContext: {
-                contextUrls,
-                contextFiles: uploadedFiles,
-                targetAccountFiles,
-                suppressionFiles,
-                templateFiles,
-              },
-            }),
-          };
+      const requestBody = {
+        message: userMessage.content,
+        sessionId,
+        conversationId: conversationId || undefined,
+        planMode: true,
+      };
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -397,7 +265,9 @@ export function AgentChatInterface({
       });
 
       if (!response.ok) {
-        throw new Error('Failed to send message');
+        const errorText = await response.text();
+        console.error('Server error response:', errorText);
+        throw new Error(`Server Error: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       const data = await response.json();
@@ -407,64 +277,30 @@ export function AgentChatInterface({
         setConversationId(data.conversationId);
       }
 
-      // Handle order recommendation response
-      if (data.recommendation) {
-        setOrderMode(true);
-        setOrderState('strategy_review');
-        setCurrentRecommendation(data.recommendation);
+      // Regular message handling
+      const assistantMessage: Message = {
+        ...data.message,
+        timestamp: data.message?.timestamp || new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
 
-        // Create configuration from recommendation
-        const config: OrderConfiguration = {
-          campaignType: data.recommendation.campaignType || 'high_quality_leads',
-          volume: data.recommendation.suggestedVolume || 100,
-          industries: data.recommendation.targetAudience?.industries?.join(', ') || '',
-          jobTitles: data.recommendation.targetAudience?.titles?.join(', ') || '',
-          companySizeMin: data.recommendation.targetAudience?.companySizeMin,
-          companySizeMax: data.recommendation.targetAudience?.companySizeMax,
-          geographies: data.recommendation.geographies?.join(', ') || '',
-          deliveryTimeline: data.recommendation.deliveryTimeline || 'standard',
-          channels: data.recommendation.channels || ['voice', 'email'],
-        };
-        setCurrentConfiguration(config);
-        setCurrentPricing(data.pricingBreakdown);
-
-        // Add recommendation message
-        const recMessage: Message = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: data.message?.content || `Based on your goal and organization intelligence, here's my recommended strategy:`,
-          timestamp: new Date().toISOString(),
-          orderRecommendation: data.recommendation,
-          orderConfiguration: config,
-          pricingBreakdown: data.pricingBreakdown,
-        };
-        setMessages((prev) => [...prev, recMessage]);
-      } else {
-        // Regular message handling
-        const assistantMessage: Message = {
-          ...data.message,
-          timestamp: data.message?.timestamp || new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-
-        // Set plan if returned
-        if (data.plan) {
-          setCurrentPlan(data.plan);
-        }
+      // Set plan if returned
+      if (data.plan) {
+        setCurrentPlan(data.plan);
       }
     } catch (error) {
       console.error('Error sending message:', error);
       const errorMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: `Sorry, I encountered an error. ${(error as Error).message}`,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [conversationId, getAuthToken, inputValue, isClientPortal, isLoading, sessionId, setConversationId, detectOrderIntent, orderMode, contextUrls, uploadedFiles, targetAccountFiles, suppressionFiles, templateFiles]);
+  }, [conversationId, getAuthToken, inputValue, isClientPortal, isLoading, sessionId, setConversationId]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -492,7 +328,6 @@ export function AgentChatInterface({
 
       const data = await response.json();
 
-      // Add execution result message
       const resultMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -544,32 +379,11 @@ export function AgentChatInterface({
       <ScrollArea className="flex-1 px-4" ref={scrollRef}>
         <div className="py-4 space-y-4">
           {messages.length === 0 ? (
-            <WelcomeMessage isClientPortal={isClientPortal} userRole={userRole} />
+            <WelcomeMessage isClientPortal={isClientPortal} userRole={userRole} onEnterOrderMode={enterOrderMode} />
           ) : (
             <AnimatePresence mode="popLayout">
               {messages.map((message) => (
-                <React.Fragment key={message.id}>
-                  <MessageBubble message={message} />
-                  {/* Render order configuration card for recommendation messages */}
-                  {message.orderRecommendation && message.orderConfiguration && orderState === 'strategy_review' && (
-                    <div className="space-y-3 ml-12">
-                      <OrderConfigurationCard
-                        recommendation={message.orderRecommendation}
-                        configuration={currentConfiguration || message.orderConfiguration}
-                        onConfigurationChange={handleConfigurationChange}
-                        onApprove={handleOrderApprove}
-                        onCancel={handleOrderCancel}
-                        rationale={message.orderRecommendation.rationale}
-                      />
-                      {currentPricing && (
-                        <OrderCostEstimate
-                          pricingBreakdown={currentPricing}
-                          volume={currentConfiguration?.volume || message.orderConfiguration.volume}
-                        />
-                      )}
-                    </div>
-                  )}
-                </React.Fragment>
+                <MessageBubble key={message.id} message={message} />
               ))}
             </AnimatePresence>
           )}
@@ -582,13 +396,6 @@ export function AgentChatInterface({
                 onApprove={() => handlePlanApprove(currentPlan.id)}
                 onReject={() => handlePlanReject(currentPlan.id)}
               />
-              {currentPricing && (
-                <OrderCostEstimate
-                  pricingBreakdown={currentPricing}
-                  volume={currentConfiguration?.volume || 100}
-                  compact
-                />
-              )}
             </div>
           )}
 
@@ -607,24 +414,6 @@ export function AgentChatInterface({
 
       {/* Input Area */}
       <div className="p-4 border-t border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        {/* Order Context Panel - shown when in order mode */}
-        {orderMode && isClientPortal && (
-          <div className="mb-3">
-            <OrderContextPanel
-              contextUrls={contextUrls}
-              onAddUrl={(url) => setContextUrls(prev => [...prev, url])}
-              onRemoveUrl={(url) => setContextUrls(prev => prev.filter(u => u !== url))}
-              uploadedFiles={uploadedFiles}
-              targetAccountFiles={targetAccountFiles}
-              suppressionFiles={suppressionFiles}
-              templateFiles={templateFiles}
-              onUploadFiles={handleFileUpload}
-              onRemoveFile={handleRemoveFile}
-              isUploading={isUploading}
-            />
-          </div>
-        )}
-
         <div className="relative">
           <div className="relative flex items-center rounded-xl border border-input bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring transition-all">
             <Textarea
@@ -632,7 +421,7 @@ export function AgentChatInterface({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={orderMode ? "Describe your campaign goal..." : "Tell AgentX what you want done…"}
+              placeholder="Tell AgentX what you want done..."
               className="min-h-[50px] max-h-[200px] w-full resize-none border-0 shadow-none focus-visible:ring-0 py-3.5 pl-4 pr-12 bg-transparent leading-relaxed"
               rows={1}
             />
@@ -657,34 +446,9 @@ export function AgentChatInterface({
           </div>
         </div>
 
-        {/* Order mode indicator */}
-        {orderMode && (
-          <div className="mt-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Package className="h-3.5 w-3.5 text-primary" />
-              <span>Order Creation Mode</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={() => {
-                setOrderMode(false);
-                setOrderState('idle');
-                setCurrentRecommendation(null);
-                setCurrentConfiguration(null);
-              }}
-            >
-              Exit
-            </Button>
-          </div>
-        )}
-
-        {!orderMode && (
-          <div className="mt-4 mb-2">
-             <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
-          </div>
-        )}
+        <div className="mt-4 mb-2">
+          <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
+        </div>
 
         <p className="text-[10px] text-muted-foreground/60 mt-2 text-center select-none">
           AgentX can make mistakes. Check important info.
@@ -719,41 +483,145 @@ function TypingIndicator() {
   );
 }
 
+// Welcome Action Card for client portal
+function WelcomeActionCard({
+  icon: Icon,
+  title,
+  description,
+  onClick,
+  primary,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  onClick: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex flex-col items-start gap-2 p-3.5 rounded-xl border text-left transition-all duration-200 group',
+        primary
+          ? 'bg-gradient-to-br from-primary/15 via-primary/10 to-primary/5 border-primary/25 hover:border-primary/40 hover:shadow-md hover:shadow-primary/10'
+          : 'bg-card/50 border-border/60 hover:bg-muted/50 hover:border-border hover:shadow-sm'
+      )}
+    >
+      <div
+        className={cn(
+          'p-2 rounded-lg transition-colors',
+          primary
+            ? 'bg-primary/15 text-primary group-hover:bg-primary/20'
+            : 'bg-muted text-muted-foreground group-hover:bg-muted/80'
+        )}
+      >
+        <Icon className="h-4 w-4" />
+      </div>
+      <div>
+        <p className={cn(
+          'text-sm font-semibold leading-none',
+          primary ? 'text-primary' : 'text-foreground'
+        )}>
+          {title}
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+          {description}
+        </p>
+      </div>
+    </button>
+  );
+}
+
 // Welcome Message Component
 function WelcomeMessage({
   isClientPortal,
   userRole,
+  onEnterOrderMode,
 }: {
   isClientPortal: boolean;
   userRole: string;
+  onEnterOrderMode: () => void;
 }) {
+  const dispatchQuickAction = (prompt: string) => {
+    window.dispatchEvent(
+      new CustomEvent('agent-quick-action', { detail: { prompt } })
+    );
+  };
+
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="flex flex-col items-center justify-center py-10 px-4 space-y-6"
+      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="flex flex-col items-center justify-center py-12 px-6 space-y-8 select-none"
     >
-      <div className="relative">
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20 shadow-xl">
-          <Bot className="h-10 w-10 text-primary" />
+      <div className="relative group cursor-default">
+        <div className="absolute -inset-1 bg-gradient-to-r from-primary to-purple-600 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200" />
+        <div className="relative w-24 h-24 rounded-3xl bg-gradient-to-br from-card to-background flex items-center justify-center border border-border/50 shadow-2xl">
+          <Bot className="h-10 w-10 text-primary transition-transform duration-500 group-hover:scale-110" />
         </div>
-        <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-background rounded-full flex items-center justify-center border border-border shadow-sm">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
+        <div className="absolute -bottom-2 -right-2 bg-background p-1.5 rounded-full border border-border shadow-sm">
+           <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500/20 animate-pulse" />
         </div>
       </div>
-      
-      <div className="text-center space-y-2 max-w-sm">
-        <h3 className="font-semibold text-xl tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-          Welcome to AgentX
+
+      <div className="text-center space-y-3 max-w-sm">
+        <h3 className="font-bold text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
+          AgentX
         </h3>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          {isClientPortal
-            ? "Your personal AI assistant for campaigns, orders, and analytics. What would you like to check today?"
-            : "I'm ready to help you manage your tasks, analyze data, and optimize results. Use a prompt below or type your own."}
+          I'm an autonomic agent designed to help you analyze data, execute campaigns, and manage operations.
         </p>
       </div>
 
-      <div className="w-full h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      {/* Client Portal Action Cards */}
+      {isClientPortal && (
+        <div className="w-full grid grid-cols-2 gap-3 max-w-md">
+          <WelcomeActionCard
+            icon={Rocket}
+            title="New Campaign"
+            description="Launch order"
+            onClick={onEnterOrderMode}
+            primary
+          />
+          <WelcomeActionCard
+            icon={BarChart3}
+            title="Analysis"
+            description="Performance review"
+            onClick={() => dispatchQuickAction('Analyze the performance of my active campaigns')}
+          />
+          <WelcomeActionCard
+            icon={FileText}
+            title="Reports"
+            description="View reports"
+            onClick={() => dispatchQuickAction('Generate a weekly summary report')}
+          />
+           <WelcomeActionCard
+            icon={Target}
+            title="Leads"
+            description="Lead quality check"
+            onClick={() => dispatchQuickAction('Check the quality of leads generated today')}
+          />
+        </div>
+      )}
+
+      {/* Admin/Internal Welcome */}
+      {!isClientPortal && (
+        <div className="w-full grid grid-cols-2 gap-3 max-w-md">
+            <WelcomeActionCard
+              icon={Brain}
+              title="System Check"
+              description="Diagnostics"
+              onClick={() => dispatchQuickAction('Run a full system diagnostic check')}
+            />
+             <WelcomeActionCard
+              icon={Building2}
+              title="Org Intel"
+              description="Analyze accounts"
+              onClick={() => dispatchQuickAction('Analyze recently active accounts for intent')}
+            />
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -763,6 +631,13 @@ function MessageBubble({ message }: { message: Message }) {
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
+  
+  // Detect if this is a campaign proposal or highly structured output
+  const isCampaignProposal = !isUser && (
+    message.content.includes('# Campaign Strategy') || 
+    message.content.includes('Campaign Created') ||
+    message.content.includes('Order Summary')
+  );
 
   const copyContent = () => {
     navigator.clipboard.writeText(message.content);
@@ -772,23 +647,25 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className={cn('group flex gap-3', isUser && 'flex-row-reverse')}
+      layout
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      className={cn('group flex gap-4', isUser && 'flex-row-reverse')}
     >
       <div
         className={cn(
-          'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border shadow-sm transition-colors',
-          isUser 
-            ? 'bg-primary border-primary/20' 
-            : 'bg-background border-border'
+          'w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ring-2 ring-background z-10',
+          isUser
+            ? 'bg-gradient-to-tr from-primary to-primary/80'
+            : 'bg-gradient-to-tr from-card to-secondary border border-border/50'
         )}
       >
         {isUser ? (
-          <User className="h-5 w-5 text-primary-foreground" />
+          <User className="h-4 w-4 text-primary-foreground" />
         ) : (
-          <Bot className="h-5 w-5 text-primary" />
+          <Bot className="h-4 w-4 text-primary" />
         )}
       </div>
 
@@ -800,61 +677,59 @@ function MessageBubble({ message }: { message: Message }) {
       >
         <div className="flex flex-col gap-1">
           {/* Sender Name */}
-          <div className={cn("text-xs text-muted-foreground px-1 flex items-center gap-2", isUser && "justify-end")}>
-            <span className="font-medium">{isUser ? 'You' : 'AgentX'}</span>
-            <span className="opacity-50">•</span>
-            <span>
-              {new Date(message.timestamp).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
+          <div className={cn("text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70 px-1 flex items-center gap-2", isUser && "justify-end")}>
+            <span>{isUser ? 'You' : 'AgentX'}</span>
           </div>
 
           <div
             className={cn(
-              'rounded-2xl px-4 py-3 text-sm shadow-sm border leading-relaxed',
+              'relative rounded-2xl px-5 py-4 text-sm shadow-sm leading-7 transition-all duration-200',
               isUser
-                ? 'bg-primary text-primary-foreground border-primary/20 rounded-tr-none'
-                : 'bg-card text-card-foreground border-border rounded-tl-none'
+                ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                : 'bg-card/80 backdrop-blur-sm border border-border/50 rounded-tl-sm text-foreground shadow-sm hover:shadow-md'
             )}
           >
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            {isCampaignProposal && (
+              <div className="absolute top-0 right-0 p-2">
+                 <Badge variant="outline" className="bg-background/50 backdrop-blur text-[10px] border-primary/20 text-primary gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    Strategy
+                 </Badge>
+              </div>
+            )}
+            
+            <div className={cn("markdown-prose whitespace-pre-wrap", isCampaignProposal && "font-medium text-foreground/90")}>
+              {message.content}
+            </div>
           </div>
         </div>
 
         {/* Thought Process */}
         {message.thoughtProcess && message.thoughtProcess.length > 0 && (
           <div className="w-full max-w-[90%]">
-            <Collapsible open={showDetails} onOpenChange={setShowDetails} className="bg-muted/30 rounded-lg border border-border/50 overflow-hidden">
+            <Collapsible open={showDetails} onOpenChange={setShowDetails} className="group/details bg-muted/20 hover:bg-muted/40 transition-colors rounded-lg border border-border/30 overflow-hidden">
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="w-full flex items-center justify-between px-3 h-9 text-xs font-medium hover:bg-muted/50"
+                  className="w-full flex items-center justify-between px-3 h-8 text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <div className="p-1 rounded bg-background border border-border/50">
-                      <Wrench className="h-3 w-3" />
-                    </div>
-                    <span>Reasoning Process ({message.thoughtProcess.length} steps)</span>
+                  <div className="flex items-center gap-2">
+                    <Brain className="h-3.5 w-3.5" />
+                    <span>View Reasoning ({message.thoughtProcess.length} steps)</span>
                   </div>
-                  {showDetails ? (
-                    <ChevronUp className="h-3 w-3 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                  )}
+                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", showDetails && "rotate-180")} />
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="px-3 pb-3 pt-1 space-y-2">
-                  <div className="h-px w-full bg-border/50 mb-2" />
+                <div className="px-3 pb-3 pt-1 space-y-3">
+                  <div className="h-px w-full bg-border/40 mb-2" />
                   {message.thoughtProcess.map((step, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-xs">
-                      <div className="flex items-center justify-center w-4 h-4 rounded-full bg-background border border-border/50 shrink-0 mt-0.5 text-[10px] font-mono text-muted-foreground">
+                    <div key={i} className="flex gap-3 text-xs group/step">
+                      <div className="flex items-center justify-center w-5 h-5 rounded-full bg-background border border-border/60 shrink-0 text-[10px] font-mono text-muted-foreground group-hover/step:border-primary/40 group-hover/step:text-primary transition-colors">
                         {i + 1}
                       </div>
-                      <span className="text-muted-foreground leading-relaxed">{step}</span>
+                      <span className="text-muted-foreground leading-relaxed pt-0.5">{step}</span>
                     </div>
                   ))}
                 </div>
@@ -865,14 +740,16 @@ function MessageBubble({ message }: { message: Message }) {
 
         {/* Tools Executed */}
         {message.toolsExecuted && message.toolsExecuted.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-1">
+          <div className="flex flex-wrap gap-2 mt-2">
             {message.toolsExecuted.map((tool, i) => (
-              <Badge 
-                key={i} 
-                variant="outline" 
-                className="text-xs py-1 px-2.5 bg-green-500/5 text-green-700 border-green-200 gap-1.5 hover:bg-green-500/10 transition-colors"
+              <Badge
+                key={i}
+                variant="outline"
+                className="text-xs py-1 px-3 h-7 bg-emerald-500/5 text-emerald-700 border-emerald-200/50 gap-1.5 hover:bg-emerald-500/10 transition-colors rounded-lg"
               >
-                <CheckCircle className="h-3 w-3" />
+                <div className="p-0.5 bg-emerald-500/20 rounded-full">
+                  <Check className="h-2.5 w-2.5" />
+                </div>
                 <span className="font-mono font-medium">{tool.tool}</span>
               </Badge>
             ))}
@@ -881,17 +758,17 @@ function MessageBubble({ message }: { message: Message }) {
 
         {/* Actions */}
         {!isUser && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity px-1">
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity px-1 duration-200">
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 rounded-md hover:bg-muted"
+              className="h-6 w-6 rounded-md hover:bg-muted text-muted-foreground"
               onClick={copyContent}
             >
               {copied ? (
                 <Check className="h-3 w-3 text-green-500" />
               ) : (
-                <Copy className="h-3 w-3 text-muted-foreground" />
+                <Copy className="h-3 w-3" />
               )}
             </Button>
           </div>

@@ -14,9 +14,16 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 interface SolutionBriefTabProps {
   brandKits?: any[];
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
+  clientProjectId?: string;
 }
 
-export default function SolutionBriefTab({ brandKits, orgIntelligence }: SolutionBriefTabProps) {
+export default function SolutionBriefTab({
+  brandKits,
+  orgIntelligence,
+  organizationId,
+  clientProjectId,
+}: SolutionBriefTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [result, setResult] = useState<any>(null);
@@ -24,6 +31,7 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
   const [exportOpen, setExportOpen] = useState(false);
   const [problemStatement, setProblemStatement] = useState("");
   const [fullHtml, setFullHtml] = useState("");
+  const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
 
   const generateMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -33,7 +41,7 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
     onSuccess: (data) => {
       setResult(data.content);
       setProjectId(data.projectId);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/projects"] });
+      queryClient.invalidateQueries({ queryKey: [projectsQueryKey] });
 
       // Build preview HTML
       const sections = data.content?.sections || [];
@@ -83,7 +91,10 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
 
   const saveAsAssetMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`);
+      const res = await apiRequest("POST", `/api/generative-studio/save-as-asset/${projectId}`, {
+        organizationId,
+        clientProjectId,
+      });
       return await res.json();
     },
     onSuccess: () => {
@@ -95,6 +106,8 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
     generateMutation.mutate({
       ...params,
       problemStatement: problemStatement || undefined,
+      organizationId,
+      clientProjectId,
     });
   };
 
@@ -119,6 +132,7 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
           onGenerate={handleGenerate}
           isGenerating={generateMutation.isPending}
           generateLabel="Generate Solution Brief"
+          disabled={!organizationId}
           extraFields={
             <div className="space-y-2">
               <Label>Problem Statement</Label>
@@ -127,6 +141,7 @@ export default function SolutionBriefTab({ brandKits, orgIntelligence }: Solutio
                 value={problemStatement}
                 onChange={(e) => setProblemStatement(e.target.value)}
                 rows={3}
+                disabled={!organizationId}
               />
             </div>
           }

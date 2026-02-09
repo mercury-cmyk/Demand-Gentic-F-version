@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { useLocation } from 'wouter';
+import { useState, useEffect } from 'react'; // Sync
+import { useLocation, useSearch } from 'wouter';
+import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -32,7 +33,7 @@ import {
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
-  ArrowLeft, ArrowRight, Eye
+  ArrowLeft, ArrowRight, Eye, Tag
 } from 'lucide-react';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
@@ -49,7 +50,6 @@ import {
   CampaignDetailView,
 } from '@/components/client-portal/campaigns';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
-import { AgenticCampaignOrderPanel } from '@/components/client-portal/orders/agentic-campaign-order-panel';
 import { ArgyleEventsContent } from '@/pages/client-portal/argyle-events';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
@@ -58,7 +58,6 @@ import { AccountIntelligenceView } from '@/components/ai-studio/account-intellig
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
 import { PromptOptimizationView } from '@/components/ai-studio/org-intelligence/prompt-optimization';
-import { OrganizationSelector } from '@/components/ai-studio/org-intelligence/organization-selector';
 import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
@@ -202,13 +201,46 @@ const statusColors: Record<string, string> = {
   paused: 'bg-gray-100 text-gray-600',
 };
 
+// Tab aliases for backward compatibility with old URLs
+const TAB_ALIASES: Record<string, string> = {
+  'agent': 'overview',
+  'reports': 'analytics-reports',
+  'agentic-demand': 'overview',
+  'activations': 'campaigns',
+  'analytics': 'overview',
+};
+
+function resolveTab(tab: string | null): string {
+  if (!tab) return 'overview';
+  return TAB_ALIASES[tab] || tab;
+}
+
 export default function ClientPortalDashboard() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const agentPanel = useAgentPanelContextOptional();
   const [user, setUser] = useState<ClientUser | null>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // URL-driven tab system
+  const tabFromUrl = new URLSearchParams(searchString).get('tab');
+  const [activeTab, setActiveTabState] = useState(resolveTab(tabFromUrl));
+  const [targetMarketTab, setTargetMarketTab] = useState('intelligence');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
+
+  // Sync activeTab with URL changes (sidebar navigation)
+  useEffect(() => {
+    const resolved = resolveTab(tabFromUrl);
+    if (resolved !== activeTab) {
+      setActiveTabState(resolved);
+    }
+  }, [tabFromUrl]);
+
+  // Update URL when activeTab changes internally
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    window.history.replaceState(null, '', `/client-portal/dashboard?tab=${tab}`);
+  };
   
   // Work Order Request State (managed campaigns by Pivotal team)
   const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
@@ -268,8 +300,7 @@ export default function ClientPortalDashboard() {
   // Report view toggle
   const [reportViewType, setReportViewType] = useState<'executive' | 'detailed'>('executive');
   
-  // Sidebar state
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // (sidebar state removed - now handled by ClientPortalLayout)
 
   // Campaign Creation Wizard State (new wizard)
   const [showCampaignWizard, setShowCampaignWizard] = useState(false);
@@ -285,7 +316,6 @@ export default function ClientPortalDashboard() {
 
   // New agentic panels state
   const [showReportsPanel, setShowReportsPanel] = useState(false);
-  const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [showEmailGenerator, setShowEmailGenerator] = useState(false);
   // Test AI Agent & Voice Selection state (client-facing)
   const [showClientTestAgent, setShowClientTestAgent] = useState(false);
@@ -463,6 +493,19 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
   });
 
+  const { data: dashboardPricingData } = useQuery<{
+    pricing: Record<string, { pricePerLead: number; isEnabled: boolean; label: string }>;
+    hasCustomPricing: boolean;
+  }>({
+    queryKey: ['client-portal-dashboard-pricing'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/billing/campaign-pricing', authHeaders);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
   const { data: projects = [], isLoading: projectsLoading, refetch: refetchProjects } = useQuery<Project[]>({
     queryKey: ['client-portal-projects'],
     queryFn: async () => {
@@ -495,6 +538,26 @@ export default function ClientPortalDashboard() {
     },
     enabled: !!user,
   });
+
+  // Fetch the client's own linked organization (not all orgs)
+  const { data: clientOrgData } = useQuery<{
+    organization: { id: string; name: string; domain: string | null; industry: string | null; logoUrl: string | null } | null;
+  }>({
+    queryKey: ['client-portal-org-intelligence'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/settings/organization-intelligence', authHeaders);
+      if (!res.ok) return { organization: null };
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  // Auto-set selectedOrgId from client's linked org
+  useEffect(() => {
+    if (clientOrgData?.organization?.id && !selectedOrgId) {
+      setSelectedOrgId(clientOrgData.organization.id);
+    }
+  }, [clientOrgData?.organization?.id, selectedOrgId]);
 
   // Feature access query
   const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
@@ -1172,204 +1235,70 @@ export default function ClientPortalDashboard() {
     );
   }
 
-  // Main navigation items - clean and unique
-  // Core navigation modules - available to all clients by default
-  const navItems: { id: string; label: string; icon: any; color: string; action?: () => void; featureRequired?: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
-    { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
-    { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
-    { id: 'accounts', label: 'Accounts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
-    { id: 'contacts', label: 'Contacts', icon: Users, color: 'from-sky-500 to-cyan-500', featureRequired: 'accounts_contacts' },
-    { id: 'intelligence', label: 'Intelligence', icon: Brain, color: 'from-violet-500 to-purple-500' },
-    { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
-    { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
-    { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
-    { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
-    { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
-  ];
-
-  // Conditionally add Argyle events nav item (as a dashboard tab, not a separate page)
-  if (argyleFeatureStatus?.enabled) {
-    // Insert before Billing
-    const billingIdx = navItems.findIndex(i => i.id === 'billing');
-    navItems.splice(billingIdx >= 0 ? billingIdx : navItems.length - 2, 0, {
-      id: 'argyle-events',
-      label: 'Upcoming Events',
-      icon: CalendarDays,
-      color: 'from-emerald-500 to-teal-500',
-    });
-  }
-
   return (
-    <div className="flex h-screen bg-[#F8F9FA] dark:bg-[#0B1120] font-sans">
-      {/* Enterprise Sidebar */}
-      <aside className={`${sidebarCollapsed ? 'w-20' : 'w-72'} bg-white dark:bg-slate-900/95 border-r border-slate-200/60 dark:border-slate-800 flex flex-col transition-all duration-300 ease-sidebar fixed h-full z-50 shadow-sm`}>
-        {/* Workspace Header */}
-        <div className="h-16 flex items-center px-6 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center justify-between w-full">
-            <div className={`flex items-center gap-3.5 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/20">
-                <Zap className="h-4 w-4 text-white" />
-              </div>
-              {!sidebarCollapsed && (
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <h1 className="font-semibold text-sm tracking-tight text-slate-900 dark:text-white leading-none">Client Portal</h1>
-                    {user.isOwner && (
-                      <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-700 text-[9px] font-semibold px-1.5 py-0.5 rounded-full dark:bg-amber-900/30 dark:text-amber-300">
-                        <Crown className="h-2.5 w-2.5" />
-                        Owner
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 font-medium truncate mt-1">{user.clientAccountName}</p>
-                </div>
-              )}
+    <ClientPortalLayout>
+      <div className="space-y-6">
+          {/* Sub-Navigation for Target Markets */}
+          {activeTab === 'target-markets' && (
+            <div className="mb-6">
+               <Tabs value={targetMarketTab} onValueChange={setTargetMarketTab} className="w-full">
+                  <TabsList>
+                     <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
+                     <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                     <TabsTrigger value="contacts">Contacts</TabsTrigger>
+                  </TabsList>
+               </Tabs>
             </div>
-            {!sidebarCollapsed && (
-              <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(true)} className="h-7 w-7 text-slate-400 hover:text-slate-600 hover:bg-slate-50">
-                <ChevronDown className="h-4 w-4 rotate-90" />
-              </Button>
-            )}
-          </div>
-          {sidebarCollapsed && (
-            <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(false)} className="w-full mt-2 h-8 text-slate-400">
-              <ChevronDown className="h-4 w-4 -rotate-90" />
-            </Button>
           )}
-        </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-6 space-y-0.5 overflow-y-auto">
-          {navItems
-            .filter(item => !item.featureRequired || hasFeature(item.featureRequired))
-            .map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                if (item.action) {
-                  item.action();
-                } else {
-                  setActiveTab(item.id);
-                }
-              }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group relative duration-200 ${
-                activeTab === item.id && !item.action
-                  ? 'bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-medium'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              <div className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${
-                activeTab === item.id && !item.action ? 'bg-white shadow-sm ring-1 ring-black/5 dark:bg-indigo-500/20 dark:ring-white/10' : 'bg-transparent group-hover:bg-white group-hover:shadow-sm group-hover:ring-1 group-hover:ring-black/5 dark:group-hover:bg-slate-800'
-              }`}>
-                <item.icon className={`h-4 w-4 transition-colors ${activeTab === item.id && !item.action ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400'}`} />
-              </div>
-              {!sidebarCollapsed && (
-                <span className="text-sm truncate tracking-tight">{item.label}</span>
-              )}
-              {activeTab === item.id && !item.action && !sidebarCollapsed && (
-                <div className="absolute right-2 h-1.5 w-1.5 rounded-full bg-indigo-600" />
-              )}
-            </button>
-          ))}
-        </nav>
-
-        {/* Owner: Back to Admin Dashboard */}
-        {user.isOwner && (
-          <div className="px-3 pt-3">
-            <a
-              href="/"
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {!sidebarCollapsed && "Admin Dashboard"}
-            </a>
-          </div>
-        )}
-
-        {/* Pinned CTA - Talk to AI Agent */}
-        <div className="p-3 border-t border-slate-200 dark:border-slate-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30">
-          <Button
-            className={`w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all ${
-              sidebarCollapsed ? 'px-0' : 'gap-2'
-            }`}
-            onClick={() => agentPanel?.openPanel()}
-          >
-            <Brain className="h-4 w-4" />
-            {!sidebarCollapsed && (
-              <div className="flex flex-col items-start">
-                <span className="font-semibold">Talk to AI Agent</span>
-                <span className="text-[10px] opacity-80">Get help with your campaigns</span>
-              </div>
-            )}
-          </Button>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col ${sidebarCollapsed ? 'ml-20' : 'ml-64'} transition-all duration-300`}>
-        {/* Top Header Bar */}
-        <header className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 h-16 flex items-center px-6 sticky top-0 z-40">
-          <div className="flex-1 flex items-center gap-4">
-            <h2 className="text-lg font-semibold">{navItems.find(i => i.id === activeTab)?.label}</h2>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full" />
-            </Button>
-            <Separator orientation="vertical" className="h-6" />
-            <div className="flex items-center gap-2">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                  {user.firstName?.[0]}{user.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <p className="text-sm font-medium leading-none">{user.firstName} {user.lastName}</p>
-                <p className="text-xs text-muted-foreground">{user.email}</p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={handleLogout}>
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </header>
-
-        <main className="flex-1 overflow-y-auto p-6">
-        {/* ==================== DASHBOARD TAB ==================== */}
-        {activeTab === 'dashboard' && (
+        {/* ==================== OVERVIEW TAB (Dashboard KPIs) ==================== */}
+        {activeTab === 'overview' && (
           <div className="space-y-8 max-w-7xl mx-auto pb-10">
-            {/* Minimal Welcome Header */}
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-slate-200 dark:border-slate-800">
-              <div className="space-y-1">
-                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
-                  Welcome back, <span className="font-semibold">{user.firstName}</span>
+            {/* Executive Header */}
+            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6 pb-6 border-b border-slate-200/80 dark:border-slate-800">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200">
+                    Executive Overview
+                  </Badge>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Updated {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+                <h2 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
+                  Welcome back, <span className="text-indigo-600 dark:text-indigo-300">{user.firstName}</span>
                 </h2>
-                <p className="text-slate-500 dark:text-slate-400 font-light text-lg">
-                  Here's your campaign performance overview for {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}.
+                <p className="text-slate-500 dark:text-slate-400 text-base">
+                  Performance overview for {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}.
                 </p>
               </div>
               
-              <div className="flex items-center gap-3">
-                 <Button onClick={() => setShowOrderPanel(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm h-10 px-5">
-                    <Plus className="h-4 w-4 mr-2" />
-                    New Order
-                  </Button>
-                  <Button variant="outline" className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white" onClick={() => setShowReportsPanel(true)}>
-                    <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
-                    Insights
-                  </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-lg"
+                  onClick={() => setShowAgenticReports(true)}
+                >
+                  <Brain className="h-4 w-4 mr-2" />
+                  Open AgentX
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-slate-200 hover:bg-slate-50 text-slate-700 h-10 px-5 shadow-sm bg-white"
+                  onClick={() => setShowReportsPanel(true)}
+                >
+                  <BarChart3 className="h-4 w-4 mr-2 text-indigo-500" />
+                  Generate Report
+                </Button>
               </div>
             </div>
 
             {/* Enterprise KPI Tiles - Refreshed */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
               {/* Leads Delivered MTD */}
-              <Card className="group hover:border-emerald-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
+                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-9 w-9 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center">
+                     <div className="h-10 w-10 rounded-xl bg-emerald-100/70 dark:bg-emerald-900/30 text-emerald-600 flex items-center justify-center">
                          <UserCheck className="h-4 w-4" />
                       </div>
                       <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
@@ -1385,10 +1314,10 @@ export default function ClientPortalDashboard() {
               </Card>
 
               {/* Acceptance Rate */}
-              <Card className="group hover:border-blue-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
+                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-9 w-9 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 flex items-center justify-center">
+                     <div className="h-10 w-10 rounded-xl bg-blue-100/70 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center">
                          <Target className="h-4 w-4" />
                       </div>
                       <span className="text-xs font-medium text-slate-500 flex items-center mt-1">
@@ -1410,10 +1339,10 @@ export default function ClientPortalDashboard() {
               </Card>
 
               {/* CPL */}
-              <Card className="group hover:border-purple-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
+                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-9 w-9 rounded-lg bg-purple-50 dark:bg-purple-900/20 text-purple-600 flex items-center justify-center">
+                     <div className="h-10 w-10 rounded-xl bg-purple-100/70 dark:bg-purple-900/30 text-purple-600 flex items-center justify-center">
                          <DollarSign className="h-4 w-4" />
                       </div>
                       <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 flex items-center gap-1">
@@ -1429,10 +1358,10 @@ export default function ClientPortalDashboard() {
               </Card>
 
               {/* Active Campaigns */}
-              <Card className="group hover:border-indigo-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
+                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-9 w-9 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 flex items-center justify-center">
+                     <div className="h-10 w-10 rounded-xl bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-600 flex items-center justify-center">
                          <Package className="h-4 w-4" />
                       </div>
                       <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400">
@@ -1447,10 +1376,10 @@ export default function ClientPortalDashboard() {
               </Card>
 
               {/* Next Invoice */}
-              <Card className="group hover:border-amber-200 transition-all duration-300 shadow-sm border-slate-200/60 hover:shadow-md bg-white dark:bg-slate-800">
+                <Card className="group rounded-2xl border border-slate-200/70 dark:border-slate-800/80 bg-white/90 dark:bg-slate-900/70 shadow-sm hover:shadow-lg transition-all">
                 <CardContent className="p-5">
                    <div className="flex justify-between items-start mb-4">
-                      <div className="h-9 w-9 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center">
+                     <div className="h-10 w-10 rounded-xl bg-amber-100/70 dark:bg-amber-900/30 text-amber-600 flex items-center justify-center">
                          <Calendar className="h-4 w-4" />
                       </div>
                       <span className="text-xs font-medium text-slate-500 mt-1">
@@ -1470,7 +1399,7 @@ export default function ClientPortalDashboard() {
             {/* AI Tools Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
                  {/* Main Chart Area */}
-                 <Card className="lg:col-span-2 shadow-sm border-slate-200/60 bg-white dark:bg-slate-800">
+                 <Card className="lg:col-span-2 rounded-2xl shadow-sm border border-slate-200/70 bg-white/90 dark:bg-slate-900/70">
                     <CardHeader className="pb-2 border-b border-slate-100 dark:border-slate-800">
                         <div className="flex items-center justify-between">
                             <CardTitle className="text-lg font-medium text-slate-800 dark:text-slate-100">Campaign Performance</CardTitle>
@@ -1496,7 +1425,7 @@ export default function ClientPortalDashboard() {
                  </Card>
 
                  {/* AI Actions */}
-                 <Card className="shadow-sm border-slate-200/60 bg-white dark:bg-slate-800 flex flex-col">
+                 <Card className="rounded-2xl shadow-sm border border-slate-200/70 bg-white/90 dark:bg-slate-900/70 flex flex-col">
                     <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
                          <CardTitle className="text-lg font-medium flex items-center gap-2 text-slate-800 dark:text-slate-100">
                              <Sparkles className="h-4 w-4 text-indigo-500" />
@@ -1505,16 +1434,6 @@ export default function ClientPortalDashboard() {
                     </CardHeader>
                     <CardContent className="p-0 flex-1">
                         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                             <button onClick={() => setShowOrderPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
-                                <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                                    <ShoppingCart className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <p className="font-medium text-sm text-slate-900 dark:text-white">New Campaign Order</p>
-                                    <p className="text-xs text-slate-500">Purchase new leads or services</p>
-                                </div>
-                                <ChevronRight className="h-4 w-4 text-slate-300 ml-auto group-hover:text-emerald-500 transition-colors" />
-                            </button>
                              <button onClick={() => setShowReportsPanel(true)} className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left group">
                                 <div className="h-10 w-10 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
                                     <BarChart3 className="h-5 w-5" />
@@ -1544,7 +1463,7 @@ export default function ClientPortalDashboard() {
 
             {/* Recent Activity */}
             <div className="grid lg:grid-cols-2 gap-6">
-              <Card>
+              <Card className="rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm bg-white/90 dark:bg-slate-900/70">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
                     <CardTitle className="text-lg">Recent Orders</CardTitle>
@@ -1559,9 +1478,6 @@ export default function ClientPortalDashboard() {
                     <div className="text-center py-8 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
                       <p>No orders yet</p>
-                      <Button variant="link" onClick={() => setShowOrderPanel(true)}>
-                        Submit your first campaign request
-                      </Button>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1589,7 +1505,7 @@ export default function ClientPortalDashboard() {
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="rounded-2xl border border-slate-200/70 dark:border-slate-800/80 shadow-sm bg-white/90 dark:bg-slate-900/70">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
                     <CardTitle className="text-lg">Your Campaigns</CardTitle>
@@ -1652,7 +1568,7 @@ export default function ClientPortalDashboard() {
                   <Badge variant="secondary" className="ml-2">{activityData?.activities?.length}</Badge>
                 )}
               </h3>
-              <Card className="border-indigo-200 dark:border-indigo-800 bg-indigo-50/30 dark:bg-indigo-950/20">
+              <Card className="rounded-2xl border border-indigo-200/70 dark:border-indigo-800/80 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-sm">
                 <CardContent className="p-6">
                   {activityLoading ? (
                     <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
@@ -1667,6 +1583,50 @@ export default function ClientPortalDashboard() {
                   )}
                 </CardContent>
               </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== VERTEX AI / AGENT X TAB ==================== */}
+        {activeTab === 'agent-x' && (
+          <div className="space-y-6 h-full flex flex-col">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
+                <Sparkles className="h-8 w-8 text-violet-600" />
+                AgentX
+              </h1>
+              <p className="text-lg text-muted-foreground font-light">
+                Autonomous Agents & Workflow Automation
+              </p>
+            </div>
+            
+            <div className="flex-1 flex items-center justify-center min-h-[400px] border rounded-lg border-dashed">
+               <div className="text-center">
+                  <Sparkles className="h-10 w-10 text-violet-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium">AgentX Console</h3>
+                  <p className="text-muted-foreground max-w-sm mt-2">
+                    Autonomous agent controls and workflow automation tools will appear here.
+                  </p>
+               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== INTELLIGENCE TAB ==================== */}
+        {activeTab === 'intelligence' && (
+          <div className="space-y-6 h-full flex flex-col">
+            <div className="flex flex-col gap-2">
+              <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
+                <Brain className="h-8 w-8 text-fuchsia-600" />
+                Organization Intelligence
+              </h1>
+              <p className="text-lg text-muted-foreground font-light">
+                Deep organization analysis, ICP definition, and market positioning
+              </p>
+            </div>
+            
+            <div className="flex-1 min-h-0 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-1">
+               <AccountIntelligenceView organizationId={user.clientAccountId} />
             </div>
           </div>
         )}
@@ -1691,42 +1651,9 @@ export default function ClientPortalDashboard() {
                   <Play className="h-4 w-4" />
                   Preview Studio
                 </Button>
-                <Button
-                  onClick={() => setShowOrderPanel(true)}
-                  className="gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 w-full sm:w-auto"
-                >
-                  <Bot className="h-4 w-4" />
-                  New Campaign Request
-                </Button>
               </div>
             </div>
 
-            {/* Agentic Campaign Order Banner */}
-            <Card className="border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/20 dark:to-purple-950/20 dark:border-violet-800">
-              <CardContent className="p-4 md:p-6">
-                <div className="flex flex-col sm:flex-row items-start gap-4">
-                  <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg">
-                    <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                  </div>
-                  <div className="flex-1 space-y-3 w-full">
-                    <div>
-                      <h4 className="font-semibold text-lg text-violet-800 dark:text-violet-300">Submit a Campaign Request</h4>
-                      <p className="text-sm text-violet-700 dark:text-violet-400 mt-1 leading-relaxed">
-                        Describe your campaign goals, target audience, budget, and timeline - our AI agent will capture all the details. The DemandGentic team will configure and launch your campaign with our best-in-class AI voice agents.
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-md hover:shadow-lg transition-all"
-                      onClick={() => setShowOrderPanel(true)}
-                    >
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Submit Campaign Request
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
 
             {/* Campaign Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1909,12 +1836,6 @@ export default function ClientPortalDashboard() {
                        <p className="text-muted-foreground text-center mb-4 max-w-md">
                          {campaigns.length === 0 ? 'Submit a campaign request and our team will configure and launch your AI-powered outreach.' : 'No campaigns match your current filters.'}
                        </p>
-                       {campaigns.length === 0 && (
-                         <Button onClick={() => setShowOrderPanel(true)} className="bg-gradient-to-r from-violet-600 to-purple-600">
-                           <Bot className="h-4 w-4 mr-2" />
-                           Submit Your First Request
-                         </Button>
-                       )}
                     </CardContent>
                  </Card>
               ) : (
@@ -1961,7 +1882,7 @@ export default function ClientPortalDashboard() {
         )}
 
         {/* ==================== REPORTS TAB ==================== */}
-        {activeTab === 'reports' && (
+        {(activeTab === 'reports' || activeTab === 'analytics-reports') && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -2109,7 +2030,7 @@ export default function ClientPortalDashboard() {
         {/* ==================== ARGYLE EVENTS TAB ==================== */}
         {activeTab === 'argyle-events' && argyleFeatureStatus?.enabled && (
           <div className="space-y-6">
-            <ArgyleEventsContent />
+            <ArgyleEventsContent organizationId={user.clientAccountId} />
           </div>
         )}
 
@@ -2172,6 +2093,30 @@ export default function ClientPortalDashboard() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Your Pricing - Quick View */}
+            {dashboardPricingData?.hasCustomPricing && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Tag className="h-5 w-5" />
+                    Your Pricing
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {Object.entries(dashboardPricingData.pricing)
+                      .filter(([, config]) => config.isEnabled)
+                      .map(([type, config]) => (
+                        <div key={type} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                          <span className="text-sm font-medium truncate mr-2">{config.label}</span>
+                          <span className="text-sm font-bold text-primary whitespace-nowrap">{formatCurrency(config.pricePerLead)}</span>
+                        </div>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Invoices Table */}
             <Card>
@@ -2261,8 +2206,8 @@ export default function ClientPortalDashboard() {
                   <h3 className="font-semibold mb-2">Email Support</h3>
                   <p className="text-sm text-muted-foreground mb-4">Get help via email. We typically respond within 2-4 hours.</p>
                   <Button variant="outline" className="w-full" asChild>
-                    <a href="mailto:support@pivotal-b2b.com">
-                      support@pivotal-b2b.com
+                    <a href="mailto:support@demandgentic.ai">
+                      support@demandgentic.ai
                     </a>
                   </Button>
                 </CardContent>
@@ -2315,7 +2260,7 @@ export default function ClientPortalDashboard() {
                       <p className="text-sm text-muted-foreground">CEO</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
-                          <a href="mailto:zahid.m@pivotal-b2b.com">
+                          <a href="mailto:zahid.m@demandgentic.ai">
                             <Mail className="h-4 w-4" />
                           </a>
                         </Button>
@@ -2337,7 +2282,7 @@ export default function ClientPortalDashboard() {
                       <p className="text-sm text-muted-foreground">Client Success Director</p>
                       <div className="flex gap-2 mt-2">
                         <Button variant="ghost" size="sm" asChild>
-                          <a href="mailto:tabasum.hamdard@pivotal-b2b.com">
+                          <a href="mailto:tabasum.hamdard@demandgentic.ai">
                             <Mail className="h-4 w-4" />
                           </a>
                         </Button>
@@ -2984,7 +2929,20 @@ export default function ClientPortalDashboard() {
               </div>
             </div>
 
-            <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
+            {clientOrgData?.organization && (
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm font-medium text-muted-foreground">Organization:</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
+                  <span className="font-medium">{clientOrgData.organization.name}</span>
+                  {clientOrgData.organization.domain && (
+                    <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
+                  )}
+                </div>
+              </div>
+            )}
 
             <Tabs defaultValue="organization-profile" className="space-y-6">
               <TabsList className="grid w-full grid-cols-6 lg:w-auto">
@@ -3346,10 +3304,23 @@ export default function ClientPortalDashboard() {
                 </Card>
               </TabsContent>
 
-              {/* Organization Intelligence Tab - Uses the same components as the main app */}
+              {/* Organization Intelligence Tab - Shows only client's linked org */}
               <TabsContent value="organization-intelligence" className="mt-4">
                 <div className="space-y-6">
-                  <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
+                  {clientOrgData?.organization && (
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="h-5 w-5 text-muted-foreground" />
+                        <span className="text-sm font-medium text-muted-foreground">Organization:</span>
+                      </div>
+                      <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
+                        <span className="font-medium">{clientOrgData.organization.name}</span>
+                        {clientOrgData.organization.domain && (
+                          <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <Tabs defaultValue="organization-profile" className="space-y-6">
                     <TabsList className="grid w-full grid-cols-6 lg:w-auto">
@@ -3358,7 +3329,6 @@ export default function ClientPortalDashboard() {
                       <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
                       <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
                       <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
-                      <TabsTrigger value="prompt-optimization">Prompt & Training</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="organization-profile" className="space-y-4">
@@ -3461,10 +3431,6 @@ export default function ClientPortalDashboard() {
             </Tabs>
           </div>
         )}
-      </main>
-      </div>
-      {/* End Main Content Area */}
-
       {/* ==================== DIALOGS ==================== */}
 
       {/* Add Contact Dialog */}
@@ -4519,16 +4485,6 @@ export default function ClientPortalDashboard() {
         onOpenChange={setShowReportsPanel}
       />
 
-      {/* Campaign Order Panel */}
-      <AgenticCampaignOrderPanel
-        open={showOrderPanel}
-        onOpenChange={setShowOrderPanel}
-        onOrderCreated={() => {
-          // Optionally refresh data after order creation
-          queryClient.invalidateQueries({ queryKey: ['client-campaigns'] });
-        }}
-      />
-
       {/* Email Template Builder - Same structure as main email campaigns */}
       <ClientEmailTemplateBuilder
         open={showEmailGenerator}
@@ -4722,6 +4678,7 @@ export default function ClientPortalDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </ClientPortalLayout>
   );
 }

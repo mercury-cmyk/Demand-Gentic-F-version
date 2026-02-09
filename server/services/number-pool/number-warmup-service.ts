@@ -5,11 +5,11 @@
  * New numbers start with reduced call limits that increase daily over 14 days.
  *
  * Warmup Phases (aggressive ramp-up to 500 calls/day max):
- * - Day 1:  10 calls/hour,  50 calls/day (10%)
- * - Day 2:  15 calls/hour,  75 calls/day (15%)
- * - Day 3:  20 calls/hour, 100 calls/day (20%)
- * - Day 4:  30 calls/hour, 150 calls/day (30%)
- * - Day 5:  40 calls/hour, 200 calls/day (40%)
+ * - Day 1:  20 calls/hour, 100 calls/day (20%)
+ * - Day 2:  25 calls/hour, 125 calls/day (25%)
+ * - Day 3:  30 calls/hour, 150 calls/day (30%)
+ * - Day 4:  40 calls/hour, 200 calls/day (40%)
+ * - Day 5:  50 calls/hour, 250 calls/day (50%)
  * - Day 6:  50 calls/hour, 250 calls/day (50%)
  * - Day 7:  60 calls/hour, 300 calls/day (60%)
  * - Day 8:  70 calls/hour, 350 calls/day (70%)
@@ -55,12 +55,12 @@ export interface NumberWarmupStatus {
  * Day 14+: Fully warmed up — reputation-based bonus kicks in
  */
 const WARMUP_SCHEDULE: WarmupPhase[] = [
-  { day: 1,  maxCallsPerHour: 10,  maxCallsPerDay: 50,   percentOfMax: 10 },
-  { day: 2,  maxCallsPerHour: 15,  maxCallsPerDay: 75,   percentOfMax: 15 },
-  { day: 3,  maxCallsPerHour: 20,  maxCallsPerDay: 100,  percentOfMax: 20 },
-  { day: 4,  maxCallsPerHour: 30,  maxCallsPerDay: 150,  percentOfMax: 30 },
-  { day: 5,  maxCallsPerHour: 40,  maxCallsPerDay: 200,  percentOfMax: 40 },
-  { day: 6,  maxCallsPerHour: 50,  maxCallsPerDay: 250,  percentOfMax: 50 },
+  { day: 1,  maxCallsPerHour: 20,  maxCallsPerDay: 100,  percentOfMax: 20 },
+  { day: 2,  maxCallsPerHour: 25,  maxCallsPerDay: 125,  percentOfMax: 25 },
+  { day: 3,  maxCallsPerHour: 30,  maxCallsPerDay: 150,  percentOfMax: 30 },
+  { day: 4,  maxCallsPerHour: 40,  maxCallsPerDay: 200,  percentOfMax: 40 },
+  { day: 5,  maxCallsPerHour: 50,  maxCallsPerDay: 250,  percentOfMax: 50 },
+  { day: 6,  maxCallsPerHour: 60,  maxCallsPerDay: 300,  percentOfMax: 60 },
   { day: 7,  maxCallsPerHour: 60,  maxCallsPerDay: 300,  percentOfMax: 60 },
   { day: 8,  maxCallsPerHour: 70,  maxCallsPerDay: 350,  percentOfMax: 70 },
   { day: 9,  maxCallsPerHour: 80,  maxCallsPerDay: 400,  percentOfMax: 80 },

@@ -74,7 +74,11 @@ const router = Router();
  */
 router.get("/organizations", requireAuth, async (req: Request, res: Response) => {
   try {
-    const organizations = await getOrganizations();
+    // If admin, show all. If client, show only their organizations.
+    const isAdmin = req.user?.roles?.includes("admin") || req.user?.role === "admin";
+    const userId = isAdmin ? undefined : req.user?.userId;
+    
+    const organizations = await getOrganizations(userId);
     res.json({ organizations });
   } catch (error) {
     console.error("[Organizations] Error listing organizations:", error);
@@ -88,7 +92,10 @@ router.get("/organizations", requireAuth, async (req: Request, res: Response) =>
  */
 router.get("/organizations/dropdown", requireAuth, async (req: Request, res: Response) => {
   try {
-    const organizations = await getOrganizationsForDropdown();
+    const isAdmin = req.user?.roles?.includes("admin") || req.user?.role === "admin";
+    const userId = isAdmin ? undefined : req.user?.userId;
+
+    const organizations = await getOrganizationsForDropdown(userId);
     res.json({ organizations });
   } catch (error) {
     console.error("[Organizations] Error getting dropdown list:", error);

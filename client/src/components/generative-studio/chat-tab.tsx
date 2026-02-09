@@ -35,9 +35,10 @@ import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 
 interface ChatTabProps {
   orgIntelligence?: OrgIntelligenceProfile | null;
+  organizationId?: string;
 }
 
-export default function ChatTab({ orgIntelligence }: ChatTabProps) {
+export default function ChatTab({ orgIntelligence, organizationId }: ChatTabProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -45,16 +46,22 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isDisabled = !organizationId;
 
   // Fetch sessions
   const { data: sessionsData } = useQuery<{ sessions: Session[] }>({
-    queryKey: ["/api/generative-studio/chat/sessions"],
+    queryKey: [
+      `/api/generative-studio/chat/sessions?organizationId=${organizationId || ""}`,
+    ],
+    enabled: !!organizationId,
   });
 
   // Fetch session messages
   const { data: messagesData } = useQuery<{ messages: Message[] }>({
-    queryKey: ["/api/generative-studio/chat/sessions", sessionId],
-    enabled: !!sessionId,
+    queryKey: [
+      `/api/generative-studio/chat/sessions/${sessionId}?organizationId=${organizationId || ""}`,
+    ],
+    enabled: !!sessionId && !!organizationId,
   });
 
   useEffect(() => {
@@ -64,11 +71,17 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
   }, [messagesData]);
 
   useEffect(() => {
+    setSessionId(null);
+    setLocalMessages([]);
+    setSuggestions([]);
+  }, [organizationId]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [localMessages]);
 
   const chatMutation = useMutation({
-    mutationFn: async (data: { sessionId?: string; message: string }) => {
+    mutationFn: async (data: { sessionId?: string; message: string; organizationId?: string }) => {
       const res = await apiRequest("POST", "/api/generative-studio/chat", data);
       return await res.json();
     },
@@ -87,7 +100,11 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
         },
       ]);
       setSuggestions(data.suggestions || []);
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/chat/sessions"] });
+      queryClient.invalidateQueries({
+        queryKey: [
+          `/api/generative-studio/chat/sessions?organizationId=${organizationId || ""}`,
+        ],
+      });
     },
     onError: (error: any) => {
       toast({ title: "Chat error", description: error.message, variant: "destructive" });
@@ -96,10 +113,17 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
 
   const deleteSessionMutation = useMutation({
     mutationFn: async (sid: string) => {
-      await apiRequest("DELETE", `/api/generative-studio/chat/sessions/${sid}`);
+      await apiRequest(
+        "DELETE",
+        `/api/generative-studio/chat/sessions/${sid}?organizationId=${organizationId || ""}`
+      );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/generative-studio/chat/sessions"] });
+      queryClient.invalidateQueries({
+        queryKey: [
+          `/api/generative-studio/chat/sessions?organizationId=${organizationId || ""}`,
+        ],
+      });
       if (sessionId) {
         setSessionId(null);
         setLocalMessages([]);
@@ -109,7 +133,7 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
   });
 
   const handleSend = () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isDisabled) return;
 
     // Add user message to local state immediately
     setLocalMessages((prev) => [
@@ -125,6 +149,7 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
     chatMutation.mutate({
       sessionId: sessionId || undefined,
       message: input,
+      organizationId,
     });
 
     setInput("");
@@ -148,6 +173,7 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
             variant="outline"
             className="w-full justify-start gap-2"
             onClick={handleNewSession}
+            disabled={isDisabled}
           >
             <Plus className="w-4 h-4" />
             New Conversation
@@ -210,6 +236,11 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
                   Ask me about content ideas, copywriting tips, SEO strategies, or help refining your
                   generated content. I can help you brainstorm and plan your content marketing.
                 </p>
+                {isDisabled && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                    Select an organization to start a conversation.
+                  </p>
+                )}
                 {orgIntelligence?.identity?.legalName?.value && (
                   <p className="text-xs text-emerald-600 mt-1">
                     Powered by Organization Intelligence for {orgIntelligence.identity.legalName.value}
@@ -311,10 +342,11 @@ export default function ChatTab({ orgIntelligence }: ChatTabProps) {
               }}
               rows={2}
               className="resize-none"
+                disabled={isDisabled}
             />
             <Button
               onClick={handleSend}
-              disabled={!input.trim() || chatMutation.isPending}
+              disabled={!input.trim() || chatMutation.isPending || isDisabled}
               className="px-3"
             >
               {chatMutation.isPending ? (

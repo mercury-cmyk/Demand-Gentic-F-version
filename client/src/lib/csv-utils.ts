@@ -556,6 +556,11 @@ export function exportAccountsToCSV(
 
 // Parse CSV content according to RFC4180
 export function parseCSV(content: string): string[][] {
+  // Strip BOM if present
+  if (content.charCodeAt(0) === 0xFEFF) {
+    content = content.slice(1);
+  }
+
   const result: string[][] = [];
   let row: string[] = [];
   let current = "";

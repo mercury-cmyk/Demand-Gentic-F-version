@@ -231,10 +231,10 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden">
-        <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+      <DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden bg-slate-950 text-slate-50 border-slate-800">
+        <DialogHeader className="px-6 py-4 border-b bg-slate-900 border-slate-800 text-white">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/20 rounded-lg">
+            <div className="p-2 bg-slate-800 rounded-lg">
               <BarChart3 className="h-6 w-6" />
             </div>
             <div>
@@ -273,48 +273,48 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                 <div className="space-y-6">
                   {/* Summary Cards */}
                   <div className="grid grid-cols-4 gap-4">
-                    <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardContent className="pt-4">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-blue-600 font-medium">Total Campaigns</p>
-                            <p className="text-3xl font-bold text-blue-700">{statsData.summary.totalCampaigns}</p>
+                            <p className="text-sm text-slate-400 font-medium">Total Campaigns</p>
+                            <p className="text-3xl font-bold text-slate-200">{statsData.summary.totalCampaigns}</p>
                           </div>
                           <Target className="h-8 w-8 text-blue-500" />
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardContent className="pt-4">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-green-600 font-medium">Approved Leads</p>
-                            <p className="text-3xl font-bold text-green-700">{statsData.summary.totalApprovedLeads}</p>
+                            <p className="text-sm text-green-400 font-medium">Approved Leads</p>
+                            <p className="text-3xl font-bold text-slate-200">{statsData.summary.totalApprovedLeads}</p>
                           </div>
                           <CheckCircle className="h-8 w-8 text-green-500" />
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="bg-gradient-to-br from-amber-50 to-amber-100 border-amber-200">
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardContent className="pt-4">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-amber-600 font-medium">Pending Review</p>
-                            <p className="text-3xl font-bold text-amber-700">{statsData.summary.totalPendingLeads}</p>
+                            <p className="text-sm text-amber-400 font-medium">Pending Review</p>
+                            <p className="text-3xl font-bold text-slate-200">{statsData.summary.totalPendingLeads}</p>
                           </div>
                           <Clock className="h-8 w-8 text-amber-500" />
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardContent className="pt-4">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-purple-600 font-medium">Unique Accounts</p>
-                            <p className="text-3xl font-bold text-purple-700">{statsData.summary.totalUniqueAccounts}</p>
+                            <p className="text-sm text-purple-400 font-medium">Unique Accounts</p>
+                            <p className="text-3xl font-bold text-slate-200">{statsData.summary.totalUniqueAccounts}</p>
                           </div>
                           <Building2 className="h-8 w-8 text-purple-500" />
                         </div>
@@ -325,9 +325,9 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   {/* Charts Row */}
                   <div className="grid grid-cols-2 gap-6">
                     {/* Lead Status Pie Chart */}
-                    <Card>
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-lg">Lead Status Distribution</CardTitle>
+                        <CardTitle className="text-lg text-slate-100">Lead Status Distribution</CardTitle>
                       </CardHeader>
                       <CardContent>
                         {leadStatusData.length > 0 ? (
@@ -346,7 +346,7 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                                   <Cell key={`cell-${index}`} fill={entry.color} />
                                 ))}
                               </Pie>
-                              <Tooltip />
+                              <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
                             </PieChart>
                           </ResponsiveContainer>
                         ) : (
@@ -358,18 +358,18 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                     </Card>
 
                     {/* Campaign Performance Bar Chart */}
-                    <Card>
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-lg">Campaign Performance</CardTitle>
+                        <CardTitle className="text-lg text-slate-100">Campaign Performance</CardTitle>
                       </CardHeader>
                       <CardContent>
                         {campaignPerformanceData.length > 0 ? (
                           <ResponsiveContainer width="100%" height={200}>
                             <BarChart data={campaignPerformanceData}>
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="name" fontSize={12} />
-                              <YAxis />
-                              <Tooltip />
+                              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                              <XAxis dataKey="name" fontSize={12} stroke="#94a3b8" />
+                              <YAxis stroke="#94a3b8" />
+                              <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
                               <Bar dataKey="approved" name="Approved" fill="#10b981" />
                               <Bar dataKey="pending" name="Pending" fill="#f59e0b" />
                             </BarChart>
@@ -384,10 +384,10 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   </div>
 
                   {/* Campaign Details Table */}
-                  <Card>
+                  <Card className="bg-slate-900 border-slate-800">
                     <CardHeader className="flex flex-row items-center justify-between">
-                      <CardTitle className="text-lg">Campaign Details</CardTitle>
-                      <Button variant="outline" size="sm" onClick={() => refetchStats()}>
+                      <CardTitle className="text-lg text-slate-100">Campaign Details</CardTitle>
+                      <Button variant="outline" size="sm" onClick={() => refetchStats()} className="border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white">
                         <RefreshCw className="h-4 w-4 mr-2" />
                         Refresh
                       </Button>
@@ -395,13 +395,13 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                     <CardContent>
                       <div className="space-y-3">
                         {statsData.regularCampaigns.map((campaign) => (
-                          <div key={campaign.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div key={campaign.id} className="flex items-center justify-between p-3 bg-slate-800 border border-slate-700 rounded-lg">
                             <div className="flex items-center gap-3">
-                              <Target className="h-5 w-5 text-blue-500" />
+                              <Target className="h-5 w-5 text-blue-400" />
                               <div>
-                                <p className="font-medium">{campaign.name}</p>
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                  <Badge variant="outline">{campaign.status}</Badge>
+                                <p className="font-medium text-slate-200">{campaign.name}</p>
+                                <div className="flex items-center gap-2 text-sm text-slate-400">
+                                  <Badge variant="outline" className="text-slate-300 border-slate-600">{campaign.status}</Badge>
                                   <span>•</span>
                                   <span>{campaign.accounts || 0} accounts</span>
                                 </div>
@@ -409,16 +409,16 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                             </div>
                             <div className="flex items-center gap-4 text-sm">
                               <div className="text-center">
-                                <p className="text-green-600 font-semibold">{campaign.leads?.approved || 0}</p>
-                                <p className="text-xs text-muted-foreground">Approved</p>
+                                <p className="text-green-400 font-semibold">{campaign.leads?.approved || 0}</p>
+                                <p className="text-xs text-slate-400">Approved</p>
                               </div>
                               <div className="text-center">
-                                <p className="text-amber-600 font-semibold">{campaign.leads?.pending || 0}</p>
-                                <p className="text-xs text-muted-foreground">Pending</p>
+                                <p className="text-amber-400 font-semibold">{campaign.leads?.pending || 0}</p>
+                                <p className="text-xs text-slate-400">Pending</p>
                               </div>
                               <div className="text-center">
-                                <p className="text-muted-foreground font-semibold">{campaign.leads?.total || 0}</p>
-                                <p className="text-xs text-muted-foreground">Total</p>
+                                <p className="text-slate-400 font-semibold">{campaign.leads?.total || 0}</p>
+                                <p className="text-xs text-slate-500">Total</p>
                               </div>
                             </div>
                           </div>
@@ -481,14 +481,14 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                             <Bot className="h-4 w-4 text-white" />
                           </div>
                           <div className="flex-1">
-                            <Card className="bg-slate-50">
+                            <Card className="bg-slate-900 border-slate-800 text-slate-200">
                               <CardContent className="pt-4">
                                 <p className="text-sm">{item.response.answer}</p>
                                 
                                 {item.response.relevantMetrics.length > 0 && (
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     {item.response.relevantMetrics.map((m, j) => (
-                                      <Badge key={j} variant="secondary">
+                                      <Badge key={j} variant="secondary" className="bg-slate-800 text-slate-300">
                                         {m.name}: {m.value}
                                       </Badge>
                                     ))}
@@ -497,10 +497,10 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
 
                                 {item.response.suggestions.length > 0 && (
                                   <div className="mt-3">
-                                    <p className="text-xs text-muted-foreground mb-1">Suggestions:</p>
+                                    <p className="text-xs text-slate-400 mb-1">Suggestions:</p>
                                     <ul className="text-xs space-y-1">
                                       {item.response.suggestions.map((s, j) => (
-                                        <li key={j} className="flex items-start gap-1">
+                                        <li key={j} className="flex items-start gap-1 text-slate-300">
                                           <Lightbulb className="h-3 w-3 text-amber-500 mt-0.5" />
                                           {s}
                                         </li>
@@ -588,33 +588,33 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   </div>
 
                   {/* Executive Summary */}
-                  <Card>
+                  <Card className="bg-slate-900 border-slate-800">
                     <CardHeader>
-                      <CardTitle className="text-base flex items-center gap-2">
+                      <CardTitle className="text-base flex items-center gap-2 text-slate-100">
                         <Sparkles className="h-4 w-4 text-amber-500" />
                         Executive Summary
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-sm">{generatedReport.executiveSummary}</p>
+                      <p className="text-sm text-slate-300">{generatedReport.executiveSummary}</p>
                     </CardContent>
                   </Card>
 
                   {/* Highlights */}
                   {generatedReport.highlights?.length > 0 && (
-                    <Card>
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-base">Key Highlights</CardTitle>
+                        <CardTitle className="text-base text-slate-100">Key Highlights</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-2 gap-4">
                           {generatedReport.highlights.map((h: ReportHighlight, i: number) => (
-                            <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
+                            <div key={i} className="flex items-start gap-3 p-3 bg-slate-800 rounded-lg">
                               {getTrendIcon(h.trend)}
                               <div>
-                                <p className="font-medium text-sm">{h.metric}</p>
-                                <p className="text-lg font-bold">{h.value}</p>
-                                <p className="text-xs text-muted-foreground">{h.insight}</p>
+                                <p className="font-medium text-sm text-slate-300">{h.metric}</p>
+                                <p className="text-lg font-bold text-slate-100">{h.value}</p>
+                                <p className="text-xs text-slate-400">{h.insight}</p>
                               </div>
                             </div>
                           ))}
@@ -625,23 +625,23 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
 
                   {/* Campaign Analysis */}
                   {generatedReport.campaignAnalysis?.length > 0 && (
-                    <Card>
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-base">Campaign Analysis</CardTitle>
+                        <CardTitle className="text-base text-slate-100">Campaign Analysis</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-4">
                           {generatedReport.campaignAnalysis.map((c: any, i: number) => (
                             <div key={i} className="border-l-4 border-blue-500 pl-4">
                               <div className="flex items-center gap-2 mb-1">
-                                <h4 className="font-medium">{c.campaignName}</h4>
+                                <h4 className="font-medium text-slate-200">{c.campaignName}</h4>
                                 {getPerformanceBadge(c.performance)}
                               </div>
-                              <p className="text-sm text-muted-foreground mb-2">{c.summary}</p>
+                              <p className="text-sm text-slate-400 mb-2">{c.summary}</p>
                               {c.recommendations?.length > 0 && (
                                 <ul className="text-xs space-y-1">
                                   {c.recommendations.map((r: string, j: number) => (
-                                    <li key={j} className="flex items-start gap-1 text-blue-600">
+                                    <li key={j} className="flex items-start gap-1 text-blue-400">
                                       <ChevronRight className="h-3 w-3 mt-0.5" />
                                       {r}
                                     </li>
@@ -657,9 +657,9 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
 
                   {/* Recommendations */}
                   {generatedReport.recommendations?.length > 0 && (
-                    <Card>
+                    <Card className="bg-slate-900 border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-base flex items-center gap-2">
+                        <CardTitle className="text-base flex items-center gap-2 text-slate-100">
                           <Lightbulb className="h-4 w-4 text-amber-500" />
                           Recommendations
                         </CardTitle>
@@ -667,8 +667,8 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                       <CardContent>
                         <ul className="space-y-2">
                           {generatedReport.recommendations.map((r: string, i: number) => (
-                            <li key={i} className="flex items-start gap-2 text-sm">
-                              <div className="h-5 w-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 text-xs font-medium">
+                            <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                              <div className="h-5 w-5 rounded-full bg-blue-900 text-blue-300 flex items-center justify-center flex-shrink-0 text-xs font-medium">
                                 {i + 1}
                               </div>
                               {r}
@@ -699,13 +699,13 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
 
               <Separator className="my-6" />
 
-              <Card>
+              <Card className="bg-slate-900 border-slate-800">
                 <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
+                  <CardTitle className="text-base flex items-center gap-2 text-slate-100">
                     <FileText className="h-4 w-4 text-blue-500" />
                     Approved Reports
                   </CardTitle>
-                  <CardDescription>Only QA-approved reports are listed here.</CardDescription>
+                  <CardDescription className="text-slate-400">Only QA-approved reports are listed here.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {approvedReportsLoading ? (
@@ -716,17 +716,17 @@ export function AgenticReportsPanel({ open, onOpenChange }: AgenticReportsPanelP
                   ) : approvedReports && approvedReports.length > 0 ? (
                     <div className="space-y-3">
                       {approvedReports.map((report) => (
-                        <div key={report.id} className="flex items-center justify-between border rounded-lg p-3">
+                        <div key={report.id} className="flex items-center justify-between border border-slate-700 rounded-lg p-3 bg-slate-800">
                           <div>
-                            <p className="font-medium">{report.reportName}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="font-medium text-slate-200">{report.reportName}</p>
+                            <p className="text-xs text-slate-400">
                               {report.reportType} • {new Date(report.createdAt).toLocaleDateString()}
                             </p>
                             {report.reportSummary && (
-                              <p className="text-xs text-muted-foreground mt-1">{report.reportSummary}</p>
+                              <p className="text-xs text-slate-400 mt-1">{report.reportSummary}</p>
                             )}
                           </div>
-                          <Button variant="outline" size="sm" disabled={!report.fileUrl}>
+                          <Button variant="outline" size="sm" disabled={!report.fileUrl} className="border-slate-600">
                             <Download className="h-4 w-4 mr-2" />
                             {report.fileUrl ? "Download" : "No File"}
                           </Button>

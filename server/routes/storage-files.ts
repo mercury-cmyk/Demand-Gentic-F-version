@@ -5,6 +5,8 @@
 
 import express from 'express';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
+import { verifyToken } from '../auth';
 import { 
   getPresignedUploadUrl, 
   getPresignedDownloadUrl, 
@@ -13,6 +15,7 @@ import {
 } from '../lib/storage';
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
 
 /**
  * Approved folder prefixes
@@ -70,8 +73,38 @@ router.post('/api/s3/upload-url', async (req, res) => {
 
     const { filename, contentType, folder } = uploadUrlSchema.parse(req.body);
 
+    // Authentication Check (Dual Auth)
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+       return res.status(401).json({ error: 'Authentication required' });
+    }
+    const token = authHeader.substring(7);
+    let userContext: any = null;
+
+    // Try main auth
+    const mainPayload = verifyToken(token);
+    if(mainPayload) userContext = { ...mainPayload, type: 'internal' };
+
+    // Try client auth
+    if(!userContext) {
+       try {
+         const decoded = jwt.verify(token, JWT_SECRET) as any;
+         if(decoded.isClient) userContext = { ...decoded, type: 'client' };
+       } catch(e) {}
+    }
+
+    if(!userContext) return res.status(401).json({ error: 'Invalid token' });
+
+    // Apply strict isolation for Client Portal users
+    let storageFolder = folder as string;
+    if (userContext.type === 'client' && folder.startsWith('campaign-orders')) {
+        // Enforce account isolation: campaign-orders/{clientAccountId}/{suffix}
+        const pathSuffix = folder.replace('campaign-orders', ''); 
+        storageFolder = `campaign-orders/${userContext.clientAccountId}${pathSuffix}`;
+    }
+
     // Generate storage key with folder structure and timestamp
-    const key = generateStorageKey(folder, filename);
+    const key = generateStorageKey(storageFolder, filename);
     console.log(`[S3:${correlationId}] Generated key: "${key}"`);
 
     // Generate presigned URL (15 minute expiry)
