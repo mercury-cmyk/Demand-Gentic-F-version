@@ -37,9 +37,7 @@ import {
   AlertCircle,
   Loader2,
   Tag,
-  Sparkles,
 } from 'lucide-react';
-import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { WorkOrderForm } from '@/components/client-portal/work-orders/work-order-form';
 import { useDirectAgenticOrderModal } from '@/hooks/use-direct-agentic-order-modal';
@@ -326,22 +324,6 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
   return (
     <>
       <div className="space-y-6">
-        {/* Unified AgentX Component */}
-        <Card className="border-indigo-100 dark:border-indigo-900 bg-indigo-50/30 dark:bg-indigo-950/10">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg font-medium flex items-center gap-2 text-indigo-700 dark:text-indigo-400">
-              <Sparkles className="h-5 w-5" />
-              AgentX Intelligence
-            </CardTitle>
-            <CardDescription>
-              AI-powered insights and recommendations for your event strategy.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-             <AccountIntelligenceView organizationId={organizationId} />
-          </CardContent>
-        </Card>
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
