@@ -44,6 +44,7 @@ import {
   FileText,
   HelpCircle,
   Phone,
+  Bot,
   BotMessageSquare,
   PhoneCall,
   ClipboardList,
@@ -96,7 +97,7 @@ const agenticOperator = {
   name: 'AgentX',
   href: '#', // Changed from navigation to action
   icon: BotMessageSquare,
-  badge: 'AI',
+  badge: 'COMING SOON',
   description: 'Unified agentic operations panel',
 };
 
@@ -122,7 +123,8 @@ const baseNavigationGroups: NavGroup[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     items: [
-      { name: 'Account Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
+      { name: 'Agent Catalog', href: '/client-portal/agents', icon: Bot },
+      { name: 'Organization Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
       { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
@@ -258,6 +260,15 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   // Build navigation dynamically based on feature availability
   const navigationGroups = React.useMemo(() => {
     const groups = baseNavigationGroups.map(group => ({ ...group, items: [...group.items] }));
+
+    // Rename AI & Intelligence group to [Client Name] AI Studio
+    const aiGroup = groups.find(g => g.id === 'ai-intelligence');
+    if (aiGroup) {
+      const clientName = user?.clientAccountName || 'Client';
+      // Truncate if too long to prevent layout breaking
+      const displayName = clientName.length > 15 ? clientName.substring(0, 15) + '...' : clientName;
+      aiGroup.label = `${displayName} AI Studio`;
+    }
 
     // Add conditional items to Campaigns group
     const campaignsGroup = groups.find(g => g.id === 'campaigns');
@@ -427,10 +438,15 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                   <agenticOperator.icon className="h-5 w-5" />
                 </div>
                 <div className="flex-1 text-left">
-                  <span className="block">{agenticOperator.name}</span>
+                  <span className="block flex items-center gap-2">
+                    {agenticOperator.name}
+                    <Badge className="h-4 px-1 text-[9px] bg-red-500 hover:bg-red-600 text-white border-0 shadow-sm animate-pulse">
+                      HOT
+                    </Badge>
+                  </span>
                   <span className="text-xs font-normal text-muted-foreground">{agenticOperator.description}</span>
                 </div>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5">
+                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 whitespace-nowrap">
                   {agenticOperator.badge}
                 </Badge>
               </button>
@@ -442,32 +458,51 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           {/* Grouped Navigation */}
           {navigationGroups.map((group) => {
             const isGroupActive = groupHasActiveItem(group, location, searchString);
+            const isAiStudioGroup = group.id === 'ai-intelligence';
 
             return (
-              <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'dashboard'}>
+              <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'dashboard' || isAiStudioGroup}>
                 <CollapsibleTrigger asChild>
-                  <button className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors group/trigger">
-                    <span>{group.label}</span>
+                  <button className={cn(
+                    "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors group/trigger",
+                    isAiStudioGroup && "text-violet-600 dark:text-violet-400 font-bold bg-violet-50/50 dark:bg-violet-900/10 rounded-sm mb-1 mt-1"
+                  )}>
+                    <span className="flex items-center gap-2">
+                       {group.label}
+                       {isAiStudioGroup && <Sparkles className="h-3 w-3 animate-pulse" />}
+                    </span>
                     <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180" />
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5 pb-2">
                   {group.items.map((item) => {
                     const isActive = isItemActive(item, location, searchString);
+                    // Removed individual item highlight for Org Intelligence
+                    const isHighlighted = false;
+
                     return (
                       <Link key={item.name} href={item.href}>
                         <span
                           className={cn(
-                            'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors',
+                            'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors relative overflow-hidden',
                             isActive
                               ? 'bg-primary/10 text-primary'
-                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                            isHighlighted && !isActive && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 border border-violet-200/50 shadow-sm',
+                            isHighlighted && isActive && 'bg-gradient-to-r from-violet-100 to-indigo-50 text-violet-800 border-violet-200 font-semibold'
                           )}
                           onClick={() => setSidebarOpen(false)}
                         >
-                          <item.icon className="h-4 w-4" />
-                          {item.name}
-                          {isActive && <ChevronRight className="h-4 w-4 ml-auto" />}
+                          <item.icon className={cn("h-4 w-4", isHighlighted && "text-violet-600")} />
+                          <span className={cn(isHighlighted && "font-semibold tracking-tight")}>{item.name}</span>
+                          
+                          {isHighlighted && (
+                             <Badge className="ml-auto h-4 px-1.5 text-[9px] bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-sm animate-pulse">
+                               HOT
+                             </Badge>
+                          )}
+                          
+                          {isActive && !isHighlighted && <ChevronRight className="h-4 w-4 ml-auto" />}
                         </span>
                       </Link>
                     );

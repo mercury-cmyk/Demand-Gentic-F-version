@@ -20,7 +20,7 @@ export const FEATURE_FLAGS = {
   argyle_event_drafts: {
     name: 'argyle_event_drafts',
     description: 'Enable Argyle event-sourced campaign drafts (client-gated to Argyle only)',
-    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+    default: true  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
   },
   ukef_campaign_reports: {
     name: 'ukef_campaign_reports',

@@ -5234,6 +5234,20 @@ export function registerRoutes(app: Express) {
         };
         console.log(`[Campaign Update] Updated aiAgentSettings voice to: ${updateData.selectedVoice}`);
       }
+
+      // Sync persona.voice when assignedVoices updated from quick campaign actions
+      if (updateData.assignedVoices && Array.isArray(updateData.assignedVoices) && updateData.assignedVoices.length > 0) {
+        const existingSettings = (updateData.aiAgentSettings || existingCampaign.aiAgentSettings as any) || {};
+        const firstVoice = updateData.assignedVoices[0];
+        updateData.aiAgentSettings = {
+          ...existingSettings,
+          persona: {
+            ...(existingSettings.persona || {}),
+            voice: firstVoice.id,
+          },
+        };
+        console.log(`[Campaign Update] Synced persona.voice to first assigned voice: "${firstVoice.id}" (${firstVoice.name}), total assigned: ${updateData.assignedVoices.length}`);
+      }
       
       const campaign = await storage.updateCampaign(req.params.id, updateData);
       if (!campaign) {

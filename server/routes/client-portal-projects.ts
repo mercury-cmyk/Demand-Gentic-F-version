@@ -83,7 +83,7 @@ router.get('/', async (req: Request, res: Response) => {
             and(
               eq(campaigns.projectId, project.id),
               eq(campaigns.clientAccountId, clientAccountId),
-              eq(campaigns.approvalStatus, 'published')
+              inArray(campaigns.approvalStatus, ['in_review', 'published'])
             )
           );
 
@@ -229,7 +229,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         and(
           eq(campaigns.projectId, projectId),
           eq(campaigns.clientAccountId, clientAccountId),
-          eq(campaigns.approvalStatus, 'published')
+          inArray(campaigns.approvalStatus, ['in_review', 'published'])
         )
       );
 

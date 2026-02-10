@@ -41,11 +41,11 @@ import {
   cleanupStaleLocks,
 } from '../services/active-call-tracker';
 
-const ORCHESTRATOR_INTERVAL_MS = 15000; // Check every 15 seconds
-const DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '50', 10); // Max 50 concurrent calls per campaign by default
-const GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '50', 10); // System-wide maximum (Telnyx capacity)
-const DELAY_BETWEEN_CALLS_MS = 500; // 500ms delay between call batches
-const PARALLEL_CALL_BATCH_SIZE = 10; // Batch size of 10 for efficient ramp-up
+const ORCHESTRATOR_INTERVAL_MS = 10000; // Check every 10 seconds (increased frequency)
+const DEFAULT_MAX_CONCURRENT_CALLS = parseInt(process.env.MAX_CONCURRENT_CALLS || '100', 10); // Max 100 concurrent calls per campaign by default
+const GLOBAL_MAX_CONCURRENT_CALLS = parseInt(process.env.GLOBAL_MAX_CONCURRENT_CALLS || '100', 10); // System-wide maximum (Telnyx capacity)
+const DELAY_BETWEEN_CALLS_MS = 250; // 250ms delay between call batches (faster ramp-up)
+const PARALLEL_CALL_BATCH_SIZE = 25; // Batch size of 25 for efficient ramp-up
 const STUCK_ITEM_TIMEOUT_MS = 300000; // 5 minutes - reduced to catch stuck calls faster while still allowing legitimate long conversations
 
 // Telnyx error codes that should pause the campaign (account-level issues)
@@ -1544,12 +1544,30 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     });
 
     const settled = await Promise.allSettled(batchPromises);
-    const results = settled.map(s => {
+    const results = await Promise.all(settled.map(async (s, index) => {
       if (s.status === 'fulfilled') return s.value;
-      // Promise rejected without being caught - log and treat as failure
-      console.error(`[AI Orchestrator] Unhandled batch promise rejection:`, s.reason);
-      return { success: false, error: s.reason };
-    });
+      
+      const item = batch[index];
+      const reason = s.reason;
+      console.error(`[AI Orchestrator] Unhandled batch promise rejection for item ${item.id}:`, reason);
+
+      // CRITICAL FIX: Reset stuck item immediately if the promise rejected (e.g. timeout)
+      try {
+        await db.execute(sql`
+          UPDATE campaign_queue
+          SET status = 'queued',
+              removed_reason = ${String(reason).substring(0, 255)},
+              next_attempt_at = NOW() + INTERVAL '1 minute',
+              updated_at = NOW()
+          WHERE id = ${item.id}
+        `);
+        console.log(`[AI Orchestrator] Reset stuck item ${item.id} due to batch rejection`);
+      } catch (err) {
+        console.error(`[AI Orchestrator] Failed to reset stuck item ${item.id}:`, err);
+      }
+
+      return { success: false, error: reason };
+    }));
     const batchSuccess = results.filter(r => r && r.success).length;
     initiated += batchSuccess;
 

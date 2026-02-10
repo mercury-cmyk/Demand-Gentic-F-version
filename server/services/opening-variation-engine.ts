@@ -48,7 +48,7 @@ export interface OpeningConfig {
 const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   {
     id: 'formal_standard',
-    template: 'Hello, may I please speak with {{name}}?',
+    template: 'Hello, this is {{agent}} from Harver. May I speak with {{name}}, please?',
     disfluencyPattern: { useFiller: false, fillerPosition: 'none', filler: '', breathPauseMs: 0 },
     pauseBeforeMs: 200,
     pauseAfterNameMs: 100,
@@ -56,7 +56,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'casual_hey',
-    template: 'Hey—is {{name}} available?',
+    template: 'Hi, this is {{agent}} from Harver—is {{name}} available?',
     disfluencyPattern: { useFiller: true, fillerPosition: 'start', filler: 'uh', breathPauseMs: 150 },
     pauseBeforeMs: 100,
     pauseAfterNameMs: 200,
@@ -64,7 +64,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'friendly_hi',
-    template: 'Hi, I was hoping to reach {{name}}—is this a good time?',
+    template: 'Hi, this is {{agent}} calling from Harver. I was hoping to reach {{name}}—is this a good time?',
     disfluencyPattern: { useFiller: false, fillerPosition: 'none', filler: '', breathPauseMs: 100 },
     pauseBeforeMs: 150,
     pauseAfterNameMs: 150,
@@ -72,7 +72,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'direct_quick',
-    template: 'Quick question—can I speak with {{name}}?',
+    template: 'Hello, this is {{agent}} from Harver—can I speak with {{name}}?',
     disfluencyPattern: { useFiller: true, fillerPosition: 'start', filler: 'um', breathPauseMs: 200 },
     pauseBeforeMs: 50,
     pauseAfterNameMs: 100,
@@ -80,7 +80,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'polite_apology',
-    template: 'Sorry to bother you—is {{name}} around?',
+    template: 'Hi, this is {{agent}} from Harver. Sorry to bother you—is {{name}} around?',
     disfluencyPattern: { useFiller: false, fillerPosition: 'none', filler: '', breathPauseMs: 100 },
     pauseBeforeMs: 100,
     pauseAfterNameMs: 200,
@@ -88,7 +88,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'formal_calling_for',
-    template: 'Hello, I\'m calling to speak with {{name}}—are they available?',
+    template: 'Hello, this is {{agent}} from Harver. I\'m calling to speak with {{name}}—are they available?',
     disfluencyPattern: { useFiller: true, fillerPosition: 'middle', filler: 'uh', breathPauseMs: 150 },
     pauseBeforeMs: 200,
     pauseAfterNameMs: 100,
@@ -96,7 +96,7 @@ const GATEKEEPER_OPENING_VARIATIONS: OpeningVariation[] = [
   },
   {
     id: 'casual_reaching_out',
-    template: 'Hey, I\'m trying to reach {{name}}—any chance they\'re free?',
+    template: 'Hey, this is {{agent}} from Harver. I\'m trying to reach {{name}}—any chance they\'re free?',
     disfluencyPattern: { useFiller: false, fillerPosition: 'none', filler: '', breathPauseMs: 100 },
     pauseBeforeMs: 100,
     pauseAfterNameMs: 150,

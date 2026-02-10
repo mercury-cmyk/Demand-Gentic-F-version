@@ -53,6 +53,17 @@ function requireArgyleClient(req: Request, res: Response, next: NextFunction) {
 // ==================== CLIENT PORTAL ROUTES (Argyle-gated) ====================
 
 /**
+ * GET /feature-status — Check availability (used by dashboard to toggle tab)
+ */
+router.get('/feature-status',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  (_req: Request, res: Response) => {
+    res.json({ enabled: true });
+  }
+);
+
+/**
  * GET /events — List upcoming events with draft status
  */
 router.get('/events',

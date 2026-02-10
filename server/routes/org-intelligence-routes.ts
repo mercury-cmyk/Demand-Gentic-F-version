@@ -100,6 +100,12 @@ interface AccountProfile {
     emailAngles: IntelligenceField;
     callOpeners: IntelligenceField;
   };
+  compliance: {
+    certifications: IntelligenceField;
+    dataResidency: IntelligenceField;
+    recordingConsent: IntelligenceField;
+    disclaimerText: IntelligenceField;
+  };
 }
 
 // Create an intelligence field with defaults

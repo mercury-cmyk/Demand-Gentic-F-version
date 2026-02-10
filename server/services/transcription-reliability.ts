@@ -252,18 +252,20 @@ export async function processMissingTranscripts(): Promise<{
 
     console.log(`${LOG_PREFIX} Found ${callsWithoutTranscripts.length} calls without transcripts`);
 
-    for (const call of callsWithoutTranscripts) {
-      stats.processed++;
+    let skippedTooShort = 0;
 
+    for (const call of callsWithoutTranscripts) {
       // Calculate call duration
       if (call.callStartedAt && call.callEndedAt) {
         const durationSec = (new Date(call.callEndedAt).getTime() - new Date(call.callStartedAt).getTime()) / 1000;
 
         if (durationSec < MIN_CALL_DURATION_FOR_TRANSCRIPT) {
-          console.log(`${LOG_PREFIX} Skipping call ${call.id} - too short (${durationSec}s)`);
+          skippedTooShort++;
           continue;
         }
       }
+
+      stats.processed++;
 
       {
         const result = await attemptFallbackTranscription(call.id, call.recordingUrl ?? null, call.telnyxCallId);
@@ -279,6 +281,9 @@ export async function processMissingTranscripts(): Promise<{
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
+    if (skippedTooShort > 0) {
+      console.log(`${LOG_PREFIX} Skipped ${skippedTooShort} calls shorter than ${MIN_CALL_DURATION_FOR_TRANSCRIPT}s`);
+    }
     console.log(`${LOG_PREFIX} Completed: ${stats.processed} processed, ${stats.succeeded} succeeded, ${stats.failed} failed`);
     return stats;
   } catch (error: any) {

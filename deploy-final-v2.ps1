@@ -125,6 +125,11 @@ $env_vars = @(
     "NODE_ENV=production",
     "ENABLE_LOG_STREAMING=true",
     "CALL_EXECUTION_ENABLED=true",
+    "GLOBAL_MAX_CONCURRENT_CALLS=100",
+    "MAX_CONCURRENT_CALLS=100",
+
+    # Feature Flags
+    "FEATURE_FLAGS=argyle_event_drafts",
 
     # Google Cloud
     "GOOGLE_CLOUD_PROJECT=pivotalb2b-2026",
@@ -153,7 +158,7 @@ $env_vars = @(
     # Production URLs
     "BASE_URL=https://demandgentic.ai",
     "PUBLIC_TEXML_HOST=demandgentic.ai",
-    "TELNYX_WEBHOOK_URL=https://demandgentic.ai/api/webhooks/telnyx",
+    # "TELNYX_WEBHOOK_URL=https://demandgentic.ai/api/webhooks/telnyx",
 
     # OpenAI SIP Configuration
     "OPENAI_SIP_MODEL=gpt-realtime",

@@ -285,12 +285,12 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     
     // Account/Organization placeholders
     '{{account.name}}': context.accountName,
-    '{{org.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
-    '{{organization.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
+    '{{org.name}}': context.organizationName || 'Harver',
+    '{{organization.name}}': context.organizationName || 'Harver',
     
     // Agent identity - use campaign organization name
-    '{{agent.name}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
-    '{{agent.fullName}}': context.organizationName || 'DemandGentic.ai By Pivotal B2B',
+    '{{agent.name}}': context.organizationName || 'Harver',
+    '{{agent.fullName}}': context.organizationName || 'Harver',
     '{{agent.firstName}}': context.organizationName?.split(' ')[0] || 'DemandGentic',
     
     // Campaign placeholders
@@ -316,18 +316,18 @@ function substitutePromptPlaceholders(prompt: string, context: CallContext): str
     result = result.replace(/\[Organization\]/g, context.organizationName);
     result = result.replace(/\[Company\]/g, context.organizationName);
   } else {
-    result = result.replace(/\[Organization\]/g, 'DemandGentic.ai By Pivotal B2B');
-    result = result.replace(/\[Company\]/g, 'DemandGentic.ai By Pivotal B2B');
+    result = result.replace(/\[Organization\]/g, 'Harver');
+    result = result.replace(/\[Company\]/g, 'Harver');
   }
   
   return result;
 }
 
 /**
- * Build DemandGentic.ai By Pivotal B2B identity preamble for the system prompt
+ * Build Harver identity preamble for the system prompt
  */
 function buildDemandGenticIdentityPreamble(context: CallContext): string {
-  const orgRef = context.organizationName || 'DemandGentic.ai By Pivotal B2B';
+  const orgRef = context.organizationName || 'Harver';
 
   // Build talking points string if available
   let talkingPointsStr = '';
@@ -364,10 +364,10 @@ This is an OUTBOUND call. The call flow is:
 
 ## YOUR IDENTITY (CRITICAL)
 
-You are an AI voice assistant calling on behalf of ${orgRef}.
+You are an AI voice assistant from Harver.
 
 **How to introduce yourself after identity is confirmed:**
-- Say: "I'm calling on behalf of ${orgRef}."
+- Say: "I'm calling from Harver."
 - Do NOT say your name is "Agent Name" or any placeholder
 - Do NOT say you are "Name" or leave placeholders unsubstituted
 ${context.contactName ? `
@@ -378,7 +378,7 @@ ${context.contactName ? `
 - Company: ${context.accountName}` : ''}
 
 **Opening (after phone is answered):**
-"Hello, may I please speak with ${context.contactName || '[the contact]'}${context.contactJobTitle ? `, the ${context.contactJobTitle}` : ''}${context.accountName ? ` at ${context.accountName}` : ''}?"
+"Hello, this is ${context.contactFirstName || context.contactName || '[Name]'} from Harver. May I speak with ${context.contactName || '[the contact]'}, please?"
 
 ## CRITICAL: GATEKEEPER vs RIGHT PARTY DETECTION
 
@@ -394,7 +394,7 @@ ${context.contactName ? `
 - "What company are you with?"
 
 **HOW TO HANDLE GATEKEEPERS:**
-1. Be polite and professional: "I'm calling on behalf of ${orgRef}"
+1. Be polite and professional: "This is ${context.contactFirstName || '[Name]'} from Harver."
 2. If they ask what it's about, be brief: "I'm following up on a business matter with ${context.contactName || 'them'}"
 3. If they can transfer you: "That would be great, thank you"
 4. If the person is unavailable: "When would be a good time to reach them?" then use submit_disposition with "no_answer" and end_call
@@ -441,15 +441,14 @@ When you hear the first human voice, you MUST determine if they have ALREADY ide
 ### SCENARIO A: They answer WITHOUT identifying themselves
 Examples: "Hello?", "Hi", "Yeah?", "Good morning", "Who's this?"
 → Your FIRST response MUST be to ask for the contact by name:
-- "Hi, am I speaking with [Contact Name]?"
-- Or: "Hello, may I speak with [Contact Name]?"
+- "Hello, this is [Your Name] from Harver. May I speak with [Contact Name], please?"
 
 **"Hello?" is NOT identity confirmation. Do NOT say "Great, thanks for confirming" as your first response.**
 
 ### SCENARIO B: They answer BY STATING THEIR NAME
 Examples: "Hi, this is Tom speaking", "Tom Brown here", "This is Tom", "[Name] speaking"
 → If the name they said MATCHES the contact name you are calling, their identity is ALREADY CONFIRMED. Do NOT ask "May I speak with [name]?" again — that is redundant and unprofessional. Instead, skip directly to your introduction:
-- "Hi ${context.contactFirstName || context.contactName || '[Name]'}, thanks for taking my call! I'm calling on behalf of ${orgRef}..."
+- "Hi ${context.contactFirstName || context.contactName || '[Name]'}, thanks for taking my call! I'm calling from Harver..."
 
 → If the name they said does NOT match the contact name, treat them as a gatekeeper and ask for the right person.
 
@@ -462,13 +461,13 @@ Identity is confirmed when they either:
 After receiving explicit confirmation, respond promptly:
 
 1. First: Acknowledge - "Thanks for confirming!"
-2. Then: Introduce yourself - "I'm calling on behalf of ${orgRef}."
+2. Then: Introduce yourself - "I'm calling from Harver."
 3. Then: Set expectations - "I'll keep this brief."
 4. Then: State why you're calling (VALUE TO THEM, not your internal goal): "${reasonForCalling}"
 5. Then: Ask an open-ended question to start the conversation.
 
 If you're not sure what to say after confirmation, default to:
-"Thanks for confirming! I'm calling on behalf of ${orgRef}. ${reasonForCalling}. Would you have a quick moment to chat?"
+"Thanks for confirming! I'm calling from Harver. ${reasonForCalling}. Would you have a quick moment to chat?"
 
 **COMPLIANCE GATE:** You MUST complete BOTH the introduction and the purpose statement BEFORE asking any discovery questions or proceeding to subsequent steps.
 
@@ -500,13 +499,13 @@ Examples of early questions:
 **HOW TO HANDLE - NEVER GO SILENT:**
 1. **Acknowledge briefly**: "Great question — let me give you the quick version."
 2. **Bridge to your pitch**: Deliver a condensed version focusing on VALUE TO THEM (20-30 seconds max)
-   - Who you are: "I'm calling on behalf of ${orgRef}."
+   - Who you are: "I'm calling from Harver."
    - What value you offer: ${context.productServiceInfo ? `"${context.productServiceInfo.substring(0, 200)}"` : 'ONE sentence about how you can help THEIR business'}
    - Why them: "I thought this might be relevant given your role${context.accountName ? ` at ${context.accountName}` : ''}"
 3. **Re-engage with a question**: End with "Does that sound like something worth exploring?" or "Is that something you're focused on right now?"
 
 **EXAMPLE RESPONSE to "What is this about?":**
-"Thanks for asking! I'm calling on behalf of ${orgRef}. ${context.productServiceInfo ? context.productServiceInfo.substring(0, 150) : 'We help companies improve their operations and achieve better results'}. I thought given your role${context.accountName ? ` at ${context.accountName}` : ''}, this might be relevant. Do you have a quick moment?"
+"Thanks for asking! I'm calling from Harver. ${context.productServiceInfo ? context.productServiceInfo.substring(0, 150) : 'We help companies improve their operations and achieve better results'}. I thought given your role${context.accountName ? ` at ${context.accountName}` : ''}, this might be relevant. Do you have a quick moment?"
 
 **⚠️ NEVER go silent when asked a direct question. ALWAYS respond immediately with a conversational answer.**
 **⚠️ Silence after identity confirmation = CRITICAL FAILURE**
@@ -936,12 +935,12 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
       openingText = substitutePromptPlaceholders(callContext.firstMessage, callContext);
       console.log(`[Gemini Live] 📋 Using custom first_message from campaign settings`);
     } else {
-      // Build canonical opening: "Hello, may I please speak with [Name], the [Job Title] at [Company]?"
+      // Build canonical opening: "Hello, this is [Name] from Harver. May I speak with [Name], please?"
       const contactName = callContext.contactName || callContext.contactFirstName || 'there';
       const jobTitle = callContext.contactJobTitle;
       const companyName = callContext.accountName;
 
-      let openingParts = [`Hello, may I please speak with ${contactName}`];
+      let openingParts = [`Hello, this is ${callContext.contactFirstName || callContext.contactName || '[Name]'} from Harver. May I speak with ${contactName}`];
       if (jobTitle && jobTitle.trim() && jobTitle.toLowerCase() !== 'decision maker') {
         openingParts.push(`, the ${jobTitle}`);
       }
@@ -1159,7 +1158,7 @@ Instructions:
               
               console.log(`[Gemini Live] Call ${config.call_id} started. Voice: ${voiceName}`);
               console.log(`[Gemini Live] Contact: ${callContext.contactName || 'Unknown'}, Title: ${callContext.contactJobTitle || 'N/A'}, Company: ${callContext.accountName || 'N/A'}`);
-              console.log(`[Gemini Live] Organization: ${callContext.organizationName || 'DemandGentic.ai By Pivotal B2B'}`);
+              console.log(`[Gemini Live] Organization: ${callContext.organizationName || 'Harver'}`);
               if (callContext.maxCallDurationSeconds) {
                 console.log(`[Gemini Live] ⏱️ Max call duration: ${callContext.maxCallDurationSeconds}s`);
               }

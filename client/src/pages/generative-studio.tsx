@@ -79,11 +79,40 @@ export default function GenerativeStudioPage() {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
-  const { data: brandKitsData } = useQuery<{ brandKits?: any[] }>({
-    queryKey: ["/api/email-builder/brand-kits"],
+  // Client Portal Integration
+  const clientPortalToken = localStorage.getItem("clientPortalToken");
+  const { data: clientOrgData } = useQuery<{
+    organization: { id: string; name: string } | null;
+  }>({
+    queryKey: ["client-portal-org-simple"],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/settings/organization-intelligence', {
+        headers: { Authorization: `Bearer ${clientPortalToken}` }
+      });
+      if (!res.ok) throw new Error("Failed to fetch client org");
+      return res.json();
+    },
+    enabled: !!clientPortalToken
   });
 
-  const brandKits = brandKitsData?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
+  // Force selection for client portal users
+  useEffect(() => {
+    if (clientPortalToken && clientOrgData?.organization?.id) {
+      setSelectedOrgId(clientOrgData.organization.id);
+    }
+  }, [clientPortalToken, clientOrgData]);
+
+  const { data: brandKitsData } = useQuery<{ brandKits?: any[] } | any[]>({
+    queryKey: ['brandKits'],
+    queryFn: async () => {
+      const res = await fetch('/api/email-builder/brand-kits');
+      if (!res.ok) throw new Error('Failed to fetch brand kits');
+      const data = await res.json();
+      return Array.isArray(data) ? { brandKits: data } : data;
+    },
+  });
+
+  const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
   useEffect(() => {
     const storedOrgId = localStorage.getItem("generativeStudioOrgId");
@@ -258,6 +287,7 @@ export default function GenerativeStudioPage() {
           <OrganizationSelector
             selectedOrgId={selectedOrgId}
             onOrgChange={setSelectedOrgId}
+            disabled={!!clientPortalToken}
           />
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">

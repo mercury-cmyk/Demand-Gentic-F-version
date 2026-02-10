@@ -40,9 +40,10 @@ interface OrganizationSelectorProps {
   selectedOrgId: string | null;
   onOrgChange: (orgId: string) => void;
   allowCreation?: boolean;
+  disabled?: boolean;
 }
 
-export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation = true }: OrganizationSelectorProps) {
+export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation = true, disabled = false }: OrganizationSelectorProps) {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
@@ -135,7 +136,7 @@ export function OrganizationSelector({ selectedOrgId, onOrgChange, allowCreation
         <span className="text-sm font-medium text-muted-foreground">Organization:</span>
       </div>
 
-      <Select value={selectedOrgId || ""} onValueChange={onOrgChange}>
+      <Select value={selectedOrgId || ""} onValueChange={onOrgChange} disabled={disabled}>
         <SelectTrigger className="w-[280px]">
           <SelectValue placeholder={isLoading ? "Loading..." : "Select organization"}>
             {selectedOrg && (

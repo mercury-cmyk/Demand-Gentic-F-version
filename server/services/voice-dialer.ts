@@ -2113,8 +2113,7 @@ openaiWs.on("open", async () => {
           .map(normalizeVoiceTemplateToken)
           .filter(Boolean);
         const usesCanonicalOpeningTokens = normalizedTokens.includes("contact.full_name")
-          || normalizedTokens.includes("contact.job_title")
-          || normalizedTokens.includes("account.name");
+          || normalizedTokens.includes("agent.name");
 
         // If it contains canonical variables (including aliases), validate and interpolate them
         if (usesCanonicalOpeningTokens) {
@@ -2130,7 +2129,8 @@ openaiWs.on("open", async () => {
               },
               {
                 name: contactInfo?.companyName || contactInfo?.company,
-              }
+              },
+              resolvedAgentNameForTemplate
             );
 
             if (!validation.valid) {
@@ -2156,7 +2156,8 @@ openaiWs.on("open", async () => {
               },
               {
                 name: contactInfo?.companyName || contactInfo?.company,
-              }
+              },
+              resolvedAgentNameForTemplate
             );
             console.log(`${LOG_PREFIX} ✅ Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
           } else {
@@ -2170,7 +2171,8 @@ openaiWs.on("open", async () => {
               },
               {
                 name: contactInfo?.companyName || contactInfo?.company,
-              }
+              },
+              resolvedAgentNameForTemplate
             );
             console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
           }
@@ -2191,7 +2193,8 @@ openaiWs.on("open", async () => {
           },
           {
             name: contactInfo?.companyName || contactInfo?.company,
-          }
+          },
+          resolvedAgentNameForTemplate
         );
 
         if (!validation.valid) {
@@ -2203,7 +2206,7 @@ openaiWs.on("open", async () => {
         // For validation failures, use a simple fallback opening
         if (useGenericOpening) {
           const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-          openingScript = `Hello, may I speak with ${testContactName} please?`;
+          openingScript = `Hello, this is ${resolvedAgentNameForTemplate || "your representative"} from Harver. May I speak with ${testContactName}, please?`;
           console.log(`${LOG_PREFIX} ⚠️ Validation failed - using simple opening message`);
         } else {
           // Use the canonical opening with interpolation
@@ -2216,7 +2219,8 @@ openaiWs.on("open", async () => {
             },
             {
               name: contactInfo?.companyName || contactInfo?.company,
-            }
+            },
+            resolvedAgentNameForTemplate
           );
           console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
         }
@@ -2224,7 +2228,7 @@ openaiWs.on("open", async () => {
 
       if (!openingScript || !openingScript.trim()) {
         const fallbackName = contactInfo?.fullName || contactInfo?.firstName || "there";
-        openingScript = `Hello, may I speak with ${fallbackName} please?`;
+        openingScript = `Hello, this is ${resolvedAgentNameForTemplate || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
         console.warn(`${LOG_PREFIX} Opening script empty after interpolation; using fallback greeting`);
       }
 
@@ -2759,7 +2763,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
     let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
     if (!openingScript || !openingScript.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-      openingScript = `Hello, may I speak with ${fallbackName} please?`;
+      openingScript = `Hello, this is ${resolvedAgentNameForTemplate || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
       console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
     }
 
@@ -3414,8 +3418,7 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
       .map(normalizeVoiceTemplateToken)
       .filter(Boolean);
     const usesCanonicalOpeningTokens = normalizedTokens.includes("contact.full_name")
-      || normalizedTokens.includes("contact.job_title")
-      || normalizedTokens.includes("account.name");
+      || normalizedTokens.includes("agent.name");
 
     console.log(`${LOG_PREFIX} [Gemini Opening] Template tokens:`, normalizedTokens, 'Uses canonical:', usesCanonicalOpeningTokens);
 
@@ -3430,12 +3433,13 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
       },
       {
         name: contactInfo?.companyName || contactInfo?.company,
-      }
+      },
+      campaignConfig?.agentName || campaignConfig?.voice || null
     );
     console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
     if (!result?.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-      return `Hello, may I speak with ${fallbackName} please?`;
+      return `Hello, this is ${campaignConfig?.agentName || campaignConfig?.voice || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
     }
     return result;
   }
@@ -3453,7 +3457,7 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
     console.log(`${LOG_PREFIX} [Gemini Opening] Interpolated result: "${result}"`);
     if (!result?.trim()) {
       const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-      return `Hello, may I speak with ${fallbackName} please?`;
+      return `Hello, this is ${campaignConfig?.agentName || campaignConfig?.voice || "your representative"} from Harver. May I speak with ${fallbackName}, please?`;
     }
     // Apply micro-variations for anti-spam (different audio fingerprint each call)
     return applyOpeningVariation(result, session.callId);
@@ -3462,7 +3466,7 @@ function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any
   // Default canonical opening for gatekeeper scenarios
   // Use the same format as OpenAI for consistency
   const contactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
-  const result = `Hello, may I speak with ${contactName} please?`;
+  const result = `Hello, this is ${campaignConfig?.agentName || campaignConfig?.voice || "your representative"} from Harver. May I speak with ${contactName}, please?`;
   console.log(`${LOG_PREFIX} [Gemini Opening] Default result: "${result}"`);
   // Apply micro-variations for anti-spam (different audio fingerprint each call)
   return applyOpeningVariation(result, session.callId);

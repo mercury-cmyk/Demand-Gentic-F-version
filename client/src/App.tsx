@@ -112,6 +112,7 @@ import ClientPortalEmailSimulation from "@/pages/client-portal-email-simulation"
 import ClientServices from "@/pages/client-portal/client-services";
 import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
 import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
+import AgentCatalogPage from "@/pages/client-portal/agent-catalog";
 import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
 import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
@@ -638,6 +639,11 @@ function Router() {
       <Route path="/client-portal/intelligence">
         <ClientPortalProtectedRoute>
           <ClientPortalIntelligence />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/agents">
+        <ClientPortalProtectedRoute>
+          <AgentCatalogPage />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/generative-studio">

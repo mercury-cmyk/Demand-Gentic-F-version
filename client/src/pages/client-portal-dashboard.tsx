@@ -43,7 +43,8 @@ import {
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
-  ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List, FileBarChart2, ShieldCheck
+  ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List, FileBarChart2, ShieldCheck,
+  MousePointerClick, ClipboardCheck, Handshake
 } from 'lucide-react';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
@@ -186,6 +187,19 @@ interface Project {
   totalCost: number;
 }
 
+interface ArgyleEvent {
+  id: string;
+  title: string;
+  startAtHuman: string | null;
+  draft: {
+    id: string;
+    status: string;
+    leadCount?: number;
+    draftFields?: any;
+    sourceFields?: any;
+  } | null;
+}
+
 interface Lead {
   id: number; // verificationContactId
   firstName: string | null;
@@ -213,6 +227,7 @@ const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
   pending: 'bg-yellow-100 text-yellow-800',
   pending_review: 'bg-yellow-100 text-yellow-800',
+  in_review: 'bg-yellow-100 text-yellow-800',
   submitted: 'bg-yellow-100 text-yellow-800',
   approved: 'bg-blue-100 text-blue-800',
   approved_pending_setup: 'bg-blue-100 text-blue-800',
@@ -251,7 +266,7 @@ export default function ClientPortalDashboard() {
   // URL-driven tab system
   const tabFromUrl = new URLSearchParams(searchString).get('tab');
   const [activeTab, setActiveTabState] = useState(resolveTab(tabFromUrl));
-  const [targetMarketTab, setTargetMarketTab] = useState('intelligence');
+  const [targetMarketTab, setTargetMarketTab] = useState('accounts');
   const [showSupportDialog, setShowSupportDialog] = useState(false);
 
   // Sync activeTab with URL changes (sidebar navigation)
@@ -303,6 +318,27 @@ export default function ClientPortalDashboard() {
     targetRevenue: [] as string[],
     targetEmployeeSize: [] as string[],
   });
+
+  // Argyle Event Selection (Link Drafts)
+  const [selectedArgyleEventId, setSelectedArgyleEventId] = useState<string>('none');
+
+  // Fetch Argyle Events (if feature enabled/client authorized)
+  const { data: argyleEventsData } = useQuery<{ events: ArgyleEvent[] }>({
+    queryKey: ['argyle-events'],
+    queryFn: async () => {
+      try {
+        const res = await apiRequest('GET', '/api/client-portal/argyle-events/events');
+        return await res.json();
+      } catch (e) {
+        return { events: [] };
+      }
+    },
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+  
+  const argyleEvents = argyleEventsData?.events || [];
+  const hasDrafts = argyleEvents.some(e => e.draft && e.draft.status !== 'submitted');
 
   // Create Project Mutation (Work Order)
   const createWorkOrderMutation = useMutation({
@@ -361,9 +397,8 @@ export default function ClientPortalDashboard() {
         targetEmployeeSize: [],
       });
 
-      // Refresh data
-      // In a real app we would invalidate queries, but here we can rely on the Project Requests page to fetch fresh data
-      // queryClient.invalidateQueries({ queryKey: ['/api/client-portal/projects'] });
+      // Refresh projects list to show the new order
+      queryClient.invalidateQueries({ queryKey: ['client-portal-projects'] });
     },
     onError: (error: any) => {
       toast({ 
@@ -373,39 +408,6 @@ export default function ClientPortalDashboard() {
       });
     }
   });
-
-  // Work Orders List State
-  // We'll fetch this from the API instead of using static/local state if possible, 
-  // but for now let's keep the UI consistent while the backend saves it.
-  const [workOrders, setWorkOrders] = useState([
-    {
-      id: 'WO-2026-003',
-      type: 'Call Campaign',
-      goals: 'Q1 Enterprise Outreach - IT Decision Makers',
-      leads: '500',
-      deadline: 'Feb 28, 2026',
-      status: 'pending',
-      created: 'Feb 1, 2026'
-    },
-    {
-      id: 'WO-2026-002',
-      type: 'Email Campaign',
-      goals: 'Product Launch Announcement',
-      leads: '1,000',
-      deadline: 'Feb 15, 2026',
-      status: 'in_progress',
-      created: 'Jan 25, 2026'
-    },
-    {
-      id: 'WO-2026-001',
-      type: 'Combined',
-      goals: 'Multi-channel ABM Campaign',
-      leads: '250',
-      deadline: 'Jan 31, 2026',
-      status: 'completed',
-      created: 'Jan 10, 2026'
-    }
-  ]);
 
   const getProgramTypeLabel = (type: string) => {
     switch (type) {
@@ -683,6 +685,22 @@ export default function ClientPortalDashboard() {
     },
     enabled: !!user,
   });
+
+  // Work Orders derived from real projects data
+  const workOrders = (projects || []).map((p: Project) => ({
+    id: p.projectCode || p.id.slice(0, 12),
+    type: p.name?.replace(/ Request$/, '') || 'Campaign',
+    goals: p.description?.split('\n')[0]?.replace(/^CAMPAIGN OBJECTIVE.*?:\s*/i, '').slice(0, 200) || p.name || '',
+    leads: p.requestedLeadCount ? p.requestedLeadCount.toLocaleString() : 'N/A',
+    deadline: p.endDate ? new Date(p.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'TBD',
+    status: p.status === 'pending' || p.status === 'draft' ? 'pending'
+          : p.status === 'active' ? 'in_progress'
+          : p.status === 'completed' ? 'completed'
+          : p.status === 'rejected' ? 'rejected'
+          : p.status,
+    created: new Date(p.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+    budgetAmount: p.budgetAmount ? parseFloat(p.budgetAmount) : 0,
+  }));
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery<Lead[]>({
     queryKey: ['client-portal-leads'],
@@ -1386,6 +1404,8 @@ export default function ClientPortalDashboard() {
   const getStatusBadge = (status: string) => {
     const label = status === 'approved_pending_setup'
       ? 'Approved - Pending setup'
+      : status === 'in_review'
+      ? 'Pending Approval'
       : status.charAt(0).toUpperCase() + status.slice(1);
     return (
       <Badge className={statusColors[status] || 'bg-gray-100 text-gray-800'}>
@@ -1595,7 +1615,6 @@ export default function ClientPortalDashboard() {
                <div className="mb-6">
                  <Tabs value={targetMarketTab} onValueChange={setTargetMarketTab} className="w-full">
                     <TabsList>
-                       <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
                        <TabsTrigger value="accounts">Accounts</TabsTrigger>
                        <TabsTrigger value="contacts">Contacts</TabsTrigger>
                        <TabsTrigger value="segments">Segments</TabsTrigger>
@@ -1603,64 +1622,6 @@ export default function ClientPortalDashboard() {
                  </Tabs>
                </div>
 
-               {targetMarketTab === 'intelligence' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-3xl font-bold tracking-tight">Organization Intelligence</h2>
-                <p className="text-muted-foreground mt-2">
-                  The foundation layer for all AI behavior - teaching the AI how your organization thinks and operates.
-                </p>
-              </div>
-            </div>
-
-            {clientOrgData?.organization && (
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-muted-foreground">Organization:</span>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
-                  <span className="font-medium">{clientOrgData.organization.name}</span>
-                  {clientOrgData.organization.domain && (
-                    <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Tabs defaultValue="settings" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-5 lg:w-auto">
-                <TabsTrigger value="settings">Settings</TabsTrigger>
-                <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
-                <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
-                <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
-                <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="settings" className="space-y-4">
-                <AccountIntelligenceView />
-              </TabsContent>
-
-              <TabsContent value="service-catalog" className="space-y-4">
-                <ServiceCatalogTab organizationId={selectedOrgId} />
-              </TabsContent>
-
-              <TabsContent value="problem-framework" className="space-y-4">
-                <ProblemFrameworkTab organizationId={selectedOrgId} />
-              </TabsContent>
-
-              <TabsContent value="icp-positioning" className="space-y-4">
-                <ICPPositioningTab />
-              </TabsContent>
-
-              <TabsContent value="messaging-proof" className="space-y-4">
-                <MessagingProofTab />
-              </TabsContent>
-            </Tabs>
-          </div>
-               )}
-               
                {targetMarketTab === 'accounts' && hasFeature('accounts_contacts') && (() => {
           const accounts = crmAccounts || [];
           const filteredAccounts = accounts.filter((a: any) => {
@@ -2457,25 +2418,6 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
-        {/* ==================== INTELLIGENCE TAB ==================== */}
-        {activeTab === 'intelligence' && (
-          <div className="space-y-6 h-full flex flex-col">
-            <div className="flex flex-col gap-2">
-              <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-                <Brain className="h-8 w-8 text-fuchsia-600" />
-                Organization Intelligence
-              </h1>
-              <p className="text-lg text-muted-foreground font-light">
-                Deep organization analysis, ICP definition, and market positioning
-              </p>
-            </div>
-            
-            <div className="flex-1 min-h-0 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-1">
-               <AccountIntelligenceView organizationId={user.clientAccountId} />
-            </div>
-          </div>
-        )}
-
         {/* ==================== CAMPAIGNS TAB ==================== */}
         {activeTab === 'campaigns' && (
           <div className="space-y-6 md:space-y-8">
@@ -2626,6 +2568,7 @@ export default function ClientPortalDashboard() {
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="in_review">Pending Approval</SelectItem>
                       <SelectItem value="approved_pending_setup">Approved (Pending setup)</SelectItem>
                       <SelectItem value="active">Active</SelectItem>
                       <SelectItem value="paused">Paused</SelectItem>
@@ -2880,7 +2823,7 @@ export default function ClientPortalDashboard() {
         {/* ==================== ARGYLE EVENTS TAB ==================== */}
         {activeTab === 'argyle-events' && argyleFeatureStatus?.enabled && (
           <div className="space-y-6">
-            <ArgyleEventsContent organizationId={user.clientAccountId} />
+            <ArgyleEventsContent />
           </div>
         )}
 
@@ -2961,22 +2904,57 @@ export default function ClientPortalDashboard() {
             {/* Your Pricing - Quick View */}
             {dashboardPricingData?.hasCustomPricing && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Tag className="h-5 w-5" />
-                    Your Pricing
-                  </CardTitle>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <div className="p-2 bg-indigo-50 rounded-lg">
+                        <Tag className="h-5 w-5 text-indigo-600" />
+                      </div>
+                      Your Pricing
+                    </CardTitle>
+                    <Badge variant="outline" className="font-normal text-muted-foreground">
+                      Custom Plan
+                    </Badge>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {Object.entries(dashboardPricingData.pricing)
                       .filter(([, config]) => config.isEnabled)
-                      .map(([type, config]) => (
-                        <div key={type} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
-                          <span className="text-sm font-medium truncate mr-2">{config.label}</span>
-                          <span className="text-sm font-bold text-primary whitespace-nowrap">{formatCurrency(config.pricePerLead)}</span>
-                        </div>
-                      ))}
+                      .sort(([, a], [, b]) => a.pricePerLead - b.pricePerLead)
+                      .map(([type, config]) => {
+                        let icon = <Tag className="h-5 w-5" />;
+                        let colorClass = "text-slate-600 bg-slate-50 border-slate-200";
+                         
+                        if (type === 'event_registration_digital_ungated') {
+                          icon = <MousePointerClick className="h-5 w-5" />;
+                          colorClass = "text-blue-600 bg-blue-50 border-blue-100";
+                        } else if (type === 'event_registration_digital_gated') {
+                          icon = <ClipboardCheck className="h-5 w-5" />;
+                          colorClass = "text-violet-600 bg-violet-50 border-violet-100";
+                        } else if (type === 'in_person_event') {
+                          icon = <Users className="h-5 w-5" />;
+                          colorClass = "text-amber-600 bg-amber-50 border-amber-100";
+                        } else if (type === 'appointment_generation') {
+                          icon = <Handshake className="h-5 w-5" />;
+                          colorClass = "text-emerald-600 bg-emerald-50 border-emerald-100";
+                        }
+
+                        return (
+                          <div key={type} className="flex items-center justify-between p-3 rounded-xl border bg-card hover:shadow-sm transition-all group">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-2 rounded-lg border ${colorClass} group-hover:scale-105 transition-transform`}>
+                                {icon}
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-semibold truncate max-w-[140px] md:max-w-[200px]" title={config.label}>{config.label}</span>
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Per Lead</span>
+                              </div>
+                            </div>
+                            <span className="text-base font-bold text-slate-900 ml-2">{formatCurrency(config.pricePerLead)}</span>
+                          </div>
+                        );
+                      })}
                   </div>
                 </CardContent>
               </Card>
@@ -3227,7 +3205,7 @@ export default function ClientPortalDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Pending Review</p>
-                      <p className="text-2xl font-bold">1</p>
+                      <p className="text-2xl font-bold">{workOrders.filter(o => o.status === 'pending').length}</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
                       <Clock className="h-5 w-5 text-blue-600" />
@@ -3240,7 +3218,7 @@ export default function ClientPortalDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">In Progress</p>
-                      <p className="text-2xl font-bold">2</p>
+                      <p className="text-2xl font-bold">{workOrders.filter(o => o.status === 'in_progress').length}</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
                       <Target className="h-5 w-5 text-amber-600" />
@@ -3253,7 +3231,7 @@ export default function ClientPortalDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Completed</p>
-                      <p className="text-2xl font-bold">12</p>
+                      <p className="text-2xl font-bold">{workOrders.filter(o => o.status === 'completed').length}</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                       <CheckCircle className="h-5 w-5 text-green-600" />
@@ -3266,7 +3244,7 @@ export default function ClientPortalDashboard() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Value</p>
-                      <p className="text-2xl font-bold">$24,500</p>
+                      <p className="text-2xl font-bold">${workOrders.reduce((sum, o) => sum + (o.budgetAmount || 0), 0).toLocaleString()}</p>
                     </div>
                     <div className="h-10 w-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
                       <DollarSign className="h-5 w-5 text-purple-600" />
@@ -3314,7 +3292,13 @@ export default function ClientPortalDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {workOrders.map((order) => (
+                      {workOrders.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                            {projectsLoading ? 'Loading orders...' : 'No orders yet. Submit your first Direct Agentic Order to get started.'}
+                          </TableCell>
+                        </TableRow>
+                      ) : workOrders.map((order) => (
                         <TableRow key={order.id}>
                           <TableCell className="font-mono font-medium">{order.id}</TableCell>
                           <TableCell>
@@ -3329,9 +3313,10 @@ export default function ClientPortalDashboard() {
                             <Badge className={
                               order.status === 'completed' ? "bg-green-100 text-green-700" :
                               order.status === 'in_progress' ? "bg-amber-100 text-amber-700" :
+                              order.status === 'rejected' ? "bg-red-100 text-red-700" :
                               "bg-blue-100 text-blue-700"
                             }>
-                              {order.status === 'in_progress' ? 'In Progress' : 
+                              {order.status === 'in_progress' ? 'In Progress' :
                                order.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                             </Badge>
                           </TableCell>
@@ -5072,6 +5057,56 @@ export default function ClientPortalDashboard() {
             {/* STEP 1: CAMPAIGN BASICS */}
             {workOrderStep === 1 && (
               <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
+                
+                {/* Argyle Event Selector (Filtered to show only valid drafts) */}
+                {hasDrafts && (
+                  <div className="space-y-2 p-4 bg-muted/30 rounded-lg border border-dashed border-orange-200">
+                    <Label className="flex items-center gap-2 text-orange-700 font-semibold">
+                      <Sparkles className="h-4 w-4" />
+                      Start from Argyle Event Draft?
+                    </Label>
+                    <Select
+                      value={selectedArgyleEventId}
+                      onValueChange={(val) => {
+                        setSelectedArgyleEventId(val);
+                        if (val !== 'none') {
+                          const event = argyleEvents.find(e => e.id === val);
+                          if (event && event.draft) {
+                             setNewWorkOrder(prev => ({
+                               ...prev,
+                               campaignGoals: event.draft?.draftFields?.objective || event.draft?.draftFields?.description || prev.campaignGoals,
+                               requiredLeads: event.draft?.leadCount?.toString() || prev.requiredLeads,
+                               additionalInstructions: [
+                                 `Event: ${event.title}`, 
+                                 event.startAtHuman ? `Date: ${event.startAtHuman}` : '',
+                                 `Source ID: ${event.id}`,
+                                 event.draft ? `(Draft ID: ${event.draft.id})` : '',
+                                 event.draft?.draftFields?.targetingNotes ? `Targeting Notes: ${event.draft.draftFields.targetingNotes}` : '',
+                                 event.draft?.draftFields?.context ? `Context: ${event.draft.draftFields.context}` : '',
+                               ].filter(Boolean).join('\n\n')
+                             }));
+                          }
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="bg-white dark:bg-slate-950">
+                        <SelectValue placeholder="No, I'll start from scratch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No, Start New Request</SelectItem>
+                        {argyleEvents
+                          .filter(e => e.draft && e.draft.status !== 'submitted')
+                          .map(e => (
+                            <SelectItem key={e.id} value={e.id}>
+                              {e.title} ({e.startAtHuman || 'TBD'})
+                            </SelectItem>
+                          ))
+                        } 
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="wo-campaignType">Program Type *</Label>
                   <Select
@@ -5434,21 +5469,8 @@ export default function ClientPortalDashboard() {
                 if (workOrderStep < 3) {
                   setWorkOrderStep(prev => prev + 1);
                 } else {
-                  // Submit
+                  // Submit - projects query will be invalidated on success
                   createWorkOrderMutation.mutate(newWorkOrder);
-
-                  // Optimistic UI update
-                  const newOrder = {
-                    id: `WO-2026-PENDING`, // Temp ID
-                    type: getProgramTypeLabel(newWorkOrder.campaignType),
-                    goals: newWorkOrder.campaignGoals,
-                    leads: newWorkOrder.requiredLeads || 'N/A',
-                    deadline: newWorkOrder.deadline ? new Date(newWorkOrder.deadline).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'TBD',
-                    status: 'pending',
-                    created: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-                  };
-                  // @ts-ignore
-                  setWorkOrders([newOrder, ...workOrders]);
                 }
               }}
               disabled={
@@ -6024,7 +6046,8 @@ export default function ClientPortalDashboard() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-4">
-            {/* Provider Selection */}
+            {/* Provider Selection - Hidden (Defaulting to Live Voice / Google) */}
+           {/* 
             <div className="space-y-2">
               <Label className="text-sm font-medium">Voice Provider</Label>
               <Select value={clientSelectedProvider} onValueChange={setClientSelectedProvider}>
@@ -6037,6 +6060,7 @@ export default function ClientPortalDashboard() {
                 </SelectContent>
               </Select>
             </div>
+           */}
 
             {/* Voice Grid */}
             <div className="space-y-2">

@@ -1258,7 +1258,7 @@ router.get("/stats/overview", async (req: Request, res: Response) => {
         .where(
           and(
             inArray(campaigns.id, regularCampaignIds),
-            eq(campaigns.approvalStatus, 'published'),
+            inArray(campaigns.approvalStatus, ['in_review', 'published']),
             eq(campaigns.clientAccountId, clientAccountId)
           )
         );

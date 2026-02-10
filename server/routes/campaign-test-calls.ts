@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requireDualAuth, requireRole } from "../auth";
 import { storage } from "../storage";
 import { db } from "../db";
 import { z } from "zod";
@@ -83,13 +83,15 @@ const initiateTestCallSchema = z.object({
  * Initiate a test call for a specific campaign
  * This uses the campaign's actual AI agent and queue system to validate real behavior
  */
-router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaign_manager"), async (req, res) => {
+router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "campaign_manager", "client"), async (req, res) => {
   try {
     const { campaignId } = req.params;
     const userId = req.user?.userId;
+    const isClient = req.user?.role === 'client';
+    const clientAccountId = isClient ? (req.user as any).clientAccountId || (req.user as any).tenantId : null;
     const isWorkOrderSource = req.query.source === 'work_order';
 
-    console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });
+    console.log("[Campaign Test Call] Request received:", { campaignId, userId, isClient, isWorkOrderSource, body: req.body });
 
     // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
     if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
@@ -116,6 +118,12 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
       
       if (!workOrder) {
         return res.status(404).json({ message: "Work Order draft not found", requestedId: campaignId });
+      }
+
+      // CLIENT OWNERSHIP CHECK (Work Order)
+      if (isClient && workOrder.clientAccountId !== clientAccountId) {
+        console.warn(`[Campaign Test Call] Client ${clientAccountId} attempted to access work order ${workOrder.id} owned by ${workOrder.clientAccountId}`);
+        return res.status(403).json({ message: "Access denied: work order does not belong to your account" });
       }
 
       // Construct Mock Campaign Object
@@ -167,6 +175,12 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
         
         if (!campaign) {
           return res.status(404).json({ message: "Campaign not found", requestedId: campaignId });
+        }
+
+        // CLIENT OWNERSHIP CHECK (Campaign)
+        if (isClient && campaign.clientAccountId !== clientAccountId) {
+           console.warn(`[Campaign Test Call] Client ${clientAccountId} attempted to access campaign ${campaign.id} owned by ${campaign.clientAccountId}`);
+           return res.status(403).json({ message: "Access denied: campaign does not belong to your account" });
         }
 
         // Verify campaign is a phone-capable campaign with AI agent mode (ai_agent or hybrid)

@@ -281,7 +281,7 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
             aiAgentSettings: aiAgentSettings, // Required for AI orchestrator to initiate calls
             ownerId: userId,
             createdBy: userId,
-            approvalStatus: 'draft',
+            approvalStatus: 'published',
             // Attach contexts from intake
             intakeRequestId: intakeRequestData?.id || null,
             // Transfer project attachments to campaign
@@ -303,6 +303,17 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
         // Don't fail the approval, just log
       }
     }
+
+    // Update any existing campaigns linked to this project to 'published' approval status
+    await db
+      .update(campaigns)
+      .set({ approvalStatus: 'published', updatedAt: new Date() })
+      .where(
+        and(
+          eq(campaigns.projectId, id),
+          ne(campaigns.approvalStatus, 'published')
+        )
+      );
 
     // Log activity
     await db.insert(clientPortalActivityLogs).values({

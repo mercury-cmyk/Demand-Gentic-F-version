@@ -39,6 +39,8 @@ import {
   Brain,
   Lightbulb,
   Award,
+  Palette,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -51,6 +53,19 @@ interface OrganizationIntelligence {
   domain?: string;
   industry?: string;
   logoUrl?: string;
+  branding?: {
+    tone?: string;
+    voice?: string;
+    keywords?: string[];
+    communicationStyle?: string;
+    forbiddenTerms?: string[];
+  };
+  compliance?: {
+    certifications?: string[];
+    dataResidency?: string;
+    recordingConsent?: string;
+    disclaimerText?: string;
+  };
   identity?: {
     legalName?: string;
     description?: string;
@@ -362,44 +377,49 @@ export default function ClientPortalIntelligence() {
 
   return (
     <ClientPortalLayout>
-      <div className="space-y-6">
+      <div className="max-w-7xl mx-auto space-y-8 pb-12">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Building2 className="h-6 w-6 text-primary" />
-              Organization Intelligence
-            </h1>
-            <p className="text-muted-foreground mt-1">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-3xl font-bold tracking-tight">Organization Intelligence</h1>
+            <p className="text-muted-foreground text-lg">
               AI-powered insights about your organization for smarter campaign execution
             </p>
           </div>
           {org && (
-            <Button onClick={() => refetch()} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+               <span className="text-xs text-muted-foreground">
+                    Last updated: {org.updatedAt ? new Date(org.updatedAt).toLocaleDateString() : 'Never'}
+               </span>
+              <Button onClick={() => refetch()} variant="outline" size="icon" className="h-9 w-9" title="Refresh Data">
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
           )}
         </div>
 
         {/* Analysis Progress */}
-        {analysisProgress && <AnalysisProgressPanel progress={analysisProgress} />}
+        {analysisProgress && (
+           <div className="animate-in fade-in zoom-in-95 duration-300">
+             <AnalysisProgressPanel progress={analysisProgress} />
+           </div>
+        )}
 
         {/* No Organization State */}
         {!org && !showCreateForm && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-primary" />
-                Set Up Your Organization Profile
-              </CardTitle>
-              <CardDescription>
-                Create your organization profile to unlock AI-powered intelligence and better campaign targeting.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button onClick={() => setShowCreateForm(true)}>
-                <Building2 className="h-4 w-4 mr-2" />
+          <Card className="border-dashed border-2 shadow-sm bg-muted/10">
+            <CardContent className="flex flex-col items-center justify-center p-12 text-center space-y-4">
+              <div className="bg-primary/10 p-4 rounded-full">
+                <Building2 className="h-10 w-10 text-primary" />
+              </div>
+              <div className="space-y-2 max-w-md">
+                <h3 className="text-xl font-semibold">No Organization Profile Found</h3>
+                <p className="text-muted-foreground">
+                  Create your organization profile to unlock AI-powered intelligence and better campaign targeting.
+                </p>
+              </div>
+              <Button onClick={() => setShowCreateForm(true)} size="lg" className="mt-4">
+                <Sparkles className="h-4 w-4 mr-2" />
                 Create Organization Profile
               </Button>
             </CardContent>
@@ -408,12 +428,13 @@ export default function ClientPortalIntelligence() {
 
         {/* Create Organization Form */}
         {showCreateForm && (
-          <Card>
+          <Card className="max-w-lg mx-auto border-primary/20 shadow-lg">
             <CardHeader>
               <CardTitle>Create Organization Profile</CardTitle>
+              <CardDescription>Enter your company details to get started</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
+              <div className="space-y-2">
                 <Label>Organization Name *</Label>
                 <Input
                   placeholder="Your Company Name"
@@ -421,16 +442,20 @@ export default function ClientPortalIntelligence() {
                   onChange={(e) => setNewOrgName(e.target.value)}
                 />
               </div>
-              <div>
+              <div className="space-y-2">
                 <Label>Website Domain</Label>
-                <Input
-                  placeholder="example.com"
-                  value={newOrgDomain}
-                  onChange={(e) => setNewOrgDomain(e.target.value)}
-                />
+                <div className="relative">
+                  <Globe className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="example.com"
+                    value={newOrgDomain}
+                    onChange={(e) => setNewOrgDomain(e.target.value)}
+                  />
+                </div>
               </div>
             </CardContent>
-            <CardFooter className="flex justify-end gap-2">
+            <CardFooter className="flex justify-between border-t bg-muted/30 py-3">
               <Button variant="ghost" onClick={() => setShowCreateForm(false)}>
                 Cancel
               </Button>
@@ -447,77 +472,73 @@ export default function ClientPortalIntelligence() {
 
         {/* Organization Intelligence Content */}
         {org && (
-          <>
-            {/* Deep Analysis Card */}
-            <Card className="border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5 text-primary" />
-                  AI Deep Research
-                </CardTitle>
-                <CardDescription>
-                  Run multi-model AI analysis to gather comprehensive intelligence about your organization
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="flex-1">
-                    <Input
-                      placeholder={org.domain || "Enter your website domain (e.g., example.com)"}
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                      disabled={isAnalyzing}
-                    />
-                  </div>
-                  <Button
-                    onClick={runDeepAnalysis}
-                    disabled={isAnalyzing}
-                    className="bg-gradient-to-r from-primary to-primary/80"
-                  >
-                    {isAnalyzing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Analyzing...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4 mr-2" />
-                        Run Deep Analysis
-                      </>
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Deep analysis uses multiple AI models (OpenAI, Gemini, Claude) to research your company from the web and synthesize comprehensive intelligence.
-                </p>
-              </CardContent>
-            </Card>
-
+          <div className="space-y-8">
             {/* Intelligence Tabs */}
-            <Tabs defaultValue="overview" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-5 lg:w-auto">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="offerings">Offerings</TabsTrigger>
-                <TabsTrigger value="icp">Target Market</TabsTrigger>
-                <TabsTrigger value="positioning">Positioning</TabsTrigger>
-                <TabsTrigger value="outreach">Outreach</TabsTrigger>
-              </TabsList>
+            <Tabs defaultValue="overview" className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <TabsList className="grid w-full grid-cols-6 lg:w-[900px] h-12 p-1 bg-muted/50 rounded-lg">
+                  <TabsTrigger value="overview" className="rounded-md data-[state=active]:shadow-sm">Identity</TabsTrigger>
+                  <TabsTrigger value="branding" className="rounded-md data-[state=active]:shadow-sm">Branding</TabsTrigger>
+                  <TabsTrigger value="offerings" className="rounded-md data-[state=active]:shadow-sm">Offerings</TabsTrigger>
+                  <TabsTrigger value="icp" className="rounded-md data-[state=active]:shadow-sm">ICP & Market</TabsTrigger>
+                  <TabsTrigger value="positioning" className="rounded-md data-[state=active]:shadow-sm">Positioning</TabsTrigger>
+                  <TabsTrigger value="compliance" className="rounded-md data-[state=active]:shadow-sm">Compliance</TabsTrigger>
+                </TabsList>
 
-              {/* Overview Tab */}
-              <TabsContent value="overview">
+                {/* Settings / Deep Analysis Button */}
+                <Tabs value="settings" className="w-auto"> 
+                   <TabsList className="bg-transparent p-0">
+                      <TabsTrigger value="settings" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none p-0">
+                         <Button variant="outline" size="sm" className="gap-2">
+                            <Settings className="h-4 w-4" />
+                            Settings & Analysis
+                         </Button>
+                      </TabsTrigger>
+                   </TabsList>
+                   
+                   <TabsContent value="settings" className="absolute right-0 top-12 z-50 w-[400px] bg-card border rounded-xl shadow-xl p-4 mt-2">
+                       <div className="space-y-4">
+                          <h3 className="font-semibold flex items-center gap-2">
+                             <Sparkles className="h-4 w-4 text-primary" />
+                             Analyze Your Organization
+                          </h3>
+                          <div className="space-y-3">
+                              <p className="text-xs text-muted-foreground">
+                                Run multi-model AI analysis to gather comprehensive intelligence.
+                              </p>
+                              <div className="flex gap-2">
+                                <Input 
+                                  placeholder={org.domain || "example.com"} 
+                                  value={domain}
+                                  onChange={(e) => setDomain(e.target.value)}
+                                  className="h-9 text-sm"
+                                />
+                                <Button 
+                                  size="sm" 
+                                  onClick={runDeepAnalysis}
+                                  disabled={isAnalyzing}
+                                >
+                                  {isAnalyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Analyze"}
+                                </Button>
+                              </div>
+                          </div>
+                          
+                          {analysisProgress && <AnalysisProgressPanel progress={analysisProgress} />}
+                       </div>
+                   </TabsContent>
+                </Tabs>
+              </div>
+
+              {/* Overview Tab (Renamed Identity) */}
+              <TabsContent value="overview" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Building2 className="h-5 w-5" />
+                      <Building2 className="h-5 w-5 text-primary" />
                       Organization Identity
                     </CardTitle>
-                    {org.updatedAt && (
-                      <CardDescription>
-                        Last updated: {new Date(org.updatedAt).toLocaleDateString()}
-                      </CardDescription>
-                    )}
                   </CardHeader>
-                  <CardContent className="grid gap-4 md:grid-cols-2">
+                  <CardContent className="grid gap-6 md:grid-cols-2">
                     <IntelligenceField
                       label="Legal Name"
                       value={org.identity?.legalName || org.name}
@@ -559,87 +580,200 @@ export default function ClientPortalIntelligence() {
                 </Card>
               </TabsContent>
 
-              {/* Offerings Tab */}
-              <TabsContent value="offerings">
+              {/* Branding Tab */}
+              <TabsContent value="branding" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Award className="h-5 w-5" />
-                      Products & Services
+                      <Palette className="h-5 w-5 text-primary" />
+                      Branding & Voice
                     </CardTitle>
                     <CardDescription>
-                      What your organization offers and the problems you solve
+                      Define how your AI agents should speak and represent your brand
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="grid gap-6 md:grid-cols-2">
                     <IntelligenceField
-                      label="Core Products/Services"
-                      value={org.offerings?.coreProducts}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, coreProducts: value.split(',').map(s => s.trim()) } })}
+                      label="Tone of Voice"
+                      value={org.branding?.tone}
+                      placeholder="e.g. Professional, Friendly, Authoritative"
+                      icon={MessageSquare}
+                      onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, tone: value } })}
                     />
                     <IntelligenceField
-                      label="Key Use Cases"
-                      value={org.offerings?.useCases}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, useCases: value.split(',').map(s => s.trim()) } })}
+                      label="Communication Style"
+                      value={org.branding?.communicationStyle}
+                      placeholder="e.g. Concise, Detailed, Storytelling"
+                      icon={MessageSquare}
+                      onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, communicationStyle: value } })}
                     />
-                    <IntelligenceField
-                      label="Problems Solved"
-                      value={org.offerings?.problemsSolved}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, problemsSolved: value.split(',').map(s => s.trim()) } })}
-                    />
-                    <IntelligenceField
-                      label="Key Differentiators"
-                      value={org.offerings?.differentiators}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, differentiators: value.split(',').map(s => s.trim()) } })}
-                    />
+                    <div className="md:col-span-2">
+                      <IntelligenceField
+                        label="Brand Keywords"
+                        value={org.branding?.keywords}
+                        multiline
+                        placeholder="Comma-separated keywords to emphasize (e.g. innovative, reliable, fast)"
+                        icon={Brain}
+                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, keywords: value.split(',').map(s => s.trim()) } })}
+                      />
+                    </div>
+                     <div className="md:col-span-2">
+                      <IntelligenceField
+                        label="Forbidden Terms"
+                        value={org.branding?.forbiddenTerms}
+                        multiline
+                        placeholder="Comma-separated terms to avoid"
+                        icon={AlertCircle}
+                        onSave={(value) => updateMutation.mutate({ branding: { ...org.branding, forbiddenTerms: value.split(',').map(s => s.trim()) } })}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
 
-              {/* Target Market Tab */}
-              <TabsContent value="icp">
+              {/* Compliance Tab */}
+              <TabsContent value="compliance" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Target className="h-5 w-5" />
+                      <Shield className="h-5 w-5 text-primary" />
+                      Compliance & Governance
+                    </CardTitle>
+                    <CardDescription>
+                      Manage regulatory requirements, data residency, and compliance settings
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-6 md:grid-cols-2">
+                    <div className="md:col-span-2">
+                      <IntelligenceField
+                        label="Certifications"
+                        value={org.compliance?.certifications}
+                        multiline
+                        placeholder="Comma-separated certifications (e.g. SOC2, HIPAA, GDPR)"
+                        icon={Award}
+                        onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, certifications: value.split(',').map(s => s.trim()) } })}
+                      />
+                    </div>
+                    <IntelligenceField
+                      label="Data Residency"
+                      value={org.compliance?.dataResidency}
+                      placeholder="e.g. US, EU, Global"
+                      icon={Globe}
+                      onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, dataResidency: value } })}
+                    />
+                     <IntelligenceField
+                      label="Recording Consent Policy"
+                      value={org.compliance?.recordingConsent}
+                      placeholder="e.g. One-party, Two-party, Required"
+                      icon={Phone}
+                      onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, recordingConsent: value } })}
+                    />
+                    <div className="md:col-span-2">
+                      <IntelligenceField
+                        label="Call Disclaimer Text"
+                        value={org.compliance?.disclaimerText}
+                        multiline
+                        placeholder="Standard disclaimer to be read during calls"
+                        icon={AlertCircle}
+                        onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, disclaimerText: value } })}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Offerings Tab */}
+              <TabsContent value="offerings" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <div className="grid lg:grid-cols-3 gap-6">
+                    <Card className="lg:col-span-3">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Award className="h-5 w-5 text-primary" />
+                          Products & Services
+                        </CardTitle>
+                        <CardDescription>
+                          What your organization offers and the problems you solve
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
+                        <IntelligenceField
+                          label="Core Products/Services"
+                          value={org.offerings?.coreProducts}
+                          multiline
+                          onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, coreProducts: value.split(',').map(s => s.trim()) } })}
+                        />
+                         <div className="grid md:grid-cols-2 gap-6">
+                            <IntelligenceField
+                              label="Key Use Cases"
+                              value={org.offerings?.useCases}
+                              multiline
+                              onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, useCases: value.split(',').map(s => s.trim()) } })}
+                            />
+                            <IntelligenceField
+                              label="Problems Solved"
+                              value={org.offerings?.problemsSolved}
+                              multiline
+                              onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, problemsSolved: value.split(',').map(s => s.trim()) } })}
+                            />
+                        </div>
+                        <IntelligenceField
+                          label="Key Differentiators"
+                          value={org.offerings?.differentiators}
+                          multiline
+                          onSave={(value) => updateMutation.mutate({ offerings: { ...org.offerings, differentiators: value.split(',').map(s => s.trim()) } })}
+                        />
+                      </CardContent>
+                    </Card>
+                </div>
+              </TabsContent>
+
+              {/* Target Market Tab */}
+              <TabsContent value="icp" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Target className="h-5 w-5 text-primary" />
                       Ideal Customer Profile
                     </CardTitle>
                     <CardDescription>
                       Your target market and buyer personas
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <IntelligenceField
-                      label="Target Industries"
-                      value={org.icp?.industries}
-                      onSave={(value) => updateMutation.mutate({ icp: { ...org.icp, industries: value.split(',').map(s => s.trim()) } })}
-                    />
-                    <IntelligenceField
-                      label="Target Company Size"
-                      value={org.icp?.companySize}
-                      onSave={(value) => updateMutation.mutate({ icp: { ...org.icp, companySize: value } })}
-                    />
+                  <CardContent className="space-y-6">
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <IntelligenceField
+                          label="Target Industries"
+                          value={org.icp?.industries}
+                          onSave={(value) => updateMutation.mutate({ icp: { ...org.icp, industries: value.split(',').map(s => s.trim()) } })}
+                        />
+                        <IntelligenceField
+                          label="Target Company Size"
+                          value={org.icp?.companySize}
+                          onSave={(value) => updateMutation.mutate({ icp: { ...org.icp, companySize: value } })}
+                        />
+                    </div>
                     <div>
-                      <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-1">
+                      <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
                         <Users className="h-3 w-3" />
                         Target Personas
                       </Label>
-                      <div className="space-y-2">
+                      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {org.icp?.personas?.map((persona, idx) => (
-                          <div key={idx} className="p-3 rounded-md bg-muted/50">
-                            <p className="font-medium text-sm">{persona.title}</p>
+                          <div key={idx} className="p-4 rounded-lg bg-muted/30 border shadow-sm">
+                            <p className="font-semibold text-sm flex items-center gap-2">
+                                <Users className="w-3 h-3 text-primary"/> {persona.title}
+                            </p>
                             {persona.painPoints && persona.painPoints.length > 0 && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Pain Points: {persona.painPoints.join(', ')}
-                              </p>
+                              <div className="mt-3 text-xs text-muted-foreground">
+                                <span className="font-medium text-foreground">Pain Points:</span>
+                                <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                                 {persona.painPoints.map((pp, i) => <li key={i}>{pp}</li>)}
+                                </ul>
+                              </div>
                             )}
                           </div>
                         )) || (
-                          <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
+                          <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md col-span-full">
                             No personas defined
                           </p>
                         )}
@@ -656,140 +790,167 @@ export default function ClientPortalIntelligence() {
               </TabsContent>
 
               {/* Positioning Tab */}
-              <TabsContent value="positioning">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Lightbulb className="h-5 w-5" />
-                      Market Positioning
-                    </CardTitle>
-                    <CardDescription>
-                      How you differentiate from competitors
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <IntelligenceField
-                      label="One-Liner Pitch"
-                      value={org.positioning?.oneLiner}
-                      onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, oneLiner: value } })}
-                    />
-                    <IntelligenceField
-                      label="Value Proposition"
-                      value={org.positioning?.valueProposition}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, valueProposition: value } })}
-                    />
-                    <IntelligenceField
-                      label="Competitors"
-                      value={org.positioning?.competitors}
-                      onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, competitors: value.split(',').map(s => s.trim()) } })}
-                    />
-                    <IntelligenceField
-                      label="Why Choose Us"
-                      value={org.positioning?.whyUs}
-                      multiline
-                      onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, whyUs: value.split(',').map(s => s.trim()) } })}
-                    />
-                  </CardContent>
-                </Card>
+              <TabsContent value="positioning" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <div className="grid lg:grid-cols-2 gap-6">
+                    <Card className="bg-primary/5 border-primary/20">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Lightbulb className="h-5 w-5 text-primary" />
+                          Market Positioning
+                        </CardTitle>
+                        <CardDescription>
+                          How you differentiate from competitors
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
+                        <IntelligenceField
+                          label="One-Liner Pitch"
+                          value={org.positioning?.oneLiner}
+                          onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, oneLiner: value } })}
+                        />
+                        <IntelligenceField
+                          label="Value Proposition"
+                          value={org.positioning?.valueProposition}
+                          multiline
+                          onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, valueProposition: value } })}
+                        />
+                        <IntelligenceField
+                          label="Why Choose Us"
+                          value={org.positioning?.whyUs}
+                          multiline
+                          onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, whyUs: value.split(',').map(s => s.trim()) } })}
+                        />
+                      </CardContent>
+                    </Card>
+                    
+                     <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <TrendingUp className="h-5 w-5 text-primary" />
+                          Competitive Landscape
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <IntelligenceField
+                          label="Primary Competitors"
+                          value={org.positioning?.competitors}
+                          onSave={(value) => updateMutation.mutate({ positioning: { ...org.positioning, competitors: value.split(',').map(s => s.trim()) } })}
+                        />
+                      </CardContent>
+                    </Card>
+                </div>
               </TabsContent>
 
               {/* Outreach Tab */}
-              <TabsContent value="outreach">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <MessageSquare className="h-5 w-5" />
-                      Outreach Intelligence
-                    </CardTitle>
-                    <CardDescription>
-                      AI-generated messaging angles and call scripts
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
-                        <Mail className="h-3 w-3" />
-                        Email Angles
-                      </Label>
-                      <div className="space-y-2">
-                        {org.outreach?.emailAngles?.map((angle, idx) => (
-                          <div key={idx} className="p-3 rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900">
-                            <p className="text-sm">{angle}</p>
-                          </div>
-                        )) || (
-                          <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
-                            Run deep analysis to generate email angles
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <Separator />
-                    <div>
-                      <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
-                        <Phone className="h-3 w-3" />
-                        Call Openers
-                      </Label>
-                      <div className="space-y-2">
-                        {org.outreach?.callOpeners?.map((opener, idx) => (
-                          <div key={idx} className="p-3 rounded-md bg-green-50 dark:bg-green-950/30 border border-green-100 dark:border-green-900">
-                            <p className="text-sm">{opener}</p>
-                          </div>
-                        )) || (
-                          <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
-                            Run deep analysis to generate call openers
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    {org.outreach?.objectionHandlers && org.outreach.objectionHandlers.length > 0 && (
-                      <>
-                        <Separator />
+              <TabsContent value="outreach" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <div className="grid lg:grid-cols-2 gap-6">
+                    <Card className="h-full">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <MessageSquare className="h-5 w-5 text-primary" />
+                          Outreach Strategy
+                        </CardTitle>
+                        <CardDescription>
+                          Messaging angles and scripts
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
                         <div>
-                          <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-2">
-                            <AlertCircle className="h-3 w-3" />
-                            Objection Handlers
+                          <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-3">
+                            <Mail className="h-3 w-3" />
+                            Email Angles
                           </Label>
-                          <div className="space-y-2">
-                            {org.outreach.objectionHandlers.map((handler, idx) => (
-                              <div key={idx} className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900">
-                                <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                                  "{handler.objection}"
-                                </p>
-                                <p className="text-sm mt-1 text-muted-foreground">{handler.response}</p>
+                          <div className="space-y-3">
+                            {org.outreach?.emailAngles?.map((angle, idx) => (
+                              <div key={idx} className="p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 text-sm">
+                                {angle}
                               </div>
-                            ))}
+                            )) || (
+                              <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
+                                Run deep analysis to generate email angles
+                              </p>
+                            )}
                           </div>
                         </div>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
+                        <Separator />
+                        <div>
+                          <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 mb-3">
+                            <Phone className="h-3 w-3" />
+                            Call Openers
+                          </Label>
+                          <div className="space-y-3">
+                            {org.outreach?.callOpeners?.map((opener, idx) => (
+                              <div key={idx} className="p-3 rounded-lg bg-green-50/50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/50 text-sm">
+                                {opener}
+                              </div>
+                            )) || (
+                              <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md">
+                                Run deep analysis to generate call openers
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="h-full">
+                         <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                              <AlertCircle className="h-5 w-5 text-primary" />
+                              Objection Handling
+                            </CardTitle>
+                         </CardHeader>
+                         <CardContent>
+                            {org.outreach?.objectionHandlers && org.outreach.objectionHandlers.length > 0 ? (
+                                <div className="space-y-4">
+                                    {org.outreach.objectionHandlers.map((handler, idx) => (
+                                      <div key={idx} className="p-4 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/50">
+                                        <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">
+                                          "{handler.objection}"
+                                        </p>
+                                        <p className="text-sm text-muted-foreground leading-relaxed">{handler.response}</p>
+                                      </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-muted-foreground italic">
+                                    No objection handlers available.
+                                </p>
+                            )}
+                         </CardContent>
+                    </Card>
+                </div>
               </TabsContent>
             </Tabs>
 
             {/* Linked Campaigns */}
             {data?.campaigns && data.campaigns.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Linked Campaigns</CardTitle>
-                  <CardDescription>
-                    Campaigns using this organization's intelligence
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
+              <div className="pt-8">
+                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                      <Zap className="w-5 h-5 text-amber-500" />
+                      Active Campaigns Using This Intelligence
+                  </h3>
+                  <div className="flex flex-wrap gap-3">
                     {data.campaigns.map((campaign) => (
-                      <Badge key={campaign.id} variant="secondary">
-                        {campaign.name}
-                        <span className="ml-1 text-xs opacity-70">({campaign.status})</span>
-                      </Badge>
+                      <Card key={campaign.id} className="w-64 border shadow-sm hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                              <div className="font-medium truncate" title={campaign.name}>{campaign.name}</div>
+                              <div className="flex items-center gap-2 mt-2">
+                                  <Badge variant="outline" className={cn(
+                                      "capitalize",
+                                      campaign.status === "active" ? "text-green-600 bg-green-50 border-green-200" :
+                                      campaign.status === "paused" ? "text-amber-600 bg-amber-50 border-amber-200" : ""
+                                  )}>
+                                      {campaign.status}
+                                  </Badge>
+                              </div>
+                          </CardContent>
+                      </Card>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+              </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </ClientPortalLayout>

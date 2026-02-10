@@ -222,6 +222,7 @@ router.post('/campaign-intake/:id/approve', requireAuth, async (req: Request, re
             clientAccountId: campaign.clientAccountId || updated.clientAccountId || undefined,
             intakeRequestId: campaign.intakeRequestId || updated.id,
             creationMode: campaign.creationMode || 'intake',
+            approvalStatus: 'published',
             updatedAt: new Date(),
           })
           .where(eq(campaigns.id, updated.campaignId));
@@ -358,6 +359,7 @@ router.post('/campaign-intake/:id/qso', requireAuth, async (req: Request, res: R
             name: `Campaign - ${updated.id.slice(0, 8).toUpperCase()}`,
             type: campaignType as any,
             status: 'draft',
+            approvalStatus: 'published',
             clientAccountId: updated.clientAccountId || undefined,
             projectId: updated.projectId,
             intakeRequestId: updated.id,
@@ -802,6 +804,7 @@ router.post('/agentic-campaign/:id/finalize', requireAuth, async (req: Request, 
         name: contextConfig.objective?.slice(0, 100) || 'New Campaign',
         type: 'call',
         status: 'draft',
+        approvalStatus: 'published',
         clientAccountId,
         projectId,
         campaignObjective: contextConfig.objective,

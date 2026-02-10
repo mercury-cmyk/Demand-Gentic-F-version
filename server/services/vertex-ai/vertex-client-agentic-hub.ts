@@ -395,6 +395,7 @@ Return JSON:
         clientAccountId: this.context.clientAccountId,
         projectId: project.id,
         status: 'draft',
+        approvalStatus: 'in_review',
         targetQualifiedLeads: request.volumeRequested,
         dialMode: 'ai_agent',
         startDate: new Date(),
