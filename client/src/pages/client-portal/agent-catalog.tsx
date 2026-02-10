@@ -140,45 +140,58 @@ const AGENT_CATALOG: AgentTypeDefinition[] = [
   }
 ];
 
+// Safely coerce a value that should be a string[] but may come back as a string or other type
+function ensureStringArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string' && val.trim()) return val.split(',').map(s => s.trim()).filter(Boolean);
+  return [];
+}
+
+// Safely coerce a value that should be an object[] (e.g. personas) but may come back as a non-array
+function ensureObjectArray<T>(val: unknown): T[] {
+  if (Array.isArray(val)) return val;
+  return [];
+}
+
 function getAgentPersonalization(agentId: string, org: OrganizationIntelligence): string[] {
   const bullets: (string | undefined)[] = [];
 
   switch (agentId) {
     case 'voice': {
-      const industries = org.icp?.industries?.slice(0, 3).join(', ');
+      const industries = ensureStringArray(org.icp?.industries).slice(0, 3).join(', ');
       if (industries) bullets.push(`Calls prospects in ${industries} on behalf of ${org.name}`);
-      const opener = org.outreach?.callOpeners?.[0];
+      const opener = ensureStringArray(org.outreach?.callOpeners)[0];
       if (opener) bullets.push(`Opens with: "${opener.length > 80 ? opener.substring(0, 80) + '...' : opener}"`);
-      const objection = org.icp?.objections?.[0];
+      const objection = ensureStringArray(org.icp?.objections)[0];
       if (objection) bullets.push(`Handles objections like: "${objection}"`);
-      const personas = org.icp?.personas?.map(p => p.title).join(', ');
+      const personas = ensureObjectArray<{title?: string}>(org.icp?.personas).map(p => p.title).filter(Boolean).join(', ');
       if (personas && org.icp?.companySize) bullets.push(`Qualifies ${personas} at ${org.icp.companySize} companies`);
       else if (personas) bullets.push(`Qualifies ${personas}`);
       if (org.positioning?.oneLiner) bullets.push(`Pitches: "${org.positioning.oneLiner}"`);
       break;
     }
     case 'email': {
-      const products = org.offerings?.coreProducts?.slice(0, 3).join(', ');
+      const products = ensureStringArray(org.offerings?.coreProducts).slice(0, 3).join(', ');
       if (products) bullets.push(`Crafts emails about ${products}`);
-      const angle = org.outreach?.emailAngles?.[0];
+      const angle = ensureStringArray(org.outreach?.emailAngles)[0];
       if (angle) bullets.push(`Uses angle: "${angle.length > 80 ? angle.substring(0, 80) + '...' : angle}"`);
-      const personas = org.icp?.personas?.map(p => p.title).join(', ');
-      const industries = org.icp?.industries?.slice(0, 3).join(', ');
+      const personas = ensureObjectArray<{title?: string}>(org.icp?.personas).map(p => p.title).filter(Boolean).join(', ');
+      const industries = ensureStringArray(org.icp?.industries).slice(0, 3).join(', ');
       if (personas && industries) bullets.push(`Targets ${personas} in ${industries}`);
       else if (personas) bullets.push(`Targets ${personas}`);
       if (org.positioning?.oneLiner) bullets.push(`Positions you as: "${org.positioning.oneLiner}"`);
-      const problems = org.offerings?.problemsSolved?.slice(0, 2).join(', ');
+      const problems = ensureStringArray(org.offerings?.problemsSolved).slice(0, 2).join(', ');
       if (problems) bullets.push(`Addresses pain points: ${problems}`);
       break;
     }
     case 'research_analysis': {
-      const industries = org.icp?.industries?.join(', ');
+      const industries = ensureStringArray(org.icp?.industries).join(', ');
       if (industries) bullets.push(`Researches accounts in ${industries}`);
-      const competitors = org.positioning?.competitors?.join(', ');
+      const competitors = ensureStringArray(org.positioning?.competitors).join(', ');
       if (competitors) bullets.push(`Tracks competitors: ${competitors}`);
-      const products = org.offerings?.coreProducts?.slice(0, 3).join(', ');
+      const products = ensureStringArray(org.offerings?.coreProducts).slice(0, 3).join(', ');
       if (products) bullets.push(`Identifies buying signals for ${products}`);
-      const regions = org.identity?.regions?.join(', ');
+      const regions = ensureStringArray(org.identity?.regions).join(', ');
       if (org.icp?.companySize && regions) bullets.push(`Monitors ${org.icp.companySize} companies in ${regions}`);
       else if (org.icp?.companySize) bullets.push(`Monitors ${org.icp.companySize} companies`);
       break;
@@ -186,22 +199,22 @@ function getAgentPersonalization(agentId: string, org: OrganizationIntelligence)
     case 'compliance': {
       const industry = org.identity?.industry || org.industry;
       if (industry) bullets.push(`Enforces compliance for ${industry} industry standards`);
-      const productCount = org.offerings?.coreProducts?.length;
+      const productCount = ensureStringArray(org.offerings?.coreProducts).length;
       if (productCount) bullets.push(`Monitors script adherence across ${productCount} product line${productCount > 1 ? 's' : ''}`);
-      const industries = org.icp?.industries?.slice(0, 3).join(', ');
+      const industries = ensureStringArray(org.icp?.industries).slice(0, 3).join(', ');
       if (industries) bullets.push(`Screens communications targeting ${industries}`);
       if (org.positioning?.oneLiner) bullets.push(`Ensures messaging aligns with: "${org.positioning.oneLiner}"`);
       break;
     }
     case 'data_management': {
-      const personas = org.icp?.personas?.map(p => p.title).join(', ');
+      const personas = ensureObjectArray<{title?: string}>(org.icp?.personas).map(p => p.title).filter(Boolean).join(', ');
       if (personas) bullets.push(`Enriches contacts matching ${personas}`);
-      const industries = org.icp?.industries?.join(', ');
+      const industries = ensureStringArray(org.icp?.industries).join(', ');
       if (industries) bullets.push(`Segments by ${industries}`);
       if (org.icp?.companySize) bullets.push(`Validates against ${org.icp.companySize} company criteria`);
-      const products = org.offerings?.coreProducts?.slice(0, 3).join(', ');
+      const products = ensureStringArray(org.offerings?.coreProducts).slice(0, 3).join(', ');
       if (products) bullets.push(`Syncs data for ${products} campaigns`);
-      const regions = org.identity?.regions?.join(', ');
+      const regions = ensureStringArray(org.identity?.regions).join(', ');
       if (regions) bullets.push(`Deduplicates across ${regions} regions`);
       break;
     }
@@ -217,10 +230,10 @@ function getIntelligenceCompleteness(org: OrganizationIntelligence): { score: nu
   if (org.identity?.description || org.identity?.industry) score++;
   else missing.push('Identity');
 
-  if (org.offerings?.coreProducts && org.offerings.coreProducts.length > 0) score++;
+  if (ensureStringArray(org.offerings?.coreProducts).length > 0) score++;
   else missing.push('Offerings');
 
-  if ((org.icp?.industries && org.icp.industries.length > 0) || (org.icp?.personas && org.icp.personas.length > 0)) score++;
+  if ((ensureStringArray(org.icp?.industries).length > 0) || (ensureObjectArray(org.icp?.personas).length > 0)) score++;
   else missing.push('ICP & Market');
 
   if (org.positioning?.oneLiner || org.positioning?.valueProposition) score++;

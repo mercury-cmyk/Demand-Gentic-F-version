@@ -43,6 +43,7 @@ import {
   Copy,
   ShieldCheck,
   Trash2,
+  LogIn,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
 import {
@@ -56,6 +57,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { setClientPortalSession } from '@/lib/client-portal-session';
 
 // Components for Client Profile and Settings
 const ClientProfileEditor = ({ client, onSave, isLoading }: { client: any; onSave: (data: any) => void; isLoading: boolean }) => {
@@ -920,6 +922,27 @@ export default function ClientPortalAdmin() {
     },
   });
 
+  const loginAsClientMutation = useMutation({
+    mutationFn: async ({ clientId, userId }: { clientId: string; userId?: string }) => {
+      const res = await apiRequest('POST', `/api/client-portal/admin/clients/${clientId}/login-as`, userId ? { userId } : {});
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || 'Failed to login as client');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setClientPortalSession(data.token, data.user);
+      toast({ title: `Signed in as ${data.user.email}`, description: `Opening ${data.user.clientAccountName} dashboard...` });
+      setTimeout(() => {
+        window.open('/client-portal/dashboard', '_blank');
+      }, 300);
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const updateClientMutation = useMutation({
     mutationFn: async (payload: Partial<any>) => {
       if (!selectedClient) throw new Error('No client selected');
@@ -1262,6 +1285,15 @@ export default function ClientPortalAdmin() {
                   </div>
                   {selectedClient && (
                     <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={loginAsClientMutation.isPending}
+                        onClick={() => loginAsClientMutation.mutate({ clientId: selectedClient.id })}
+                      >
+                        <LogIn className="h-4 w-4 mr-1" />
+                        {loginAsClientMutation.isPending ? 'Signing in...' : 'Login as Client'}
+                      </Button>
                       <Button variant="outline" size="sm" onClick={handleOpenBillingConfig}>
                         <DollarSign className="h-4 w-4 mr-1" />
                         Billing
@@ -1468,6 +1500,7 @@ export default function ClientPortalAdmin() {
                               <TableHead>Name</TableHead>
                               <TableHead>Last Login</TableHead>
                               <TableHead>Status</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -1486,6 +1519,17 @@ export default function ClientPortalAdmin() {
                                   <Badge variant={user.isActive ? 'default' : 'secondary'}>
                                     {user.isActive ? 'Active' : 'Inactive'}
                                   </Badge>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={loginAsClientMutation.isPending}
+                                    onClick={() => loginAsClientMutation.mutate({ clientId: selectedClient!.id, userId: user.id })}
+                                  >
+                                    <LogIn className="h-3.5 w-3.5 mr-1" />
+                                    Sign In
+                                  </Button>
                                 </TableCell>
                               </TableRow>
                             ))}

@@ -723,9 +723,9 @@ async function setOrchestratorStallReason(campaignId: string, reason: string | n
  * Process a single campaign - initiate calls to maintain concurrency
  */
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
-  // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+  // Guard: calls blocked by default — must be enabled in Telephony settings
   if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
-    await setOrchestratorStallReason(campaignId, 'Call execution disabled. Switch webhooks to dev mode in Telephony settings.');
+    await setOrchestratorStallReason(campaignId, 'Call execution disabled. Go to Settings > Telephony and enable call execution.');
     return { initiated: 0, skipped: 0 };
   }
 

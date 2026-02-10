@@ -93,10 +93,10 @@ router.post("/:campaignId/test-call", requireDualAuth, requireRole("admin", "cam
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isClient, isWorkOrderSource, body: req.body });
 
-    // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+    // Guard: calls blocked by default — must be enabled in Telephony settings
     if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
       return res.status(403).json({
-        message: "Call execution is not enabled. Go to Settings > Telephony and click 'Switch to Dev' to enable calls on this server."
+        message: "Call execution is not enabled. Go to Settings > Telephony and enable call execution."
       });
     }
 

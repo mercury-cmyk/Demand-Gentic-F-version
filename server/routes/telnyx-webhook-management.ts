@@ -534,14 +534,14 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       }
     }
 
-    // Disable call execution on this server — production Cloud Run handles calls now
-    process.env.CALL_EXECUTION_ENABLED = 'false';
-    console.log('[Telnyx Webhook] 🚫 Call execution DISABLED on this server (production mode)');
+    // Keep call execution enabled — this server (Cloud Run) handles production calls
+    process.env.CALL_EXECUTION_ENABLED = 'true';
+    console.log('[Telnyx Webhook] ✅ Call execution ENABLED on this server (production mode)');
 
     res.json({
       success: true,
-      message: 'Switched to production webhook URLs. Call execution disabled on this server.',
-      callExecutionEnabled: false,
+      message: 'Switched to production webhook URLs. Call execution enabled on this server.',
+      callExecutionEnabled: true,
       config: {
         voiceUrl,
         statusCallbackUrl,

@@ -601,10 +601,10 @@ class CampaignRunnerService {
   }
 
   private async loadCampaignTasks(campaignId: string): Promise<void> {
-    // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+    // Guard: calls blocked by default — must be enabled in Telephony settings
     if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
-      console.log(`${LOG_PREFIX} Skipping task load - call execution not enabled. Switch webhooks to dev mode first.`);
-      this.broadcastStallReason(campaignId, 'Call execution is disabled. Switch webhooks to dev mode in Telephony settings.');
+      console.log(`${LOG_PREFIX} Skipping task load - call execution not enabled. Enable call execution in Telephony settings.`);
+      this.broadcastStallReason(campaignId, 'Call execution is disabled. Go to Settings > Telephony and enable call execution.');
       return;
     }
 

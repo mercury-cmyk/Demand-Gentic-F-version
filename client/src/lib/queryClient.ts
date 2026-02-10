@@ -25,9 +25,11 @@ async function throwIfResNotOk(res: Response, url?: string) {
 export function getAuthHeaders(url?: string): HeadersInit {
   const headers: HeadersInit = {};
   
-  // Choose token based on URL or current path context
-  const isClientPortal = url?.includes('/api/client-portal/') || 
-                         window.location.pathname.startsWith('/client-portal/');
+  // Choose token based on current page context first, then URL
+  // Admin pages calling /api/client-portal/admin/* should use admin token
+  const isOnClientPortalPage = window.location.pathname.startsWith('/client-portal/');
+  const isClientPortal = isOnClientPortalPage ||
+                         (url?.includes('/api/client-portal/') && !url?.includes('/api/client-portal/admin/'));
   
   if (isClientPortal) {
     const token = localStorage.getItem('clientPortalToken');

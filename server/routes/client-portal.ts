@@ -1781,6 +1781,71 @@ router.get('/admin/clients', requireAuth, requireRole('admin', 'campaign_manager
   }
 });
 
+/**
+ * POST /admin/clients/:clientId/login-as
+ * Admin impersonation: generate a client portal token for an admin to sign into a client's dashboard.
+ * Picks the first active user on the account, or a specific userId if provided.
+ */
+router.post('/admin/clients/:clientId/login-as', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { userId } = req.body;
+
+    // Get client account
+    const [account] = await db
+      .select()
+      .from(clientAccounts)
+      .where(eq(clientAccounts.id, clientId))
+      .limit(1);
+
+    if (!account) {
+      return res.status(404).json({ message: 'Client account not found' });
+    }
+
+    // Find the target user
+    let targetUser;
+    if (userId) {
+      [targetUser] = await db
+        .select()
+        .from(clientUsers)
+        .where(and(eq(clientUsers.id, userId), eq(clientUsers.clientAccountId, clientId)))
+        .limit(1);
+    } else {
+      // Pick the first active user
+      [targetUser] = await db
+        .select()
+        .from(clientUsers)
+        .where(and(eq(clientUsers.clientAccountId, clientId), eq(clientUsers.isActive, true)))
+        .limit(1);
+    }
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'No active user found for this client account' });
+    }
+
+    // Generate token with isOwner=true since an admin is impersonating
+    const token = generateClientToken(targetUser, true);
+
+    console.log(`[CLIENT PORTAL] Admin ${req.user!.userId} logged in as client user ${targetUser.email} (account: ${account.name})`);
+
+    res.json({
+      token,
+      user: {
+        id: targetUser.id,
+        email: targetUser.email,
+        firstName: targetUser.firstName,
+        lastName: targetUser.lastName,
+        clientAccountId: targetUser.clientAccountId,
+        clientAccountName: account.name,
+        isOwner: true,
+      },
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Admin login-as error:', error);
+    res.status(500).json({ message: 'Failed to generate client session' });
+  }
+});
+
 router.post('/admin/clients', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
     const data = insertClientAccountSchema.parse({
