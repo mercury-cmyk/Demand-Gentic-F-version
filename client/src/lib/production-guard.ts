@@ -52,7 +52,9 @@ function interceptLocalhostRequests() {
   XMLHttpRequest.prototype.open = function patchedOpen(
     method: string,
     url: string | URL,
-    ...args: any[]
+    async?: boolean,
+    username?: string | null,
+    password?: string | null,
   ) {
     const urlStr = typeof url === 'string' ? url : url.href;
     if (isLocalhostUrl(urlStr)) {
@@ -62,7 +64,7 @@ function interceptLocalhostRequests() {
       // Don't actually open the connection — just let it fail silently later
       return;
     }
-    return originalOpen.call(this, method, url, ...args);
+    return originalOpen.call(this, method, url, async ?? true, username, password);
   };
 
   // --- WebSocket ---
