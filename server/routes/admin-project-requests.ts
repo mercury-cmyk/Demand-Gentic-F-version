@@ -27,6 +27,7 @@ import {
 import { requireAuth } from '../auth';
 import { generateJSON } from '../services/vertex-ai';
 import { notificationService } from '../services/notification-service';
+import { notificationService as mercuryNotificationService } from '../services/mercury';
 
 const router = Router();
 
@@ -329,6 +330,26 @@ router.post('/:id/approve', requireAuth, async (req: Request, res: Response) => 
       console.error('[Admin Project Requests] Notification error:', notifyError);
     }
 
+    // Mercury Bridge: Dispatch project_request_approved event (async, non-blocking)
+    mercuryNotificationService.dispatch({
+      eventType: 'project_request_approved',
+      tenantId: project.clientAccountId,
+      actorUserId: userId,
+      payload: {
+        projectName: project.name,
+        projectId: project.id,
+        approvalDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        approvedBy: userId,
+        campaignId: createdCampaign?.id || '',
+        portalLink: createdCampaign
+          ? `/client-portal/campaigns/${createdCampaign.id}`
+          : '/client-portal/projects',
+        recipientName: project.name, // Will be overridden by template variables per-recipient
+      },
+    }).catch(err => {
+      console.error('[Admin Project Requests] Mercury notification error:', err.message);
+    });
+
     res.json({
       success: true,
       project: updatedProject,
@@ -410,6 +431,21 @@ router.post('/:id/reject', requireAuth, async (req: Request, res: Response) => {
     } catch (notifyError) {
       console.error('[Admin Project Requests] Notification error:', notifyError);
     }
+
+    // Mercury Bridge: Dispatch project_request_rejected event (async, non-blocking)
+    mercuryNotificationService.dispatch({
+      eventType: 'project_request_rejected',
+      tenantId: project.clientAccountId,
+      actorUserId: userId,
+      payload: {
+        projectName: project.name,
+        projectId: project.id,
+        rejectionReason: parsed.reason,
+        recipientName: project.name,
+      },
+    }).catch(err => {
+      console.error('[Admin Project Requests] Mercury notification error:', err.message);
+    });
 
     res.json({
       success: true,

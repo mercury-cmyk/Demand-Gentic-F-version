@@ -42,6 +42,16 @@ export const FEATURE_FLAGS = {
     description: 'Enable Argyle event → admin project request → approval → campaign creation pipeline (Argyle-only client gate)',
     default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
   },
+  smtp_email_enabled: {
+    name: 'smtp_email_enabled',
+    description: 'Enable Mercury Bridge SMTP email sending for notifications, test sends, and templated emails',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
+  bulk_invites_enabled: {
+    name: 'bulk_invites_enabled',
+    description: 'Enable bulk client portal invitations via Mercury Bridge email system',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
   // Add more feature flags here as needed
 } as const;
 

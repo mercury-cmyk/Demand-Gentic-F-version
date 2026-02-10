@@ -144,6 +144,7 @@ import PromptInspectorPage from "@/pages/prompt-inspector";
 import SmtpProvidersPage from "@/pages/smtp-providers";
 import TransactionalTemplatesPage from "@/pages/transactional-templates";
 import DomainManagementPage from "@/pages/domain-management";
+import MercuryNotificationsPage from "@/pages/mercury-notifications";
 import DeliverabilityDashboardPage from "@/pages/deliverability-dashboard";
 import BrandKitsPage from "@/pages/brand-kits";
 import { EmailBuilderDnD } from "@/components/email-builder/EmailBuilderDnD";
@@ -424,6 +425,7 @@ function AuthenticatedApp() {
               <Route path="/settings/smtp-providers" component={SmtpProvidersPage} />
               <Route path="/settings/transactional-templates" component={TransactionalTemplatesPage} />
               <Route path="/settings/domain-management" component={DomainManagementPage} />
+              <Route path="/settings/mercury-notifications" component={MercuryNotificationsPage} />
               <Route path="/settings/deliverability" component={DeliverabilityDashboardPage} />
               <Route path="/settings/brand-kits" component={BrandKitsPage} />
               <Route path="/email-builder" component={() => <EmailBuilderDnD />} />
