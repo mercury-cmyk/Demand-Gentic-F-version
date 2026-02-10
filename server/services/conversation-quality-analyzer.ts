@@ -458,18 +458,50 @@ Return JSON with this exact shape and no extra keys:
 }`;
 
   try {
-    const response = await getDeepSeekClient().chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: "Return only valid JSON. No markdown." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.3,
-    });
+    let response;
+    let actualModel = model;
+
+    // Try DeepSeek first, fall back to Gemini if DeepSeek is not configured
+    const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
+    const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
+
+    if (hasDeepSeek) {
+      response = await getDeepSeekClient().chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: "Return only valid JSON. No markdown." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+      });
+    } else if (hasGemini) {
+      // Fallback: Use Gemini via Google AI SDK
+      console.log("[ConversationQuality] DeepSeek not configured, falling back to Gemini");
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genai = new GoogleGenerativeAI(geminiKey!);
+      const geminiModel = genai.getGenerativeModel({
+        model: "gemini-2.0-flash",
+        generationConfig: { temperature: 0.3, responseMimeType: "application/json" },
+      });
+      const geminiResult = await geminiModel.generateContent(prompt);
+      const geminiContent = geminiResult.response?.text() || null;
+      if (!geminiContent) {
+        return buildFallbackAnalysis(input, "analysis_failed", "Gemini returned empty content.");
+      }
+      actualModel = "gemini-2.0-flash";
+      // Wrap in OpenAI-compatible format for uniform handling below
+      response = {
+        choices: [{ message: { content: geminiContent } }],
+      } as any;
+    } else {
+      console.warn("[ConversationQuality] No AI provider configured (DEEPSEEK_API_KEY or GEMINI_API_KEY required)");
+      return buildFallbackAnalysis(input, "analysis_failed", "No AI provider configured for quality analysis.");
+    }
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      return buildFallbackAnalysis(input, "analysis_failed", "DeepSeek returned empty content.");
+      return buildFallbackAnalysis(input, "analysis_failed", `${actualModel} returned empty content.`);
     }
 
     let jsonStr = content.trim();
@@ -538,7 +570,7 @@ Return JSON with this exact shape and no extra keys:
         outcome: raw.learningSignals?.outcome || input.disposition,
       },
       metadata: {
-        model,
+        model: actualModel,
         analyzedAt: new Date().toISOString(),
         interactionType: input.interactionType,
         analysisStage: input.analysisStage || "post_call",

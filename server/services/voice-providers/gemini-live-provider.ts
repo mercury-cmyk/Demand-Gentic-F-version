@@ -73,7 +73,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   // Anti-repetition: Track recent phrases to prevent loops
   private recentPhrases: string[] = [];
-  private readonly MAX_RECENT_PHRASES = 10;
+  private readonly MAX_RECENT_PHRASES = 15;
+  private consecutiveRepetitions: number = 0;
 
   // Speech-to-Text streaming for user transcription
   private speechClient: SpeechClient | null = null;
@@ -362,7 +363,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
               },
             },
           },
-          temperature: config.temperature ?? 0.5,
+          temperature: config.temperature ?? 0.7,
         },
         systemInstruction: {
           parts: [{ text: config.systemPrompt }],
@@ -398,7 +399,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
               },
             },
           },
-          temperature: config.temperature ?? 0.5,
+          temperature: config.temperature ?? 0.7,
         },
         system_instruction: {
           parts: [{ text: config.systemPrompt }],
@@ -1034,9 +1035,17 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         });
 
         if (isRepetition) {
-          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED - suppressing duplicate phrase: "${text.substring(0, 50)}..."`);
-          // Don't emit or track this phrase - it's a repeat
+          this.consecutiveRepetitions++;
+          console.warn(`${LOG_PREFIX} ⚠️ REPETITION DETECTED (${this.consecutiveRepetitions}x) - suppressing: "${text.substring(0, 50)}..."`);
+
+          // After 2+ consecutive repetitions, interrupt Gemini to break the loop
+          if (this.consecutiveRepetitions >= 2) {
+            console.warn(`${LOG_PREFIX} 🛑 Breaking repetition loop - sending cancel to Gemini`);
+            this.cancelResponse();
+            this.consecutiveRepetitions = 0;
+          }
         } else {
+          this.consecutiveRepetitions = 0;
           // Track this phrase for future comparison
           this.recentPhrases.push(normalizedText);
           if (this.recentPhrases.length > this.MAX_RECENT_PHRASES) {

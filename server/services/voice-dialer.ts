@@ -1709,7 +1709,10 @@ function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
       if (framesDue <= 0) return;
 
       const framesAvailable = Math.floor(session.telnyxOutboundBuffer.length / TELNYX_G711_FRAME_BYTES);
-      const framesToSend = Math.min(framesDue, framesAvailable, TELNYX_MAX_FRAMES_PER_TICK);
+      // If buffer is above 50% capacity, allow 2x drain rate to catch up and avoid drops
+      const bufferPressure = session.telnyxOutboundBuffer.length / TELNYX_MAX_BUFFER_BYTES;
+      const maxFrames = bufferPressure > 0.5 ? TELNYX_MAX_FRAMES_PER_TICK * 2 : TELNYX_MAX_FRAMES_PER_TICK;
+      const framesToSend = Math.min(framesDue, framesAvailable, maxFrames);
       if (framesToSend <= 0) return;
 
       for (let i = 0; i < framesToSend; i++) {
@@ -1962,13 +1965,15 @@ openaiWs.on("open", async () => {
       console.log(`${LOG_PREFIX} ✅ Organization name resolved: "${resolvedOrgName}"`);
     }
 
+      // Resolve agent name from persona or selected voice name
+      const resolvedAgentNameForTemplate = campaignConfig?.agentName || campaignConfig?.voice || null;
       const voiceTemplateValues = buildVoiceTemplateValues({
         baseValues: session.voiceVariables,
         contactInfo,
         callerId: session.fromNumber || process.env.TELNYX_FROM_NUMBER || null,
         calledNumber: session.calledNumber || null,
         orgName: resolvedOrgName,
-        agentName: campaignConfig?.agentName || null,
+        agentName: resolvedAgentNameForTemplate,
       });
       // Get cost optimization settings early to use in prompt building
       const costSettingsEarly = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
@@ -2443,13 +2448,14 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
       console.log(`${LOG_PREFIX} [Gemini] ✅ Organization name resolved: "${resolvedOrgNameGemini}"`);
     }
 
-    // Build system prompt
+    // Build system prompt - resolve agent name from persona or selected voice name
+    const resolvedAgentNameGemini = campaignConfig?.agentName || campaignConfig?.voice || null;
     const voiceTemplateValues = buildVoiceTemplateValues({
       baseValues: session.voiceVariables,
       contactInfo,
       callerId: session.fromNumber || process.env.TELNYX_FROM_NUMBER || null,
       orgName: resolvedOrgNameGemini,
-      agentName: campaignConfig?.agentName || null,
+      agentName: resolvedAgentNameGemini,
     });
     const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
     const useCondensedPrompt = costSettings.useCondensedPrompt !== false;
@@ -7341,8 +7347,10 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       // Organization name - explicitly extract for prompt building
       organizationName: companyName,
       companyName: companyName,
-      // Agent name: resolve from persona.name, persona.agentName, or top-level agentName — trim to ensure non-empty or null
+      // Agent name: resolve from persona.name, persona.agentName, top-level agentName, or fall back to selected voice name
       agentName: (aiSettings?.persona?.name || aiSettings?.persona?.agentName || aiSettings?.agentName || '').trim() || null,
+      // Include assignedVoices so voice name can be used as agentName fallback
+      assignedVoices: (campaign as any).assignedVoices || null,
       // New campaign context fields (Foundation + Campaign Layer Architecture)
       campaignObjective: campaign.campaignObjective,
       productServiceInfo: campaign.productServiceInfo,
@@ -8041,7 +8049,17 @@ async function buildSystemPrompt(
   // This follows the required flow: Personality → Environment → Tone → Goal → Call Flow → Guardrails
   // =====================================================================
 
-  const agentName = campaignConfig?.agentName || 'the calling agent';
+  // Resolve agent name: persona name > voice name from rotation > single voice > fallback
+  let resolvedVoiceName: string | null = null;
+  const assignedVoicesList = campaignConfig?.assignedVoices as { id: string; name: string }[] | null;
+  if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
+    const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
+    resolvedVoiceName = randomVoice?.name || randomVoice?.id || null;
+  }
+  if (!resolvedVoiceName) {
+    resolvedVoiceName = campaignConfig?.voice || null;
+  }
+  const agentName = campaignConfig?.agentName || resolvedVoiceName || 'the calling agent';
   const orgName = campaignConfig?.organizationName || campaignConfig?.companyName || 'our organization';
   const firstName = contactInfo?.firstName || 'the contact';
   const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
@@ -8127,8 +8145,8 @@ Identity is CONFIRMED only when they explicitly say:
 - "Hello?" / "Hi" / "Yeah?" / "Who is this?" / "What's this about?" — these are NOT confirmations
 
 If they say "who is this?" or "who's calling?":
-- Respond naturally: "Oh hi, this is [your first name only]. Am I speaking with ${firstName}?"
-- Do NOT mention the company name or purpose yet
+- Respond naturally: "Oh hi, this is ${agentName} calling from ${orgName}. Am I speaking with ${firstName}?"
+- Be confident and clear about your identity
 
 If they say "what's this about?":
 - Keep it vague: "Just wanted to connect briefly. Is this ${firstName}?"
@@ -8141,7 +8159,7 @@ Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying questio
 ### 2. Right Party Detected — Permission-Based Opening
 If the person confirms they are ${fullName}:
 
-1. Brief introduction: "Hi ${firstName}, this is [Your Name] calling from **${orgName}**."
+1. Brief introduction: "Hi ${firstName}, this is ${agentName} calling from **${orgName}**."
 2. Respectful time check: "I know your time is valuable — do you have a moment for a quick conversation?"
 3. WAIT for permission. If they say no, respect it and end politely.
 
@@ -8169,7 +8187,7 @@ Classify as gatekeeper and respond with a clear, concise request:
 - "Could you please connect me with ${firstName}?"
 
 **When Asked "Who is calling?" or "Where are you calling from?":**
-- Respond confidently: "This is [Your Name] calling from ${orgName}."
+- Respond confidently: "This is ${agentName} calling from ${orgName}."
 
 **When Asked "What is this regarding?":**
 - Keep it VAGUE: "It's regarding some of the services we offer."

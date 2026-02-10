@@ -517,6 +517,7 @@ router.get('/all', async (req: Request, res: Response) => {
           campaignName: campaigns.name,
           contactFirstName: contacts.firstName,
           contactLastName: contacts.lastName,
+          aiAgentSettings: campaigns.aiAgentSettings,
           // Lead information (if recording is already a lead)
           leadId: leads.id,
           leadQaStatus: leads.qaStatus,
@@ -528,12 +529,21 @@ router.get('/all', async (req: Request, res: Response) => {
         .where(and(...conditions))
         .orderBy(desc(callSessions.startedAt));
 
+      // Deduplicate by callSessions.id — the leads leftJoin can produce
+      // multiple rows for the same session when several leads share a telnyxCallId
+      const seenSessionIds = new Set<string>();
+
       for (const rec of localRecordings) {
+        if (seenSessionIds.has(rec.id)) continue;
+        seenSessionIds.add(rec.id);
+
         if (rec.telnyxCallId) {
           seenCallIds.add(rec.telnyxCallId);
         }
 
         const contactName = [rec.contactFirstName, rec.contactLastName].filter(Boolean).join(' ') || null;
+        const aiSettings = rec.aiAgentSettings as any;
+        const agentName = aiSettings?.persona?.name || aiSettings?.persona?.agentName || null;
 
         allRecordings.push({
           id: rec.id,
@@ -545,6 +555,7 @@ router.get('/all', async (req: Request, res: Response) => {
           contactId: rec.contactId,
           campaignId: rec.campaignId,
           campaignName: rec.campaignName,
+          agentName,
           startedAt: rec.startedAt?.toISOString(),
           endedAt: rec.endedAt?.toISOString(),
           durationSec: rec.recordingDurationSec || rec.durationSec, // Include for display
@@ -580,22 +591,44 @@ router.get('/all', async (req: Request, res: Response) => {
         });
 
         // Add Telnyx recordings that aren't already in local
+        // Build a phone+time index for fuzzy dedup when telnyxCallId doesn't match
+        const localPhoneTimeKeys = new Set<string>();
+        for (const r of allRecordings) {
+          if (r.toNumber && r.startedAt) {
+            // Round to nearest 2-minute window for fuzzy matching
+            const ts = Math.floor(new Date(r.startedAt).getTime() / 120_000);
+            localPhoneTimeKeys.add(`${r.toNumber}|${ts}`);
+            // Also add adjacent window to handle edge cases
+            localPhoneTimeKeys.add(`${r.toNumber}|${ts - 1}`);
+            localPhoneTimeKeys.add(`${r.toNumber}|${ts + 1}`);
+          }
+        }
+
         for (const rec of telnyxResult.recordings) {
           if (!matchesDurationFilter(rec.recordingDurationSec ?? rec.durationSec)) {
             continue;
           }
-          if (!seenCallIds.has(rec.telnyxCallId)) {
-            allRecordings.push({
-              ...rec,
-              contactName: null,
-              contactPhone: rec.toNumber,
-              campaignId: null,
-              campaignName: null,
-              disposition: null,
-              hasTranscript: false,
-              agentType: 'ai',
-            });
+          // Skip if telnyxCallId already seen
+          if (seenCallIds.has(rec.telnyxCallId)) {
+            continue;
           }
+          // Also skip if same phone + similar time already in local recordings
+          if (rec.toNumber && rec.startedAt) {
+            const ts = Math.floor(new Date(rec.startedAt).getTime() / 120_000);
+            if (localPhoneTimeKeys.has(`${rec.toNumber}|${ts}`)) {
+              continue;
+            }
+          }
+          allRecordings.push({
+            ...rec,
+            contactName: null,
+            contactPhone: rec.toNumber,
+            campaignId: null,
+            campaignName: null,
+            disposition: null,
+            hasTranscript: false,
+            agentType: 'ai',
+          });
         }
       } catch (telnyxError) {
         console.error('[Recordings API] Error fetching from Telnyx:', telnyxError);

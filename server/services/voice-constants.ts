@@ -211,20 +211,7 @@ export const VOICE_MAPPING: Record<string, VoiceConfig> = {
     provider: 'google',
     description: 'Forward and confident (Studio)'
   },
-  'Algieba': {
-    displayName: 'Algieba',
-    gender: 'male',
-    googleVoiceName: 'en-GB-Studio-B',
-    provider: 'google',
-    description: 'Smooth and polished (British Studio)'
-  },
-  'Despina': {
-    displayName: 'Despina',
-    gender: 'female',
-    googleVoiceName: 'en-GB-Neural2-C',
-    provider: 'google',
-    description: 'Smooth and professional (British Neural2)'
-  },
+
   'Iapetus': {
     displayName: 'Iapetus',
     gender: 'male',
@@ -267,27 +254,7 @@ export const VOICE_MAPPING: Record<string, VoiceConfig> = {
     provider: 'google',
     description: 'Upbeat and positive (Neural2)'
   },
-  'Autonoe': {
-    displayName: 'Autonoe',
-    gender: 'female',
-    googleVoiceName: 'en-AU-Neural2-C',
-    provider: 'google',
-    description: 'Bright and cheerful (Australian Neural2)'
-  },
-  'Callirrhoe': {
-    displayName: 'Callirrhoe',
-    gender: 'female',
-    googleVoiceName: 'en-AU-Neural2-A',
-    provider: 'google',
-    description: 'Easy-going and relaxed (Australian Neural2)'
-  },
-  'Umbriel': {
-    displayName: 'Umbriel',
-    gender: 'male',
-    googleVoiceName: 'en-AU-Neural2-B',
-    provider: 'google',
-    description: 'Easy-going and laid-back (Australian Neural2)'
-  },
+
   'Enceladus': {
     displayName: 'Enceladus',
     gender: 'male',
@@ -315,13 +282,6 @@ export const VOICE_MAPPING: Record<string, VoiceConfig> = {
     googleVoiceName: 'en-US-Wavenet-D',
     provider: 'google',
     description: 'Firm and decisive (Wavenet)'
-  },
-  'Zubenelgenubi': {
-    displayName: 'Zubenelgenubi',
-    gender: 'male',
-    googleVoiceName: 'en-AU-Neural2-D',
-    provider: 'google',
-    description: 'Casual and conversational (Australian Neural2)'
   },
 
   // Additional common voice names

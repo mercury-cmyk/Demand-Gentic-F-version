@@ -152,14 +152,33 @@ export async function resolveAgentAssignment(campaignId: string): Promise<Resolv
     // Build system prompt from persona and campaign context
     const systemPromptParts: string[] = [];
 
-    // Agent identity - check both agentName and name fields
-    const agentName = persona.agentName || persona.name || 'AI Sales Agent';
+    // Organization identity
+    const orgName = persona.companyName || organizationName;
+
+    // Voice Selection Logic (resolve BEFORE agent name so voice name can be used as fallback)
+    // Priority: 1. Assigned Voices Rotation, 2. Persona Voice, 3. Fallback
+    let voice = persona.voice || aiSettings.voiceId || aiSettings.voice || 'Puck';
+    let voiceName = voice; // The voice's display name (e.g., "Kore", "Puck")
+
+    const assignedVoices = (campaign as any).assignedVoices as { id: string; name: string }[] | null;
+    if (assignedVoices && Array.isArray(assignedVoices) && assignedVoices.length > 0) {
+      // Pick a random voice from the assigned list
+      const randomVoice = assignedVoices[Math.floor(Math.random() * assignedVoices.length)];
+      if (randomVoice?.id) {
+        voice = randomVoice.id;
+        voiceName = randomVoice.name || randomVoice.id;
+      }
+    }
+
+    // Agent identity - check persona fields first, then fall back to the selected voice name
+    // This ensures the AI always has a real name to use without manual entry
+    const agentName = persona.agentName || persona.name || voiceName;
+
+    // Build system prompt from persona and campaign context
     if (agentName) {
       systemPromptParts.push(`You are ${agentName}.`);
     }
 
-    // Organization identity
-    const orgName = persona.companyName || organizationName;
     if (orgName) {
       systemPromptParts.push(`You represent ${orgName}.`);
     }
@@ -190,6 +209,7 @@ CRITICAL CONVERSATION BEHAVIOR:
 1. CALL OPENING: When the call connects, IMMEDIATELY say your greeting. Do NOT wait or pause before speaking. The prospect has already picked up the phone and is waiting to hear who is calling. Start speaking right away with your opening script.
 2. CALL CLOSING: You MUST ALWAYS say a proper farewell before ending the call. After confirming any appointment, email, or completing your objective, say "Thank you so much for your time today! Have a great day!" and WAIT for their response before calling end_call. NEVER hang up immediately after confirming details.
 3. TURN-TAKING: Wait for the prospect to finish speaking before responding. Do not interrupt.
+4. IDENTITY: When anyone asks "who are you?", "who is calling?", or "where are you calling from?", ALWAYS respond with your name and organization: "This is ${agentName} calling from ${orgName || 'our company'}." Be confident and clear about your identity.
 `);
 
     // Build first message - check multiple fields
@@ -203,8 +223,8 @@ CRITICAL CONVERSATION BEHAVIOR:
       agentName,
       systemPrompt: systemPromptParts.join(' ') || 'You are a helpful sales development representative.',
       firstMessage,
-      // Voice priority: persona.voice > aiSettings.voiceId > aiSettings.voice > fallback
-      voice: persona.voice || aiSettings.voiceId || aiSettings.voice || 'Puck',
+      // Voice priority: Rotation > persona.voice > aiSettings.voiceId > aiSettings.voice > fallback
+      voice,
       settings: aiSettings,
     };
   }
@@ -481,14 +501,14 @@ export async function storeCallSession(ctx: UnifiedCallContext): Promise<void> {
     from_number: ctx.fromNumber,
     caller_number_id: ctx.callerNumberId,
     caller_number_decision_id: ctx.callerNumberDecisionId,
-    virtual_agent_id: ctx.virtualAgentId,
+    virtual_agent_id: ctx.virtualAgentId ?? undefined,
     is_test_call: ctx.isTestCall,
-    test_call_id: ctx.testCallId,
+    test_call_id: ctx.testCallId ?? undefined,
     first_message: ctx.firstMessage,
     voice: ctx.voice,
     agent_name: ctx.agentName,
     organization_name: ctx.organizationName,
-    system_prompt: ctx.systemPrompt,
+    system_prompt: ctx.systemPrompt ?? undefined,
     provider: ctx.provider,
     test_contact: ctx.isTestCall ? {
       name: ctx.contactName,

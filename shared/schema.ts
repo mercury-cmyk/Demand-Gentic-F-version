@@ -1939,6 +1939,12 @@ export const campaigns = pgTable("campaigns", {
   // Max Call Duration - strictly enforces call time limits per campaign
   maxCallDurationSeconds: integer("max_call_duration_seconds").default(240), // Default 4 minutes, range: 60-1800 seconds
 
+  // Concurrent Worker Settings (AI Deployment Capacity)
+  maxConcurrentWorkers: integer("max_concurrent_workers").default(1),
+  
+  // Multi-voice Assignment (for voice rotation)
+  assignedVoices: jsonb("assigned_voices"), // Array of { id: string, name: string }
+
   // Problem Intelligence Organization (links to campaign_organizations for problem framework)
   problemIntelligenceOrgId: varchar("problem_intelligence_org_id"), // References campaignOrganizations.id
 

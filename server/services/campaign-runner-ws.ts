@@ -187,6 +187,17 @@ class CampaignRunnerService {
   private runners: Map<WebSocket, RunnerClient> = new Map();
   private taskQueue: Map<string, CampaignTask[]> = new Map(); // campaignId -> tasks
   private processingInterval: NodeJS.Timeout | null = null;
+  private campaignConfigs = new Map<string, { maxWorkers: number }>();
+
+  private getGlobalActiveCount(campaignId: string): number {
+    let count = 0;
+    for (const runner of this.runners.values()) {
+      if (runner.currentTask && runner.currentTask.campaignId === campaignId) {
+        count++;
+      }
+    }
+    return count;
+  }
 
   initialize(server: HttpServer): WebSocketServer {
     this.wss = new WebSocketServer({
@@ -607,6 +618,11 @@ class CampaignRunnerService {
         return;
       }
 
+      // Store campaign concurrency config
+      this.campaignConfigs.set(campaignId, { 
+        maxWorkers: (campaign as any).maxConcurrentWorkers || 1 
+      });
+
       // Get virtual agent if assigned (using any cast for extended campaign fields)
       const campaignExt = campaign as any;
       const virtualAgentId = campaignExt.virtualAgentId;
@@ -913,6 +929,16 @@ class CampaignRunnerService {
 
   private getNextTask(runner: RunnerClient): CampaignTask | null {
     for (const campaignId of runner.activeCampaigns) {
+      // Check global campaign concurrency limit
+      const config = this.campaignConfigs.get(campaignId);
+      if (config) {
+        const currentActive = this.getGlobalActiveCount(campaignId);
+        if (currentActive >= config.maxWorkers) {
+          // Skip this campaign, it's at capacity
+          continue;
+        }
+      }
+
       const tasks = this.taskQueue.get(campaignId);
       if (tasks && tasks.length > 0) {
         return tasks.shift()!;

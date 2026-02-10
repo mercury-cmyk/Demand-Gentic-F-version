@@ -89,11 +89,11 @@ const GEMINI_VOICES = [
   // Professional voices
   'Sulafat', 'Gacrux', 'Achird', 'Schedar', 'Sadaltager', 'Pulcherrima',
   // Specialized voices
-  'Algieba', 'Despina', 'Iapetus', 'Erinome', 'Vindemiatrix', 'Achernar',
+  'Iapetus', 'Erinome', 'Vindemiatrix', 'Achernar',
   // Dynamic voices
-  'Sadachbia', 'Laomedeia', 'Autonoe', 'Callirrhoe', 'Umbriel',
+  'Sadachbia', 'Laomedeia',
   // Character voices
-  'Enceladus', 'Algenib', 'Rasalgethi', 'Alnilam', 'Zubenelgenubi',
+  'Enceladus', 'Algenib', 'Rasalgethi', 'Alnilam',
 ];
 
 /**

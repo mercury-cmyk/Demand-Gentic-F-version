@@ -388,7 +388,7 @@ function HeaderSection({
             {isTest ? 'Test' : 'Production'}
           </Badge>
           {conversation.agentType === 'ai' && (
-            <Badge variant="secondary">AI Agent</Badge>
+            <Badge variant="secondary">{conversation.agentName || 'AI Agent'}</Badge>
           )}
         </div>
       </div>

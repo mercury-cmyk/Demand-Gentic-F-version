@@ -2383,10 +2383,11 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
 
     if (!campaign) return null;
 
+    const aiSettings = campaign.aiAgentSettings as any || {};
     return {
       script: campaign.callScript,
-      voice: (campaign.aiAgentSettings as any)?.persona?.voice || 'alloy',
-      openingScript: (campaign.aiAgentSettings as any)?.scripts?.opening,
+      voice: aiSettings?.persona?.voice || 'alloy',
+      openingScript: aiSettings?.scripts?.opening,
       qualificationCriteria: campaign.qualificationQuestions,
       // New campaign context fields (Foundation + Campaign Layer Architecture)
       campaignObjective: campaign.campaignObjective,
@@ -2396,7 +2397,11 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignObjections: campaign.campaignObjections as Array<{ objection: string; response: string }> | null,
       successCriteria: campaign.successCriteria,
       campaignContextBrief: campaign.campaignContextBrief,
-      ...(campaign.aiAgentSettings as any || {})
+      // Agent name: resolve from persona fields
+      agentName: (aiSettings?.persona?.name || aiSettings?.persona?.agentName || aiSettings?.agentName || '').trim() || null,
+      // Include assignedVoices so voice name can be used as agentName fallback
+      assignedVoices: (campaign as any).assignedVoices || null,
+      ...aiSettings,
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
@@ -2525,7 +2530,17 @@ async function buildSystemPrompt(
   // This follows the required flow: Personality → Environment → Tone → Goal → Call Flow → Guardrails
   // =====================================================================
 
-  const agentName = campaignConfig?.agentName || 'the calling agent';
+  // Resolve agent name: persona name > voice name from rotation > single voice > fallback
+  let resolvedVoiceName: string | null = null;
+  const assignedVoicesList = campaignConfig?.assignedVoices as { id: string; name: string }[] | null;
+  if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
+    const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
+    resolvedVoiceName = randomVoice?.name || randomVoice?.id || null;
+  }
+  if (!resolvedVoiceName) {
+    resolvedVoiceName = campaignConfig?.voice || null;
+  }
+  const agentName = campaignConfig?.agentName || resolvedVoiceName || 'the calling agent';
   const orgName = campaignConfig?.organizationName || campaignConfig?.companyName || 'our organization';
   const firstName = contactInfo?.firstName || 'the contact';
   const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
@@ -2611,6 +2626,7 @@ If the person indicates they are not ${firstName} or sounds like a gatekeeper:
 
 - Be polite and respectful.
 - Ask to be connected to ${firstName}.
+- When asked "Who are you?" or "Who is calling?" — respond confidently: "This is ${agentName} calling from ${orgName}."
 - Do not pitch, explain details, or justify the call.
 - Make no more than two polite attempts.
 - If refused, thank them sincerely and end the call.

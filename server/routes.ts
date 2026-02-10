@@ -96,6 +96,7 @@ import documentExtractRouter from './routes/document-extract';
 import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
+import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
 import { z } from "zod";
 import {
   apiLimiter,
@@ -118,7 +119,7 @@ import { normalizeName } from "./normalization";
 import multer from "multer";
 import { uploadToS3 } from "./lib/storage";
 import * as schema from "@shared/schema";
-import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, type InsertMailboxAccount, type Account } from "@shared/schema";
+import { customFieldDefinitions, accounts as accountsTable, contacts as contactsTable, domainSetItems, users, userRoles, campaignAgentAssignments, campaignQueue, agentQueue, campaigns, contacts, accounts, lists, segments, leads, leadVerifications, verificationCampaigns, verificationContacts, verificationLeadSubmissions, suppressionPhones, campaignSuppressionContacts, campaignSuppressionAccounts, campaignSuppressionEmails, campaignSuppressionDomains, callJobs, callSessions, callAttempts, calls, callDispositions, dispositions, activityLog, industryReference, dialerCallAttempts, clientProjects, clientAccounts, clientCampaignAccess, campaignTestCalls, campaignOrganizations, callQualityRecords, type InsertMailboxAccount, type Account } from "@shared/schema";
 import {
   insertAccountSchema,
   insertContactSchema,
@@ -4763,6 +4764,10 @@ export function registerRoutes(app: Express) {
         'callback-requested',
         'not_interested',
         'dnc-request',
+        'meeting_booked',
+        'interested',
+        'do_not_call',
+        'wrong_number'
       ];
 
       // Query human agent calls from callAttempts
@@ -4784,12 +4789,31 @@ export function registerRoutes(app: Express) {
 
       // Query AI agent calls from callSessions
       // AI dispositions are stored in aiDisposition field with similar values
-      const aiConnectedStatuses = ['completed', 'connected'];
-      const aiConnectedDispositions = ['connected', 'qualified', 'callback_requested', 'callback-requested', 'not_interested', 'dnc_request', 'dnc-request', 'meeting_booked', 'interested'];
+      // UPDATED definition: 'Connected' means any Right Party Contact (RPC) or where a conversation occurred.
+      // Explicitly includes: Qualified, Not Interested, DNC, Wrong Number (often means answered).
+      // Explicitly excludes: No Answer, Voicemail, Busy, Failed.
+      
+      const aiConnectedDispositions = [
+        'connected', 
+        'qualified', 
+        'callback_requested', 
+        'callback-requested', 
+        'not_interested', 
+        'not-interested',
+        'dnc_request', 
+        'dnc-request', 
+        'do_not_call',
+        'meeting_booked', 
+        'interested',
+        'wrong_number',
+        'invalid_data',
+        'completed' // 'completed' is sometimes used as a generic success status
+      ];
+
       const aiQualifiedDispositions = ['qualified', 'meeting_booked', 'interested'];
       const aiDncDispositions = ['dnc_request', 'dnc-request', 'do_not_call'];
       const aiNotInterestedDispositions = ['not_interested', 'not-interested', 'rejected'];
-      const aiNoAnswerDispositions = ['no_answer', 'no-answer', 'unanswered', 'busy', 'failed'];
+      const aiNoAnswerDispositions = ['no_answer', 'no-answer', 'unanswered', 'busy', 'failed', 'hung_up'];
       const aiVoicemailDispositions = ['voicemail', 'left_voicemail', 'machine'];
 
       const [aiCallStats] = await db
@@ -13878,6 +13902,9 @@ Provide JSON response with:
   // ==================== CLIENT HIERARCHY / ASSIGNMENT ====================
   app.use('/api/admin', requireAuth, clientAssignmentRouter);
 
+  // ==================== ADMIN AGENTIC CAMPAIGNS ====================
+  app.use('/api/admin', adminAgenticCampaignsRouter);
+
   app.use('/api/client-portal', clientPortalRouter);
 
   // ==================== CAMPAIGN SUPPRESSION LISTS ====================
@@ -14596,28 +14623,27 @@ Provide JSON response with:
       // We'll fetch both call_sessions and test_calls, then combine
       const conversations: any[] = [];
 
+      // Build where clauses at outer scope so they're accessible for both fetch and count queries
+      const sessionConditions: any[] = [];
+      if (campaignId && campaignId !== 'all') {
+        sessionConditions.push(eq(callSessions.campaignId, campaignId as string));
+      }
+      if (search) {
+        const searchPattern = `%${search}%`;
+        sessionConditions.push(
+          or(
+            like(callSessions.aiTranscript, searchPattern),
+            like(callSessions.toNumberE164, searchPattern),
+            like(contacts.firstName, searchPattern),
+            like(contacts.lastName, searchPattern),
+            like(accounts.name, searchPattern)
+          )
+        );
+      }
+      const sessionWhereClause = sessionConditions.length ? and(...sessionConditions) : undefined;
+
       // ===== FETCH CALL SESSIONS (Production Calls) =====
       if (!source || source === 'all' || source === 'call_session') {
-        const sessionConditions: any[] = [];
-
-        if (campaignId && campaignId !== 'all') {
-          sessionConditions.push(eq(callSessions.campaignId, campaignId as string));
-        }
-
-        if (search) {
-          const searchPattern = `%${search}%`;
-          sessionConditions.push(
-            or(
-              like(callSessions.aiTranscript, searchPattern),
-              like(callSessions.toNumberE164, searchPattern),
-              like(contacts.firstName, searchPattern),
-              like(contacts.lastName, searchPattern),
-              like(accounts.name, searchPattern)
-            )
-          );
-        }
-
-        const sessionWhereClause = sessionConditions.length ? and(...sessionConditions) : undefined;
 
         // Query call sessions (transcript optional)
         const sessions = await db
@@ -14641,6 +14667,7 @@ Provide JSON response with:
             recordingStatus: callSessions.recordingStatus,
             toNumberE164: callSessions.toNumberE164,
             createdAt: callSessions.startedAt,
+            aiAgentSettings: campaigns.aiAgentSettings,
           })
           .from(callSessions)
           .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
@@ -14649,6 +14676,40 @@ Provide JSON response with:
           .where(sessionWhereClause)
           .orderBy(desc(callSessions.startedAt))
           .limit(limitNum);
+
+        // Fetch quality records for sessions that lack aiAnalysis (fallback enrichment)
+        const sessionsWithoutAnalysis = sessions.filter(s => !s.analysis).map(s => s.id);
+        const qualityRecordMap = new Map<string, any>();
+        if (sessionsWithoutAnalysis.length > 0) {
+          const qRecords = await db
+            .select({
+              callSessionId: callQualityRecords.callSessionId,
+              overallScore: callQualityRecords.overallQualityScore,
+              engagement: callQualityRecords.engagementScore,
+              clarity: callQualityRecords.clarityScore,
+              empathy: callQualityRecords.empathyScore,
+              objectionHandling: callQualityRecords.objectionHandlingScore,
+              qualification: callQualityRecords.qualificationScore,
+              closing: callQualityRecords.closingScore,
+              sentiment: callQualityRecords.sentiment,
+              engagementLevel: callQualityRecords.engagementLevel,
+              issues: callQualityRecords.issues,
+              recommendations: callQualityRecords.recommendations,
+              fullTranscript: callQualityRecords.fullTranscript,
+            })
+            .from(callQualityRecords)
+            .where(inArray(callQualityRecords.callSessionId, sessionsWithoutAnalysis))
+            .orderBy(desc(callQualityRecords.createdAt));
+
+          // Keep only the latest quality record per session
+          for (const qr of qRecords) {
+            if (!qualityRecordMap.has(qr.callSessionId)) {
+              qualityRecordMap.set(qr.callSessionId, qr);
+            }
+          }
+        }
+
+        console.log(`[QA] Found ${sessions.length} call sessions, ${qualityRecordMap.size} quality record fallbacks`);
 
         // ===== HELPER: Transform a single session row into conversation format =====
         function transformSession(session: typeof sessions[0]) {
@@ -14661,31 +14722,58 @@ Provide JSON response with:
           const detectedIssues = qualityData?.detectedIssues || qualityData?.issues || analysisObj?.issues || [];
           const callSummary = qualityData?.summary || analysisObj?.summary || undefined;
 
-          const normalizedAnalysis = analysisObj ? {
-            overallScore: qualityData?.overallScore ?? analysisObj?.overallScore,
-            summary: callSummary,
-            qualityDimensions: qualityData?.qualityDimensions || analysisObj?.qualityDimensions,
-            campaignAlignment: qualityData?.campaignAlignment || analysisObj?.campaignAlignment,
-            dispositionReview: qualityData?.dispositionReview || analysisObj?.dispositionReview,
-            issues: detectedIssues,
-            recommendations: qualityData?.recommendations || analysisObj?.recommendations,
-            breakdowns: qualityData?.breakdowns || analysisObj?.breakdowns,
-            performanceGaps: qualityData?.performanceGaps || analysisObj?.performanceGaps,
-            flowCompliance: qualityData?.flowCompliance || analysisObj?.flowCompliance,
-            learningSignals: qualityData?.learningSignals || analysisObj?.learningSignals,
-            nextBestActions: qualityData?.nextBestActions || analysisObj?.nextBestActions,
-            promptUpdates: qualityData?.promptUpdates || analysisObj?.promptUpdates,
-            metadata: qualityData?.metadata || analysisObj?.metadata,
-            outcome: analysisObj?.outcome,
-            keyTopics: analysisObj?.keyTopics,
-            nextSteps: analysisObj?.nextSteps,
-            sentiment: analysisObj?.sentiment,
-            conversationState: analysisObj?.conversationState,
-          } : undefined;
+          // Build analysis from aiAnalysis jsonb OR from callQualityRecords structured data
+          const hasAiAnalysis = !!analysisObj;
+          const qualityRecord = qualityRecordMap.get(session.id);
+
+          let normalizedAnalysis: any;
+          if (hasAiAnalysis) {
+            normalizedAnalysis = {
+              overallScore: qualityData?.overallScore ?? analysisObj?.overallScore,
+              summary: callSummary,
+              qualityDimensions: qualityData?.qualityDimensions || analysisObj?.qualityDimensions,
+              campaignAlignment: qualityData?.campaignAlignment || analysisObj?.campaignAlignment,
+              dispositionReview: qualityData?.dispositionReview || analysisObj?.dispositionReview,
+              issues: detectedIssues,
+              recommendations: qualityData?.recommendations || analysisObj?.recommendations,
+              breakdowns: qualityData?.breakdowns || analysisObj?.breakdowns,
+              performanceGaps: qualityData?.performanceGaps || analysisObj?.performanceGaps,
+              flowCompliance: qualityData?.flowCompliance || analysisObj?.flowCompliance,
+              learningSignals: qualityData?.learningSignals || analysisObj?.learningSignals,
+              nextBestActions: qualityData?.nextBestActions || analysisObj?.nextBestActions,
+              promptUpdates: qualityData?.promptUpdates || analysisObj?.promptUpdates,
+              metadata: qualityData?.metadata || analysisObj?.metadata,
+              outcome: analysisObj?.outcome,
+              keyTopics: analysisObj?.keyTopics,
+              nextSteps: analysisObj?.nextSteps,
+              sentiment: qualityData?.learningSignals?.sentiment || analysisObj?.sentiment,
+              engagementLevel: qualityData?.learningSignals?.engagementLevel || analysisObj?.engagementLevel,
+              conversationState: analysisObj?.conversationState,
+            };
+          } else if (qualityRecord) {
+            // Fallback: Build analysis from callQualityRecords structured data
+            normalizedAnalysis = {
+              overallScore: qualityRecord.overallScore,
+              qualityDimensions: {
+                engagement: qualityRecord.engagement,
+                clarity: qualityRecord.clarity,
+                empathy: qualityRecord.empathy,
+                objectionHandling: qualityRecord.objectionHandling,
+                qualification: qualityRecord.qualification,
+                closing: qualityRecord.closing,
+              },
+              issues: qualityRecord.issues || [],
+              recommendations: qualityRecord.recommendations || [],
+              sentiment: qualityRecord.sentiment,
+              engagementLevel: qualityRecord.engagementLevel,
+            };
+          }
 
           const hasRecording = !!(session.recordingS3Key || session.recordingUrl);
           const recordingAvailable = session.recordingStatus === 'stored' || !!session.recordingUrl;
           const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || 'Unknown Contact';
+          const aiSettings = session.aiAgentSettings as any;
+          const agentName = aiSettings?.persona?.name || aiSettings?.persona?.agentName || undefined;
 
           return {
             id: session.id,
@@ -14701,6 +14789,7 @@ Provide JSON response with:
             status: session.status || 'unknown',
             disposition: session.disposition || undefined,
             agentType: session.agentType,
+            agentName,
             duration: session.duration || undefined,
             transcript: normalized.transcript,
             transcriptTurns: normalized.transcriptTurns,
@@ -14770,30 +14859,27 @@ Provide JSON response with:
         }
       }
 
+      // Build test call where clause at outer scope
+      const testConditions: any[] = [];
+      if (campaignId && campaignId !== 'all') {
+        testConditions.push(eq(campaignTestCalls.campaignId, campaignId as string));
+      }
+      testConditions.push(eq(campaignTestCalls.status, 'completed'));
+      if (search) {
+        const searchPattern2 = `%${search}%`;
+        testConditions.push(
+          or(
+            like(campaignTestCalls.fullTranscript, searchPattern2),
+            like(campaignTestCalls.testContactName, searchPattern2),
+            like(campaignTestCalls.testCompanyName, searchPattern2),
+            like(campaignTestCalls.testPhoneNumber, searchPattern2)
+          )
+        );
+      }
+      const testWhereClause = testConditions.length ? and(...testConditions) : undefined;
+
       // ===== FETCH TEST CALLS =====
       if (!source || source === 'all' || source === 'test_call') {
-        const testConditions: any[] = [];
-
-        if (campaignId && campaignId !== 'all') {
-          testConditions.push(eq(campaignTestCalls.campaignId, campaignId as string));
-        }
-
-        // Only include completed test calls
-        testConditions.push(eq(campaignTestCalls.status, 'completed'));
-
-        if (search) {
-          const searchPattern = `%${search}%`;
-          testConditions.push(
-            or(
-              like(campaignTestCalls.fullTranscript, searchPattern),
-              like(campaignTestCalls.testContactName, searchPattern),
-              like(campaignTestCalls.testCompanyName, searchPattern),
-              like(campaignTestCalls.testPhoneNumber, searchPattern)
-            )
-          );
-        }
-
-        const testWhereClause = testConditions.length ? and(...testConditions) : undefined;
 
         // Query test calls with their rich analysis data
         const testCalls = await db
@@ -14907,7 +14993,7 @@ Provide JSON response with:
       }
 
       // Count Test Calls
-      if (!source || source === 'all' || source === 'campaign_test_call') {
+      if (!source || source === 'all' || source === 'test_call') {
         const [testsResult] = await db
           .select({ count: sql<number>`count(*)` })
           .from(campaignTestCalls)
@@ -14928,6 +15014,9 @@ Provide JSON response with:
       conversations.sort((a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
+
+      const withAnalysis = conversations.filter(c => c.analysis).length;
+      console.log(`[QA] Returning ${conversations.length} conversations (${withAnalysis} with analysis), counts: calls=${globalCounts.calls}, testCalls=${globalCounts.testCalls}`);
 
 
       // Apply limit after combining
@@ -14969,6 +15058,17 @@ Provide JSON response with:
         })
         .slice(0, 10);
 
+      // Compute quality stats excluding voicemails and no-answer
+      const nonVoicemailDispositions = new Set(['voicemail', 'no_answer', 'busy']);
+      const realConversations = limitedConversations.filter(c => {
+        const disp = (c.disposition || '').toLowerCase();
+        return !nonVoicemailDispositions.has(disp);
+      });
+      const analyzedConversations = realConversations.filter(c => c.analysis?.overallScore > 0);
+      const avgQualityScore = analyzedConversations.length > 0
+        ? Math.round(analyzedConversations.reduce((sum: number, c: any) => sum + (c.analysis?.overallScore || 0), 0) / analyzedConversations.length)
+        : undefined;
+
       res.json({
         conversations: limitedConversations,
         total: globalCounts.total,
@@ -14979,14 +15079,18 @@ Provide JSON response with:
           withRecordings: conversations.filter(c => c.hasRecording).length,
           withAnalysis: conversations.filter(c => c.analysis).length,
           totalIssues: allIssuesAcrossConversations.length,
-          counts: globalCounts
+          counts: globalCounts,
+          // Quality-specific stats
+          realConversations: realConversations.length,
+          analyzedWithScores: analyzedConversations.length,
+          avgQualityScore,
         },
         topChallenges,
       });
 
     } catch (error: any) {
-      console.error('Error fetching QA conversations:', error);
-      res.status(500).json({ message: "Failed to fetch conversations" });
+      console.error('[QA] Error fetching conversations:', error?.message || error, error?.stack?.slice(0, 500));
+      res.status(500).json({ message: "Failed to fetch conversations", error: error?.message });
     }
   });
 
@@ -15083,7 +15187,7 @@ ANALYSIS RULES:
 
 Analyze the call and return a JSON object with:
 {
-  "overallScore": <1-10>,
+  "overallScore": <0-100>,
   "testResult": "success" | "needs_improvement" | "failed",
   "performanceMetrics": {
     "identityConfirmed": <boolean>,
@@ -15123,6 +15227,11 @@ Analyze the call and return a JSON object with:
     "expectedDisposition": "<what the disposition should be based on transcript>",
     "isAccurate": <boolean>,
     "notes": ["<any notes about disposition accuracy>"]
+  },
+  "learningSignals": {
+    "sentiment": "positive" | "neutral" | "negative",
+    "engagementLevel": "high" | "medium" | "low",
+    "outcome": "<brief outcome description>"
   },
   "summary": "<2-3 sentence summary of the call and key findings>"
 }
@@ -15189,6 +15298,7 @@ Return ONLY valid JSON, no other text.`;
             recommendations: analysis.recommendations,
             qualityDimensions: analysis.qualityDimensions,
             dispositionReview: analysis.dispositionReview,
+            learningSignals: analysis.learningSignals,
             summary: analysis.summary,
             analyzedAt: new Date().toISOString(),
           },
@@ -15208,6 +15318,7 @@ Return ONLY valid JSON, no other text.`;
           recommendations: analysis.recommendations,
           qualityDimensions: analysis.qualityDimensions,
           dispositionReview: analysis.dispositionReview,
+          learningSignals: analysis.learningSignals,
           summary: analysis.summary,
         },
       });

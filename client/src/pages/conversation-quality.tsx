@@ -236,11 +236,22 @@ function ConversationCard({
             {format(new Date(conversation.createdAt), 'MMM d, HH:mm')}
           </div>
         </div>
-        {conversation.duration && conversation.duration > 0 && (
-          <div className="mt-1 text-xs text-muted-foreground">
-            Duration: {Math.floor(conversation.duration / 60)}:{String(conversation.duration % 60).padStart(2, '0')}
-          </div>
-        )}
+        {/* Quality Score + Duration */}
+        <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+          {conversation.analysis?.overallScore !== undefined && conversation.analysis.overallScore > 0 && (
+            <Badge
+              variant={conversation.analysis.overallScore >= 70 ? "default" : conversation.analysis.overallScore >= 50 ? "secondary" : "destructive"}
+              className={cn("text-xs", conversation.analysis.overallScore >= 70 && "bg-green-600")}
+            >
+              Score: {conversation.analysis.overallScore}/100
+            </Badge>
+          )}
+          {conversation.duration && conversation.duration > 0 && (
+            <span>
+              Duration: {Math.floor(conversation.duration / 60)}:{String(conversation.duration % 60).padStart(2, '0')}
+            </span>
+          )}
+        </div>
         {conversation.detectedIssues && conversation.detectedIssues.length > 0 && (
           <div className="mt-2 flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 text-yellow-500" />
@@ -324,12 +335,20 @@ export default function ConversationQualityPage() {
     );
   }
 
+  // Compute stats — exclude voicemails/no-answer from quality metrics
+  const nonVmDispositions = new Set(['voicemail', 'no_answer', 'busy']);
+  const realConvos = conversations.filter(c => !nonVmDispositions.has((c.disposition || '').toLowerCase()));
+  const analyzedConvos = realConvos.filter(c => c.analysis?.overallScore && c.analysis.overallScore > 0);
+  const avgScore = analyzedConvos.length > 0
+    ? Math.round(analyzedConvos.reduce((s, c) => s + (c.analysis?.overallScore || 0), 0) / analyzedConvos.length)
+    : null;
+
   const stats = {
     total: conversations.length,
     calls: conversations.filter(c => c.type === 'call' && !c.isTestCall).length,
-    emails: conversations.filter(c => c.type === 'email').length,
+    analyzed: analyzedConvos.length,
     testCalls: conversations.filter(c => c.isTestCall).length,
-    withTranscripts: conversations.filter(c => (c.transcript && c.transcript.length > 100) || (c.transcriptTurns && c.transcriptTurns.length > 2)).length,
+    avgScore,
   };
 
   return (
@@ -370,7 +389,7 @@ export default function ConversationQualityPage() {
               <Phone className="h-5 w-5 text-purple-500" />
               <div>
                 <p className="text-2xl font-bold">{stats.calls}</p>
-                <p className="text-xs text-muted-foreground">Calls</p>
+                <p className="text-xs text-muted-foreground">Production Calls</p>
               </div>
             </div>
           </CardContent>
@@ -378,10 +397,10 @@ export default function ConversationQualityPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <Mail className="h-5 w-5 text-blue-500" />
+              <BarChart3 className="h-5 w-5 text-blue-500" />
               <div>
-                <p className="text-2xl font-bold">{stats.emails}</p>
-                <p className="text-xs text-muted-foreground">Emails</p>
+                <p className="text-2xl font-bold">{stats.analyzed}</p>
+                <p className="text-xs text-muted-foreground">Analyzed</p>
               </div>
             </div>
           </CardContent>
@@ -400,10 +419,10 @@ export default function ConversationQualityPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-green-500" />
+              <TrendingUp className="h-5 w-5 text-green-500" />
               <div>
-                <p className="text-2xl font-bold">{stats.withTranscripts}</p>
-                <p className="text-xs text-muted-foreground">With Transcripts</p>
+                <p className="text-2xl font-bold">{stats.avgScore !== null ? `${stats.avgScore}/100` : '--'}</p>
+                <p className="text-xs text-muted-foreground">Avg Score</p>
               </div>
             </div>
           </CardContent>
@@ -509,7 +528,7 @@ export default function ConversationQualityPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Conversations</CardTitle>
             <CardDescription>
-              {conversations.length} conversation{conversations.length !== 1 ? 's' : ''} ({stats.withTranscripts} with full transcripts)
+              {conversations.length} conversation{conversations.length !== 1 ? 's' : ''} ({stats.analyzed} analyzed with quality scores)
             </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-0">

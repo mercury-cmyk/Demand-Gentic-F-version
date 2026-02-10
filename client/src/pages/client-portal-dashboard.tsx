@@ -6027,7 +6027,7 @@ export default function ClientPortalDashboard() {
                   { value: 'Pegasus', label: 'Pegasus', desc: 'Calm & Authoritative' },
                   { value: 'Sadaltager', label: 'Sadaltager', desc: 'Knowledgeable & Expert' },
                   { value: 'Pulcherrima', label: 'Pulcherrima', desc: 'Forward & Assertive' },
-                  { value: 'Algieba', label: 'Algieba', desc: 'Smooth & Polished' },
+
                 ] : [
                   { value: 'alloy', label: 'Alloy', desc: 'Neutral & Balanced' },
                   { value: 'echo', label: 'Echo', desc: 'Warm & Engaging' },

@@ -56,6 +56,8 @@ interface ConversationListPanelProps {
     emails: number;
     testCalls: number;
     withTranscripts: number;
+    analyzedWithScores?: number;
+    avgQualityScore?: number;
   };
 }
 
@@ -82,9 +84,9 @@ export function ConversationListPanel({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
         <StatCard icon={<MessageSquare className="h-4 w-4" />} value={stats.total} label="Total" />
         <StatCard icon={<Phone className="h-4 w-4 text-purple-500" />} value={stats.calls} label="Calls" />
-        <StatCard icon={<Mail className="h-4 w-4 text-blue-500" />} value={stats.emails} label="Emails" />
+        <StatCard icon={<BarChart3 className="h-4 w-4 text-blue-500" />} value={stats.analyzedWithScores ?? 0} label="Analyzed" />
         <StatCard icon={<AlertTriangle className="h-4 w-4 text-yellow-500" />} value={stats.testCalls} label="Test Calls" />
-        <StatCard icon={<FileText className="h-4 w-4 text-green-500" />} value={stats.withTranscripts} label="Transcripts" />
+        <StatCard icon={<FileText className="h-4 w-4 text-green-500" />} value={stats.avgQualityScore !== undefined ? `${stats.avgQualityScore}/100` : '--'} label="Avg Score" />
       </div>
 
       {/* Filters */}
@@ -242,7 +244,7 @@ function StatCard({
   label,
 }: {
   icon: React.ReactNode;
-  value: number;
+  value: number | string;
   label: string;
 }) {
   return (

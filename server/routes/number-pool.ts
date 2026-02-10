@@ -71,8 +71,8 @@ const updateNumberSchema = z.object({
   displayName: z.string().optional(),
   region: z.string().optional(),
   status: z.enum(['active', 'cooling', 'suspended', 'retired']).optional(),
-  maxCallsPerHour: z.number().min(1).max(100).optional(),
-  maxCallsPerDay: z.number().min(1).max(500).optional(),
+  maxCallsPerHour: z.number().min(1).max(1000).optional(),
+  maxCallsPerDay: z.number().min(1).max(5000).optional(),
   tags: z.array(z.string()).optional(),
 });
 

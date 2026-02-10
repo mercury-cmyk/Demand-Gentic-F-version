@@ -165,9 +165,9 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
     },
 
     dispositionReview: conv.analysis?.dispositionReview ? {
-      assignedDisposition: conv.analysis.dispositionReview.assigned,
-      expectedDisposition: conv.analysis.dispositionReview.expected,
-      isAccurate: conv.analysis.dispositionReview.accurate,
+      assignedDisposition: conv.analysis.dispositionReview.assignedDisposition || conv.analysis.dispositionReview.assigned,
+      expectedDisposition: conv.analysis.dispositionReview.expectedDisposition || conv.analysis.dispositionReview.expected,
+      isAccurate: conv.analysis.dispositionReview.isAccurate ?? conv.analysis.dispositionReview.accurate,
       notes: conv.analysis.dispositionReview.notes,
     } : undefined,
 
@@ -261,11 +261,9 @@ export default function UnifiedIntelligencePage() {
         emails: conversationsData.stats.counts.emails,
         testCalls: conversationsData.stats.counts.testCalls,
         withTranscripts: conversationsData.stats.counts.withTranscripts,
+        analyzedWithScores: conversationsData.stats.analyzedWithScores,
+        avgQualityScore: conversationsData.stats.avgQualityScore,
       };
-    } else if (conversationsData?.total !== undefined && conversationsData?.conversations?.length && conversationsData.total > conversationsData.conversations.length) {
-       // Only total is available from server (pagination)
-       const serverTotal = conversationsData.total;
-       // ... interpolate others? No, just use client stats for others if counts object missing
     }
 
     // Fallback to client-side specific counts
@@ -275,6 +273,8 @@ export default function UnifiedIntelligencePage() {
       emails: conversations.filter(c => c.interactionType === 'email').length,
       testCalls: conversations.filter(c => c.type === 'test').length,
       withTranscripts: conversations.filter(c => c.hasTranscript).length,
+      analyzedWithScores: conversations.filter(c => c.qualityScore && c.qualityScore > 0).length,
+      avgQualityScore: undefined as number | undefined,
     };
   }, [conversations, conversationsData]);
 
@@ -301,7 +301,7 @@ export default function UnifiedIntelligencePage() {
       return response.json();
     },
     onSuccess: (data) => {
-      toast({ title: 'Analysis Complete', description: `Score: ${data.analysis?.overallScore || 'N/A'}/10` });
+      toast({ title: 'Analysis Complete', description: `Score: ${data.analysis?.overallScore || 'N/A'}/100` });
       refetchConversations();
     },
     onError: (error: any) => {

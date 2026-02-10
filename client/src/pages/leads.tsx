@@ -141,6 +141,13 @@ export default function LeadsPage() {
     queryKey: ['/api/campaigns'],
   });
 
+  // Build campaign ID -> name lookup
+  const campaignNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of campaigns) map.set(c.id, c.name);
+    return map;
+  }, [campaigns]);
+
   const getAgentDisplayName = (lead: LeadWithAccount) => {
     const humanName = `${lead.agentFirstName || ''} ${lead.agentLastName || ''}`.trim();
     return (lead.agentDisplayName || humanName || lead.aiAgentName || (lead as any).customFields?.aiAgentName || '').trim();
@@ -1200,7 +1207,7 @@ export default function LeadsPage() {
                     </div>
                   </TableCell>
                   <TableCell data-testid={`text-campaign-${lead.id}`}>
-                    {lead.campaignId || '-'}
+                    {(lead.campaignId && campaignNameMap.get(lead.campaignId)) || lead.campaignId || '-'}
                   </TableCell>
                   <TableCell>
                     {agentName ? (
@@ -1598,33 +1605,11 @@ export default function LeadsPage() {
       audioRef.currentTime = 0;
     }
 
-    // Fetch fresh recording URL from backend (presigned URLs expire, backend auto-refreshes from Telnyx)
+    // Use the stream proxy endpoint to bypass CORS and handle URL expiration
     setLoadingRecordingId(leadId);
     try {
-      const response = await fetch(`/api/leads/${leadId}/recording-url`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        },
-      });
-      
-      const data = await response.json();
-      
-      // Handle expired recordings that couldn't be refreshed (410 Gone)
-      if (response.status === 410) {
-        toast({
-          title: "Recording Expired",
-          description: "This recording has expired and could not be refreshed from Telnyx.",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      if (!response.ok || !data.url) {
-        throw new Error(data.message || 'No recording URL available');
-      }
-
-      // Create new audio and play with fresh URL
-      const audio = new Audio(data.url);
+      const streamUrl = `/api/recordings/${leadId}/stream`;
+      const audio = new Audio(streamUrl);
       audio.onended = () => setPlayingLeadId(null);
       audio.onpause = () => {
         if (audio.currentTime === 0) setPlayingLeadId(null);
@@ -1637,12 +1622,12 @@ export default function LeadsPage() {
         });
         setPlayingLeadId(null);
       };
-      
+
       await audio.play();
       setAudioRef(audio);
       setPlayingLeadId(leadId);
     } catch (error: any) {
-      console.error('Failed to fetch recording URL:', error);
+      console.error('Failed to play recording:', error);
       toast({
         title: "Recording Error",
         description: error.message || "Failed to load recording. Please try again.",

@@ -104,6 +104,7 @@ interface Recording {
   fromNumber?: string | null;
   toNumber?: string | null;
   agentType: string | null;
+  agentName?: string | null;
   disposition: string | null;
   recordingStatus: string | null;
   durationSec?: number | null; // Call duration in seconds
@@ -839,12 +840,12 @@ export default function CallRecordingsPage() {
                             {recording.campaignName}
                           </Badge>
                         )}
-                        
+
                         {recording.agentType && (
                           <Badge className={`text-xs text-white ${AGENT_TYPE_COLORS[recording.agentType] || 'bg-gray-500'}`}>
                             {recording.agentType === 'ai' && <Bot className="h-3 w-3 mr-1" />}
                             {recording.agentType === 'human' && <User className="h-3 w-3 mr-1" />}
-                            {recording.agentType.replace('_', ' ')}
+                            {recording.agentName || recording.agentType.replace('_', ' ')}
                           </Badge>
                         )}
                         

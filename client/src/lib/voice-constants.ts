@@ -37,8 +37,6 @@ export const GEMINI_VOICES: VoiceOption[] = [
   { id: 'Pulcherrima', name: 'Pulcherrima', gender: 'female', tone: 'Forward, Confident', description: 'Bold and assertive', bestFor: ['Closing calls'], provider: 'gemini', color: 'from-red-500 to-rose-600' },
 
   // Specialized voices
-  { id: 'Algieba', name: 'Algieba', gender: 'male', tone: 'Smooth, Polished', description: 'Refined delivery', bestFor: ['Premium brands'], provider: 'gemini', color: 'from-yellow-500 to-amber-600' },
-  { id: 'Despina', name: 'Despina', gender: 'female', tone: 'Smooth, Professional', description: 'Elegant and articulate', bestFor: ['Luxury market'], provider: 'gemini', color: 'from-fuchsia-500 to-pink-600' },
   { id: 'Iapetus', name: 'Iapetus', gender: 'male', tone: 'Clear, Precise', description: 'Technical and accurate', bestFor: ['Product demos'], provider: 'gemini', color: 'from-sky-500 to-blue-600' },
   { id: 'Erinome', name: 'Erinome', gender: 'female', tone: 'Clear, Articulate', description: 'Professional presenter', bestFor: ['Presentations'], provider: 'gemini', color: 'from-violet-400 to-purple-500' },
   { id: 'Vindemiatrix', name: 'Vindemiatrix', gender: 'female', tone: 'Gentle, Soft', description: 'Calming presence', bestFor: ['Sensitive topics'], provider: 'gemini', color: 'from-green-300 to-teal-400' },
@@ -47,16 +45,12 @@ export const GEMINI_VOICES: VoiceOption[] = [
   // Dynamic voices
   { id: 'Sadachbia', name: 'Sadachbia', gender: 'female', tone: 'Lively, Dynamic', description: 'High-energy and exciting', bestFor: ['Product launches'], provider: 'gemini', color: 'from-orange-400 to-red-500' },
   { id: 'Laomedeia', name: 'Laomedeia', gender: 'female', tone: 'Upbeat, Positive', description: 'Optimistic and motivating', bestFor: ['Follow-up calls'], provider: 'gemini', color: 'from-lime-400 to-green-500' },
-  { id: 'Autonoe', name: 'Autonoe', gender: 'female', tone: 'Bright, Cheerful', description: 'Sunny and engaging', bestFor: ['Relationship building'], provider: 'gemini', color: 'from-yellow-400 to-orange-500' },
-  { id: 'Callirrhoe', name: 'Callirrhoe', gender: 'female', tone: 'Easy-going, Relaxed', description: 'Casual and comfortable', bestFor: ['Informal calls'], provider: 'gemini', color: 'from-teal-400 to-cyan-500' },
-  { id: 'Umbriel', name: 'Umbriel', gender: 'male', tone: 'Easy-going, Laid-back', description: 'Relaxed and natural', bestFor: ['Warm introductions'], provider: 'gemini', color: 'from-emerald-400 to-teal-500' },
 
   // Character voices
   { id: 'Enceladus', name: 'Enceladus', gender: 'male', tone: 'Breathy, Intimate', description: 'Thoughtful whisper', bestFor: ['Confidential discussions'], provider: 'gemini', color: 'from-slate-500 to-gray-600' },
   { id: 'Algenib', name: 'Algenib', gender: 'male', tone: 'Gravelly, Deep', description: 'Distinctive and memorable', bestFor: ['Brand differentiation'], provider: 'gemini', color: 'from-stone-600 to-slate-700' },
   { id: 'Rasalgethi', name: 'Rasalgethi', gender: 'male', tone: 'Informative, Educational', description: 'Teacher-like clarity', bestFor: ['Training calls'], provider: 'gemini', color: 'from-blue-500 to-cyan-600' },
   { id: 'Alnilam', name: 'Alnilam', gender: 'male', tone: 'Firm, Decisive', description: 'Strong and commanding', bestFor: ['Leadership messaging'], provider: 'gemini', color: 'from-red-600 to-rose-700' },
-  { id: 'Zubenelgenubi', name: 'Zubenelgenubi', gender: 'male', tone: 'Casual, Conversational', description: 'Natural and unscripted', bestFor: ['Peer-to-peer'], provider: 'gemini', color: 'from-green-500 to-emerald-600' },
 ];
 
 // OpenAI Realtime voices

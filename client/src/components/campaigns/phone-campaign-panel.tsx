@@ -5,7 +5,7 @@
  * Includes queue statistics, agent assignment, and AI call controls.
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,10 +22,25 @@ import {
   AlertCircle,
   BarChart,
   RefreshCw,
+  Zap,
+  Mic,
+  Check,
 } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/queryClient';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { apiRequest, getAuthHeaders } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface QueueStats {
   total: number;
@@ -51,6 +66,9 @@ export interface PhoneCampaignPanelProps {
     name: string;
     status: string;
     dialMode?: string;
+    type: string;
+    maxConcurrentWorkers?: number;
+    assignedVoices?: { id: string; name: string }[];
   };
   queueStats?: QueueStats;
   onAssignAgents?: () => void;
@@ -70,6 +88,161 @@ export function PhoneCampaignPanel({
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [scaleDialogOpen, setScaleDialogOpen] = useState(false);
+  const [workerCount, setWorkerCount] = useState(campaign.maxConcurrentWorkers || 1);
+
+  // Scale Workers Mutation
+  const updateScaleMutation = useMutation({
+    mutationFn: async (count: number) => {
+      const res = await apiRequest("PATCH", `/api/campaigns/${campaign.id}`, {
+        maxConcurrentWorkers: count
+      });
+      if (!res.ok) throw new Error("Failed to update capacity");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaigns"] });
+      toast({ title: "Deployment Capacity Scaled Successfully" });
+      setScaleDialogOpen(false);
+    },
+    onError: (err) => {
+      toast({
+        title: "Scaling Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // === Voice Assignment Logic ===
+  const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
+  const [selectedVoices, setSelectedVoices] = useState<{ id: string; name: string }[]>(
+    campaign.assignedVoices || []
+  );
+
+  // Audio preview state
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [loadingVoiceId, setLoadingVoiceId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Play voice preview
+  const playVoicePreview = async (voice: any) => {
+    if (playingVoiceId === voice.id) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setPlayingVoiceId(null);
+      setLoadingVoiceId(null);
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    setLoadingVoiceId(voice.id);
+
+    try {
+      const response = await fetch('/api/voice-providers/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          voiceId: voice.id,
+          provider: voice.provider || 'gemini',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch preview');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      audio.onended = () => {
+        setPlayingVoiceId(null);
+        setLoadingVoiceId(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = () => {
+        setPlayingVoiceId(null);
+        setLoadingVoiceId(null);
+        URL.revokeObjectURL(audioUrl);
+        toast({
+          title: "Preview Failed",
+          description: "Could not play voice preview",
+          variant: "destructive",
+        });
+      };
+
+      await audio.play();
+      setPlayingVoiceId(voice.id);
+    } catch (error) {
+      console.error('Preview error:', error);
+      toast({
+        title: "Preview Error",
+        description: "Failed to load voice preview",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingVoiceId(null);
+    }
+  };
+
+  // Fetch available voices
+  const { data: voiceOptionsData } = useQuery({
+    queryKey: ['voice-options'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/admin/voice-options');
+      return res.json();
+    },
+    enabled: voiceDialogOpen, // Only fetch when dialog is open
+  });
+
+  const voiceOptions = voiceOptionsData?.data || [];
+
+  // Update Voices Mutation
+  const updateVoicesMutation = useMutation({
+    mutationFn: async (voices: { id: string; name: string }[]) => {
+      const res = await apiRequest('PATCH', `/api/campaigns/${campaign.id}`, {
+        assignedVoices: voices,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/campaigns'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaign.id}`] });
+      toast({ title: "Voices Assigned Successfully" });
+      setVoiceDialogOpen(false);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Voice Assignment Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const toggleVoice = (voiceId: string, voiceName: string) => {
+    setSelectedVoices(prev => {
+      const exists = prev.find(v => v.id === voiceId);
+      if (exists) {
+        return prev.filter(v => v.id !== voiceId);
+      } else {
+        return [...prev, { id: voiceId, name: voiceName }];
+      }
+    });
+  };
 
   const isAiAgent = campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql';
 
@@ -349,12 +522,141 @@ export function PhoneCampaignPanel({
         <Button
           size="sm"
           variant="outline"
+          onClick={() => setScaleDialogOpen(true)}
+        >
+          <Zap className="w-4 h-4 mr-2" />
+          Deployment Scale
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setVoiceDialogOpen(true)}
+        >
+          <Mic className="w-4 h-4 mr-2" />
+          Assign Voices {selectedVoices.length > 0 && `(${selectedVoices.length})`}
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => setLocation(`/reports?campaign=${campaign.id}`)}
         >
           <BarChart className="w-4 h-4 mr-2" />
           Reports
         </Button>
       </div>
+
+      <Dialog open={scaleDialogOpen} onOpenChange={setScaleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>AI Workforce Deployment Scale</DialogTitle>
+            <DialogDescription>
+              Adjust the number of concurrent AI agents deployed for this campaign.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="flex items-center gap-4">
+              <Label htmlFor="workers" className="text-right">
+                Concurrent Agents
+              </Label>
+              <Input
+                id="workers"
+                type="number"
+                min={1}
+                max={50}
+                value={workerCount}
+                onChange={(e) => setWorkerCount(parseInt(e.target.value) || 1)}
+                className="col-span-3"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Note: Each agent can handle 1 active conversation at a time. Increasing this scales your outreach throughput.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="submit"
+              onClick={() => updateScaleMutation.mutate(workerCount)}
+              disabled={updateScaleMutation.isPending}
+            >
+              {updateScaleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Deploy Agents
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Voice Assignment Dialog */}
+      <Dialog open={voiceDialogOpen} onOpenChange={setVoiceDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Assign Voice Rotation</DialogTitle>
+            <DialogDescription>
+              Select multiple voices to be used in rotation for this campaign.
+              If none are selected, the default voice configuration will be used.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <ScrollArea className="h-[300px] w-full rounded-md border p-4">
+              <div className="space-y-4">
+                {voiceOptions.map((voice: any) => (
+                  <div key={voice.id} className="flex items-center justify-between space-x-2">
+                    <div className="flex items-center space-x-2 flex-1">
+                      <Checkbox 
+                        id={voice.id} 
+                        checked={selectedVoices.some(v => v.id === voice.id)}
+                        onCheckedChange={() => toggleVoice(voice.id, voice.name)}
+                      />
+                      <div className="grid gap-1.5 leading-none">
+                        <Label
+                          htmlFor={voice.id}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                        >
+                          {voice.name}
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          {voice.description || voice.gender || 'AI Voice'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => playVoicePreview(voice)}
+                      disabled={loadingVoiceId === voice.id}
+                      title="Preview Voice"
+                    >
+                      {loadingVoiceId === voice.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : playingVoiceId === voice.id ? (
+                        <Pause className="h-4 w-4 text-primary" />
+                      ) : (
+                        <Play className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                      )}
+                    </Button>
+                  </div>
+                ))}
+                {voiceOptions.length === 0 && (
+                  <p className="text-center text-muted-foreground py-4">
+                    No voices available.
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => updateVoicesMutation.mutate(selectedVoices)}
+              disabled={updateVoicesMutation.isPending}
+            >
+              {updateVoicesMutation.isPending ? "Saving..." : "Save Voices"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -460,8 +460,6 @@ export const GEMINI_VOICES = {
   // Specialized voices
   SADALTAGER: 'Sadaltager',     // Knowledgeable - Authoritative consultant
   PULCHERRIMA: 'Pulcherrima',   // Forward - Bold and assertive
-  ALGIEBA: 'Algieba',           // Smooth - Refined delivery
-  DESPINA: 'Despina',           // Smooth - Elegant and articulate
   IAPETUS: 'Iapetus',           // Clear - Technical and accurate
   ERINOME: 'Erinome',           // Clear - Professional presenter
   VINDEMIATRIX: 'Vindemiatrix', // Gentle - Calming presence
@@ -470,16 +468,12 @@ export const GEMINI_VOICES = {
   // Dynamic voices
   SADACHBIA: 'Sadachbia',       // Lively - High-energy and exciting
   LAOMEDEIA: 'Laomedeia',       // Upbeat - Optimistic and motivating
-  AUTONOE: 'Autonoe',           // Bright - Sunny and engaging
-  CALLIRRHOE: 'Callirrhoe',     // Easy-going - Casual and comfortable
-  UMBRIEL: 'Umbriel',           // Easy-going - Relaxed and natural
   
   // Character voices
   ENCELADUS: 'Enceladus',       // Breathy - Thoughtful whisper
   ALGENIB: 'Algenib',           // Gravelly - Distinctive and memorable
   RASALGETHI: 'Rasalgethi',     // Informative - Teacher-like clarity
   ALNILAM: 'Alnilam',           // Firm - Strong and commanding
-  ZUBENELGENUBI: 'Zubenelgenubi', // Casual - Natural and unscripted
 } as const;
 
 export type GeminiVoice = typeof GEMINI_VOICES[keyof typeof GEMINI_VOICES];
@@ -593,20 +587,6 @@ export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
     style: ['forward', 'confident', 'assertive'],
     bestFor: ['closing calls', 'urgency', 'decision-making'],
   },
-  'Algieba': {
-    name: 'Algieba',
-    description: 'Smooth and polished voice - refined delivery',
-    gender: 'male',
-    style: ['smooth', 'polished', 'refined'],
-    bestFor: ['premium brands', 'luxury', 'sophistication'],
-  },
-  'Despina': {
-    name: 'Despina',
-    description: 'Smooth and professional voice - elegant and articulate',
-    gender: 'female',
-    style: ['smooth', 'professional', 'elegant'],
-    bestFor: ['luxury market', 'high-end services', 'refinement'],
-  },
   'Iapetus': {
     name: 'Iapetus',
     description: 'Clear and precise voice - technical and accurate',
@@ -649,27 +629,6 @@ export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
     style: ['upbeat', 'positive', 'motivating'],
     bestFor: ['follow-up calls', 'encouragement', 'positivity'],
   },
-  'Autonoe': {
-    name: 'Autonoe',
-    description: 'Bright and cheerful voice - sunny and engaging',
-    gender: 'female',
-    style: ['bright', 'cheerful', 'sunny'],
-    bestFor: ['relationship building', 'warm calls', 'friendliness'],
-  },
-  'Callirrhoe': {
-    name: 'Callirrhoe',
-    description: 'Easy-going and relaxed voice - casual and comfortable',
-    gender: 'female',
-    style: ['easy-going', 'relaxed', 'casual'],
-    bestFor: ['informal calls', 'casual conversations', 'comfort'],
-  },
-  'Umbriel': {
-    name: 'Umbriel',
-    description: 'Easy-going and laid-back voice - relaxed and natural',
-    gender: 'male',
-    style: ['easy-going', 'laid-back', 'natural'],
-    bestFor: ['warm introductions', 'casual outreach', 'naturalness'],
-  },
   'Enceladus': {
     name: 'Enceladus',
     description: 'Breathy and intimate voice - thoughtful whisper',
@@ -697,13 +656,6 @@ export const GEMINI_VOICE_DETAILS: Record<GeminiVoice, {
     gender: 'male',
     style: ['firm', 'decisive', 'commanding'],
     bestFor: ['leadership messaging', 'authority', 'decisiveness'],
-  },
-  'Zubenelgenubi': {
-    name: 'Zubenelgenubi',
-    description: 'Casual and conversational voice - natural and unscripted',
-    gender: 'male',
-    style: ['casual', 'conversational', 'natural'],
-    bestFor: ['peer-to-peer', 'informal outreach', 'authenticity'],
   },
 };
 

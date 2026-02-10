@@ -109,11 +109,11 @@ const GEMINI_VOICE_PREFERENCES = [
   // Professional voices
   "Sulafat", "Gacrux", "Achird", "Schedar", "Sadaltager", "Pulcherrima",
   // Specialized voices
-  "Algieba", "Despina", "Iapetus", "Erinome", "Vindemiatrix", "Achernar",
+  "Iapetus", "Erinome", "Vindemiatrix", "Achernar",
   // Dynamic voices
-  "Sadachbia", "Laomedeia", "Autonoe", "Callirrhoe", "Umbriel",
+  "Sadachbia", "Laomedeia",
   // Character voices
-  "Enceladus", "Algenib", "Rasalgethi", "Alnilam", "Zubenelgenubi",
+  "Enceladus", "Algenib", "Rasalgethi", "Alnilam",
 ];
 
 function normalizeVoiceName(preferred?: string) {
@@ -905,11 +905,18 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
     if (humanInitiated) {
       // Human spoke first (e.g., "Hello?") - respond to their greeting
       console.log('[Gemini Live] ✅ Human spoke first - responding to their greeting');
-      const openingMessage = `The person just answered and said something like "Hello?". Respond with this EXACT message:
+      const openingMessage = `The person just answered and said something like "Hello?".
+Your task is to verify their identity.
+Say EXACTLY this and NOTHING else:
 
 "${openingText}"
 
-THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear their response.`;
+Instructions:
+1. Speak ONLY the text in quotes above.
+2. STOP immediately after the question mark.
+3. WAIT for the user to reply.
+4. DO NOT simulate or predict the user's response.
+5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.`;
 
       geminiWs?.send(JSON.stringify({
         clientContent: {
@@ -923,11 +930,18 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
     } else {
       // Timeout expired - AI takes initiative (human was silent)
       console.log('[Gemini Live] ✅ Timeout expired - AI taking initiative');
-      const openingMessage = `The call has been connected but the person hasn't spoken yet. Initiate the conversation with this EXACT message:
+      const openingMessage = `The call has been connected but the person hasn't spoken yet.
+Your task is to verify their identity.
+Initiate the conversation with this EXACT message:
 
 "${openingText}"
 
-THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear their response.`;
+Instructions:
+1. Speak ONLY the text in quotes above.
+2. STOP immediately after the question mark.
+3. WAIT for the user to reply.
+4. DO NOT simulate or predict the user's response.
+5. DO NOT say "Thanks for confirming" until you actually hear "Yes" from the user.`;
 
       geminiWs?.send(JSON.stringify({
         clientContent: {
@@ -1568,7 +1582,9 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
               }
               
               // Run post-call analysis if we have a valid call session
-              if (callSessionId && fullTranscript && fullTranscript.length > 50) {
+              // LOWERED THRESHOLD: Allow shorter interactions (e.g. immediate rejections) to be analyzed
+              // 15 chars covers "Not interested", "Wrong number", "Stop calling"
+              if (callSessionId && fullTranscript && fullTranscript.length > 15) {
                 // AUTO-TRIGGER: Post-call quality analysis (non-blocking)
                 // Run in background to not delay call cleanup
                 setImmediate(async () => {
@@ -1588,16 +1604,22 @@ THEN STOP and WAIT for them to respond. Do NOT continue speaking until you hear 
                       await db.update(callSessions)
                         .set({
                           aiAnalysis: {
-                            overallScore: analysisResult.overallScore,
-                            summary: analysisResult.summary,
-                            qualityDimensions: analysisResult.qualityDimensions,
-                            campaignAlignment: analysisResult.campaignAlignment,
-                            dispositionReview: analysisResult.dispositionReview,
-                            issues: analysisResult.issues,
-                            recommendations: analysisResult.recommendations,
-                            breakdowns: analysisResult.breakdowns,
-                            performanceGaps: analysisResult.performanceGaps,
-                            analyzedAt: analysisResult.metadata.analyzedAt,
+                            conversationQuality: {
+                              overallScore: analysisResult.overallScore,
+                              summary: analysisResult.summary,
+                              qualityDimensions: analysisResult.qualityDimensions,
+                              campaignAlignment: analysisResult.campaignAlignment,
+                              dispositionReview: analysisResult.dispositionReview,
+                              issues: analysisResult.issues,
+                              recommendations: analysisResult.recommendations,
+                              breakdowns: analysisResult.breakdowns,
+                              performanceGaps: analysisResult.performanceGaps,
+                              flowCompliance: analysisResult.flowCompliance,
+                              learningSignals: analysisResult.learningSignals,
+                              nextBestActions: analysisResult.nextBestActions,
+                              promptUpdates: analysisResult.promptUpdates,
+                              metadata: analysisResult.metadata,
+                            },
                           } as any,
                         })
                         .where(eq(callSessions.id, callSessionId!));

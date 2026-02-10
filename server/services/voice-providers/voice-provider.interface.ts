@@ -282,9 +282,9 @@ export const OPENAI_TO_GEMINI_VOICE_MAP: Record<string, string> = {
 // Official Gemini TTS voices (30 total) - all real Google voices
 export const VALID_GEMINI_VOICES = [
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
-  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
-  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
-  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Enceladus', 'Iapetus', 
+  'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
+  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird',
   'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
 ];
 
@@ -302,13 +302,8 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
   'Zephyr': 'alloy',
   'Leda': 'nova',
   'Orus': 'echo',
-  'Callirrhoe': 'alloy',
-  'Autonoe': 'nova',
   'Enceladus': 'echo',
   'Iapetus': 'marin',
-  'Umbriel': 'alloy',
-  'Algieba': 'cedar',
-  'Despina': 'nova',
   'Erinome': 'nova',
   'Algenib': 'onyx',
   'Rasalgethi': 'echo',
@@ -317,7 +312,6 @@ export const GEMINI_TO_OPENAI_VOICE_MAP: Record<string, string> = {
   'Alnilam': 'fable',
   'Pulcherrima': 'fable',
   'Achird': 'alloy',
-  'Zubenelgenubi': 'alloy',
   'Vindemiatrix': 'nova',
   'Sadachbia': 'shimmer',
   'Sadaltager': 'echo',

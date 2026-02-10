@@ -389,14 +389,13 @@ const GOOGLE_VOICES = [
   // Specialized voices
   { value: 'Sadaltager', label: 'Sadaltager - Knowledgeable & Expert', provider: 'google' },
   { value: 'Pulcherrima', label: 'Pulcherrima - Forward & Assertive', provider: 'google' },
-  { value: 'Algieba', label: 'Algieba - Smooth & Polished', provider: 'google' },
-  { value: 'Despina', label: 'Despina - Elegant & Articulate', provider: 'google' },
+
   { value: 'Iapetus', label: 'Iapetus - Clear & Precise', provider: 'google' },
   { value: 'Erinome', label: 'Erinome - Professional Presenter', provider: 'google' },
   // Dynamic voices
   { value: 'Sadachbia', label: 'Sadachbia - Lively & Dynamic', provider: 'google' },
   { value: 'Laomedeia', label: 'Laomedeia - Upbeat & Positive', provider: 'google' },
-  { value: 'Autonoe', label: 'Autonoe - Bright & Cheerful', provider: 'google' },
+
 ];
 
 const PROVIDER_OPTIONS = [

@@ -32,6 +32,15 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
   Phone,
   RefreshCw,
   Search,
@@ -60,6 +69,8 @@ interface TelnyxNumber {
   reputationBand: string | null;
   callsToday: number;
   callsThisHour: number;
+  maxCallsPerHour: number;
+  maxCallsPerDay: number;
   lastUsedAt: string | null;
   createdAt: string;
 }
@@ -93,6 +104,32 @@ interface CallStats {
 export default function NumberPoolPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingNumber, setEditingNumber] = useState<TelnyxNumber | null>(null);
+  const [editLimits, setEditLimits] = useState({ hourly: 40, daily: 500 });
+
+  // Update limits mutation
+  const updateLimitsMutation = useMutation({
+    mutationFn: async (data: { id: string; hourly: number; daily: number }) => {
+      const res = await apiRequest("PATCH", `/api/number-pool/numbers/${data.id}`, {
+        maxCallsPerHour: data.hourly,
+        maxCallsPerDay: data.daily,
+      });
+      if (!res.ok) throw new Error("Failed to update limits");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/number-pool/numbers"] });
+      toast({ title: "Limits updated successfully" });
+      setEditingNumber(null);
+    },
+    onError: (err) => {
+      toast({
+        title: "Failed to update limits",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Fetch numbers
   const { data: numbersData, isLoading: numbersLoading } = useQuery({
@@ -445,6 +482,8 @@ export default function NumberPoolPage() {
                   <TableHead>Phone Number</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Reputation</TableHead>
+                  <TableHead>Limit (Hr)</TableHead>
+                  <TableHead>Limit (Day)</TableHead>
                   <TableHead>Calls Today</TableHead>
                   <TableHead>Last Used</TableHead>
                   <TableHead>Region</TableHead>
@@ -466,6 +505,8 @@ export default function NumberPoolPage() {
                     <TableCell>
                       {getReputationBadge(num.reputationBand, num.reputationScore)}
                     </TableCell>
+                    <TableCell>{num.maxCallsPerHour}</TableCell>
+                    <TableCell>{num.maxCallsPerDay}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Activity className="h-4 w-4 text-muted-foreground" />
@@ -489,6 +530,18 @@ export default function NumberPoolPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditingNumber(num);
+                              setEditLimits({
+                                hourly: num.maxCallsPerHour || 40,
+                                daily: num.maxCallsPerDay || 500
+                              });
+                            }}
+                          >
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Edit Limits
+                          </DropdownMenuItem>
                           {num.status === "active" ? (
                             <DropdownMenuItem
                               onClick={() =>
@@ -537,6 +590,61 @@ export default function NumberPoolPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingNumber} onOpenChange={(open) => !open && setEditingNumber(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Call Limits</DialogTitle>
+            <DialogDescription>
+              Adjust spacing limits for {editingNumber?.phoneNumberE164}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="hourly" className="text-right">
+                Hourly Limit
+              </Label>
+              <Input
+                id="hourly"
+                type="number"
+                value={editLimits.hourly}
+                onChange={(e) => setEditLimits({ ...editLimits, hourly: parseInt(e.target.value) || 0 })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="daily" className="text-right">
+                Daily Limit
+              </Label>
+              <Input
+                id="daily"
+                type="number"
+                value={editLimits.daily}
+                onChange={(e) => setEditLimits({ ...editLimits, daily: parseInt(e.target.value) || 0 })}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="submit"
+              onClick={() => {
+                if (editingNumber) {
+                  updateLimitsMutation.mutate({
+                    id: editingNumber.id,
+                    hourly: editLimits.hourly,
+                    daily: editLimits.daily
+                  });
+                }
+              }}
+              disabled={updateLimitsMutation.isPending}
+            >
+              {updateLimitsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
