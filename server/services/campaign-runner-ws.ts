@@ -171,10 +171,11 @@ interface IncomingMessage {
 }
 
 interface OutgoingMessage {
-  type: 'registered' | 'task' | 'no_tasks' | 'campaign_complete' | 'error' | 'heartbeat_ack' | 'stats';
+  type: 'registered' | 'task' | 'no_tasks' | 'campaign_complete' | 'error' | 'heartbeat_ack' | 'stats' | 'stall_reason';
   task?: CampaignTask;
   campaignId?: string;
   error?: string;
+  stallReason?: string;
   stats?: {
     activeCampaigns: number;
     queuedItems: number;
@@ -603,6 +604,7 @@ class CampaignRunnerService {
     // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
     if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
       console.log(`${LOG_PREFIX} Skipping task load - call execution not enabled. Switch webhooks to dev mode first.`);
+      this.broadcastStallReason(campaignId, 'Call execution is disabled. Switch webhooks to dev mode in Telephony settings.');
       return;
     }
 
@@ -615,6 +617,7 @@ class CampaignRunnerService {
 
       if (!campaign || campaign.status !== 'active') {
         console.log(`${LOG_PREFIX} Campaign ${campaignId} not active`);
+        this.broadcastStallReason(campaignId, `Campaign is not active (status: ${campaign?.status || 'not found'}).`);
         return;
       }
 
@@ -681,6 +684,11 @@ class CampaignRunnerService {
         .where(baseWhere)
         .orderBy(sql`${campaignQueue.priority} DESC`, campaignQueue.createdAt)
         .limit(50);
+      }
+
+      if (queueItems.length === 0) {
+        this.broadcastStallReason(campaignId, 'All contacts have been called or are waiting for retry cooldown.');
+        return;
       }
 
       // === TIMEZONE-BASED PRIORITIZATION ===
@@ -812,6 +820,16 @@ class CampaignRunnerService {
         console.log(`${LOG_PREFIX} Skipped: ${skippedCountryNotEnabled} country not enabled, ${skippedOutsideHours} outside hours, ${skippedNoTimezone} no timezone`);
       }
 
+      if (prioritizedItems.length === 0 && queueItems.length > 0) {
+        const parts: string[] = [];
+        if (skippedOutsideHours > 0) parts.push(`${skippedOutsideHours} outside business hours`);
+        if (skippedCountryNotEnabled > 0) parts.push(`${skippedCountryNotEnabled} in disabled countries`);
+        if (skippedNoTimezone > 0) parts.push(`${skippedNoTimezone} with unknown timezone`);
+        this.broadcastStallReason(campaignId,
+          `No eligible contacts right now: ${parts.join(', ')}. Calls will resume when business hours open.`);
+        return;
+      }
+
       const tasks: CampaignTask[] = [];
       const maxTasks = 50; // Limit tasks per batch
 
@@ -918,6 +936,7 @@ class CampaignRunnerService {
       }
 
       if (tasks.length > 0) {
+        this.broadcastStallReason(campaignId, ''); // Clear any previous stall reason
         const existing = this.taskQueue.get(campaignId) || [];
         this.taskQueue.set(campaignId, [...existing, ...tasks]);
         console.log(`${LOG_PREFIX} Loaded ${tasks.length} tasks for campaign ${campaignId}`);
@@ -1064,6 +1083,14 @@ class CampaignRunnerService {
   private sendMessage(ws: WebSocket, message: OutgoingMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
+    }
+  }
+
+  private broadcastStallReason(campaignId: string, reason: string): void {
+    for (const [ws, runner] of this.runners.entries()) {
+      if (runner.activeCampaigns.has(campaignId)) {
+        this.sendMessage(ws, { type: 'stall_reason', campaignId, stallReason: reason });
+      }
     }
   }
 

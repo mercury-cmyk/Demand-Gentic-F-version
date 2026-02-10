@@ -1057,9 +1057,14 @@ export class TelnyxAiBridge extends EventEmitter {
         const isAnsweredViaApi = callState === 'answered' || callState === 'bridged' || callState === 'active';
         const isAnswered = isAnsweredViaApi || isAnsweredViaWebhook;
 
-        // Start conversation when call is answered, or after 30s as fallback
-        // (TeXML calls may not report state correctly but Telnyx still bridges them)
-        if (isAlive && !hasSpoken && (isAnswered || attempts >= 30)) {
+        // Start conversation only when we have real evidence the call was answered:
+        // - Webhook notification (isAnsweredViaWebhook)
+        // - API state shows answered/bridged/active (isAnsweredViaApi)
+        // - Media WebSocket is connected (hasMediaConnection)
+        // NOTE: We no longer use a time-based fallback (attempts >= 30) because
+        // is_alive stays true while the call is still ringing, which caused calls
+        // to be falsely promoted to "answered" and then sit for 3+ minutes.
+        if (isAlive && !hasSpoken && (isAnswered || hasMediaConnection)) {
           hasSpoken = true;
 
           // CRITICAL: Mark call as answered so polling continues with extended timeout
@@ -1070,8 +1075,8 @@ export class TelnyxAiBridge extends EventEmitter {
               console.log(`[TelnyxAiBridge] Call ${callId} answered (via webhook notification)`);
             } else if (isAnsweredViaApi) {
               console.log(`[TelnyxAiBridge] Call ${callId} answered (state: ${callState})`);
-            } else {
-              console.log(`[TelnyxAiBridge] Call ${callId} assumed answered after ${attempts}s (state: ${callState}) — marking isAnswered=true`);
+            } else if (hasMediaConnection) {
+              console.log(`[TelnyxAiBridge] Call ${callId} answered (media WebSocket connected)`);
             }
           }
 

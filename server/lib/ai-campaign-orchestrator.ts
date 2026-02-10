@@ -14,7 +14,7 @@ import * as sipDialer from '../services/sip';
 import { AiAgentSettings, CallContext } from '../services/ai-voice-agent';
 import { isVoiceVariablePreflightError } from '../services/voice-variable-contract';
 import { db } from '../db';
-import { campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns } from '@shared/schema';
+import { campaigns, campaignQueue, contacts, suppressionPhones, campaignSuppressionAccounts, campaignAgentAssignments, virtualAgents, dialerCallAttempts, dialerRuns } from '@shared/schema';
 import { eq, sql, inArray, and } from 'drizzle-orm';
 import { checkSuppressionBulk } from './suppression.service';
 import { getBestPhoneForContact } from './phone-utils';
@@ -702,11 +702,30 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
 }
 
 /**
+ * Persist stall reason to the campaigns table so the UI can display why calls stopped.
+ * Pass null to clear the stall reason when calls resume.
+ */
+async function setOrchestratorStallReason(campaignId: string, reason: string | null): Promise<void> {
+  try {
+    await db.update(campaigns)
+      .set({
+        lastStallReason: reason,
+        lastStallReasonAt: reason ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(campaigns.id, campaignId));
+  } catch (err) {
+    console.error(`[AI Orchestrator] Failed to set stall reason for ${campaignId}:`, err);
+  }
+}
+
+/**
  * Process a single campaign - initiate calls to maintain concurrency
  */
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
   // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
   if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+    await setOrchestratorStallReason(campaignId, 'Call execution disabled. Switch webhooks to dev mode in Telephony settings.');
     return { initiated: 0, skipped: 0 };
   }
 
@@ -719,6 +738,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   // Check campaign is still active and in ai_agent mode
   if (campaign.status !== 'active' || campaign.dialMode !== 'ai_agent') {
     console.log(`[AI Orchestrator] Campaign ${campaignId} not active/ai_agent (status=${campaign.status}, mode=${campaign.dialMode})`);
+    await setOrchestratorStallReason(campaignId, `Campaign is not active or not in AI agent mode (status: ${campaign.status}).`);
     return { initiated: 0, skipped: 0 };
   }
 
@@ -728,6 +748,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   const aiSettings = campaign.aiAgentSettings as AiAgentSettings;
   if (!aiSettings) {
     console.log(`[AI Orchestrator] Campaign ${campaignId} has no AI settings`);
+    await setOrchestratorStallReason(campaignId, 'No AI agent settings configured for this campaign.');
     return { initiated: 0, skipped: 0 };
   }
   
@@ -763,6 +784,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   const legacyFromNumber = process.env.TELNYX_FROM_NUMBER;
   if (!legacyFromNumber && !process.env.TELNYX_NUMBER_POOL_ENABLED) {
     console.log(`[AI Orchestrator] No TELNYX_FROM_NUMBER configured and number pool not enabled`);
+    await setOrchestratorStallReason(campaignId, 'No caller ID configured. Enable number pool or set TELNYX_FROM_NUMBER.');
     return { initiated: 0, skipped: 0 };
   }
 
@@ -785,6 +807,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   const queueItems = await getQueuedItems(campaignId, slotsAvailable);
   console.log(`[AI Orchestrator] Found ${queueItems.length} queued items for campaign ${campaignId}`);
   if (queueItems.length === 0) {
+    await setOrchestratorStallReason(campaignId, 'No contacts remaining in the queue.');
     return { initiated: 0, skipped: 0 };
   }
 
@@ -1034,6 +1057,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   console.log(`[AI Orchestrator] After compliance: ${eligibleItems.length} eligible, ${skipped} removed`);
   
   if (eligibleItems.length === 0) {
+    await setOrchestratorStallReason(campaignId, 'All contacts filtered (business hours/compliance). Calls will resume automatically.');
     return { initiated: 0, skipped };
   }
 
@@ -1550,6 +1574,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
         `);
         console.log(`[AI Orchestrator] Reset ${remainingItems.length} remaining items to retry next hour`);
       }
+      await setOrchestratorStallReason(campaignId, 'Hourly call limit reached on all numbers. Calls will resume next hour.');
       return { initiated, skipped, hourlyLimitPaused: true };
     }
 
@@ -1557,6 +1582,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     const fatalResult = results.find((r: any) => r && r.fatalError);
     if (fatalResult) {
       console.log(`[AI Orchestrator] Stopping campaign ${campaignId} processing due to fatal Telnyx error`);
+      await setOrchestratorStallReason(campaignId, 'Fatal telephony error. Check Telnyx account status.');
       return { initiated, skipped, fatalError: true };
     }
 
@@ -1564,6 +1590,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
     if (i + PARALLEL_CALL_BATCH_SIZE < eligibleItems.length) {
       await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CALLS_MS));
     }
+  }
+
+  // Clear stall reason when calls are successfully initiated
+  if (initiated > 0) {
+    await setOrchestratorStallReason(campaignId, null);
   }
 
   return { initiated, skipped };

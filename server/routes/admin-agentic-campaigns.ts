@@ -952,6 +952,7 @@ router.get('/voice-options', requireAuth, async (req: Request, res: Response) =>
       { id: 'Sadachbia', name: 'Sadachbia', gender: 'male', tone: 'lively', description: 'Lively, energetic voice for dynamic outreach' },
       { id: 'Sadaltager', name: 'Sadaltager', gender: 'male', tone: 'knowledgeable', description: 'Knowledgeable, articulate voice for consultative sales' },
       { id: 'Sulafat', name: 'Sulafat', gender: 'male', tone: 'warm', description: 'Warm, engaging voice for nurturing prospects' },
+      { id: 'Pegasus', name: 'Pegasus', gender: 'male', tone: 'calm', description: 'Calm, authoritative voice for serious discussions' },
     ];
 
     res.json({ success: true, data: voiceOptions });

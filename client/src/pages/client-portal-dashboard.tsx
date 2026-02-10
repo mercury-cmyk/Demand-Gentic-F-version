@@ -101,6 +101,19 @@ interface Campaign {
   orderNumber?: string;
   estimatedBudget?: string;
   approvedBudget?: string;
+  stats?: {
+    attempts: number;
+    impressions: number;
+    leads: number;
+    targetAchieved: number;
+    remaining: number;
+    queueStats?: {
+      total: number;
+      remaining: number;
+      completed: number;
+      failed: number;
+    };
+  };
 }
 
 interface Order {
@@ -255,6 +268,10 @@ export default function ClientPortalDashboard() {
     window.history.replaceState(null, '', `/client-portal/dashboard?tab=${tab}`);
   };
   
+  // Queue View State
+  const [showQueueDialog, setShowQueueDialog] = useState(false);
+  const [queueCampaignId, setQueueCampaignId] = useState<string | null>(null);
+
   // Work Order Request State (managed campaigns by Pivotal team)
   const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
   const [workOrderStep, setWorkOrderStep] = useState(1);
@@ -685,6 +702,16 @@ export default function ClientPortalDashboard() {
     queryFn: async () => {
       const res = await fetch('/api/client-portal/activity', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch activity log');
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  const { data: voiceOptions = [] } = useQuery<{id: string, name: string, description: string}[]>({
+    queryKey: ['client-portal-voice-options'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/campaigns/voice-options', authHeaders);
+      if (!res.ok) return [];
       return res.json();
     },
     enabled: !!user,
@@ -1456,7 +1483,18 @@ export default function ClientPortalDashboard() {
     const matchesStatus = campaignStatusFilter === 'all' || effectiveStatus === campaignStatusFilter;
     const matchesSearch = !campaignSearchQuery || 
       campaign.name.toLowerCase().includes(campaignSearchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
+    
+    // Type filtering logic
+    let matchesType = true;
+    if (campaignTypeFilter !== 'all') {
+        const type = (campaign.type || campaign.campaignType || '').toLowerCase();
+        if (campaignTypeFilter === 'voice') matchesType = type.includes('voice') || type.includes('call') || type.includes('phone');
+        else if (campaignTypeFilter === 'email') matchesType = type.includes('email') || type.includes('mail');
+        else if (campaignTypeFilter === 'combined') matchesType = type.includes('combo') || type.includes('hybrid');
+        else if (campaignTypeFilter === 'data') matchesType = type.includes('data');
+    }
+
+    return matchesStatus && matchesSearch && matchesType;
   });
   
   // Filter projects (campaign requests)
@@ -2660,6 +2698,10 @@ export default function ClientPortalDashboard() {
                     onSelectVoice={(campaignId) => {
                       setClientVoiceCampaignId(campaignId);
                       setShowClientVoiceSelect(true);
+                    }}
+                    onViewQueue={(campaignId) => {
+                      setQueueCampaignId(campaignId);
+                      setShowQueueDialog(true);
                     }}
                   />
                 ))}
@@ -6011,24 +6053,14 @@ export default function ClientPortalDashboard() {
             <div className="space-y-2">
               <Label className="text-sm font-medium">Select Voice</Label>
               <div className="grid grid-cols-2 gap-2 max-h-[45vh] overflow-y-auto pr-1">
-                {(clientSelectedProvider === 'google' ? [
+                {(clientSelectedProvider === 'google' 
+                  ? (voiceOptions.length > 0 ? voiceOptions.map(v => ({ value: v.id, label: v.name, desc: v.description })) : [
                   { value: 'Kore', label: 'Kore', desc: 'Firm & Professional (Default)' },
                   { value: 'Fenrir', label: 'Fenrir', desc: 'Excitable & Persuasive' },
                   { value: 'Charon', label: 'Charon', desc: 'Informative & Authoritative' },
                   { value: 'Aoede', label: 'Aoede', desc: 'Breezy & Friendly' },
-                  { value: 'Puck', label: 'Puck', desc: 'Upbeat & Lively' },
-                  { value: 'Zephyr', label: 'Zephyr', desc: 'Bright & Clear' },
-                  { value: 'Leda', label: 'Leda', desc: 'Youthful & Modern' },
-                  { value: 'Orus', label: 'Orus', desc: 'Firm & Reliable' },
-                  { value: 'Sulafat', label: 'Sulafat', desc: 'Warm & Caring' },
-                  { value: 'Gacrux', label: 'Gacrux', desc: 'Mature & Credible' },
-                  { value: 'Schedar', label: 'Schedar', desc: 'Even & Composed' },
-                  { value: 'Achird', label: 'Achird', desc: 'Friendly & Welcoming' },
-                  { value: 'Pegasus', label: 'Pegasus', desc: 'Calm & Authoritative' },
-                  { value: 'Sadaltager', label: 'Sadaltager', desc: 'Knowledgeable & Expert' },
-                  { value: 'Pulcherrima', label: 'Pulcherrima', desc: 'Forward & Assertive' },
-
-                ] : [
+                ]) 
+                  : [
                   { value: 'alloy', label: 'Alloy', desc: 'Neutral & Balanced' },
                   { value: 'echo', label: 'Echo', desc: 'Warm & Engaging' },
                   { value: 'fable', label: 'Fable', desc: 'Expressive & Dynamic' },
@@ -6143,7 +6175,70 @@ export default function ClientPortalDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      <CampaignQueueDialog 
+        open={showQueueDialog} 
+        onOpenChange={setShowQueueDialog} 
+        campaignId={queueCampaignId} 
+      />
       </div>
     </ClientPortalLayout>
+  );
+}
+
+function CampaignQueueDialog({ open, onOpenChange, campaignId }: { open: boolean; onOpenChange: (open: boolean) => void; campaignId: string | null }) {
+  const { data: queue = [], isLoading } = useQuery({
+     queryKey: ['campaign-queue', campaignId],
+     queryFn: async () => {
+         if (!campaignId) return [];
+         const token = localStorage.getItem('clientPortalToken');
+         const res = await fetch(`/api/client-portal/campaigns/${campaignId}/queue`, {
+            headers: { Authorization: `Bearer ${token}` },
+         });
+         if (!res.ok) return [];
+         return res.json();
+     },
+     enabled: !!campaignId && open
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Campaign Queue (Preview)</DialogTitle>
+          <DialogDescription>
+             Next 50 contacts in queue
+          </DialogDescription>
+        </DialogHeader>
+        <div className="h-[300px] border rounded-md overflow-hidden">
+           {isLoading ? (
+             <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin h-6 w-6" /></div>
+           ) : (
+             <ScrollArea className="h-full">
+             <Table>
+                <TableHeader>
+                   <TableRow>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Status</TableHead>
+                   </TableRow>
+                </TableHeader>
+                <TableBody>
+                   {queue.length === 0 ? (
+                      <TableRow><TableCell colSpan={2} className="text-center">Queue is empty</TableCell></TableRow>
+                   ) : (
+                      queue.map((item: any) => (
+                        <TableRow key={item.id}>
+                           <TableCell>{item.phoneNumber}</TableCell>
+                           <TableCell><Badge variant="outline">{item.status}</Badge></TableCell>
+                        </TableRow>
+                      ))
+                   )}
+                </TableBody>
+             </Table>
+             </ScrollArea>
+           )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

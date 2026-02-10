@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
   Target, ChevronRight, Clock, CheckCircle, Truck,
-  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic
+  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic, List
 } from 'lucide-react';
 
 interface Campaign {
@@ -31,6 +31,19 @@ interface Campaign {
   estimatedBudget?: string;
   approvedBudget?: string;
   totalContacts?: number;
+  stats?: {
+    attempts: number;
+    impressions: number;
+    leads: number;
+    targetAchieved: number;
+    remaining: number;
+    queueStats?: {
+      total: number;
+      remaining: number;
+      completed: number;
+      failed: number;
+    };
+  };
 }
 
 interface CampaignCardProps {
@@ -39,6 +52,7 @@ interface CampaignCardProps {
   onViewDetails?: (campaignId: string) => void;
   onTestAgent?: (campaignId: string) => void;
   onSelectVoice?: (campaignId: string) => void;
+  onViewQueue?: (campaignId: string) => void;
 }
 
 const statusConfig: Record<string, {
@@ -114,7 +128,7 @@ const statusSteps = [
   { key: 'completed', label: 'Completed' },
 ];
 
-export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice }: CampaignCardProps) {
+export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice, onViewQueue }: CampaignCardProps) {
   const status = campaign.status || 'active';
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
@@ -190,21 +204,26 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-3 gap-2 pt-2">
-          <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <Users className="h-4 w-4 mx-auto text-blue-500 mb-1" />
-            <p className="text-xs text-muted-foreground">Eligible</p>
-            <p className="font-semibold text-sm">{campaign.eligibleCount?.toLocaleString() || 0}</p>
+        <div className="grid grid-cols-4 gap-2 pt-2">
+          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+            <Users className="h-3.5 w-3.5 mx-auto text-blue-500 mb-1" />
+            <p className="text-[10px] text-muted-foreground">Queue</p>
+            <p className="font-semibold text-xs">{(campaign.stats?.queueStats?.total ?? campaign.totalContacts ?? campaign.eligibleCount ?? 0).toLocaleString()}</p>
           </div>
-          <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <CheckCircle className="h-4 w-4 mx-auto text-green-500 mb-1" />
-            <p className="text-xs text-muted-foreground">Verified</p>
-            <p className="font-semibold text-sm">{campaign.verifiedCount?.toLocaleString() || 0}</p>
+          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+            <Clock className="h-3.5 w-3.5 mx-auto text-amber-500 mb-1" />
+            <p className="text-[10px] text-muted-foreground">Remaining</p>
+            <p className="font-semibold text-xs">{(campaign.stats?.remaining ?? 0).toLocaleString()}</p>
           </div>
-          <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-            <Truck className="h-4 w-4 mx-auto text-purple-500 mb-1" />
-            <p className="text-xs text-muted-foreground">Delivered</p>
-            <p className="font-semibold text-sm">{deliveredCount.toLocaleString()}</p>
+          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+            <Truck className="h-3.5 w-3.5 mx-auto text-purple-500 mb-1" />
+            <p className="text-[10px] text-muted-foreground">Attempts</p>
+            <p className="font-semibold text-xs">{(campaign.stats?.attempts ?? campaign.deliveredCount ?? 0).toLocaleString()}</p>
+          </div>
+          <div className="text-center p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+            <CheckCircle className="h-3.5 w-3.5 mx-auto text-green-500 mb-1" />
+            <p className="text-[10px] text-muted-foreground">Leads</p>
+            <p className="font-semibold text-xs">{(campaign.stats?.leads ?? campaign.verifiedCount ?? 0).toLocaleString()}</p>
           </div>
         </div>
 
@@ -249,6 +268,17 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
 
       <CardFooter className="pt-3 border-t bg-slate-50/50 dark:bg-slate-900/50 flex flex-col gap-2">
         <div className="flex gap-2 w-full">
+          {onViewQueue && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1"
+              onClick={() => onViewQueue(campaign.id)}
+            >
+              <List className="h-3.5 w-3.5" />
+              Queue
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -262,6 +292,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
             <Button
               variant="ghost"
               size="sm"
+              className="px-2"
               onClick={() => onViewDetails(campaign.id)}
             >
               <BarChart3 className="h-4 w-4" />

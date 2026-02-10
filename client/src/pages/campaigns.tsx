@@ -31,6 +31,7 @@ import {
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { StatCard } from "@/components/shared/stat-card";
 import { ConfidenceIndicator } from "@/components/ui/confidence-indicator";
 import { Progress } from "@/components/ui/progress";
@@ -716,6 +717,12 @@ export default function CampaignsPage() {
                       {/* Expandable Type-Specific Panel */}
                       <CollapsibleContent>
                         <div className="border-t px-4 py-4 bg-muted/20">
+                          {isPhone && (campaign as any).lastStallReason && campaign.status === 'active' && (
+                            <Alert variant="warning" className="mb-3">
+                              <AlertCircle className="h-4 w-4" />
+                              <AlertDescription>{(campaign as any).lastStallReason}</AlertDescription>
+                            </Alert>
+                          )}
                           {isPhone && (
                             <PhoneCampaignPanel
                               campaign={{

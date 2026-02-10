@@ -15,6 +15,9 @@ import {
   campaigns,
   campaignIntakeRequests,
   virtualAgents,
+  campaignQueue,
+  callAttempts,
+  leads,
 } from '@shared/schema';
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
@@ -119,9 +122,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const campaignIds = new Set(clientCampaigns.map((c) => c.id));
 
-    // Also include campaigns created from approved intake requests (agentic orders)
-    const approvedIntakeStatuses = ['approved', 'qso_approved', 'in_progress', 'completed'] as const;
-
+    // Also include campaigns created from intake requests (ALL items)
     const intakeCampaigns = await db
       .select({
         id: campaigns.id,
@@ -140,10 +141,7 @@ router.get('/', async (req: Request, res: Response) => {
       })
       .from(campaigns)
       .innerJoin(campaignIntakeRequests, eq(campaigns.id, campaignIntakeRequests.campaignId))
-      .where(and(
-        eq(campaignIntakeRequests.clientAccountId, clientAccountId),
-        inArray(campaignIntakeRequests.status, approvedIntakeStatuses as any)
-      ))
+      .where(eq(campaignIntakeRequests.clientAccountId, clientAccountId))
       .orderBy(desc(campaigns.createdAt));
 
     const mappedIntakeCampaigns = intakeCampaigns
@@ -174,7 +172,7 @@ router.get('/', async (req: Request, res: Response) => {
     // V2: Also include campaigns linked directly via campaigns.clientAccountId
     // This catches campaigns created by admins without workOrders or intakeRequests
     let directCampaigns: typeof clientCampaigns = [];
-    if (isFeatureEnabled('client_campaign_listing_v2')) {
+    if (true) {
       // Add intake campaign IDs to the dedup set
       for (const ic of mappedIntakeCampaigns) {
         campaignIds.add(ic.id);
@@ -224,10 +222,86 @@ router.get('/', async (req: Request, res: Response) => {
         }));
     }
 
-    res.json([...clientCampaigns, ...mappedIntakeCampaigns, ...directCampaigns]);
+    const campaignsList = [...clientCampaigns, ...mappedIntakeCampaigns, ...directCampaigns];
+
+    // Enrich with Stats
+    const campaignsWithStats = await Promise.all(campaignsList.map(async (c) => {
+      try {
+        const [queueStats] = await db
+            .select({
+                total: sql<number>`count(*)::int`,
+                pending: sql<number>`sum(case when status = 'queued' or status = 'pending' then 1 else 0 end)::int`
+            })
+            .from(campaignQueue)
+            .where(eq(campaignQueue.campaignId, c.id));
+            
+        const [attemptStats] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(callAttempts)
+            .where(eq(callAttempts.campaignId, c.id));
+            
+        const [leadStats] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(leads)
+            .where(eq(leads.campaignId, c.id));
+
+        const totalQueue = Number(queueStats?.total || 0);
+        const remaining = Number(queueStats?.pending || 0);
+        const attempts = Number(attemptStats?.count || 0);
+        const leadCount = Number(leadStats?.count || 0);
+
+        return {
+            ...c,
+            eligibleCount: totalQueue,
+            verifiedCount: leadCount,
+            deliveredCount: attempts, 
+            totalContacts: totalQueue,
+            stats: {
+                attempts: attempts,
+                impressions: attempts, 
+                leads: leadCount,
+                targetAchieved: leadCount, 
+                remaining: remaining 
+            }
+        };
+      } catch (e) {
+        console.error('Error fetching stats for campaign ' + c.id, e);
+        return c;
+      }
+    }));
+
+    res.json(campaignsWithStats);
   } catch (error) {
      console.error('[CLIENT CAMPAIGNS] List error:', error);
      res.status(500).json({ message: 'Failed to list campaigns' });
+  }
+});
+
+/**
+ * GET /:id/queue - Get a sample of the queue for a campaign
+ */
+router.get('/:id/queue', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { id } = req.params;
+
+    const queue = await db
+      .select({
+        id: campaignQueue.id,
+        phoneNumber: campaignQueue.dialedNumber,
+        status: campaignQueue.status,
+        nextAttemptAt: campaignQueue.nextAttemptAt
+      })
+      .from(campaignQueue)
+      .where(eq(campaignQueue.campaignId, id))
+      .limit(50);
+
+    res.json(queue);
+  } catch (error) {
+    console.error('Queue fetch error:', error);
+    res.status(500).json({ message: 'Failed to fetch queue' });
   }
 });
 
@@ -584,6 +658,43 @@ router.patch('/:campaignId/voice', async (req: Request, res: Response) => {
     console.error('[CLIENT CAMPAIGNS] Voice update error:', error);
     res.status(500).json({ message: 'Failed to update voice' });
   }
+});
+
+/**
+ * GET /voice-options - Get available voice options
+ */
+router.get('/voice-options', async (req: Request, res: Response) => {
+    // Official Google Gemini Live TTS voices (30 available)
+    const voiceOptions = [
+      // Female voices
+      { id: 'Kore', name: 'Kore', gender: 'female', tone: 'warm', description: 'Warm, professional voice ideal for executive outreach' },
+      { id: 'Aoede', name: 'Aoede', gender: 'female', tone: 'bright', description: 'Bright, engaging voice for mid-market outreach' },
+      { id: 'Leda', name: 'Leda', gender: 'female', tone: 'youthful', description: 'Youthful, consultative voice for high-value prospects' },
+      { id: 'Erinome', name: 'Erinome', gender: 'female', tone: 'clear', description: 'Clear, precise voice for informative content' },
+      { id: 'Laomedeia', name: 'Laomedeia', gender: 'female', tone: 'upbeat', description: 'Upbeat, dynamic voice for engaging presentations' },
+      { id: 'Pulcherrima', name: 'Pulcherrima', gender: 'female', tone: 'forward', description: 'Forward, articulate voice for modern business' },
+      { id: 'Vindemiatrix', name: 'Vindemiatrix', gender: 'female', tone: 'gentle', description: 'Gentle, refined voice for premium experiences' },
+      { id: 'Achernar', name: 'Achernar', gender: 'female', tone: 'soft', description: 'Soft, intimate voice for personal connections' },
+      // Male voices
+      { id: 'Puck', name: 'Puck', gender: 'male', tone: 'upbeat', description: 'Upbeat, friendly voice for warm outreach' },
+      { id: 'Charon', name: 'Charon', gender: 'male', tone: 'informative', description: 'Informative, authoritative voice for technical audiences' },
+      { id: 'Fenrir', name: 'Fenrir', gender: 'male', tone: 'bold', description: 'Bold, confident voice for enterprise sales' },
+      { id: 'Orus', name: 'Orus', gender: 'male', tone: 'firm', description: 'Firm, confident voice for professional settings' },
+      { id: 'Zephyr', name: 'Zephyr', gender: 'male', tone: 'bright', description: 'Bright, optimistic voice for engaging content' },
+      { id: 'Enceladus', name: 'Enceladus', gender: 'male', tone: 'clear', description: 'Clear, direct voice for straightforward messaging' },
+      { id: 'Iapetus', name: 'Iapetus', gender: 'male', tone: 'clear', description: 'Clear, even voice for balanced communication' },
+      { id: 'Algenib', name: 'Algenib', gender: 'male', tone: 'raspy', description: 'Raspy, distinctive voice for memorable pitches' },
+      { id: 'Rasalgethi', name: 'Rasalgethi', gender: 'male', tone: 'informed', description: 'Informed, mature voice for executive discussions' },
+      { id: 'Alnilam', name: 'Alnilam', gender: 'male', tone: 'firm', description: 'Firm, strong voice for authoritative presentations' },
+      { id: 'Schedar', name: 'Schedar', gender: 'male', tone: 'even', description: 'Even, steady voice for professional calls' },
+      { id: 'Gacrux', name: 'Gacrux', gender: 'male', tone: 'mature', description: 'Mature, experienced voice for senior audiences' },
+      { id: 'Achird', name: 'Achird', gender: 'male', tone: 'friendly', description: 'Friendly, approachable voice for relationship building' },
+      { id: 'Sadachbia', name: 'Sadachbia', gender: 'male', tone: 'lively', description: 'Lively, energetic voice for dynamic outreach' },
+      { id: 'Sadaltager', name: 'Sadaltager', gender: 'male', tone: 'knowledgeable', description: 'Knowledgeable, articulate voice for consultative sales' },
+      { id: 'Sulafat', name: 'Sulafat', gender: 'male', tone: 'warm', description: 'Warm, engaging voice for nurturing prospects' },
+      { id: 'Pegasus', name: 'Pegasus', gender: 'male', tone: 'calm', description: 'Calm, authoritative voice for serious discussions' },
+    ];
+    res.json(voiceOptions);
 });
 
 /**

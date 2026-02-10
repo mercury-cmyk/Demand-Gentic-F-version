@@ -206,10 +206,19 @@ export default function CampaignRunnerPage() {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Keep This Tab Open</AlertTitle>
         <AlertDescription>
-          This page must remain open and active to run campaigns. 
+          This page must remain open and active to run campaigns.
           All calls are made from your browser using WebRTC.
         </AlertDescription>
       </Alert>
+
+      {/* Stall Reason Warning */}
+      {runnerState.stallReason && (
+        <Alert variant="warning">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Campaign Stalled</AlertTitle>
+          <AlertDescription>{runnerState.stallReason}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Campaign Selection */}

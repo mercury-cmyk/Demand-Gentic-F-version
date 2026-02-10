@@ -101,6 +101,7 @@ export interface CampaignRunnerState {
   currentTask: CampaignTask | null;
   stats: CampaignRunnerStats;
   error: Error | null;
+  stallReason: string | null;
   transcripts: CallTranscript[];
   callDurationSeconds: number;
 }
@@ -127,6 +128,7 @@ export function useCampaignRunner(config: CampaignRunnerConfig): [CampaignRunner
   const [isPaused, setIsPaused] = useState(false);
   const [currentTask, setCurrentTask] = useState<CampaignTask | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [stallReason, setStallReason] = useState<string | null>(null);
   const [stats, setStats] = useState<CampaignRunnerStats>({
     totalCallsMade: 0,
     successfulCalls: 0,
@@ -398,6 +400,7 @@ export function useCampaignRunner(config: CampaignRunnerConfig): [CampaignRunner
 
       case 'task':
         if (message.task && !isPaused) {
+          setStallReason(null); // Clear stall if we got a task
           processTask(message.task);
         }
         break;
@@ -405,6 +408,15 @@ export function useCampaignRunner(config: CampaignRunnerConfig): [CampaignRunner
       case 'no_tasks':
         console.log('[CampaignRunner] No tasks available');
         // Will retry on next interval
+        break;
+
+      case 'stall_reason':
+        if (message.stallReason) {
+          console.log(`[CampaignRunner] Campaign stalled: ${message.stallReason}`);
+          setStallReason(message.stallReason);
+        } else {
+          setStallReason(null);
+        }
         break;
 
       case 'campaign_complete':
@@ -508,6 +520,7 @@ export function useCampaignRunner(config: CampaignRunnerConfig): [CampaignRunner
     currentTask,
     stats,
     error,
+    stallReason,
     transcripts: webrtcState.transcripts,
     callDurationSeconds: webrtcState.callDurationSeconds,
   };

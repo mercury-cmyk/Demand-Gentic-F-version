@@ -95,7 +95,37 @@ export async function processDisposition(
   };
 
   try {
-    // Get the call attempt with related data
+    // Atomically claim this disposition using a conditional UPDATE.
+    // This prevents the race condition where multiple async handlers
+    // (webhook, polling, WebSocket close) all read dispositionProcessed=false
+    // before any of them write true.
+    const claimResult = await db
+      .update(dialerCallAttempts)
+      .set({ dispositionProcessed: true, dispositionProcessedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(dialerCallAttempts.id, callAttemptId),
+        eq(dialerCallAttempts.dispositionProcessed, false)
+      ));
+
+    const claimedRows = (claimResult as any).rowCount ?? (claimResult as any).count ?? 0;
+
+    if (claimedRows === 0) {
+      // Either the call attempt doesn't exist, or it was already processed.
+      const [existing] = await db
+        .select({ id: dialerCallAttempts.id, dispositionProcessed: dialerCallAttempts.dispositionProcessed })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      if (!existing) {
+        result.errors.push(`Call attempt ${callAttemptId} not found`);
+      } else {
+        result.errors.push(`Call attempt ${callAttemptId} already processed`);
+      }
+      return result;
+    }
+
+    // Now read the full call attempt data for processing
     const [callAttempt] = await db
       .select()
       .from(dialerCallAttempts)
@@ -103,13 +133,7 @@ export async function processDisposition(
       .limit(1);
 
     if (!callAttempt) {
-      result.errors.push(`Call attempt ${callAttemptId} not found`);
-      return result;
-    }
-
-    // Check if already processed
-    if (callAttempt.dispositionProcessed) {
-      result.errors.push(`Call attempt ${callAttemptId} already processed`);
+      result.errors.push(`Call attempt ${callAttemptId} not found after claim`);
       return result;
     }
 
@@ -159,13 +183,11 @@ export async function processDisposition(
         return result;
     }
 
-    // Mark call attempt as processed
+    // Store the final disposition value (processed flag was already set atomically above)
     await db
       .update(dialerCallAttempts)
       .set({
         disposition,
-        dispositionProcessed: true,
-        dispositionProcessedAt: new Date(),
         updatedAt: new Date()
       })
       .where(eq(dialerCallAttempts.id, callAttemptId));

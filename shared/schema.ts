@@ -1992,6 +1992,11 @@ export const campaigns = pgTable("campaigns", {
   // Schema: { enabled: boolean, maxCallsPerNumber?: number, rotationStrategy?: 'round_robin' | 'reputation_based' | 'region_match', cooldownHours?: number }
   numberPoolConfig: jsonb("number_pool_config"),
 
+  // ==================== STALL REASON TRACKING ====================
+  // Persisted by the AI orchestrator when campaigns silently stop making calls
+  lastStallReason: text("last_stall_reason"),
+  lastStallReasonAt: timestamp("last_stall_reason_at"),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   launchedAt: timestamp("launched_at"),
