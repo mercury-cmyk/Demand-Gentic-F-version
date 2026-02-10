@@ -43,7 +43,7 @@ import {
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
-  ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List
+  ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List, FileBarChart2, ShieldCheck
 } from 'lucide-react';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
@@ -61,6 +61,8 @@ import {
 } from '@/components/client-portal/campaigns';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { ArgyleEventsContent } from '@/pages/client-portal/argyle-events';
+import { UkefReportsContent } from '@/pages/client-portal/ukef-reports';
+import { UkefTranscriptQaContent } from '@/pages/client-portal/ukef-transcript-qa';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
@@ -84,6 +86,7 @@ interface Campaign {
   id: string;
   name: string;
   status: string;
+  clientStatus?: string | null;
   eligibleCount: number;
   totalContacts: number;
   verifiedCount: number;
@@ -199,6 +202,7 @@ const statusColors: Record<string, string> = {
   pending_review: 'bg-yellow-100 text-yellow-800',
   submitted: 'bg-yellow-100 text-yellow-800',
   approved: 'bg-blue-100 text-blue-800',
+  approved_pending_setup: 'bg-blue-100 text-blue-800',
   sent: 'bg-blue-100 text-blue-800',
   active: 'bg-green-100 text-green-800',
   delivering: 'bg-purple-100 text-purple-800',
@@ -739,6 +743,40 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
     staleTime: 5 * 60 * 1000,
   });
+
+  // UKEF campaign reports feature probe (via summary endpoint)
+  const { data: ukefReportsProbe } = useQuery<{ enabled: boolean }>({
+    queryKey: ['ukef-reports-feature-probe'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/client-portal/ukef-reports/summary', authHeaders);
+        if (!res.ok) return { enabled: false };
+        return { enabled: true };
+      } catch {
+        return { enabled: false };
+      }
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  const ukefReportsEnabled = ukefReportsProbe?.enabled ?? false;
+
+  // UKEF transcript QA feature probe
+  const { data: ukefTranscriptQaProbe } = useQuery<{ enabled: boolean }>({
+    queryKey: ['ukef-tqa-feature-probe'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/client-portal/ukef-transcript-qa/status', authHeaders);
+        if (!res.ok) return { enabled: false };
+        return { enabled: true };
+      } catch {
+        return { enabled: false };
+      }
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  const ukefTranscriptQaEnabled = ukefTranscriptQaProbe?.enabled ?? false;
 
   // Business profile query
   const { data: businessProfileData, isLoading: profileLoading } = useQuery<{
@@ -1319,9 +1357,12 @@ export default function ClientPortalDashboard() {
   };
 
   const getStatusBadge = (status: string) => {
+    const label = status === 'approved_pending_setup'
+      ? 'Approved - Pending setup'
+      : status.charAt(0).toUpperCase() + status.slice(1);
     return (
       <Badge className={statusColors[status] || 'bg-gray-100 text-gray-800'}>
-        {status.charAt(0).toUpperCase() + status.slice(1)}
+        {label}
       </Badge>
     );
   };
@@ -1411,7 +1452,8 @@ export default function ClientPortalDashboard() {
   // Filter campaigns
   // Filter campaigns
   const filteredCampaigns = campaigns.filter(campaign => {
-    const matchesStatus = campaignStatusFilter === 'all' || campaign.status === campaignStatusFilter;
+    const effectiveStatus = campaign.clientStatus || campaign.status;
+    const matchesStatus = campaignStatusFilter === 'all' || effectiveStatus === campaignStatusFilter;
     const matchesSearch = !campaignSearchQuery || 
       campaign.name.toLowerCase().includes(campaignSearchQuery.toLowerCase());
     return matchesStatus && matchesSearch;
@@ -1454,6 +1496,56 @@ export default function ClientPortalDashboard() {
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
+  }
+
+  // Main navigation items - clean and unique
+  // Core navigation modules - available to all clients by default
+  const navItems: { id: string; label: string; icon: any; color: string; action?: () => void; featureRequired?: string }[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'from-blue-500 to-cyan-500' },
+    { id: 'campaign-order', label: 'Agentic Order', icon: ClipboardList, color: 'from-orange-500 to-amber-500', action: () => setShowOrderPanel(true) },
+    { id: 'campaigns', label: 'Campaigns', icon: Target, color: 'from-purple-500 to-pink-500' },
+    { id: 'accounts', label: 'Accounts', icon: Building2, color: 'from-rose-500 to-pink-500', featureRequired: 'accounts_contacts' },
+    { id: 'contacts', label: 'Contacts', icon: Users, color: 'from-sky-500 to-cyan-500', featureRequired: 'accounts_contacts' },
+    { id: 'intelligence', label: 'Intelligence', icon: Brain, color: 'from-violet-500 to-purple-500' },
+    { id: 'leads', label: 'Leads', icon: UserCheck, color: 'from-green-500 to-emerald-500' },
+    { id: 'bookings', label: 'Bookings', icon: Calendar, color: 'from-teal-500 to-green-500', featureRequired: 'calendar_booking' },
+    { id: 'billing', label: 'Billing', icon: Receipt, color: 'from-indigo-500 to-purple-500' },
+    { id: 'support', label: 'Support', icon: Headphones, color: 'from-slate-500 to-slate-600' },
+    { id: 'settings', label: 'Settings', icon: Settings, color: 'from-gray-500 to-slate-500' },
+  ];
+
+  // Conditionally add Argyle events nav item (as a dashboard tab, not a separate page)
+  if (argyleFeatureStatus?.enabled) {
+    // Insert before Billing
+    const billingIdx = navItems.findIndex(i => i.id === 'billing');
+    navItems.splice(billingIdx >= 0 ? billingIdx : navItems.length - 2, 0, {
+      id: 'argyle-events',
+      label: 'Upcoming Events',
+      icon: CalendarDays,
+      color: 'from-emerald-500 to-teal-500',
+    });
+  }
+
+  // Conditionally add UKEF campaign reports tab (feature-flagged + client-gated)
+  if (ukefReportsEnabled) {
+    const billingIdx2 = navItems.findIndex(i => i.id === 'billing');
+    navItems.splice(billingIdx2 >= 0 ? billingIdx2 : navItems.length - 2, 0, {
+      id: 'ukef-reports',
+      label: 'Campaign Reports',
+      icon: FileBarChart2,
+      color: 'from-sky-500 to-blue-600',
+    });
+  }
+
+  // Conditionally add UKEF transcript QA tab (feature-flagged + client-gated)
+  if (ukefTranscriptQaEnabled) {
+    const billingIdx3 = navItems.findIndex(i => i.id === 'billing');
+    navItems.splice(billingIdx3 >= 0 ? billingIdx3 : navItems.length - 2, 0, {
+      id: 'ukef-transcript-qa',
+      label: 'Transcript QA',
+      icon: ShieldCheck,
+      color: 'from-violet-500 to-purple-600',
+    });
   }
 
   return (
@@ -2261,7 +2353,7 @@ export default function ClientPortalDashboard() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {getStatusBadge(campaign.status || 'active')}
+                            {getStatusBadge(campaign.clientStatus || campaign.status || 'active')}
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           </div>
                         </div>
@@ -2496,6 +2588,7 @@ export default function ClientPortalDashboard() {
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="approved_pending_setup">Approved (Pending setup)</SelectItem>
                       <SelectItem value="active">Active</SelectItem>
                       <SelectItem value="paused">Paused</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
@@ -2746,6 +2839,20 @@ export default function ClientPortalDashboard() {
         {activeTab === 'argyle-events' && argyleFeatureStatus?.enabled && (
           <div className="space-y-6">
             <ArgyleEventsContent organizationId={user.clientAccountId} />
+          </div>
+        )}
+
+        {/* ==================== UKEF CAMPAIGN REPORTS TAB ==================== */}
+        {activeTab === 'ukef-reports' && ukefReportsEnabled && (
+          <div className="space-y-6">
+            <UkefReportsContent />
+          </div>
+        )}
+
+        {/* ==================== UKEF TRANSCRIPT QA TAB ==================== */}
+        {activeTab === 'ukef-transcript-qa' && ukefTranscriptQaEnabled && (
+          <div className="space-y-6">
+            <UkefTranscriptQaContent />
           </div>
         )}
 

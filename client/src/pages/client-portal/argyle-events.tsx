@@ -141,6 +141,9 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
+  const [showRequestLeadsDialog, setShowRequestLeadsDialog] = useState(false);
+  const [requestLeadsEventId, setRequestLeadsEventId] = useState<string | null>(null);
+  const [requestLeadsCount, setRequestLeadsCount] = useState<string>('');
 
   // Check feature status
   const { data: featureStatus } = useQuery<{ enabled: boolean; reason?: string }>({
@@ -304,6 +307,40 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
     },
   });
 
+  // Request leads mutation — one-step: create draft + submit + bridge to project
+  const requestLeadsMutation = useMutation({
+    mutationFn: async ({ eventId, leadCount }: { eventId: string; leadCount: number }) => {
+      const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/request-leads`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ leadCount }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to request leads');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
+      setShowRequestLeadsDialog(false);
+      setRequestLeadsEventId(null);
+      setRequestLeadsCount('');
+      toast({
+        title: data.alreadySubmitted ? 'Already requested' : 'Leads requested!',
+        description: data.alreadySubmitted
+          ? 'This event already has a lead order submitted.'
+          : `Order ${data.orderNumber} submitted. Our team will review and begin work.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Request failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
   if (featureStatus && !featureStatus.enabled) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -448,35 +485,66 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
                         </span>
                       )}
                       {event.draftStatus === 'not_created' ? (
-                        <Button
-                          size="sm"
-                          onClick={() => createDraftMutation.mutate(event.id)}
-                          disabled={createDraftMutation.isPending}
-                        >
-                          {createDraftMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Plus className="h-4 w-4 mr-1" />
-                          )}
-                          Create Draft
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => createDraftMutation.mutate(event.id)}
+                            disabled={createDraftMutation.isPending}
+                          >
+                            {createDraftMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Plus className="h-4 w-4 mr-1" />
+                            )}
+                            Draft
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setRequestLeadsEventId(event.id);
+                              setShowRequestLeadsDialog(true);
+                            }}
+                          >
+                            <Target className="h-4 w-4 mr-1" />
+                            Request Leads
+                          </Button>
+                        </div>
                       ) : event.draftStatus === 'submitted' ? (
                         <Button size="sm" variant="outline" disabled>
                           <CheckCircle2 className="h-4 w-4 mr-1" />
                           Ordered
                         </Button>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedDraftId(event.draftId);
-                            setShowDraftDialog(true);
-                          }}
-                        >
-                          <FileEdit className="h-4 w-4 mr-1" />
-                          Open Draft
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedDraftId(event.draftId);
+                              setShowDraftDialog(true);
+                            }}
+                          >
+                            <FileEdit className="h-4 w-4 mr-1" />
+                            Edit Draft
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              if (event.draftId) {
+                                submitDraftMutation.mutate(event.draftId);
+                              }
+                            }}
+                            disabled={submitDraftMutation.isPending}
+                          >
+                            {submitDraftMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                            ) : (
+                              <Send className="h-4 w-4 mr-1" />
+                            )}
+                            Submit Order
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -509,6 +577,74 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
         isSaving={updateDraftMutation.isPending}
         isSubmitting={submitDraftMutation.isPending}
       />
+
+      {/* Request Leads Quick Dialog */}
+      <Dialog open={showRequestLeadsDialog} onOpenChange={(open) => {
+        setShowRequestLeadsDialog(open);
+        if (!open) {
+          setRequestLeadsEventId(null);
+          setRequestLeadsCount('');
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-primary" />
+              Request Leads
+            </DialogTitle>
+            <DialogDescription>
+              Specify how many leads you need for this event. Your request will be sent to our team for review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="quickLeadCount" className="text-sm font-medium">
+                Number of Leads *
+              </Label>
+              <Input
+                id="quickLeadCount"
+                type="number"
+                min="1"
+                placeholder="e.g., 500"
+                value={requestLeadsCount}
+                onChange={(e) => setRequestLeadsCount(e.target.value)}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowRequestLeadsDialog(false);
+                setRequestLeadsEventId(null);
+                setRequestLeadsCount('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (requestLeadsEventId && requestLeadsCount) {
+                  requestLeadsMutation.mutate({
+                    eventId: requestLeadsEventId,
+                    leadCount: parseInt(requestLeadsCount, 10),
+                  });
+                }
+              }}
+              disabled={!requestLeadsCount || parseInt(requestLeadsCount, 10) <= 0 || requestLeadsMutation.isPending}
+            >
+              {requestLeadsMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Send className="h-4 w-4 mr-1" />
+              )}
+              Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

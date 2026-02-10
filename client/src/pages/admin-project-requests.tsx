@@ -68,6 +68,14 @@ interface ProjectRequest {
   createdAt: string;
   updatedAt: string;
   approvalNotes: string | null;
+  // Event metadata (for Argyle event-sourced projects)
+  externalEventId?: string | null;
+  eventTitle?: string | null;
+  eventCommunity?: string | null;
+  eventType?: string | null;
+  eventLocation?: string | null;
+  eventDate?: string | null;
+  eventSourceUrl?: string | null;
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: typeof Clock }> = {
@@ -412,6 +420,12 @@ export default function AdminProjectRequests() {
                                 <span>Has landing page</span>
                               </div>
                             )}
+                            {project.externalEventId && (
+                              <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                                <Zap className="h-3 w-3 mr-1" />
+                                Event-sourced
+                              </Badge>
+                            )}
                           </div>
                         </div>
 
@@ -513,6 +527,53 @@ export default function AdminProjectRequests() {
                     <p className="text-xs text-muted-foreground mt-2">
                       These attachments will be linked to the campaign when approved.
                     </p>
+                  </div>
+                )}
+
+                {/* Event Source Section (Argyle event-sourced projects) */}
+                {selectedProject.externalEventId && (
+                  <div className="pt-4">
+                    <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-purple-600" />
+                      Source Event
+                    </p>
+                    <div className="space-y-2 bg-purple-50 rounded-lg p-3 border border-purple-200">
+                      {selectedProject.eventTitle && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Event:</span>{' '}
+                          <span className="font-medium">{selectedProject.eventTitle}</span>
+                        </div>
+                      )}
+                      {selectedProject.eventCommunity && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Community:</span>{' '}
+                          <span>{selectedProject.eventCommunity}</span>
+                        </div>
+                      )}
+                      {selectedProject.eventDate && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Date:</span>{' '}
+                          <span>{selectedProject.eventDate}</span>
+                        </div>
+                      )}
+                      {selectedProject.eventLocation && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Location:</span>{' '}
+                          <span>{selectedProject.eventLocation}</span>
+                        </div>
+                      )}
+                      {selectedProject.eventSourceUrl && (
+                        <a
+                          href={selectedProject.eventSourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline flex items-center gap-1 mt-1"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          View source event
+                        </a>
+                      )}
+                    </div>
                   </div>
                 )}
 

@@ -6964,7 +6964,8 @@ export const clientProjectStatusEnum = pgEnum('client_project_status', [
   'active',
   'paused',
   'completed',
-  'archived'
+  'archived',
+  'rejected'
 ]);
 
 export const billingModelTypeEnum = pgEnum('billing_model_type', [
@@ -7108,6 +7109,9 @@ export const clientProjects = pgTable("client_projects", {
   approvedAt: timestamp("approved_at"),
   rejectionReason: text("rejection_reason"),
 
+  // External event linkage (Argyle event-sourced projects)
+  externalEventId: varchar("external_event_id").references(() => externalEvents.id, { onDelete: 'set null' }),
+
   createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -7117,6 +7121,7 @@ export const clientProjects = pgTable("client_projects", {
   codeIdx: index("client_projects_code_idx").on(table.projectCode),
   typeIdx: index("client_projects_type_idx").on(table.projectType),
   orgIdx: index("client_projects_org_idx").on(table.campaignOrganizationId),
+  eventIdx: index("client_projects_event_idx").on(table.externalEventId),
 }));
 
 // Link campaigns to projects
