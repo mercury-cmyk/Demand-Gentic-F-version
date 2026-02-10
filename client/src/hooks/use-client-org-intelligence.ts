@@ -192,21 +192,21 @@ export function useClientOrgIntelligence() {
         parts.push(`Industry: ${org.identity.industry}`);
       }
       
-      if (org.offerings?.coreProducts?.length) {
+      if (Array.isArray(org.offerings?.coreProducts) && org.offerings.coreProducts.length) {
         parts.push(`Products/Services: ${org.offerings.coreProducts.join(', ')}`);
       }
-      if (org.offerings?.problemsSolved?.length) {
+      if (Array.isArray(org.offerings?.problemsSolved) && org.offerings.problemsSolved.length) {
         parts.push(`Problems Solved: ${org.offerings.problemsSolved.join(', ')}`);
       }
-      if (org.offerings?.differentiators?.length) {
+      if (Array.isArray(org.offerings?.differentiators) && org.offerings.differentiators.length) {
         parts.push(`Key Differentiators: ${org.offerings.differentiators.join(', ')}`);
       }
       
-      if (org.icp?.industries?.length) {
+      if (Array.isArray(org.icp?.industries) && org.icp.industries.length) {
         parts.push(`Target Industries: ${org.icp.industries.join(', ')}`);
       }
-      if (org.icp?.personas?.length) {
-        const titles = org.icp.personas.map(p => p.title).join(', ');
+      if (Array.isArray(org.icp?.personas) && org.icp.personas.length) {
+        const titles = org.icp.personas.map((p: any) => (typeof p === 'string' ? p : p.title)).join(', ');
         parts.push(`Target Personas: ${titles}`);
       }
       if (org.icp?.companySize) {
@@ -240,11 +240,11 @@ export function useClientOrgIntelligence() {
 
     const org = data.organization;
     if (org?.icp) {
-      if (org.icp.industries) {
+      if (Array.isArray(org.icp.industries)) {
         suggestions.industries = org.icp.industries;
       }
-      if (org.icp.personas) {
-        suggestions.titles = org.icp.personas.map(p => p.title);
+      if (Array.isArray(org.icp.personas)) {
+        suggestions.titles = org.icp.personas.map((p: any) => (typeof p === 'string' ? p : p.title));
       }
       if (org.icp.companySize) {
         suggestions.companySize = org.icp.companySize;

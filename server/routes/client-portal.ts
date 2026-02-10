@@ -47,6 +47,7 @@ import clientPortalBookingsRouter from './client-portal-bookings';
 import argyleEventsRouter from '../integrations/argyle_events/routes';
 import { ukefReportsRouter } from '../integrations/ukef_reports';
 import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
+import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 
 const router = Router();
 
@@ -188,6 +189,9 @@ router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
 router.use('/settings', requireClientAuth, clientPortalSettingsRouter);
 router.use('/crm', requireClientAuth, clientPortalCrmRouter);
 router.use('/bookings', requireClientAuth, clientPortalBookingsRouter);
+
+// Canonical work orders (Direct Agentic Orders) — used by Work Orders tab + Upcoming Events
+router.use('/work-orders', requireClientAuth, clientPortalWorkOrdersRouter);
 
 // Argyle event-sourced campaign drafts (feature-flagged, client-gated)
 router.use('/argyle-events', requireClientAuth, argyleEventsRouter);

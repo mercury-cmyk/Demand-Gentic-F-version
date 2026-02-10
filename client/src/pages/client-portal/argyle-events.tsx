@@ -41,6 +41,8 @@ import {
 } from 'lucide-react';
 import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
+import { WorkOrderForm } from '@/components/client-portal/work-orders/work-order-form';
+import { useDirectAgenticOrderModal } from '@/hooks/use-direct-agentic-order-modal';
 
 const getToken = () => localStorage.getItem('clientPortalToken');
 
@@ -141,9 +143,9 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
-  const [showRequestLeadsDialog, setShowRequestLeadsDialog] = useState(false);
-  const [requestLeadsEventId, setRequestLeadsEventId] = useState<string | null>(null);
-  const [requestLeadsCount, setRequestLeadsCount] = useState<string>('');
+
+  // Shared Direct Agentic Order modal (same form as Work Orders tab)
+  const { openModal, modalProps } = useDirectAgenticOrderModal();
 
   // Check feature status
   const { data: featureStatus } = useQuery<{ enabled: boolean; reason?: string }>({
@@ -304,40 +306,6 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
     },
     onError: (error: Error) => {
       toast({ title: 'Submission failed', description: error.message, variant: 'destructive' });
-    },
-  });
-
-  // Request leads mutation — one-step: create draft + submit + bridge to project
-  const requestLeadsMutation = useMutation({
-    mutationFn: async ({ eventId, leadCount }: { eventId: string; leadCount: number }) => {
-      const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/request-leads`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ leadCount }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to request leads');
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      setShowRequestLeadsDialog(false);
-      setRequestLeadsEventId(null);
-      setRequestLeadsCount('');
-      toast({
-        title: data.alreadySubmitted ? 'Already requested' : 'Leads requested!',
-        description: data.alreadySubmitted
-          ? 'This event already has a lead order submitted.'
-          : `Order ${data.orderNumber} submitted. Our team will review and begin work.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Request failed', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -502,8 +470,18 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
                           <Button
                             size="sm"
                             onClick={() => {
-                              setRequestLeadsEventId(event.id);
-                              setShowRequestLeadsDialog(true);
+                              openModal({
+                                mode: 'event',
+                                eventContext: {
+                                  externalEventId: event.id,
+                                  eventTitle: event.title,
+                                  eventDate: event.startAtHuman || event.startAtIso || '',
+                                  eventType: event.eventType || 'event',
+                                  eventLocation: event.location || '',
+                                  eventCommunity: event.community || '',
+                                  eventSourceUrl: event.sourceUrl || '',
+                                },
+                              });
                             }}
                           >
                             <Target className="h-4 w-4 mr-1" />
@@ -578,73 +556,8 @@ export function ArgyleEventsContent({ organizationId }: { organizationId?: strin
         isSubmitting={submitDraftMutation.isPending}
       />
 
-      {/* Request Leads Quick Dialog */}
-      <Dialog open={showRequestLeadsDialog} onOpenChange={(open) => {
-        setShowRequestLeadsDialog(open);
-        if (!open) {
-          setRequestLeadsEventId(null);
-          setRequestLeadsCount('');
-        }
-      }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-primary" />
-              Request Leads
-            </DialogTitle>
-            <DialogDescription>
-              Specify how many leads you need for this event. Your request will be sent to our team for review.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label htmlFor="quickLeadCount" className="text-sm font-medium">
-                Number of Leads *
-              </Label>
-              <Input
-                id="quickLeadCount"
-                type="number"
-                min="1"
-                placeholder="e.g., 500"
-                value={requestLeadsCount}
-                onChange={(e) => setRequestLeadsCount(e.target.value)}
-                className="mt-1"
-                autoFocus
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowRequestLeadsDialog(false);
-                setRequestLeadsEventId(null);
-                setRequestLeadsCount('');
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (requestLeadsEventId && requestLeadsCount) {
-                  requestLeadsMutation.mutate({
-                    eventId: requestLeadsEventId,
-                    leadCount: parseInt(requestLeadsCount, 10),
-                  });
-                }
-              }}
-              disabled={!requestLeadsCount || parseInt(requestLeadsCount, 10) <= 0 || requestLeadsMutation.isPending}
-            >
-              {requestLeadsMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              ) : (
-                <Send className="h-4 w-4 mr-1" />
-              )}
-              Submit Request
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared Direct Agentic Order Modal (same form as Work Orders) */}
+      <WorkOrderForm {...modalProps} />
     </>
   );
 }
