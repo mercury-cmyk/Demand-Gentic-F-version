@@ -37,6 +37,11 @@ export const FEATURE_FLAGS = {
     description: 'Fix client portal campaign listing to include campaigns linked directly via clientAccountId (not only via workOrders/intakeRequests)',
     default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
   },
+  argyle_event_orders: {
+    name: 'argyle_event_orders',
+    description: 'Enable Argyle event → admin project request → approval → campaign creation pipeline (Argyle-only client gate)',
+    default: false  // Feature flag OFF by default; enable via FEATURE_FLAGS env var
+  },
   // Add more feature flags here as needed
 } as const;
 

@@ -7,8 +7,32 @@
 
 import { db } from '../../db';
 import { eq, sql } from 'drizzle-orm';
-import { workOrders, workOrderDrafts, clientPortalActivityLogs } from '@shared/schema';
+import { workOrderDrafts, clientPortalActivityLogs } from '@shared/schema';
 import type { DraftFieldsPayload } from './types';
+
+/**
+ * Normalize array fields to string[] for text[] columns.
+ * Handles: string[], [{label,value}], null, undefined
+ */
+export function normalizeToStringArray(input: any): string[] {
+  if (!input || !Array.isArray(input)) return [];
+  return input
+    .filter((item: any) => item != null && item !== '')
+    .map((item: any) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null) return item.value || item.label || '';
+      return String(item);
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Convert JS arrays to PostgreSQL text[] literal format: '{val1,val2,...}'
+ */
+export function toPgTextArray(arr: string[]): string {
+  if (arr.length === 0) return '{}';
+  return `{${arr.map(s => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` ).join(',')}}`;  
+}
 
 /**
  * Generate a unique order number for a work order.
@@ -60,40 +84,50 @@ export async function submitDraftAsWorkOrder(
   const draftFields = draft.draftFields as DraftFieldsPayload;
 
   // Create work order from draft fields
+  // NOTE: Using raw SQL because workOrders.organizationContext exists in Drizzle schema
+  // but NOT in the actual database (known schema drift). Drizzle insert would fail.
   const orderNumber = generateOrderNumber();
-  const [workOrder] = await db
-    .insert(workOrders)
-    .values({
-      orderNumber,
-      clientAccountId,
-      clientUserId: clientUserId || null,
-      title: draftFields.title || 'Argyle Event Campaign',
-      description: draftFields.description || draftFields.context || '',
-      orderType: 'lead_generation',
-      priority: 'normal',
-      status: 'submitted',
-      targetLeadCount: draft.leadCount,
-      targetTitles: draftFields.targetAudience || [],
-      targetIndustries: draftFields.targetIndustries || [],
-      targetRegions: draftFields.eventLocation ? [draftFields.eventLocation] : [],
-      clientNotes: [
-        draftFields.targetingNotes,
-        draftFields.timingNotes,
-        `Event: ${draftFields.sourceUrl}`,
-      ].filter(Boolean).join('\n\n'),
-      specialRequirements: draftFields.objective || '',
-      organizationContext: draftFields.context || '',
-      requestedStartDate: null,
-      requestedEndDate: null,
-      submittedAt: new Date(),
-    })
-    .returning({ id: workOrders.id });
+  const clientNotes = [
+    draftFields.targetingNotes,
+    draftFields.timingNotes,
+    `Event: ${draftFields.sourceUrl}`,
+  ].filter(Boolean).join('\n\n');
+
+  const targetTitles = normalizeToStringArray(draftFields.targetAudience);
+  const targetIndustries = normalizeToStringArray(draftFields.targetIndustries);
+  const targetRegions = draftFields.eventLocation ? [draftFields.eventLocation] : [];
+
+  const workOrderResult = await db.execute(sql`
+    INSERT INTO work_orders (
+      order_number, client_account_id, client_user_id, title, description,
+      order_type, priority, status, target_lead_count,
+      target_titles, target_industries, target_regions,
+      client_notes, special_requirements,
+      requested_start_date, requested_end_date, submitted_at
+    ) VALUES (
+      ${orderNumber}, ${clientAccountId}, ${clientUserId || null},
+      ${draftFields.title || 'Argyle Event Campaign'},
+      ${draftFields.description || draftFields.context || ''},
+      'lead_generation', 'normal', 'submitted', ${draft.leadCount},
+      ${toPgTextArray(targetTitles)}::text[],
+      ${toPgTextArray(targetIndustries)}::text[],
+      ${toPgTextArray(targetRegions)}::text[],
+      ${clientNotes}, ${draftFields.objective || ''},
+      NULL, NULL, NOW()
+    ) RETURNING id
+  `);
+
+  const rows = (workOrderResult as any).rows || workOrderResult;
+  const workOrderId = Array.isArray(rows) ? rows[0]?.id : (rows as any)?.id;
+  if (!workOrderId) {
+    throw new Error('Failed to create work order — no ID returned');
+  }
 
   // Link draft to work order and mark as submitted
   await db
     .update(workOrderDrafts)
     .set({
-      workOrderId: workOrder.id,
+      workOrderId: workOrderId,
       status: 'submitted',
       submittedAt: new Date(),
       updatedAt: new Date(),
@@ -107,7 +141,7 @@ export async function submitDraftAsWorkOrder(
       clientUserId: clientUserId || null,
       action: 'work_order_submitted',
       entityType: 'work_order',
-      entityId: workOrder.id,
+      entityId: workOrderId,
       details: {
         orderNumber,
         draftId,
@@ -124,7 +158,7 @@ export async function submitDraftAsWorkOrder(
   console.log(`[WorkOrderAdapter] Draft ${draftId} submitted as work order ${orderNumber}`);
 
   return {
-    workOrderId: workOrder.id,
+    workOrderId: workOrderId,
     orderNumber,
   };
 }

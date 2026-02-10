@@ -22,6 +22,7 @@ import {
   clientOrganizationLinks,
   campaignOrganizations,
   clientBusinessProfiles,
+  externalEvents,
 } from '@shared/schema';
 import { requireAuth } from '../auth';
 import { generateJSON } from '../services/vertex-ai';
@@ -56,9 +57,18 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
         approvalNotes: clientProjects.approvalNotes,
         createdAt: clientProjects.createdAt,
         updatedAt: clientProjects.updatedAt,
+        // Event metadata (populated for Argyle event-sourced projects)
+        externalEventId: clientProjects.externalEventId,
+        eventTitle: externalEvents.title,
+        eventCommunity: externalEvents.community,
+        eventType: externalEvents.eventType,
+        eventLocation: externalEvents.location,
+        eventDate: externalEvents.startAtHuman,
+        eventSourceUrl: externalEvents.sourceUrl,
       })
       .from(clientProjects)
       .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+      .leftJoin(externalEvents, eq(clientProjects.externalEventId, externalEvents.id))
       .orderBy(desc(clientProjects.createdAt))
       .limit(parseInt(limit as string))
       .offset(parseInt(offset as string));
@@ -119,9 +129,18 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         rejectionReason: clientProjects.rejectionReason,
         createdAt: clientProjects.createdAt,
         updatedAt: clientProjects.updatedAt,
+        // Event metadata
+        externalEventId: clientProjects.externalEventId,
+        eventTitle: externalEvents.title,
+        eventCommunity: externalEvents.community,
+        eventType: externalEvents.eventType,
+        eventLocation: externalEvents.location,
+        eventDate: externalEvents.startAtHuman,
+        eventSourceUrl: externalEvents.sourceUrl,
       })
       .from(clientProjects)
       .leftJoin(clientAccounts, eq(clientProjects.clientAccountId, clientAccounts.id))
+      .leftJoin(externalEvents, eq(clientProjects.externalEventId, externalEvents.id))
       .where(eq(clientProjects.id, id));
 
     if (!project) {
