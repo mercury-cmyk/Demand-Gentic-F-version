@@ -14875,10 +14875,60 @@ Provide JSON response with:
         }
       }
 
+      // ===== CALCULATE GLOBAL STATS (IGNORING LIMIT) =====
+      // We need to run separate count queries to get the real totals for the dashboard
+      let totalCallsCount = 0;
+      let totalTestCallsCount = 0;
+      let totalTranscriptsCount = 0;
+      
+      // Count Production Calls
+      if (!source || source === 'all' || source === 'call_session') {
+        const [callsResult] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(callSessions)
+          .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+          .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+          .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+          .where(sessionWhereClause);
+        totalCallsCount = Number(callsResult?.count || 0);
+
+        // Count transcripts
+        if (callsResult?.count > 0) {
+           const [transcriptsResult] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(callSessions)
+            .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+            .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+            .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+            // Only count if transcript is present and not empty
+            .where(and(sessionWhereClause, isNotNull(callSessions.aiTranscript), sql`length(${callSessions.aiTranscript}) > 0`));
+           totalTranscriptsCount = Number(transcriptsResult?.count || 0);
+        }
+      }
+
+      // Count Test Calls
+      if (!source || source === 'all' || source === 'campaign_test_call') {
+        const [testsResult] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(campaignTestCalls)
+          .leftJoin(campaigns, eq(campaignTestCalls.campaignId, campaigns.id))
+          .where(testWhereClause);
+        totalTestCallsCount = Number(testsResult?.count || 0);
+      }
+
+      const globalCounts = {
+        total: totalCallsCount + totalTestCallsCount,
+        calls: totalCallsCount,
+        emails: 0, // Email support pending
+        testCalls: totalTestCallsCount,
+        withTranscripts: totalTranscriptsCount
+      };
+
       // Sort all conversations by date descending
       conversations.sort((a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
+
 
       // Apply limit after combining
       const limitedConversations = conversations.slice(0, limitNum);
@@ -14921,17 +14971,19 @@ Provide JSON response with:
 
       res.json({
         conversations: limitedConversations,
-        total: limitedConversations.length,
+        total: globalCounts.total,
         stats: {
-          callSessions: conversations.filter(c => c.source === 'call_session').length,
-          testCalls: conversations.filter(c => c.source === 'test_call').length,
-          withTranscripts: conversations.filter(c => c.transcript || (c.transcriptTurns && c.transcriptTurns.length > 0)).length,
+          callSessions: globalCounts.calls,
+          testCalls: globalCounts.testCalls,
+          withTranscripts: globalCounts.withTranscripts,
           withRecordings: conversations.filter(c => c.hasRecording).length,
           withAnalysis: conversations.filter(c => c.analysis).length,
           totalIssues: allIssuesAcrossConversations.length,
+          counts: globalCounts
         },
         topChallenges,
       });
+
     } catch (error: any) {
       console.error('Error fetching QA conversations:', error);
       res.status(500).json({ message: "Failed to fetch conversations" });

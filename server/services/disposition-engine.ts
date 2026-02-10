@@ -328,6 +328,22 @@ async function processQualifiedLead(
 
   console.log('[DispositionEngine] Preparing to create lead with payload:', JSON.stringify(leadPayload, null, 2));
 
+  // Check for existing lead with same telnyxCallId to prevent duplicates
+  if (callAttempt.telnyxCallId) {
+    const [existingLead] = await db
+      .select({ id: leads.id })
+      .from(leads)
+      .where(eq(leads.telnyxCallId, callAttempt.telnyxCallId))
+      .limit(1);
+
+    if (existingLead) {
+      console.log(`[DispositionEngine] ⏭️ Lead already exists for telnyxCallId ${callAttempt.telnyxCallId} (lead: ${existingLead.id}), skipping duplicate`);
+      result.leadId = existingLead.id;
+      result.actions.push(`Skipped duplicate lead (existing: ${existingLead.id})`);
+      return;
+    }
+  }
+
   // Create lead record with contact info and source tracking
   try {
     const [newLead] = await db

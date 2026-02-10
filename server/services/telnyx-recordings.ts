@@ -53,6 +53,13 @@ async function fetchWithRetry(
       });
       
       clearTimeout(timeoutId);
+      
+      // If 422, it might be an invalid ID format, don't retry same URL
+      if (response.status === 422) {
+         // Don't throw loop, just return response so caller can handle
+         return response; 
+      }
+
       return response;
     } catch (error: any) {
       lastError = error;
@@ -88,31 +95,31 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
   }
 
   try {
-    // Proceed directly to fetch recordings.
-    // We skip fetching /calls/{id} because call_control_id expires (422) quickly,
-    // but the recording itself persists and can be looked up by that same ID.
-
-    // Get recordings for this call (with retry)
-    // We try both call_control_id and call_leg_id filters as they can be interchangeable depending on context
+    // Attempt 1: call_control_id
     let recordingsResponse = await fetchWithRetry(
       `${TELNYX_API_BASE}/recordings?filter[call_control_id]=${encodeURIComponent(callControlId)}`,
       { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
     );
     
-    // If empty or failed, try as call_leg_id
-    try {
-        const dataClone = await recordingsResponse.clone().json().catch(() => ({ data: [] }));
-        if (!recordingsResponse.ok || !dataClone.data || dataClone.data.length === 0) {
-            console.log(`[Telnyx] No recordings found with call_control_id, trying call_leg_id: ${callControlId}`);
-            recordingsResponse = await fetchWithRetry(
-                `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${encodeURIComponent(callControlId)}`,
-                { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
-            );
-        }
-    } catch (e) {
-      // Ignore clone error
+    // Attempt 2: call_leg_id
+    if (!recordingsResponse.ok || (await isResponseEmpty(recordingsResponse))) {
+        console.log(`[Telnyx] No recordings found with call_control_id, trying call_leg_id: ${callControlId}`);
+        recordingsResponse = await fetchWithRetry(
+            `${TELNYX_API_BASE}/recordings?filter[call_leg_id]=${encodeURIComponent(callControlId)}`,
+            { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+        );
     }
 
+    // Attempt 3: call_session_id
+    if (!recordingsResponse.ok || (await isResponseEmpty(recordingsResponse))) {
+        // Only try session ID if the ID looks like a UUID (v2 style), not v3
+        // Actually, just try it.
+        console.log(`[Telnyx] No recordings found with call_leg_id, trying call_session_id: ${callControlId}`);
+        recordingsResponse = await fetchWithRetry(
+            `${TELNYX_API_BASE}/recordings?filter[call_session_id]=${encodeURIComponent(callControlId)}`,
+            { headers: { 'Authorization': `Bearer ${TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+        );
+    }
 
     if (recordingsResponse.status === 404) {
       console.log('[Telnyx] Recordings not found (404) for call:', callControlId);
@@ -121,7 +128,9 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
 
     if (!recordingsResponse.ok) {
       const errorText = await recordingsResponse.text();
-      throw new Error(`Telnyx API error fetching recordings (${recordingsResponse.status}): ${errorText}`);
+      // Only throw if it's a real error, not just a "not found" disguised as 422
+      console.warn(`[Telnyx] API returned error (${recordingsResponse.status}): ${errorText}`);
+      return null;
     }
 
     const recordingsData = await recordingsResponse.json();
@@ -136,9 +145,6 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
       if (downloadUrl) {
         console.log('[Telnyx] Download URL retrieved from recording object');
         return downloadUrl;
-      } else {
-        console.log('[Telnyx] Recording found but no download URLs available:', recording.id);
-        return null;
       }
     }
 
@@ -153,6 +159,17 @@ export async function fetchTelnyxRecording(callControlId: string): Promise<strin
     throw error;
   }
 }
+
+// Helper to check if response data is empty without consuming body if not needed (using clone)
+async function isResponseEmpty(response: Response): Promise<boolean> {
+    try {
+        const data = await response.clone().json();
+        return !data.data || data.data.length === 0;
+    } catch {
+        return false;
+    }
+}
+
 
 /**
  * Update lead with Telnyx recording URL

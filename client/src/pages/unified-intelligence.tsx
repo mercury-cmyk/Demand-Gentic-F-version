@@ -252,13 +252,32 @@ export default function UnifiedIntelligencePage() {
   }, [allConversations, filters]);
 
   // Calculate stats
-  const stats = useMemo(() => ({
-    total: conversations.length,
-    calls: conversations.filter(c => c.interactionType === 'call' && c.type !== 'test').length,
-    emails: conversations.filter(c => c.interactionType === 'email').length,
-    testCalls: conversations.filter(c => c.type === 'test').length,
-    withTranscripts: conversations.filter(c => c.hasTranscript).length,
-  }), [conversations]);
+  const stats = useMemo(() => {
+    // Prefer server-side true counts (ignoring pagination limit)
+    if (conversationsData?.stats?.counts) {
+      return {
+        total: conversationsData.stats.counts.total,
+        calls: conversationsData.stats.counts.calls,
+        emails: conversationsData.stats.counts.emails,
+        testCalls: conversationsData.stats.counts.testCalls,
+        withTranscripts: conversationsData.stats.counts.withTranscripts,
+      };
+    } else if (conversationsData?.total !== undefined && conversationsData?.conversations?.length && conversationsData.total > conversationsData.conversations.length) {
+       // Only total is available from server (pagination)
+       const serverTotal = conversationsData.total;
+       // ... interpolate others? No, just use client stats for others if counts object missing
+    }
+
+    // Fallback to client-side specific counts
+    return {
+      total: conversationsData?.total || conversations.length,
+      calls: conversations.filter(c => c.interactionType === 'call' && c.type !== 'test').length,
+      emails: conversations.filter(c => c.interactionType === 'email').length,
+      testCalls: conversations.filter(c => c.type === 'test').length,
+      withTranscripts: conversations.filter(c => c.hasTranscript).length,
+    };
+  }, [conversations, conversationsData]);
+
 
   // Find selected conversation for detail panel
   const selectedRaw = useMemo(() => (

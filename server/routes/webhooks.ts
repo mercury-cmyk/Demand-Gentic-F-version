@@ -715,17 +715,33 @@ router.post("/telnyx", async (req, res) => {
       // Import storeCallSessionRecording for call_sessions S3 storage
       const { storeCallSessionRecording } = await import('../services/recording-storage');
 
-      // Store lead recordings in background
+      // Store lead recordings in background (with single retry on failure)
       for (const lead of updatedLeads) {
-        storeRecordingFromWebhook(lead.id, recordingUrl).catch((err) => {
-          console.error(`[Telnyx Webhook] Failed to store recording in S3 for lead ${lead.id}:`, err);
+        storeRecordingFromWebhook(lead.id, recordingUrl).catch(async (err) => {
+          console.error(`[Telnyx Webhook] Failed to store recording for lead ${lead.id}, retrying in 10s:`, err);
+          setTimeout(async () => {
+            try {
+              await storeRecordingFromWebhook(lead.id, recordingUrl);
+              console.log(`[Telnyx Webhook] ✅ Retry succeeded for lead ${lead.id}`);
+            } catch (retryErr) {
+              console.error(`[Telnyx Webhook] ❌ Retry also failed for lead ${lead.id}:`, retryErr);
+            }
+          }, 10000);
         });
       }
 
-      // Store call session recordings in background (for recordings dashboard)
+      // Store call session recordings in background (with single retry on failure)
       for (const session of updatedSessions) {
-        storeCallSessionRecording(session.id, recordingUrl).catch((err) => {
-          console.error(`[Telnyx Webhook] Failed to store recording in S3 for call session ${session.id}:`, err);
+        storeCallSessionRecording(session.id, recordingUrl).catch(async (err) => {
+          console.error(`[Telnyx Webhook] Failed to store recording for session ${session.id}, retrying in 10s:`, err);
+          setTimeout(async () => {
+            try {
+              await storeCallSessionRecording(session.id, recordingUrl);
+              console.log(`[Telnyx Webhook] ✅ Retry succeeded for session ${session.id}`);
+            } catch (retryErr) {
+              console.error(`[Telnyx Webhook] ❌ Retry also failed for session ${session.id}:`, retryErr);
+            }
+          }, 10000);
         });
       }
 

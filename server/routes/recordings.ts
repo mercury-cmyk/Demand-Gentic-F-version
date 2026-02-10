@@ -156,6 +156,7 @@ router.get('/', async (req: Request, res: Response) => {
         contactId: callSessions.contactId,
         aiAgentId: callSessions.aiAgentId,
         transcript: callSessions.aiTranscript,
+        telnyxCallId: callSessions.telnyxCallId,
         // Join fields
         campaignName: campaigns.name,
         contactFirstName: contacts.firstName,
@@ -183,8 +184,16 @@ router.get('/', async (req: Request, res: Response) => {
     const total = countResult[0]?.count || 0;
     const totalPages = Math.ceil(total / limitNum);
 
+    // Deduplicate by telnyxCallId — keep the first (most recent due to ORDER BY desc)
+    const seenCallIds = new Set<string>();
+    const dedupedRecordings = recordings.filter(rec => {
+      if (rec.telnyxCallId && seenCallIds.has(rec.telnyxCallId)) return false;
+      if (rec.telnyxCallId) seenCallIds.add(rec.telnyxCallId);
+      return true;
+    });
+
     // Transform results
-    const items = recordings.map(rec => ({
+    const items = dedupedRecordings.map(rec => ({
       id: rec.id,
       fromNumber: rec.fromNumber,
       toNumber: rec.toNumber,

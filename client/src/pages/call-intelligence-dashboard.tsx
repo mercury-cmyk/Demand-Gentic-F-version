@@ -41,6 +41,7 @@ import {
   AudioPlayerEnhanced,
   TranscriptDisplay,
   QualityMetricsPanel,
+  AgentLearningPipeline,
   type UnifiedCallRecord,
   type UnifiedCallsResponse,
   type CallIntelligenceFilters,
@@ -86,7 +87,7 @@ export default function CallIntelligenceDashboard() {
   const [filters, setFilters] = useState<CallIntelligenceFilters>(defaultFilters);
   const [page, setPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'combined' | 'recording' | 'transcript'>('combined');
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const limit = 20;
 
   // Fetch campaigns for filter dropdown
@@ -136,6 +137,7 @@ export default function CallIntelligenceDashboard() {
       return response.json();
     },
     enabled: !!selectedCallId,
+    refetchInterval: autoRefresh ? 3000 : false, // Fast poll for active details
   });
 
   const selectedCall = selectedCallData?.data;
@@ -271,13 +273,13 @@ export default function CallIntelligenceDashboard() {
 
         <div className="flex items-center gap-2">
           <Button
-            variant={autoRefresh ? 'default' : 'outline'}
+            variant={autoRefresh ? 'outline' : 'outline'}
             size="sm"
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className="gap-2"
+            className={autoRefresh ? "gap-2 border-green-500 text-green-600 hover:bg-green-50 hover:text-green-700" : "gap-2 text-muted-foreground"}
           >
-            <RefreshCw className={`h-4 w-4 ${autoRefresh ? 'animate-spin' : ''}`} />
-            {autoRefresh ? 'Live' : 'Auto-refresh'}
+            <RefreshCw className={`h-4 w-4 ${autoRefresh ? 'animate-spin duration-[3000ms]' : ''}`} />
+            {autoRefresh ? 'Live Sync Active' : 'Enable Live Sync'}
           </Button>
           <Button variant="outline" size="sm" onClick={() => refetchCalls()}>
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -552,6 +554,15 @@ export default function CallIntelligenceDashboard() {
                           isRetrying={retrySyncMutation.isPending}
                         />
                       </div>
+                    )}
+
+                    {/* Agent Learning Pipeline */}
+                    {selectedCall.quality.analyzed && (
+                         <AgentLearningPipeline 
+                            issues={selectedCall.quality.issues}
+                            recommendations={selectedCall.quality.recommendations}
+                            className="bg-muted/30 p-4 rounded-lg border"
+                         />
                     )}
 
                     {/* Transcript */}

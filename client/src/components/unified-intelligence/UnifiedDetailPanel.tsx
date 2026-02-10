@@ -39,6 +39,8 @@ import { UnifiedRecordingPlayer } from './UnifiedRecordingPlayer';
 import { UnifiedTranscriptDisplay } from './UnifiedTranscriptDisplay';
 import { CallAnalysisSummary } from './CallAnalysisSummary';
 import { QualityAnalysisPanel } from './QualityAnalysisPanel';
+import { AgentLearningPipeline } from '../call-intelligence/AgentLearningPipeline';
+import { QualityIssue, QualityRecommendation } from '../call-intelligence/types';
 
 interface UnifiedDetailPanelProps {
   conversation: UnifiedConversationDetail | null;
@@ -99,6 +101,21 @@ export function UnifiedDetailPanel({
   const canAnalyze = hasTranscriptContent && !hasCallAnalysis && conversation.source === 'call_session';
   const canTranscribe = hasRecordingAvailable && !hasTranscriptContent && conversation.source === 'call_session';
   const hasCallHistory = (conversation.callCount || 1) > 1 && conversation.callHistory;
+
+  // Map issues and recommendations for the Learning Pipeline
+  const learningIssues: QualityIssue[] = conversation.callAnalysis.detectedIssues.map(issue => ({
+    type: issue.type || issue.code,
+    severity: issue.severity as 'high' | 'medium' | 'low',
+    description: issue.description,
+    recommendation: issue.recommendation
+  }));
+
+  const learningRecommendations: QualityRecommendation[] = conversation.qualityAnalysis.recommendations.map(rec => ({
+    category: rec.category || rec.area,
+    suggestedChange: rec.suggestedChange || rec.text,
+    expectedImpact: rec.impact || 'medium',
+    priority: (rec.priority as 'high' | 'medium' | 'low') || 'medium'
+  }));
 
   return (
     <Card className={cn('h-full flex flex-col bg-background/80', className)}>
@@ -206,6 +223,16 @@ export function UnifiedDetailPanel({
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Agent Learning Pipeline - Prominently mapped here */}
+              {(learningIssues.length > 0 || learningRecommendations.length > 0) && (
+                <div className="rounded-lg border bg-background/70 p-3">
+                   <AgentLearningPipeline
+                      issues={learningIssues}
+                      recommendations={learningRecommendations}
+                   />
                 </div>
               )}
 

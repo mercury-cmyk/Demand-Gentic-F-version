@@ -195,7 +195,7 @@ export const defaultFilters: CallIntelligenceFilters = {
   qualityScoreRange: { min: null, max: null },
   sentiment: 'all',
   hasTranscript: null,
-  hasRecording: null,
+  hasRecording: true, // Default to showing only calls with recordings
   hasAnalysis: null,
   disposition: 'all',
   sortBy: 'date',

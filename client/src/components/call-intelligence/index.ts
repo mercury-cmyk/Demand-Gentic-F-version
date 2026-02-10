@@ -10,5 +10,6 @@ export { TranscriptDisplay } from './TranscriptDisplay';
 export { QualityMetricsPanel, type QualityFeedback } from './QualityMetricsPanel';
 export { CallFilters } from './CallFilters';
 export { CallList } from './CallList';
+export { AgentLearningPipeline } from './AgentLearningPipeline';
 
 export * from './types';

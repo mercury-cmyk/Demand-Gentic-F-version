@@ -75,7 +75,7 @@ async function fetchRecordingFromTelnyx(
         const response = await axios.get(
           `https://api.telnyx.com/v2/recordings`,
           {
-            headers: { Authorization: `Bearer ${apiKey}` },
+            headers: { Authorization: `Bearer ${apiKey.trim()}` },
             params: {
               'filter[created_at][gte]': startTime.toISOString(),
               'filter[created_at][lte]': endTime.toISOString(),
@@ -115,13 +115,14 @@ async function fetchRecordingFromTelnyx(
  */
 async function transcribeWithSpeakers(
   recordingUrl: string,
-  contactFirstName: string | null
+  contactFirstName: string | null,
+  telnyxCallId?: string | null
 ): Promise<{ transcript: string; structuredTranscript: any; transcriptTurns: any[] } | null> {
   try {
     console.log('[AutoRecordingSyncWorker] 🎤 Starting Google Cloud Speech-to-Text transcription...');
     
     // Use Google Cloud Speech-to-Text service with structured output
-    const result = await submitStructuredTranscription(recordingUrl);
+    const result = await submitStructuredTranscription(recordingUrl, { telnyxCallId });
     
     if (!result) {
       console.error('[AutoRecordingSyncWorker] Transcription returned empty result');
@@ -245,7 +246,7 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
       let recordingS3Key: string | null = null;
       if (leadId && isRecordingStorageEnabled()) {
         console.log(`[AutoRecordingSyncWorker] 📥 Downloading recording to GCS for ${targetLabel}...`);
-        recordingS3Key = await downloadAndStoreRecording(recordingUrl, leadId);
+        recordingS3Key = await downloadAndStoreRecording(recordingUrl, leadId, telnyxCallId);
 
         if (recordingS3Key) {
           await db.update(leads)
@@ -264,7 +265,7 @@ export function initializeAutoRecordingSyncWorker(): Worker<AutoRecordingSyncJob
           .where(eq(leads.id, leadId));
       }
 
-      const transcriptionResult = await transcribeWithSpeakers(recordingUrl, contactFirstName);
+      const transcriptionResult = await transcribeWithSpeakers(recordingUrl, contactFirstName, telnyxCallId);
 
       if (!transcriptionResult) {
         if (leadId) {

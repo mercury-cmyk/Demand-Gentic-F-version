@@ -197,11 +197,51 @@ class CampaignRunnerService {
       this.handleConnection(ws);
     });
 
+    // Reset any stuck tasks from previous runs
+    this.resetStuckQueueItems();
+
     // Start task distribution loop
     this.startProcessingLoop();
 
     console.log(`${LOG_PREFIX} Initialized`);
     return this.wss;
+  }
+
+  // Monitor for stuck calls (auto-recovery)
+  private async resetStuckQueueItems(): Promise<void> {
+    try {
+      // Find items that are 'in_progress' but haven't been updated in > 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      const stuckItems = await db.select({
+        id: campaignQueue.id,
+      })
+      .from(campaignQueue)
+      .where(and(
+        eq(campaignQueue.status, 'in_progress'),
+        lte(campaignQueue.updatedAt, fiveMinutesAgo)
+      ));
+
+      if (stuckItems.length > 0) {
+        console.log(`${LOG_PREFIX} Found ${stuckItems.length} stuck queue items. Resetting to queued.`);
+        
+        const ids = stuckItems.map(item => item.id);
+        
+        await db.update(campaignQueue)
+          .set({
+            status: 'queued',
+            updatedAt: new Date(),
+            removedReason: 'system_recovery_stuck_in_progress',
+            // Add a small delay so we don't hammer them immediately if there's a systemic issue
+            nextAttemptAt: new Date(Date.now() + 30 * 1000) 
+          })
+          .where(inArray(campaignQueue.id, ids));
+          
+        console.log(`${LOG_PREFIX} Successfully reset stuck items.`);
+      }
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Failed to reset stuck queue items:`, error);
+    }
   }
 
   private handleConnection(ws: WebSocket): void {
@@ -547,9 +587,9 @@ class CampaignRunnerService {
   }
 
   private async loadCampaignTasks(campaignId: string): Promise<void> {
-    // Guard: skip when webhooks are pointed to production (dev server should not distribute tasks)
-    if (process.env.CALL_EXECUTION_ENABLED === 'false') {
-      console.log(`${LOG_PREFIX} Skipping task load - call execution disabled (webhooks pointed to production)`);
+    // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+    if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
+      console.log(`${LOG_PREFIX} Skipping task load - call execution not enabled. Switch webhooks to dev mode first.`);
       return;
     }
 
@@ -618,6 +658,8 @@ class CampaignRunnerService {
       let skippedOutsideHours = 0;
       let skippedNoTimezone = 0;
       const timezoneStats: Record<string, { total: number; callable: number }> = {};
+      const skippedItemsToDelay: string[] = [];
+      const skippedItemsToDisable: string[] = [];
 
       for (const item of queueItems) {
         const contact = item.contact;
@@ -625,6 +667,7 @@ class CampaignRunnerService {
         // Check if country is in enabled calling regions
         if (!isCountryEnabled(contact.country)) {
           skippedCountryNotEnabled++;
+          skippedItemsToDisable.push(item.queueItem.id);
           continue;
         }
         
@@ -644,12 +687,16 @@ class CampaignRunnerService {
         
         if (!callPriority.timezone) {
           skippedNoTimezone++;
+          // No timezone known - delay check for 4 hours to let enrichment catch up or just skip for now
+          skippedItemsToDelay.push(item.queueItem.id);
           continue;
         }
         
         if (!callPriority.canCallNow) {
           skippedOutsideHours++;
-          continue; // Skip contacts outside business hours - they'll be called later
+          // Skip contacts outside business hours - delay 1 hour
+          skippedItemsToDelay.push(item.queueItem.id);
+          continue; 
         }
         
         timezoneStats[tzKey].callable++;
@@ -661,6 +708,30 @@ class CampaignRunnerService {
           canCallNow: callPriority.canCallNow,
           reason: callPriority.reason,
         });
+      }
+
+      // Bulk update skipped items so we don't block the queue
+      if (skippedItemsToDelay.length > 0) {
+          // Delay by 1 hour (outside business hours)
+          await db.update(campaignQueue)
+            .set({ 
+               nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000), 
+               updatedAt: new Date()
+            })
+            .where(inArray(campaignQueue.id, skippedItemsToDelay))
+            .catch(err => console.error(`${LOG_PREFIX} Failed to delay items:`, err));
+      }
+
+      if (skippedItemsToDisable.length > 0) {
+          // Permanently skip items in disabled countries
+          await db.update(campaignQueue)
+            .set({ 
+               status: 'completed', 
+               removedReason: 'country_not_enabled',
+               updatedAt: new Date()
+            })
+            .where(inArray(campaignQueue.id, skippedItemsToDisable))
+            .catch(err => console.error(`${LOG_PREFIX} Failed to disable items:`, err));
       }
       
       // Sort by priority (highest first = currently in business hours)
@@ -877,6 +948,12 @@ class CampaignRunnerService {
           this.runners.delete(ws);
           ws.close();
         }
+      }
+
+      // Periodically (every ~1 min) check for stuck tasks in DB
+      // This uses a random check to avoid thundering herd if multiple instances (though currently singleton)
+      if (Math.random() < 0.05) { // ~5% chance per 5s tick ~= every 100s
+        await this.resetStuckQueueItems();
       }
 
       // Try to assign tasks to ready runners

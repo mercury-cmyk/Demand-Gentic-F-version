@@ -42,7 +42,8 @@ export function getCallSessionRecordingS3Key(
  */
 export async function downloadAndStoreRecording(
   sourceUrl: string,
-  leadId: string
+  leadId: string,
+  telnyxCallId: string | null = null
 ): Promise<string | null> {
   if (!isS3Configured()) {
     console.log('[RecordingStorage] S3 not configured, skipping storage');
@@ -64,9 +65,34 @@ export async function downloadAndStoreRecording(
     
     // CRITICAL FIX: Handle 403 (presigned URL expired)
     if (response.status === 403) {
-      console.warn(`[RecordingStorage] ⚠️ URL expired (403), would need fresh recording fetch from Telnyx`);
-      console.warn(`[RecordingStorage] Lead ${leadId}: Recording storage skipped (URL expired). Will rely on call_sessions.aiTranscript`);
-      return null; // Return null to indicate failure - caller should skip S3 storage
+      console.warn(`[RecordingStorage] ⚠️ URL expired (403).`);
+      
+      if (telnyxCallId) {
+         console.log(`[RecordingStorage] Attempting to refresh URL via Telnyx API for call ${telnyxCallId}...`);
+         try {
+           // We dynamically import to avoid circular dependency if possible, or just use the import if it's safe.
+           // Since this service is "recording-storage", depending on "telnyx-recordings" is fine (one way).
+           // But let's check imports. "telnyx-recordings" likely depends on "db", etc.
+           // Let's use dynamic import just like google-transcription does.
+           const { fetchTelnyxRecording } = await import('./telnyx-recordings');
+           const refreshedUrl = await fetchTelnyxRecording(telnyxCallId);
+           
+           if (refreshedUrl) {
+             console.log(`[RecordingStorage] ✅ Refreshed URL obtained. Retrying download.`);
+             response = await fetch(refreshedUrl, { timeout: 30000 });
+           } else {
+             console.warn(`[RecordingStorage] ❌ Failed to refresh URL via Telnyx API (not found).`);
+           }
+         } catch (refreshErr) {
+            console.warn(`[RecordingStorage] ❌ Error refreshing URL:`, refreshErr);
+         }
+      }
+      
+      // Re-check status after potential refresh
+      if (response.status === 403) {
+          console.warn(`[RecordingStorage] Lead ${leadId}: Recording storage skipped (Still 403). Will rely on call_sessions.aiTranscript`);
+          return null; 
+      }
     }
     
     if (!response.ok) {

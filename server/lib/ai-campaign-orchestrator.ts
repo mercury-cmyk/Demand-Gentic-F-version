@@ -705,8 +705,8 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
  * Process a single campaign - initiate calls to maintain concurrency
  */
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
-  // Guard: skip when webhooks are pointed to production (dev server should not process campaigns)
-  if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+  // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+  if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
     return { initiated: 0, skipped: 0 };
   }
 

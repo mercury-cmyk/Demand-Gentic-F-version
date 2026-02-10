@@ -91,10 +91,10 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });
 
-    // Guard: block test calls when webhooks are pointed to production
-    if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+    // Guard: calls blocked by default — only enabled after clicking "Switch to Dev" in Telephony settings
+    if (process.env.CALL_EXECUTION_ENABLED !== 'true') {
       return res.status(403).json({
-        message: "Call execution is disabled. Switch webhooks to dev mode to make calls from this server."
+        message: "Call execution is not enabled. Go to Settings > Telephony and click 'Switch to Dev' to enable calls on this server."
       });
     }
 
