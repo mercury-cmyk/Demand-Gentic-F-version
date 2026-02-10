@@ -982,7 +982,7 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                     title="Email Preview"
                                     srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                                     className="w-full h-full border-0"
-                                    sandbox="allow-same-origin"
+                                    sandbox="allow-same-origin allow-scripts"
                                     style={{ minHeight: '500px' }}
                                   />
                                 </div>
@@ -1379,7 +1379,7 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                                             title={`Generated Email Preview ${index + 1}`}
                                             srcDoc={sanitizeHtmlForIframePreview(previewHtml)}
                                             className="w-full h-full border-0"
-                                            sandbox="allow-same-origin"
+                                            sandbox="allow-same-origin allow-scripts"
                                           />
                                         </div>
                                     </div>
@@ -1545,6 +1545,7 @@ ${overrideOrgName || businessProfile?.dbaName || 'Your Name'}`}
                     title="Email Preview"
                     srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                     className="w-full h-full border-0"
+                    sandbox="allow-same-origin allow-scripts"
                   />
                 </div>
               </div>

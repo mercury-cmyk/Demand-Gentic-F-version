@@ -117,6 +117,7 @@ export function TemplatePreviewModal({
                 height: "100%",
                 border: "none"
               }}
+              sandbox="allow-same-origin allow-scripts"
             />
           </div>
         </div>

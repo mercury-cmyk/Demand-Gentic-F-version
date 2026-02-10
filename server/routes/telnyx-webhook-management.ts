@@ -186,6 +186,7 @@ router.get('/webhook-config', requireAuth, requireRole(['admin']), async (req: R
         productionUrl: productionUrl,
         websocketUrl: currentWebsocketUrl,
         isDevMode: process.env.NODE_ENV !== 'production',
+        callExecutionEnabled: process.env.CALL_EXECUTION_ENABLED === 'true',
       },
       updatedAt: texmlApp?.updated_at,
     });
@@ -410,9 +411,14 @@ router.post('/webhook-config/switch-to-dev', requireAuth, requireRole(['admin'])
       }
     }
 
+    // Enable call execution on this server — dev server handles calls now
+    process.env.CALL_EXECUTION_ENABLED = 'true';
+    console.log('[Telnyx Webhook] ✅ Call execution ENABLED on this server (dev mode)');
+
     res.json({
       success: true,
-      message: 'Switched to development (ngrok) webhook URLs',
+      message: 'Switched to development (ngrok) webhook URLs. Call execution enabled on this server.',
+      callExecutionEnabled: true,
       config: {
         voiceUrl,
         statusCallbackUrl,
@@ -528,9 +534,14 @@ router.post('/webhook-config/switch-to-prod', requireAuth, requireRole(['admin']
       }
     }
 
+    // Disable call execution on this server — production Cloud Run handles calls now
+    process.env.CALL_EXECUTION_ENABLED = 'false';
+    console.log('[Telnyx Webhook] 🚫 Call execution DISABLED on this server (production mode)');
+
     res.json({
       success: true,
-      message: 'Switched to production webhook URLs',
+      message: 'Switched to production webhook URLs. Call execution disabled on this server.',
+      callExecutionEnabled: false,
       config: {
         voiceUrl,
         statusCallbackUrl,

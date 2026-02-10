@@ -209,7 +209,25 @@ export default function PhoneCampaignEditPage() {
       });
     },
   });
-
+  const syncQueueMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/campaigns/${campaignId}/ops/sync-queue`, { link_accounts: true });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Queue Sync Complete",
+        description: `Added: ${data.added_to_queue}, Accounts Linked: ${data.accounts_linked}, Skipped (No Account): ${data.skipped_no_account}`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  });
   const handleSave = () => {
     // Validate required fields
     if (!name.trim()) {
@@ -502,6 +520,26 @@ export default function PhoneCampaignEditPage() {
 
         {/* Audience Tab */}
         <TabsContent value="audience" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Queue Operations</CardTitle>
+              <CardDescription>
+                Maintenance tools for campaign queue
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                 <Button onClick={() => syncQueueMutation.mutate()} variant="outline" disabled={syncQueueMutation.isPending}>
+                    {syncQueueMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ListChecks className="w-4 h-4 mr-2" />}
+                    Sync Queue & Link Accounts
+                 </Button>
+                 <p className="text-muted-foreground text-sm">
+                    Populates missing contacts into the queue and attempts to link them to accounts by normalized company name.
+                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Audience Selection</CardTitle>

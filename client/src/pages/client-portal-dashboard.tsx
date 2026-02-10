@@ -9,8 +9,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
@@ -33,7 +43,7 @@ import {
   ClipboardList, Palette, BookOpen, PhoneCall, MailCheck, Play, Wand2,
   Contact2, Building, FileSpreadsheet, Globe, MapPin, Briefcase,
   Workflow, Shield, Puzzle, Pencil, Volume2, Crown, Cpu, Smile, Database,
-  ArrowLeft, ArrowRight, Eye, Tag
+  ArrowLeft, ArrowRight, Eye, Tag, Layers, AlertTriangle, Crosshair, MessageSquareText, List
 } from 'lucide-react';
 import { useAgentPanelContextOptional } from '@/components/agent-panel';
 import {
@@ -57,7 +67,6 @@ import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
 import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
-import { PromptOptimizationView } from '@/components/ai-studio/org-intelligence/prompt-optimization';
 import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
@@ -244,15 +253,153 @@ export default function ClientPortalDashboard() {
   
   // Work Order Request State (managed campaigns by Pivotal team)
   const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
+  const [workOrderStep, setWorkOrderStep] = useState(1);
+  
+  // Temp inputs for tag fields
+  const [geoInput, setGeoInput] = useState('');
+  const [titleInput, setTitleInput] = useState('');
+  const [industryInput, setIndustryInput] = useState('');
+
   const [newWorkOrder, setNewWorkOrder] = useState({
-    campaignType: '' as 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom',
+    campaignType: '' as string,
     campaignGoals: '',
+    productServices: '',
+    talkingPoints: '',
+    qualifications: '',
+    successCriteria: '',
     requiredLeads: '',
     desiredTimeline: '',
     deadline: '',
     additionalInstructions: '',
     priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
+    landingPageUrl: '',
+    projectFileUrl: '',
+    fileName: '',
+    // Audience Targeting
+    targetGeo: [] as string[],
+    targetTitles: [] as string[],
+    targetIndustries: [] as string[],
+    targetRevenue: [] as string[],
+    targetEmployeeSize: [] as string[],
   });
+
+  // Create Project Mutation (Work Order)
+  const createWorkOrderMutation = useMutation({
+    mutationFn: async (data: typeof newWorkOrder) => {
+      // Format description with all targeting details
+      const targetingDetails = [
+        `GEO: ${data.targetGeo.join(', ')}`,
+        `TITLES: ${data.targetTitles.join(', ')}`,
+        `INDUSTRIES: ${data.targetIndustries.join(', ')}`,
+        `REVENUE: ${data.targetRevenue.join(', ')}`,
+        `EMPLOYEE SIZE: ${data.targetEmployeeSize.join(', ')}`
+      ].join('\n');
+
+      const fullDescription = `CAMPAIGN OBJECTIVE/CONTEXT:\n${data.campaignGoals}\n\nPRODUCT/SERVICES:\n${data.productServices}\n\nKEY TALKING POINTS:\n${data.talkingPoints}\n\nQUALIFICATIONS:\n${data.qualifications}\n\nSUCCESS CRITERIA:\n${data.successCriteria}\n\nTARGET AUDIENCE:\n${targetingDetails}\n\nTIMELINE:\n${data.desiredTimeline}\n\nPRIORITY:\n${data.priority}\n\nINSTRUCTIONS:\n${data.additionalInstructions}`;
+
+      // Map Work Order fields to Project Request schema
+      return apiRequest('POST', '/api/client-portal/projects', {
+        name: `${getProgramTypeLabel(data.campaignType)} Request`,
+        description: fullDescription,
+        requestedLeadCount: parseInt(data.requiredLeads.replace(/\D/g, '') || '0'),
+        endDate: data.deadline || undefined,
+        startDate: new Date().toISOString(),
+        budgetCurrency: 'USD',
+        landingPageUrl: data.landingPageUrl || undefined,
+        projectFileUrl: data.projectFileUrl || undefined,
+      });
+    },
+    onSuccess: () => {
+      toast({ 
+        title: 'Work Order Submitted', 
+        description: 'Your project request has been submitted for review.' 
+      });
+      setShowWorkOrderDialog(false);
+      setWorkOrderStep(1);
+      
+      // Reset form
+      setNewWorkOrder({
+        campaignType: '',
+        campaignGoals: '',
+        productServices: '',
+        talkingPoints: '',
+        qualifications: '',
+        successCriteria: '',
+        requiredLeads: '',
+        desiredTimeline: '',
+        deadline: '',
+        additionalInstructions: '',
+        priority: 'normal',
+        landingPageUrl: '',
+        projectFileUrl: '',
+        fileName: '',
+        targetGeo: [],
+        targetTitles: [],
+        targetIndustries: [],
+        targetRevenue: [],
+        targetEmployeeSize: [],
+      });
+
+      // Refresh data
+      // In a real app we would invalidate queries, but here we can rely on the Project Requests page to fetch fresh data
+      // queryClient.invalidateQueries({ queryKey: ['/api/client-portal/projects'] });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Submission Failed', 
+        description: error.message || 'Failed to submit work order.',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  // Work Orders List State
+  // We'll fetch this from the API instead of using static/local state if possible, 
+  // but for now let's keep the UI consistent while the backend saves it.
+  const [workOrders, setWorkOrders] = useState([
+    {
+      id: 'WO-2026-003',
+      type: 'Call Campaign',
+      goals: 'Q1 Enterprise Outreach - IT Decision Makers',
+      leads: '500',
+      deadline: 'Feb 28, 2026',
+      status: 'pending',
+      created: 'Feb 1, 2026'
+    },
+    {
+      id: 'WO-2026-002',
+      type: 'Email Campaign',
+      goals: 'Product Launch Announcement',
+      leads: '1,000',
+      deadline: 'Feb 15, 2026',
+      status: 'in_progress',
+      created: 'Jan 25, 2026'
+    },
+    {
+      id: 'WO-2026-001',
+      type: 'Combined',
+      goals: 'Multi-channel ABM Campaign',
+      leads: '250',
+      deadline: 'Jan 31, 2026',
+      status: 'completed',
+      created: 'Jan 10, 2026'
+    }
+  ]);
+
+  const getProgramTypeLabel = (type: string) => {
+    switch (type) {
+      case 'appointment_setting': return 'Appointment Setting';
+      case 'event_reg_digital_ungated': return 'Event Reg - Digital (Ungated)';
+      case 'event_reg_digital_gated': return 'Event Reg - Digital (Gated)';
+      case 'in_person_events': return 'In-Person Events';
+      case 'data_hygiene_enrichment': return 'Data Hygiene';
+      case 'call_campaign': return 'Call Campaign';
+      case 'email_campaign': return 'Email Campaign';
+      case 'combined': return 'Combined';
+      case 'data_enrichment': return 'Data Enrichment';
+      default: return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  };
 
   // Self-Service Campaign Creation State
   const [showCampaignCreator, setShowCampaignCreator] = useState(false);
@@ -674,7 +821,9 @@ export default function ClientPortalDashboard() {
     enabled: !!user,
   });
 
-  // Bookings query
+  // Bookings state
+  const [showCreateBookingType, setShowCreateBookingType] = useState(false);
+  const [newBookingType, setNewBookingType] = useState({ name: '', slug: '', duration: 30, description: '', color: '#3b82f6' });
   const [bookingsFilter, setBookingsFilter] = useState<'upcoming' | 'past' | 'all'>('upcoming');
   const { data: clientBookings = [], isLoading: bookingsLoading, refetch: refetchBookings } = useQuery<any[]>({
     queryKey: ['client-portal-bookings', bookingsFilter],
@@ -695,6 +844,28 @@ export default function ClientPortalDashboard() {
       return res.json();
     },
     enabled: !!user && enabledFeatures.includes('calendar_booking'),
+  });
+
+  // Create booking type mutation
+  const createBookingTypeMutation = useMutation({
+    mutationFn: async (data: { name: string; slug: string; duration: number; description: string; color: string }) => {
+      const res = await fetch('/api/client-portal/bookings/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Failed to create booking type'); }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchBookingTypes();
+      setShowCreateBookingType(false);
+      setNewBookingType({ name: '', slug: '', duration: 30, description: '', color: '#3b82f6' });
+      toast({ title: 'Booking type created!' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Failed to create booking type', description: error.message, variant: 'destructive' });
+    },
   });
 
   // Preview Studio - Campaign audience query
@@ -818,6 +989,8 @@ export default function ClientPortalDashboard() {
       website?: string | null;
       phone?: string | null;
       supportEmail?: string | null;
+      logoUrl?: string | null;
+      brandColor?: string | null;
     }) => {
       const res = await fetch('/api/client-portal/settings/business-profile', {
         method: 'POST',
@@ -1014,6 +1187,8 @@ export default function ClientPortalDashboard() {
       website: businessProfile.website || null,
       phone: businessProfile.phone || null,
       supportEmail: businessProfile.supportEmail || null,
+      logoUrl: businessProfile.logoUrl || null,
+      brandColor: businessProfile.brandColor || null,
     });
   };
 
@@ -1056,6 +1231,52 @@ export default function ClientPortalDashboard() {
       if (!uploadRes.ok) throw new Error('Failed to upload file');
 
       setNewProject(prev => ({ 
+        ...prev, 
+        projectFileUrl: key,
+        fileName: file.name
+      }));
+      toast({ title: 'File uploaded successfully' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Upload failed', variant: 'destructive' });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleWorkOrderFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      // Get presigned URL
+      const res = await fetch('/api/s3/upload-url', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${getToken()}` 
+        },
+        body: JSON.stringify({ 
+          filename: file.name, 
+          contentType: file.type,
+          folder: 'uploads' 
+        }),
+      });
+      
+      if (!res.ok) throw new Error('Failed to get upload URL');
+      const { url, key } = await res.json();
+
+      // Upload to S3
+      const uploadRes = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload file');
+
+      setNewWorkOrder(prev => ({ 
         ...prev, 
         projectFileUrl: key,
         fileName: file.name
@@ -1240,14 +1461,508 @@ export default function ClientPortalDashboard() {
       <div className="space-y-6">
           {/* Sub-Navigation for Target Markets */}
           {activeTab === 'target-markets' && (
-            <div className="mb-6">
-               <Tabs value={targetMarketTab} onValueChange={setTargetMarketTab} className="w-full">
-                  <TabsList>
-                     <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
-                     <TabsTrigger value="accounts">Accounts</TabsTrigger>
-                     <TabsTrigger value="contacts">Contacts</TabsTrigger>
-                  </TabsList>
-               </Tabs>
+            <div className="space-y-6">
+               <div className="mb-6">
+                 <Tabs value={targetMarketTab} onValueChange={setTargetMarketTab} className="w-full">
+                    <TabsList>
+                       <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
+                       <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                       <TabsTrigger value="contacts">Contacts</TabsTrigger>
+                       <TabsTrigger value="segments">Segments</TabsTrigger>
+                    </TabsList>
+                 </Tabs>
+               </div>
+
+               {targetMarketTab === 'intelligence' && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-bold tracking-tight">Organization Intelligence</h2>
+                <p className="text-muted-foreground mt-2">
+                  The foundation layer for all AI behavior - teaching the AI how your organization thinks and operates.
+                </p>
+              </div>
+            </div>
+
+            {clientOrgData?.organization && (
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm font-medium text-muted-foreground">Organization:</span>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
+                  <span className="font-medium">{clientOrgData.organization.name}</span>
+                  {clientOrgData.organization.domain && (
+                    <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <Tabs defaultValue="settings" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-5 lg:w-auto">
+                <TabsTrigger value="settings">Settings</TabsTrigger>
+                <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
+                <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
+                <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
+                <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="settings" className="space-y-4">
+                <AccountIntelligenceView />
+              </TabsContent>
+
+              <TabsContent value="service-catalog" className="space-y-4">
+                <ServiceCatalogTab organizationId={selectedOrgId} />
+              </TabsContent>
+
+              <TabsContent value="problem-framework" className="space-y-4">
+                <ProblemFrameworkTab organizationId={selectedOrgId} />
+              </TabsContent>
+
+              <TabsContent value="icp-positioning" className="space-y-4">
+                <ICPPositioningTab />
+              </TabsContent>
+
+              <TabsContent value="messaging-proof" className="space-y-4">
+                <MessagingProofTab />
+              </TabsContent>
+            </Tabs>
+          </div>
+               )}
+               
+               {targetMarketTab === 'accounts' && hasFeature('accounts_contacts') && (() => {
+          const accounts = crmAccounts || [];
+          const filteredAccounts = accounts.filter((a: any) => {
+            if (crmFilterIndustry && a.industry !== crmFilterIndustry) return false;
+            if (crmSearchQuery) {
+              const q = crmSearchQuery.toLowerCase();
+              return [a.name, a.industry, a.website].some(f => f?.toLowerCase()?.includes(q));
+            }
+            return true;
+          });
+          const allIndustries = [...new Set(accounts.map((a: any) => a.industry).filter(Boolean))];
+          const currentItems = filteredAccounts;
+
+          return (
+          <div className="space-y-6 max-w-7xl mx-auto">
+            {/* Header with stats */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  <span className="font-semibold">Accounts</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light">
+                  Manage your company data for campaigns and targeting
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {hasFeature('bulk_upload') && (
+                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => {
+                  const items = filteredAccounts;
+                  const headers = 'Company Name,Industry,Website,Phone';
+                  const rows = items.map((i: any) => `${i.companyName},${i.industry},${i.website},${i.phone}`);
+                  const csv = [headers, ...rows].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = `accounts.csv`; a.click();
+                  toast({ title: 'Exported', description: `${items.length} accounts exported to CSV` });
+                }}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+                <Button size="sm" onClick={() => setShowAddAccountDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Account
+                </Button>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Accounts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? accounts.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Contacts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalContacts ?? 0}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Industries</p>
+                <p className="text-2xl font-semibold">{allIndustries.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Opted Out</p>
+                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+              </CardContent></Card>
+            </div>
+
+            {/* Filters + View Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input placeholder={`Search accounts...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
+                </div>
+                {allIndustries.length > 0 && (
+                  <Select value={crmFilterIndustry} onValueChange={setCrmFilterIndustry}>
+                    <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="All Industries" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All Industries</SelectItem>
+                      {allIndustries.map(ind => <SelectItem key={ind} value={ind as string}>{ind as string}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="flex border rounded-md overflow-hidden">
+                <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+                <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {crmSelectedItems.length > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <Badge variant="secondary">{crmSelectedItems.length} selected</Badge>
+                <Button variant="outline" size="sm" onClick={() => setCrmSelectedItems([])}>Deselect All</Button>
+                <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                  if (!window.confirm(`Delete ${crmSelectedItems.length} accounts?`)) return;
+                  crmSelectedItems.forEach(id => deleteAccountMutation.mutate(id));
+                  setCrmSelectedItems([]);
+                }}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </div>
+            )}
+
+            {/* Content - ACCOUNTS */}
+            {crmAccountsLoading ? (
+              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : filteredAccounts.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                  <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
+                  <div className="flex justify-center gap-3">
+                    <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
+                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : crmViewMode === 'table' ? (
+              <Card className="shadow-sm">
+                <CardContent className="p-0">
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 dark:bg-slate-800">
+                          <TableHead className="w-10">
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredAccounts.length && filteredAccounts.length > 0} onChange={() => toggleSelectAll(filteredAccounts)} />
+                          </TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Industry</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Website</TableHead>
+                          <TableHead>Contacts</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredAccounts.map((account: any) => (
+                          <TableRow key={account.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(account, 'account')}>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={() => toggleCrmSelection(account.id)} />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-700 text-xs font-bold">{account.name?.[0]}</div>
+                                {account.name}
+                              </div>
+                            </TableCell>
+                            <TableCell>{account.industry && <Badge variant="outline" className="text-xs">{account.industry}</Badge>}</TableCell>
+                            <TableCell><span className="text-xs capitalize text-muted-foreground">{account.accountType || '-'}</span></TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{account.website}</TableCell>
+                            <TableCell><Badge variant="secondary">{account.contactCount || 0}</Badge></TableCell>
+                            <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(account, 'account')}><Eye className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => { setEditingAccount(account); setShowAddAccountDialog(true); }}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete account "${account.name}"?`)) {
+                                  deleteAccountMutation.mutate(account.id);
+                                }
+                              }}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredAccounts.map((account: any) => (
+                  <Card key={account.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(account, 'account')}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold">{account.name?.[0]}</div>
+                          <div>
+                            <CardTitle className="text-base">{account.name}</CardTitle>
+                            {account.industry && <Badge variant="outline" className="text-xs mt-1">{account.industry}</Badge>}
+                          </div>
+                        </div>
+                        <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(account.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(account.id); }} />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                      {account.website && <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5" />{account.website}</div>}
+                      {account.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{account.phone}</div>}
+                      <div className="flex items-center gap-2"><Users className="h-3.5 w-3.5" />{account.contactCount || 0} contacts</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
+
+               {targetMarketTab === 'contacts' && hasFeature('accounts_contacts') && (() => {
+          const contacts = crmContacts || [];
+          const accounts = crmAccounts || [];
+          const filteredContacts = contacts.filter((c: any) => {
+            if (crmFilterIndustry && c.industry !== crmFilterIndustry) return false;
+            if (crmSearchQuery) {
+              const q = crmSearchQuery.toLowerCase();
+              return [c.firstName, c.lastName, c.email, c.company, c.title, c.phone].some(f => f?.toLowerCase()?.includes(q));
+            }
+            return true;
+          });
+          const allIndustries = [...new Set(contacts.map((c: any) => c.industry).filter(Boolean))];
+          const currentItems = filteredContacts;
+
+          return (
+          <div className="space-y-6 max-w-7xl mx-auto">
+            {/* Header with stats */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-light tracking-tight text-slate-900 dark:text-white">
+                  <span className="font-semibold">Contacts</span>
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 font-light">
+                  Manage your contact data for campaigns and targeting
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {hasFeature('bulk_upload') && (
+                  <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => {
+                  const items = filteredContacts;
+                  const headers = 'First Name,Last Name,Email,Phone,Company,Title';
+                  const rows = items.map((i: any) => `${i.firstName},${i.lastName},${i.email},${i.phone},${i.company},${i.title}`);
+                  const csv = [headers, ...rows].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a'); a.href = url; a.download = `contacts.csv`; a.click();
+                  toast({ title: 'Exported', description: `${items.length} contacts exported to CSV` });
+                }}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+                <Button size="sm" onClick={() => setShowAddContactDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Contact
+                </Button>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Accounts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalAccounts ?? 0}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Total Contacts</p>
+                <p className="text-2xl font-semibold">{crmStatsData?.totalContacts ?? contacts.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Industries</p>
+                <p className="text-2xl font-semibold">{allIndustries.length}</p>
+              </CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Opted Out</p>
+                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+              </CardContent></Card>
+            </div>
+
+            {/* Filters + View Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input placeholder={`Search contacts...`} className="pl-9 w-[250px] h-9" value={crmSearchQuery} onChange={e => setCrmSearchQuery(e.target.value)} />
+                </div>
+                {allIndustries.length > 0 && (
+                  <Select value={crmFilterIndustry} onValueChange={setCrmFilterIndustry}>
+                    <SelectTrigger className="w-[160px] h-9"><SelectValue placeholder="All Industries" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All Industries</SelectItem>
+                      {allIndustries.map(ind => <SelectItem key={ind} value={ind as string}>{ind as string}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="flex border rounded-md overflow-hidden">
+                <Button variant={crmViewMode === 'table' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('table')}>
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+                <Button variant={crmViewMode === 'card' ? 'default' : 'ghost'} size="icon" className="h-9 w-9 rounded-none" onClick={() => setCrmViewMode('card')}>
+                  <LayoutDashboard className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {crmSelectedItems.length > 0 && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <Badge variant="secondary">{crmSelectedItems.length} selected</Badge>
+                <Button variant="outline" size="sm" onClick={() => setCrmSelectedItems([])}>Deselect All</Button>
+                <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => {
+                  if (!window.confirm(`Delete ${crmSelectedItems.length} contacts?`)) return;
+                  crmSelectedItems.forEach(id => deleteContactMutation.mutate(id));
+                  setCrmSelectedItems([]);
+                }}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+              </div>
+            )}
+
+            {/* Content - CONTACTS */}
+            {crmContactsLoading ? (
+              <div className="flex justify-center p-12"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : filteredContacts.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-16 text-center">
+                  <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                  <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
+                  <div className="flex justify-center gap-3">
+                    <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
+                    {hasFeature('bulk_upload') && <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : crmViewMode === 'table' ? (
+              <Card className="shadow-sm">
+                <CardContent className="p-0">
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 dark:bg-slate-800">
+                          <TableHead className="w-10">
+                            <input type="checkbox" className="rounded" checked={crmSelectedItems.length === filteredContacts.length && filteredContacts.length > 0} onChange={() => toggleSelectAll(filteredContacts)} />
+                          </TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Phone</TableHead>
+                          <TableHead>Company</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredContacts.map((contact: any) => (
+                          <TableRow key={contact.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                            <TableCell onClick={e => e.stopPropagation()}>
+                              <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={() => toggleCrmSelection(contact.id)} />
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs bg-primary/10">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                                </Avatar>
+                                {contact.firstName} {contact.lastName}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-sm">{contact.email}</TableCell>
+                            <TableCell className="text-sm">{contact.phone}</TableCell>
+                            <TableCell className="text-sm">{contact.company}</TableCell>
+                            <TableCell className="text-sm">{contact.title}</TableCell>
+                            <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+                              <Button variant="ghost" size="sm" onClick={() => handleViewCrmDetail(contact, 'contact')}><Eye className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => { setEditingContact(contact); setShowAddContactDialog(true); }}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete contact "${contact.firstName} ${contact.lastName}"?`)) {
+                                  deleteContactMutation.mutate(contact.id);
+                                }
+                              }}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredContacts.map((contact: any) => (
+                  <Card key={contact.id} className="shadow-sm hover:shadow-md transition-shadow cursor-pointer group" onClick={() => handleViewCrmDetail(contact, 'contact')}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-gradient-to-br from-violet-500 to-purple-500 text-white font-bold">{contact.firstName?.[0]}{contact.lastName?.[0]}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <CardTitle className="text-base">{contact.firstName} {contact.lastName}</CardTitle>
+                            {contact.title && <p className="text-xs text-muted-foreground mt-0.5">{contact.title}</p>}
+                          </div>
+                        </div>
+                        <input type="checkbox" className="rounded" checked={crmSelectedItems.includes(contact.id)} onChange={(e) => { e.stopPropagation(); toggleCrmSelection(contact.id); }} />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-2 text-sm text-muted-foreground">
+                      {contact.email && <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" />{contact.email}</div>}
+                      {contact.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" />{contact.phone}</div>}
+                      {contact.company && <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />{contact.company}</div>}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
+               {targetMarketTab === 'segments' && (
+                 <Card className="border-dashed">
+                    <CardContent className="py-16 text-center">
+                      <List className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
+                      <h3 className="font-semibold text-lg mb-2">Segments & Lists</h3>
+                      <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create and manage audience segments for targeted outreach.</p>
+                      <Button variant="outline" disabled>Coming Soon</Button>
+                    </CardContent>
+                 </Card>
+               )}
             </div>
           )}
 
@@ -1276,7 +1991,7 @@ export default function ClientPortalDashboard() {
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-lg"
-                  onClick={() => setShowAgenticReports(true)}
+                  onClick={() => setActiveTab('agent-x')}
                 >
                   <Brain className="h-4 w-4 mr-2" />
                   Open AgentX
@@ -2450,42 +3165,33 @@ export default function ClientPortalDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell className="font-mono font-medium">WO-2026-003</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-violet-50">Call Campaign</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate">Q1 Enterprise Outreach - IT Decision Makers</TableCell>
-                        <TableCell>500</TableCell>
-                        <TableCell>Feb 28, 2026</TableCell>
-                        <TableCell><Badge className="bg-blue-100 text-blue-700">Pending Review</Badge></TableCell>
-                        <TableCell>Feb 1, 2026</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-mono font-medium">WO-2026-002</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-blue-50">Email Campaign</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate">Product Launch Announcement</TableCell>
-                        <TableCell>1,000</TableCell>
-                        <TableCell>Feb 15, 2026</TableCell>
-                        <TableCell><Badge className="bg-amber-100 text-amber-700">In Progress</Badge></TableCell>
-                        <TableCell>Jan 25, 2026</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="font-mono font-medium">WO-2026-001</TableCell>
-                        <TableCell><Badge variant="outline" className="bg-green-50">Combined</Badge></TableCell>
-                        <TableCell className="max-w-[200px] truncate">Multi-channel ABM Campaign</TableCell>
-                        <TableCell>250</TableCell>
-                        <TableCell>Jan 31, 2026</TableCell>
-                        <TableCell><Badge className="bg-green-100 text-green-700">Completed</Badge></TableCell>
-                        <TableCell>Jan 10, 2026</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                        </TableCell>
-                      </TableRow>
+                      {workOrders.map((order) => (
+                        <TableRow key={order.id}>
+                          <TableCell className="font-mono font-medium">{order.id}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="bg-violet-50">
+                              {order.type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate">{order.goals}</TableCell>
+                          <TableCell>{order.leads}</TableCell>
+                          <TableCell>{order.deadline}</TableCell>
+                          <TableCell>
+                            <Badge className={
+                              order.status === 'completed' ? "bg-green-100 text-green-700" :
+                              order.status === 'in_progress' ? "bg-amber-100 text-amber-700" :
+                              "bg-blue-100 text-blue-700"
+                            }>
+                              {order.status === 'in_progress' ? 'In Progress' : 
+                               order.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{order.created}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
@@ -2944,17 +3650,16 @@ export default function ClientPortalDashboard() {
               </div>
             )}
 
-            <Tabs defaultValue="organization-profile" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-6 lg:w-auto">
-                <TabsTrigger value="organization-profile">Organization Profile</TabsTrigger>
+            <Tabs defaultValue="settings" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-5 lg:w-auto">
+                <TabsTrigger value="settings">Settings</TabsTrigger>
                 <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
                 <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
                 <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
                 <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
-                <TabsTrigger value="prompt-optimization">Prompt & Training</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="organization-profile" className="space-y-4">
+              <TabsContent value="settings" className="space-y-4">
                 <AccountIntelligenceView />
               </TabsContent>
 
@@ -2973,10 +3678,6 @@ export default function ClientPortalDashboard() {
               <TabsContent value="messaging-proof" className="space-y-4">
                 <MessagingProofTab />
               </TabsContent>
-
-              <TabsContent value="prompt-optimization" className="space-y-4">
-                <PromptOptimizationView />
-              </TabsContent>
             </Tabs>
           </div>
         )}
@@ -2984,94 +3685,166 @@ export default function ClientPortalDashboard() {
         {/* ==================== BOOKINGS TAB ==================== */}
         {activeTab === 'bookings' && hasFeature('calendar_booking') && (
           <div className="space-y-6">
+            {/* Header */}
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold">Bookings</h2>
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Calendar className="h-6 w-6 text-primary" />
+                  Bookings
+                </h2>
                 <p className="text-muted-foreground">Manage meetings, booking types, and availability</p>
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant={bookingsFilter === 'upcoming' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setBookingsFilter('upcoming')}
-                >
-                  Upcoming
-                </Button>
-                <Button
-                  variant={bookingsFilter === 'past' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setBookingsFilter('past')}
-                >
-                  Past
-                </Button>
-                <Button
-                  variant={bookingsFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setBookingsFilter('all')}
-                >
-                  All
-                </Button>
                 <Button size="sm" variant="outline" onClick={() => refetchBookings()}>
                   <RefreshCw className="h-4 w-4 mr-1" />
                   Refresh
                 </Button>
+                <Button size="sm" onClick={() => setShowCreateBookingType(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  New Booking Type
+                </Button>
               </div>
             </div>
 
-            {/* Booking Types Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {(clientBookingTypes || []).filter((t: any) => t.isActive).map((type: any) => (
-                <Card key={type.id} className="border-l-4" style={{ borderLeftColor: type.color || '#3b82f6' }}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">{type.name}</CardTitle>
-                      <Badge variant="secondary">{type.duration}m</Badge>
+            {/* Stats Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/30 dark:to-background border-blue-200/50">
+                <CardContent className="pt-5 pb-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Active Booking Types</p>
+                      <p className="text-2xl font-bold">{(clientBookingTypes || []).filter((t: any) => t.isActive).length}</p>
                     </div>
-                    {type.description && (
-                      <CardDescription className="text-xs">{type.description}</CardDescription>
-                    )}
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <LinkIcon className="h-3 w-3" />
-                      <span className="truncate font-mono">/{type.slug}</span>
+                    <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+                      <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-2 h-7 text-xs"
-                      onClick={() => {
-                        const url = `${window.location.origin}/book/${user?.email?.split('@')[0] || 'user'}/${type.slug}`;
-                        navigator.clipboard.writeText(url);
-                        toast({ title: 'Link copied!', description: 'Booking link copied to clipboard' });
-                      }}
-                    >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      Copy Link
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-              {(clientBookingTypes || []).filter((t: any) => t.isActive).length === 0 && (
-                <Card className="col-span-3 border-dashed">
-                  <CardContent className="py-8 text-center text-muted-foreground">
-                    <Calendar className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm font-medium">No booking types yet</p>
-                    <p className="text-xs mt-1">Create a booking type to start accepting meetings</p>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-background border-emerald-200/50">
+                <CardContent className="pt-5 pb-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Upcoming</p>
+                      <p className="text-2xl font-bold">{clientBookings.filter((b: any) => new Date(b.startTime) >= new Date() && b.status === 'confirmed').length}</p>
+                    </div>
+                    <div className="h-10 w-10 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center">
+                      <Clock className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-gradient-to-br from-violet-50 to-white dark:from-violet-950/30 dark:to-background border-violet-200/50">
+                <CardContent className="pt-5 pb-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Bookings</p>
+                      <p className="text-2xl font-bold">{clientBookings.length}</p>
+                    </div>
+                    <div className="h-10 w-10 rounded-full bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center">
+                      <Users className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Bookings Table */}
+            {/* Booking Types Cards */}
+            <div>
+              <h3 className="text-lg font-semibold mb-3">Your Booking Types</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(clientBookingTypes || []).filter((t: any) => t.isActive).map((type: any) => (
+                  <Card key={type.id} className="group relative overflow-hidden hover:shadow-md transition-shadow">
+                    <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: type.color || '#3b82f6' }} />
+                    <CardHeader className="pb-2 pt-5">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">{type.name}</CardTitle>
+                        <Badge variant="secondary" className="font-mono">{type.duration}m</Badge>
+                      </div>
+                      {type.description && (
+                        <CardDescription className="text-xs line-clamp-2">{type.description}</CardDescription>
+                      )}
+                    </CardHeader>
+                    <CardContent className="pt-0 space-y-3">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
+                        <LinkIcon className="h-3 w-3 shrink-0" />
+                        <span className="truncate font-mono">/{type.slug}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-8 text-xs"
+                          onClick={() => {
+                            const url = `${window.location.origin}/book/${user?.email?.split('@')[0] || 'user'}/${type.slug}`;
+                            navigator.clipboard.writeText(url);
+                            toast({ title: 'Link copied!', description: 'Booking link copied to clipboard' });
+                          }}
+                        >
+                          <ExternalLink className="h-3 w-3 mr-1" />
+                          Copy Link
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`/api/client-portal/bookings/types/${type.id}`, {
+                                method: 'DELETE',
+                                headers: { Authorization: `Bearer ${getToken()}` },
+                              });
+                              if (res.ok) {
+                                toast({ title: 'Booking type deleted' });
+                                refetchBookingTypes();
+                              }
+                            } catch {
+                              toast({ title: 'Failed to delete', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                {/* Add New Card */}
+                <Card
+                  className="border-dashed cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-all flex items-center justify-center min-h-[160px]"
+                  onClick={() => setShowCreateBookingType(true)}
+                >
+                  <CardContent className="text-center py-6">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
+                      <Plus className="h-5 w-5 text-primary" />
+                    </div>
+                    <p className="text-sm font-medium">Create Booking Type</p>
+                    <p className="text-xs text-muted-foreground mt-1">Set up a new meeting type</p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            {/* Bookings List */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-lg">
-                      {bookingsFilter === 'upcoming' ? 'Upcoming' : bookingsFilter === 'past' ? 'Past' : 'All'} Bookings
-                    </CardTitle>
+                    <CardTitle className="text-lg">Scheduled Meetings</CardTitle>
                     <CardDescription>{clientBookings.length} booking{clientBookings.length !== 1 ? 's' : ''}</CardDescription>
+                  </div>
+                  <div className="flex gap-1 bg-muted rounded-lg p-0.5">
+                    {(['upcoming', 'past', 'all'] as const).map((f) => (
+                      <Button
+                        key={f}
+                        variant={bookingsFilter === f ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-7 text-xs capitalize"
+                        onClick={() => setBookingsFilter(f)}
+                      >
+                        {f}
+                      </Button>
+                    ))}
                   </div>
                 </div>
               </CardHeader>
@@ -3087,107 +3860,254 @@ export default function ClientPortalDashboard() {
                     <p className="text-sm mt-1">Bookings will appear here when meetings are scheduled</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date & Time</TableHead>
-                          <TableHead>Guest</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Duration</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Meeting Link</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {clientBookings.map((booking: any) => {
-                          const startDate = new Date(booking.startTime);
-                          const endDate = new Date(booking.endTime);
-                          const isPast = startDate < new Date();
-                          return (
-                            <TableRow key={booking.id} className={isPast ? 'opacity-60' : ''}>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                                  <div>
-                                    <div className="font-medium text-sm">
-                                      {startDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – {endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                                    </div>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div>
-                                  <div className="font-medium text-sm">{booking.guestName}</div>
-                                  <div className="text-xs text-muted-foreground">{booking.guestEmail}</div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="text-xs">{booking.bookingTypeName || 'Meeting'}</Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-1 text-sm">
-                                  <Clock className="h-3 w-3 text-muted-foreground" />
-                                  {booking.bookingTypeDuration || 30}m
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant={booking.status === 'confirmed' ? 'default' : booking.status === 'cancelled' ? 'destructive' : 'secondary'}
-                                  className="text-xs"
-                                >
-                                  {booking.status === 'confirmed' && <CheckCircle className="h-3 w-3 mr-1" />}
-                                  {booking.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {booking.meetingUrl ? (
-                                  <a href={booking.meetingUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                                    <ExternalLink className="h-3 w-3" />
-                                    Join
-                                  </a>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {!isPast && booking.status === 'confirmed' && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`/api/client-portal/bookings/${booking.id}/cancel`, {
-                                          method: 'PUT',
-                                          ...authHeaders,
-                                        });
-                                        if (res.ok) {
-                                          toast({ title: 'Booking cancelled' });
-                                          refetchBookings();
-                                        }
-                                      } catch {
-                                        toast({ title: 'Failed to cancel', variant: 'destructive' });
-                                      }
-                                    }}
-                                  >
-                                    Cancel
-                                  </Button>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+                  <div className="space-y-3">
+                    {clientBookings.map((booking: any) => {
+                      const startDate = new Date(booking.startTime);
+                      const endDate = new Date(booking.endTime);
+                      const isPast = startDate < new Date();
+                      const isConfirmed = booking.status === 'confirmed';
+                      const isCancelled = booking.status === 'cancelled';
+                      return (
+                        <div
+                          key={booking.id}
+                          className={`flex items-center gap-4 p-4 rounded-lg border transition-all ${isPast ? 'opacity-60 bg-muted/20' : 'bg-background hover:shadow-sm'} ${isCancelled ? 'border-red-200/50' : ''}`}
+                        >
+                          {/* Date badge */}
+                          <div className="hidden sm:flex flex-col items-center justify-center bg-primary/5 rounded-lg px-3 py-2 min-w-[60px]">
+                            <span className="text-xs font-medium text-primary uppercase">
+                              {startDate.toLocaleDateString('en-US', { month: 'short' })}
+                            </span>
+                            <span className="text-xl font-bold leading-tight">
+                              {startDate.getDate()}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {startDate.toLocaleDateString('en-US', { weekday: 'short' })}
+                            </span>
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm truncate">{booking.guestName}</span>
+                              <Badge
+                                variant={isConfirmed ? 'default' : isCancelled ? 'destructive' : 'secondary'}
+                                className="text-[10px] h-5"
+                              >
+                                {isConfirmed && <CheckCircle className="h-2.5 w-2.5 mr-0.5" />}
+                                {booking.status}
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                {booking.guestEmail}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – {endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                              </span>
+                              {booking.bookingTypeName && (
+                                <Badge variant="outline" className="text-[10px] h-5">{booking.bookingTypeName}</Badge>
+                              )}
+                            </div>
+                            {booking.guestNotes && (
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-1 italic">"{booking.guestNotes}"</p>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {booking.meetingUrl && (
+                              <Button variant="outline" size="sm" className="h-8 text-xs" asChild>
+                                <a href={booking.meetingUrl} target="_blank" rel="noopener noreferrer">
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  Join
+                                </a>
+                              </Button>
+                            )}
+                            {!isPast && isConfirmed && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch(`/api/client-portal/bookings/${booking.id}/cancel`, {
+                                      method: 'PUT',
+                                      ...authHeaders,
+                                    });
+                                    if (res.ok) {
+                                      toast({ title: 'Booking cancelled' });
+                                      refetchBookings();
+                                    }
+                                  } catch {
+                                    toast({ title: 'Failed to cancel', variant: 'destructive' });
+                                  }
+                                }}
+                              >
+                                <X className="h-3 w-3 mr-1" />
+                                Cancel
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
             </Card>
+
+            {/* Create Booking Type Dialog */}
+            <Dialog open={showCreateBookingType} onOpenChange={setShowCreateBookingType}>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    Create Booking Type
+                  </DialogTitle>
+                  <DialogDescription>Set up a new meeting type for people to book with you</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label>Meeting Name *</Label>
+                    <Input
+                      placeholder="e.g. Product Demo, Strategy Call"
+                      value={newBookingType.name}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        setNewBookingType(prev => ({ ...prev, name, slug }));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL Slug</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">/book/.../</span>
+                      <Input
+                        placeholder="product-demo"
+                        value={newBookingType.slug}
+                        onChange={(e) => setNewBookingType(prev => ({ ...prev, slug: e.target.value }))}
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Duration (minutes)</Label>
+                      <Select
+                        value={String(newBookingType.duration)}
+                        onValueChange={(v) => setNewBookingType(prev => ({ ...prev, duration: parseInt(v) }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 minutes</SelectItem>
+                          <SelectItem value="30">30 minutes</SelectItem>
+                          <SelectItem value="45">45 minutes</SelectItem>
+                          <SelectItem value="60">60 minutes</SelectItem>
+                          <SelectItem value="90">90 minutes</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Color</Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={newBookingType.color}
+                          onChange={(e) => setNewBookingType(prev => ({ ...prev, color: e.target.value }))}
+                          className="h-9 w-12 rounded border cursor-pointer"
+                        />
+                        <Input
+                          value={newBookingType.color}
+                          onChange={(e) => setNewBookingType(prev => ({ ...prev, color: e.target.value }))}
+                          className="font-mono text-sm flex-1"
+                          placeholder="#3b82f6"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Textarea
+                      placeholder="Describe what this meeting is about..."
+                      value={newBookingType.description}
+                      onChange={(e) => setNewBookingType(prev => ({ ...prev, description: e.target.value }))}
+                      rows={3}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowCreateBookingType(false)}>Cancel</Button>
+                  <Button
+                    onClick={() => createBookingTypeMutation.mutate(newBookingType)}
+                    disabled={!newBookingType.name || !newBookingType.slug || createBookingTypeMutation.isPending}
+                  >
+                    {createBookingTypeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Create Booking Type
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
+
+        {/* ==================== SERVICE CATALOG TAB ==================== */}
+        {activeTab === 'service-catalog' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Layers className="h-6 w-6" />
+                Service Catalog
+              </h2>
+              <p className="text-muted-foreground">Define and manage your service offerings</p>
+            </div>
+            <ServiceCatalogTab organizationId={selectedOrgId} />
+          </div>
+        )}
+
+        {/* ==================== PROBLEM FRAMEWORK TAB ==================== */}
+        {activeTab === 'problem-framework' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <AlertTriangle className="h-6 w-6" />
+                Problem Framework
+              </h2>
+              <p className="text-muted-foreground">Map problems your services solve to drive intelligent outreach</p>
+            </div>
+            <ProblemFrameworkTab organizationId={selectedOrgId} />
+          </div>
+        )}
+
+        {/* ==================== ICP & POSITIONING TAB ==================== */}
+        {activeTab === 'icp-positioning' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Crosshair className="h-6 w-6" />
+                ICP & Positioning
+              </h2>
+              <p className="text-muted-foreground">Define your ideal customer profile and competitive positioning</p>
+            </div>
+            <ICPPositioningTab />
+          </div>
+        )}
+
+        {/* ==================== MESSAGING & PROOF TAB ==================== */}
+        {activeTab === 'messaging-proof' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <MessageSquareText className="h-6 w-6" />
+                Messaging & Proof
+              </h2>
+              <p className="text-muted-foreground">Craft messaging frameworks and proof points for your outreach</p>
+            </div>
+            <MessagingProofTab />
           </div>
         )}
 
@@ -3195,14 +4115,17 @@ export default function ClientPortalDashboard() {
         {activeTab === 'settings' && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold">Settings</h2>
-              <p className="text-muted-foreground">Manage your business profile and preferences</p>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Settings className="h-6 w-6 text-primary" />
+                Settings
+              </h2>
+              <p className="text-muted-foreground">Manage your business profile, branding, and preferences</p>
             </div>
 
             <Tabs defaultValue="business-profile" className="w-full">
               <TabsList>
                 <TabsTrigger value="business-profile">Business Profile</TabsTrigger>
-                <TabsTrigger value="organization-intelligence">Organization Intelligence</TabsTrigger>
+                <TabsTrigger value="branding">Branding</TabsTrigger>
                 <TabsTrigger value="compliance">Compliance</TabsTrigger>
                 <TabsTrigger value="integrations">Integrations</TabsTrigger>
               </TabsList>
@@ -3238,12 +4161,56 @@ export default function ClientPortalDashboard() {
                       </div>
                     </div>
 
+                    <Separator />
+
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Website</Label>
+                        <div className="relative">
+                          <Globe className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                          <Input
+                            placeholder="https://yourcompany.com"
+                            value={businessProfile?.website || ''}
+                            onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, website: e.target.value }))}
+                            className="pl-10"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Phone</Label>
+                        <div className="relative">
+                          <Phone className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                          <Input
+                            placeholder="+1 (555) 123-4567"
+                            value={businessProfile?.phone || ''}
+                            onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, phone: e.target.value }))}
+                            className="pl-10"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Support Email</Label>
+                      <div className="relative">
+                        <Mail className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Input
+                          placeholder="support@yourcompany.com"
+                          value={businessProfile?.supportEmail || ''}
+                          onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, supportEmail: e.target.value }))}
+                          className="pl-10"
+                        />
+                      </div>
+                    </div>
+
+                    <Separator />
+
                     <div className="space-y-2">
                       <Label>Street Address *</Label>
                       <Input
                         placeholder="123 Business St, Suite 100"
-                        value={businessProfile?.streetAddress || ''}
-                        onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, streetAddress: e.target.value }))}
+                        value={businessProfile?.streetAddress || businessProfile?.addressLine1 || ''}
+                        onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, streetAddress: e.target.value, addressLine1: e.target.value }))}
                       />
                     </div>
 
@@ -3295,7 +4262,7 @@ export default function ClientPortalDashboard() {
                     <Button 
                       className="mt-4" 
                       onClick={handleSaveBusinessProfile}
-                      disabled={saveBusinessProfileMutation.isPending || !businessProfile?.legalBusinessName || !businessProfile?.streetAddress || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode}
+                      disabled={saveBusinessProfileMutation.isPending || !businessProfile?.legalBusinessName || !(businessProfile?.streetAddress || businessProfile?.addressLine1) || !businessProfile?.city || !businessProfile?.state || !businessProfile?.postalCode}
                     >
                       {saveBusinessProfileMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                       Save Business Profile
@@ -3304,58 +4271,171 @@ export default function ClientPortalDashboard() {
                 </Card>
               </TabsContent>
 
-              {/* Organization Intelligence Tab - Shows only client's linked org */}
-              <TabsContent value="organization-intelligence" className="mt-4">
-                <div className="space-y-6">
-                  {clientOrgData?.organization && (
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="h-5 w-5 text-muted-foreground" />
-                        <span className="text-sm font-medium text-muted-foreground">Organization:</span>
+              <TabsContent value="branding" className="mt-4 space-y-4">
+                {/* Logo Setup */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Upload className="h-5 w-5" />
+                      Company Logo
+                    </CardTitle>
+                    <CardDescription>
+                      Your logo appears on emails, reports, and the client portal
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-start gap-6">
+                      <div className="shrink-0">
+                        <div
+                          className="h-24 w-24 rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden"
+                          style={{ borderColor: businessProfile?.brandColor || '#e2e8f0' }}
+                        >
+                          {businessProfile?.logoUrl ? (
+                            <img
+                              src={businessProfile.logoUrl}
+                              alt="Company logo"
+                              className="h-full w-full object-contain p-1"
+                            />
+                          ) : (
+                            <div className="text-center">
+                              <Building2 className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                              <span className="text-[10px] text-muted-foreground">No logo</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-md">
-                        <span className="font-medium">{clientOrgData.organization.name}</span>
-                        {clientOrgData.organization.domain && (
-                          <Badge variant="secondary" className="text-[10px]">{clientOrgData.organization.domain}</Badge>
+                      <div className="flex-1 space-y-3">
+                        <div className="space-y-2">
+                          <Label>Logo URL</Label>
+                          <Input
+                            placeholder="https://yourcompany.com/logo.png"
+                            value={businessProfile?.logoUrl || ''}
+                            onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, logoUrl: e.target.value }))}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Paste a URL to your company logo (PNG, SVG, or JPG recommended). Square or horizontal logos work best.
+                          </p>
+                        </div>
+                        {businessProfile?.logoUrl && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 h-7"
+                            onClick={() => setBusinessProfile((prev: any) => ({ ...prev, logoUrl: '' }))}
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Remove Logo
+                          </Button>
                         )}
                       </div>
                     </div>
-                  )}
+                  </CardContent>
+                </Card>
 
-                  <Tabs defaultValue="organization-profile" className="space-y-6">
-                    <TabsList className="grid w-full grid-cols-6 lg:w-auto">
-                      <TabsTrigger value="organization-profile">Organization Profile</TabsTrigger>
-                      <TabsTrigger value="service-catalog">Service Catalog</TabsTrigger>
-                      <TabsTrigger value="problem-framework">Problem Framework</TabsTrigger>
-                      <TabsTrigger value="icp-positioning">ICP & Positioning</TabsTrigger>
-                      <TabsTrigger value="messaging-proof">Messaging & Proof</TabsTrigger>
-                    </TabsList>
+                {/* Brand Color */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Palette className="h-5 w-5" />
+                      Brand Color
+                    </CardTitle>
+                    <CardDescription>
+                      Your primary brand color used throughout emails, buttons, and accents
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="color"
+                        value={businessProfile?.brandColor || '#3B82F6'}
+                        onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
+                        className="h-12 w-16 rounded-lg border cursor-pointer"
+                      />
+                      <div className="flex-1 space-y-1">
+                        <Label>Hex Color Code</Label>
+                        <Input
+                          value={businessProfile?.brandColor || ''}
+                          onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
+                          placeholder="#3B82F6"
+                          className="font-mono max-w-[200px]"
+                        />
+                      </div>
+                    </div>
 
-                    <TabsContent value="organization-profile" className="space-y-4">
-                      <AccountIntelligenceView />
-                    </TabsContent>
+                    {/* Quick Presets */}
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Quick Presets</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { color: '#3B82F6', name: 'Blue' },
+                          { color: '#8B5CF6', name: 'Purple' },
+                          { color: '#EC4899', name: 'Pink' },
+                          { color: '#EF4444', name: 'Red' },
+                          { color: '#F97316', name: 'Orange' },
+                          { color: '#EAB308', name: 'Yellow' },
+                          { color: '#22C55E', name: 'Green' },
+                          { color: '#14B8A6', name: 'Teal' },
+                          { color: '#06B6D4', name: 'Cyan' },
+                          { color: '#6366F1', name: 'Indigo' },
+                          { color: '#1E293B', name: 'Dark' },
+                          { color: '#64748B', name: 'Slate' },
+                        ].map((preset) => (
+                          <button
+                            key={preset.color}
+                            className={`h-8 w-8 rounded-full border-2 transition-all hover:scale-110 ${
+                              businessProfile?.brandColor === preset.color ? 'ring-2 ring-offset-2 ring-primary' : 'border-transparent'
+                            }`}
+                            style={{ backgroundColor: preset.color }}
+                            onClick={() => setBusinessProfile((prev: any) => ({ ...prev, brandColor: preset.color }))}
+                            title={preset.name}
+                          />
+                        ))}
+                      </div>
+                    </div>
 
-                    <TabsContent value="service-catalog" className="space-y-4">
-                      <ServiceCatalogTab organizationId={selectedOrgId} />
-                    </TabsContent>
+                    {/* Brand Preview */}
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Preview</Label>
+                      <div className="rounded-lg border p-4 space-y-3">
+                        <div className="flex items-center gap-3">
+                          {businessProfile?.logoUrl ? (
+                            <img src={businessProfile.logoUrl} alt="Logo" className="h-8 w-8 object-contain" />
+                          ) : (
+                            <div className="h-8 w-8 rounded-md flex items-center justify-center" style={{ backgroundColor: businessProfile?.brandColor || '#3B82F6' }}>
+                              <span className="text-white font-bold text-xs">
+                                {(businessProfile?.legalBusinessName || 'Co')[0]?.toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          <span className="font-semibold text-sm">{businessProfile?.dbaName || businessProfile?.legalBusinessName || 'Your Company'}</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <div
+                            className="h-8 px-4 rounded-md flex items-center justify-center text-white text-xs font-medium"
+                            style={{ backgroundColor: businessProfile?.brandColor || '#3B82F6' }}
+                          >
+                            Primary Button
+                          </div>
+                          <div
+                            className="h-8 px-4 rounded-md flex items-center justify-center text-xs font-medium border"
+                            style={{ color: businessProfile?.brandColor || '#3B82F6', borderColor: businessProfile?.brandColor || '#3B82F6' }}
+                          >
+                            Outline Button
+                          </div>
+                        </div>
+                        <div className="h-1 rounded-full" style={{ backgroundColor: businessProfile?.brandColor || '#3B82F6' }} />
+                      </div>
+                    </div>
 
-                    <TabsContent value="problem-framework" className="space-y-4">
-                      <ProblemFrameworkTab organizationId={selectedOrgId} />
-                    </TabsContent>
-
-                    <TabsContent value="icp-positioning" className="space-y-4">
-                      <ICPPositioningTab />
-                    </TabsContent>
-
-                    <TabsContent value="messaging-proof" className="space-y-4">
-                      <MessagingProofTab />
-                    </TabsContent>
-
-                    <TabsContent value="prompt-optimization" className="space-y-4">
-                      <PromptOptimizationView />
-                    </TabsContent>
-                  </Tabs>
-                </div>
+                    <Button
+                      onClick={handleSaveBusinessProfile}
+                      disabled={saveBusinessProfileMutation.isPending}
+                    >
+                      {saveBusinessProfileMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      Save Brand Settings
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
 
               <TabsContent value="compliance" className="mt-4">
@@ -3386,7 +4466,7 @@ export default function ClientPortalDashboard() {
                       <h4 className="font-medium mb-2">Email Footer Preview</h4>
                       <div className="text-sm text-muted-foreground space-y-1">
                         <p>{businessProfile?.legalBusinessName || 'Your Company Name'}</p>
-                        <p>{businessProfile?.streetAddress || '123 Business St'}</p>
+                        <p>{businessProfile?.streetAddress || businessProfile?.addressLine1 || '123 Business St'}</p>
                         <p>
                           {businessProfile?.city || 'City'}, {businessProfile?.state || 'ST'} {businessProfile?.postalCode || '00000'}
                         </p>
@@ -3810,181 +4890,459 @@ export default function ClientPortalDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Work Order Request Dialog */}
-      <Dialog open={showWorkOrderDialog} onOpenChange={setShowWorkOrderDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+      {/* Work Order Request Sheet (Step-based) */}
+      <Sheet open={showWorkOrderDialog} onOpenChange={setShowWorkOrderDialog}>
+        <SheetContent side="right" className="sm:max-w-xl w-full overflow-y-auto">
+          <SheetHeader className="mb-6">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 flex items-center justify-center shadow-md">
                 <ClipboardList className="h-5 w-5 text-white" />
               </div>
               <div>
-                <DialogTitle>Submit Work Order Request</DialogTitle>
-                <DialogDescription>
-                  Request our team to run a campaign on your behalf
-                </DialogDescription>
+                <SheetTitle>Submit Work Order</SheetTitle>
+                <SheetDescription>
+                  Request our team to run a campaign ({workOrderStep} of 3)
+                </SheetDescription>
               </div>
             </div>
-          </DialogHeader>
-          <div className="space-y-5 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="wo-campaignType">Campaign Type *</Label>
-              <Select
-                value={newWorkOrder.campaignType}
-                onValueChange={(val: 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom') =>
-                  setNewWorkOrder(prev => ({ ...prev, campaignType: val }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select campaign type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="call_campaign">
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-violet-500" />
-                      Call Campaign
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="email_campaign">
-                    <div className="flex items-center gap-2">
-                      <Mail className="h-4 w-4 text-blue-500" />
-                      Email Campaign
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="combined">
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-green-500" />
-                      Combined (Multi-channel)
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="data_enrichment">
-                    <div className="flex items-center gap-2">
-                      <Database className="h-4 w-4 text-amber-500" />
-                      Data Enrichment
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="custom">
-                    <div className="flex items-center gap-2">
-                      <Settings className="h-4 w-4 text-gray-500" />
-                      Custom Request
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Stepper Indicator */}
+            <div className="flex gap-2 mt-4 px-1">
+              {[1, 2, 3].map((step) => (
+                <div 
+                  key={step} 
+                  className={`h-1.5 flex-1 rounded-full transition-colors ${
+                    step <= workOrderStep ? 'bg-orange-500' : 'bg-slate-200 dark:bg-slate-800'
+                  }`}
+                />
+              ))}
             </div>
+          </SheetHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="wo-goals">Campaign Goals *</Label>
-              <Textarea
-                id="wo-goals"
-                placeholder="Describe what you want to achieve with this campaign (e.g., schedule demos with IT decision makers, generate qualified leads for enterprise software...)"
-                value={newWorkOrder.campaignGoals}
-                onChange={(e) => setNewWorkOrder(prev => ({ ...prev, campaignGoals: e.target.value }))}
-                rows={3}
-              />
-            </div>
+          <div className="space-y-6 py-2 pb-20">
+            
+            {/* STEP 1: CAMPAIGN BASICS */}
+            {workOrderStep === 1 && (
+              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
+                <div className="space-y-2">
+                  <Label htmlFor="wo-campaignType">Program Type *</Label>
+                  <Select
+                    value={newWorkOrder.campaignType}
+                    onValueChange={(val: string) =>
+                      setNewWorkOrder(prev => ({ ...prev, campaignType: val }))
+                    }
+                  >
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder="Select program type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="appointment_setting">Appointment Setting ($500.00)</SelectItem>
+                      <SelectItem value="event_reg_digital_ungated">Event Registration - Digital (Ungated) ($10.00)</SelectItem>
+                      <SelectItem value="event_reg_digital_gated">Event Registration - Digital (Gated) ($40.00)</SelectItem>
+                      <SelectItem value="in_person_events">In-Person Events Program ($80.00)</SelectItem>
+                      <SelectItem value="data_hygiene_enrichment">Data Hygiene and Enrichment ($0.35/Record)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="wo-leads">Required Number of Leads</Label>
-                <div className="relative">
-                  <Users className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="wo-leads"
-                    type="text"
-                    className="pl-9"
-                    placeholder="e.g. 500"
-                    value={newWorkOrder.requiredLeads}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, requiredLeads: e.target.value }))}
+                <div className="space-y-2">
+                  <Label htmlFor="wo-goals">Campaign Objective or Context *</Label>
+                  <Textarea
+                    id="wo-goals"
+                    placeholder="Describe the campaign objectives and context..."
+                    value={newWorkOrder.campaignGoals}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, campaignGoals: e.target.value }))}
+                    className="min-h-[100px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-productServices">Product Services</Label>
+                  <Textarea
+                    id="wo-productServices"
+                    placeholder="Describe the products or services being promoted..."
+                    value={newWorkOrder.productServices}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, productServices: e.target.value }))}
+                    className="min-h-[80px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-talkingPoints">Key Talking Points</Label>
+                  <Textarea
+                    id="wo-talkingPoints"
+                    placeholder="List the key talking points..."
+                    value={newWorkOrder.talkingPoints}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, talkingPoints: e.target.value }))}
+                    className="min-h-[80px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-qualifications">Qualifications</Label>
+                  <Textarea
+                    id="wo-qualifications"
+                    placeholder="Describe refinement criteria or qualifications..."
+                    value={newWorkOrder.qualifications}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, qualifications: e.target.value }))}
+                    className="min-h-[80px]"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-successCriteria">Success Criteria</Label>
+                  <Textarea
+                    id="wo-successCriteria"
+                    placeholder="Define what success looks like..."
+                    value={newWorkOrder.successCriteria}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, successCriteria: e.target.value }))}
+                    className="min-h-[80px]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="wo-leads">Number of lead</Label>
+                    <div className="relative">
+                      <Users className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="wo-leads"
+                        className="pl-9 h-11"
+                        placeholder="e.g. 500"
+                        value={newWorkOrder.requiredLeads}
+                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, requiredLeads: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wo-priority">Priority</Label>
+                    <Select
+                      value={newWorkOrder.priority}
+                      onValueChange={(val: 'low' | 'normal' | 'high' | 'urgent') =>
+                        setNewWorkOrder(prev => ({ ...prev, priority: val }))
+                      }
+                    >
+                      <SelectTrigger className="h-11">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: TARGETING */}
+            {workOrderStep === 2 && (
+              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
+                <div className="bg-muted/30 border rounded-lg p-4 space-y-4">
+                  <h4 className="font-semibold text-sm flex items-center gap-2 text-primary">
+                    <Target className="h-4 w-4" />
+                    Audience specs
+                  </h4>
+
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Geography</Label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {newWorkOrder.targetGeo.map((tag, i) => (
+                          <Badge key={i} variant="secondary" className="gap-1 pr-1">
+                            {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetGeo: prev.targetGeo.filter((_, idx) => idx !== i) }))} />
+                          </Badge>
+                        ))}
+                      </div>
+                      <Input
+                        placeholder="Type & Enter (e.g. US, Canada)"
+                        value={geoInput}
+                        onChange={(e) => setGeoInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            if (geoInput.trim()) {
+                              setNewWorkOrder(prev => ({ ...prev, targetGeo: [...prev.targetGeo, geoInput.trim()] }));
+                              setGeoInput('');
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Job Titles</Label>
+                      <div className="flex flex-wrap gap-2 mb-2">
+                         {newWorkOrder.targetTitles.map((tag, i) => (
+                          <Badge key={i} variant="secondary" className="gap-1 pr-1">
+                            {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetTitles: prev.targetTitles.filter((_, idx) => idx !== i) }))} />
+                          </Badge>
+                        ))}
+                      </div>
+                      <Input
+                        placeholder="Type & Enter (e.g. CEO, VP Sales)"
+                        value={titleInput}
+                        onChange={(e) => setTitleInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            if (titleInput.trim()) {
+                              setNewWorkOrder(prev => ({ ...prev, targetTitles: [...prev.targetTitles, titleInput.trim()] }));
+                              setTitleInput('');
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase text-muted-foreground">Industries</Label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {newWorkOrder.targetIndustries.map((tag, i) => (
+                        <Badge key={i} variant="secondary" className="gap-1 pr-1">
+                          {tag} <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => setNewWorkOrder(prev => ({ ...prev, targetIndustries: prev.targetIndustries.filter((_, idx) => idx !== i) }))} />
+                        </Badge>
+                      ))}
+                    </div>
+                    <Input
+                      placeholder="Type & Enter (e.g. SaaS, Fintech)"
+                      value={industryInput}
+                      onChange={(e) => setIndustryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                         if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          if (industryInput.trim()) {
+                            setNewWorkOrder(prev => ({ ...prev, targetIndustries: [...prev.targetIndustries, industryInput.trim()] }));
+                            setIndustryInput('');
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 pt-2">
+                    <div className="space-y-2">
+                      <Label>Revenue</Label>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between font-normal">
+                            {newWorkOrder.targetRevenue.length > 0 
+                              ? `${newWorkOrder.targetRevenue.length} selected` 
+                              : "Select"}
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-[200px]">
+                          {['$0 - $1M', '$1M - $10M', '$10M - $50M', '$50M - $100M', '$100M - $500M', '$500M - $1B', '$1B+'].map((opt) => (
+                            <DropdownMenuCheckboxItem
+                              key={opt}
+                              checked={newWorkOrder.targetRevenue.includes(opt)}
+                              onCheckedChange={(checked) => {
+                                setNewWorkOrder(prev => ({
+                                  ...prev,
+                                  targetRevenue: checked 
+                                    ? [...prev.targetRevenue, opt]
+                                    : prev.targetRevenue.filter(v => v !== opt)
+                                }));
+                              }}
+                            >
+                              {opt}
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Employees</Label>
+                      <DropdownMenu>
+                         <DropdownMenuTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between font-normal">
+                            {newWorkOrder.targetEmployeeSize.length > 0 
+                              ? `${newWorkOrder.targetEmployeeSize.length} selected` 
+                              : "Select"}
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-[200px]">
+                          {['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5000+'].map((opt) => (
+                             <DropdownMenuCheckboxItem
+                              key={opt}
+                              checked={newWorkOrder.targetEmployeeSize.includes(opt)}
+                              onCheckedChange={(checked) => {
+                                setNewWorkOrder(prev => ({
+                                  ...prev,
+                                  targetEmployeeSize: checked 
+                                    ? [...prev.targetEmployeeSize, opt]
+                                    : prev.targetEmployeeSize.filter(v => v !== opt)
+                                }));
+                              }}
+                            >
+                              {opt}
+                            </DropdownMenuCheckboxItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: DETAILS & REVIEW */}
+            {workOrderStep === 3 && (
+              <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="wo-timeline">Desired Timeline</Label>
+                    <div className="relative">
+                      <Clock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="wo-timeline"
+                        className="pl-9 h-11"
+                        placeholder="e.g. 2 weeks"
+                        value={newWorkOrder.desiredTimeline}
+                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, desiredTimeline: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="wo-deadline">Hard Deadline</Label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="wo-deadline"
+                        type="date"
+                        className="pl-9 h-11"
+                        value={newWorkOrder.deadline}
+                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, deadline: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-landingPage">Landing Page / URL</Label>
+                  <div className="relative">
+                     <LinkIcon className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                     <Input 
+                        id="wo-landingPage" 
+                        className="pl-9 h-11"
+                        placeholder="https://example.com"
+                        value={newWorkOrder.landingPageUrl} 
+                        onChange={(e) => setNewWorkOrder(prev => ({ ...prev, landingPageUrl: e.target.value }))}
+                     />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Project Files</Label>
+                   <div className="border border-dashed rounded-lg p-4 flex flex-col items-center justify-center gap-3 bg-muted/20">
+                      <FileText className="h-8 w-8 text-muted-foreground/50" />
+                      <div className="text-center">
+                        <p className="text-sm font-medium">Upload Briefs or Suppression Lists</p>
+                        <p className="text-xs text-muted-foreground">CSV, PDF, DOCX up to 10MB</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="relative" disabled={isUploading}>
+                          {isUploading ? <Loader2 className="h-3 w-3 mr-2 animate-spin" /> : <Upload className="h-3 w-3 mr-2" />}
+                          Select File
+                          <input 
+                            type="file" 
+                            className="absolute inset-0 opacity-0 cursor-pointer" 
+                            onChange={handleWorkOrderFileUpload}
+                            disabled={isUploading}
+                          />
+                        </Button>
+                      </div>
+                      {newWorkOrder.fileName && (
+                        <div className="flex items-center gap-2 mt-2 bg-green-50 text-green-700 px-3 py-1 rounded-sm text-xs">
+                          <CheckCircle className="h-3 w-3" />
+                          {newWorkOrder.fileName}
+                          <X 
+                            className="h-3 w-3 ml-2 cursor-pointer" 
+                            onClick={() => setNewWorkOrder(prev => ({ ...prev, projectFileUrl: '', fileName: '' }))}
+                          />
+                        </div>
+                      )}
+                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wo-instructions">Additional Instructions</Label>
+                  <Textarea
+                    id="wo-instructions"
+                    placeholder="Any specific exclusions or notes..."
+                    value={newWorkOrder.additionalInstructions}
+                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, additionalInstructions: e.target.value }))}
+                    className="min-h-[100px]"
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="wo-priority">Priority</Label>
-                <Select
-                  value={newWorkOrder.priority}
-                  onValueChange={(val: 'low' | 'normal' | 'high' | 'urgent') =>
-                    setNewWorkOrder(prev => ({ ...prev, priority: val }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="wo-timeline">Desired Timeline</Label>
-                <div className="relative">
-                  <Clock className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="wo-timeline"
-                    className="pl-9"
-                    placeholder="e.g. 2 weeks, 1 month"
-                    value={newWorkOrder.desiredTimeline}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, desiredTimeline: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wo-deadline">Deadline</Label>
-                <div className="relative">
-                  <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="wo-deadline"
-                    type="date"
-                    className="pl-9"
-                    value={newWorkOrder.deadline}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, deadline: e.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="wo-instructions">Additional Instructions</Label>
-              <Textarea
-                id="wo-instructions"
-                placeholder="Any specific requirements, target industries, geographic focus, exclusions, or other details our team should know..."
-                value={newWorkOrder.additionalInstructions}
-                onChange={(e) => setNewWorkOrder(prev => ({ ...prev, additionalInstructions: e.target.value }))}
-                rows={3}
-              />
-            </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowWorkOrderDialog(false)}>Cancel</Button>
+
+          <SheetFooter className="absolute bottom-0 left-0 right-0 p-6 bg-background border-t flex flex-row gap-2 sm:justify-between items-center z-10">
+             <Button 
+                variant="ghost" 
+                onClick={() => workOrderStep === 1 ? setShowWorkOrderDialog(false) : setWorkOrderStep(prev => prev - 1)}
+              >
+                {workOrderStep === 1 ? 'Cancel' : 'Back'}
+              </Button>
+            
             <Button 
               onClick={() => {
-                toast({ title: 'Work Order Submitted', description: 'Your request has been submitted. Our team will review it shortly.' });
-                setShowWorkOrderDialog(false);
-                setNewWorkOrder({
-                  campaignType: '' as 'call_campaign' | 'email_campaign' | 'combined' | 'data_enrichment' | 'custom',
-                  campaignGoals: '',
-                  requiredLeads: '',
-                  desiredTimeline: '',
-                  deadline: '',
-                  additionalInstructions: '',
-                  priority: 'normal',
-                });
+                if (workOrderStep < 3) {
+                  setWorkOrderStep(prev => prev + 1);
+                } else {
+                  // Submit
+                  createWorkOrderMutation.mutate(newWorkOrder);
+
+                  // Optimistic UI update
+                  const newOrder = {
+                    id: `WO-2026-PENDING`, // Temp ID
+                    type: getProgramTypeLabel(newWorkOrder.campaignType),
+                    goals: newWorkOrder.campaignGoals,
+                    leads: newWorkOrder.requiredLeads || 'N/A',
+                    deadline: newWorkOrder.deadline ? new Date(newWorkOrder.deadline).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'TBD',
+                    status: 'pending',
+                    created: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+                  };
+                  // @ts-ignore
+                  setWorkOrders([newOrder, ...workOrders]);
+                }
               }}
-              disabled={!newWorkOrder.campaignType || !newWorkOrder.campaignGoals}
-              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+              disabled={
+                (workOrderStep === 1 && (!newWorkOrder.campaignType || !newWorkOrder.campaignGoals)) || 
+                createWorkOrderMutation.isPending
+              }
+              className={`min-w-[120px] ${workOrderStep === 3 ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600' : ''}`}
             >
-              <Send className="h-4 w-4 mr-2" />
-              Submit Work Order
+              {createWorkOrderMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Submitting
+                </>
+              ) : (
+                <>
+                  {workOrderStep === 3 ? (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Submit Order
+                    </>
+                  ) : (
+                    <>
+                      Next Step
+                      <ChevronRight className="h-4 w-4 ml-2" />
+                    </>
+                  )}
+                </>
+              )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* Self-Service Campaign Creator Wizard */}
       <Dialog open={showCampaignCreator} onOpenChange={(open) => { setShowCampaignCreator(open); if (!open) setCampaignCreatorStep(1); }}>

@@ -93,6 +93,7 @@ import telnyxWebhookRouter from './routes/telnyx-webhook-management';
 import transcriptionManagementRouter from './routes/transcription-management';
 import clientAssignmentRouter from './routes/client-assignment';
 import documentExtractRouter from './routes/document-extract';
+import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import { z } from "zod";
@@ -775,6 +776,7 @@ export function registerRoutes(app: Express) {
 
   // Health Check Endpoint
   app.use('/api', healthRouter);
+  app.use('/api', campaignOpsRouter);
   
   // Public Booking Routes
   app.use('/api/bookings', bookingRouter);

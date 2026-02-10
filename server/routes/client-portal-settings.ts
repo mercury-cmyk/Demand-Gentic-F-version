@@ -90,20 +90,20 @@ router.post('/business-profile', async (req: Request, res: Response) => {
     }
 
     const updateSchema = z.object({
-      legalBusinessName: z.string().min(1, 'Legal business name is required'),
+      legalBusinessName: z.string().optional().nullable().or(z.literal('')),
       dbaName: z.string().optional().nullable(),
-      addressLine1: z.string().min(1, 'Address is required'),
+      addressLine1: z.string().optional().nullable().or(z.literal('')),
       addressLine2: z.string().optional().nullable(),
-      city: z.string().min(1, 'City is required'),
-      state: z.string().min(1, 'State is required'),
-      postalCode: z.string().min(1, 'Postal code is required'),
+      city: z.string().optional().nullable().or(z.literal('')),
+      state: z.string().optional().nullable().or(z.literal('')),
+      postalCode: z.string().optional().nullable().or(z.literal('')),
       country: z.string().default('United States'),
       customUnsubscribeUrl: z.string().url().optional().nullable().or(z.literal('')),
       website: z.string().url().optional().nullable().or(z.literal('')),
       phone: z.string().optional().nullable(),
       supportEmail: z.string().email().optional().nullable().or(z.literal('')),
       logoUrl: z.string().url().optional().nullable().or(z.literal('')),
-      brandColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().nullable(),
+      brandColor: z.string().regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/).optional().nullable().or(z.literal('')),
     });
 
     const validatedData = updateSchema.parse(req.body);

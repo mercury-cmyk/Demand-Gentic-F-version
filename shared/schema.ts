@@ -12483,15 +12483,15 @@ export const clientBusinessProfiles = pgTable("client_business_profiles", {
   clientAccountId: varchar("client_account_id").notNull().unique().references(() => clientAccounts.id, { onDelete: 'cascade' }),
 
   // Legal Business Information (Required for compliance)
-  legalBusinessName: text("legal_business_name").notNull(),
+  legalBusinessName: text("legal_business_name"),
   dbaName: text("dba_name"), // DBA / Trade Name (optional)
   
   // Physical Address (Required for CAN-SPAM, GDPR compliance)
-  addressLine1: text("address_line1").notNull(),
+  addressLine1: text("address_line1"),
   addressLine2: text("address_line2"),
-  city: text("city").notNull(),
-  state: text("state").notNull(),
-  postalCode: text("postal_code").notNull(),
+  city: text("city"),
+  state: text("state"),
+  postalCode: text("postal_code"),
   country: text("country").notNull().default('United States'),
 
   // Custom Unsubscribe URL (for client's own unsubscribe mechanism)

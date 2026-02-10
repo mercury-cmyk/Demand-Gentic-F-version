@@ -547,6 +547,12 @@ class CampaignRunnerService {
   }
 
   private async loadCampaignTasks(campaignId: string): Promise<void> {
+    // Guard: skip when webhooks are pointed to production (dev server should not distribute tasks)
+    if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+      console.log(`${LOG_PREFIX} Skipping task load - call execution disabled (webhooks pointed to production)`);
+      return;
+    }
+
     try {
       // Get campaign details
       const [campaign] = await db.select()

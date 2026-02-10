@@ -564,7 +564,7 @@ export function SimpleTemplateBuilder({
   const [brandPalette, setBrandPalette] = useState<BrandPaletteKey>("indigo");
   const [useCustomBrandColors, setUseCustomBrandColors] = useState(false);
   const [brandColors, setBrandColors] = useState(BRAND_COLOR_PRESETS.indigo);
-  const [isCanvasExpanded, setIsCanvasExpanded] = useState(false);
+  const [isCanvasExpanded, setIsCanvasExpanded] = useState(true);
   const [selectedMergeToken, setSelectedMergeToken] = useState<string | undefined>(undefined);
 
   const htmlEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1424,7 +1424,7 @@ export function SimpleTemplateBuilder({
 
             {/* Email Canvas Container */}
             <div className="flex-1 flex justify-center overflow-auto pb-4">
-              <div className={`w-full transition-all duration-300 ${isCanvasExpanded ? "max-w-[1000px]" : "max-w-[600px]"}`}>
+              <div className={`w-full transition-all duration-300 ${isCanvasExpanded ? "max-w-[1400px]" : "max-w-[800px]"}`}>
                 {/* Email Container */}
                 <div className="bg-white rounded-lg shadow-lg border overflow-hidden min-h-[600px] flex flex-col">
                   {editorMode === "visual" ? (
@@ -1445,7 +1445,7 @@ export function SimpleTemplateBuilder({
                           className="w-full h-full border-0 pt-12"
                           style={{ background: '#f3f4f6' }}
                           title="Email Preview"
-                          sandbox="allow-same-origin"
+                          sandbox="allow-same-origin allow-scripts"
                         />
                       </div>
                     ) : (

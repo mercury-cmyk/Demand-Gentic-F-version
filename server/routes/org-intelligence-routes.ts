@@ -7,7 +7,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { requireAuth, requireRole, verifyToken } from "../auth";
 import { db } from "../db";
-import { accounts, contacts, accountIntelligence, campaignOrganizations } from "@shared/schema";
+import { accounts, contacts, accountIntelligence, campaignOrganizations, clientOrganizationLinks } from "@shared/schema";
 import { ilike, or, inArray, desc, sql, eq } from "drizzle-orm";
 import { collectWebsiteContent, type WebsitePageSummary } from "../lib/website-research";
 import crypto from "crypto";
@@ -767,8 +767,18 @@ Return your analysis in the following JSON format ONLY (no markdown, no explanat
  * POST /api/org-intelligence/analyze
  * Analyze a company domain using AI
  */
-router.post("/analyze", requireAuth, requireRole('admin', 'campaign_manager'), async (req: Request, res: Response) => {
+router.post("/analyze", requireDualAuth, async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    // Allow Clients to run analysis
+    const allowAccess = 
+      ['admin', 'campaign_manager'].includes(user.role) || 
+      user.role === 'client';
+    
+    if (!allowAccess) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
     const { domain, context } = req.body;
     
     if (!domain) {
@@ -1438,8 +1448,19 @@ Return ONLY valid JSON in this format:
  * POST /api/org-intelligence/analyze-deep
  * Deep multi-model analysis with SSE progress streaming
  */
-router.post("/analyze-deep", requireAuth, requireRole('admin', 'campaign_manager'), async (req: Request, res: Response) => {
-  // Set SSE headers
+router.post("/analyze-deep", requireDualAuth, async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    // Allow Clients to run analysis
+    const allowAccess = 
+      ['admin', 'campaign_manager'].includes(user.role) || 
+      user.role === 'client';
+    
+    if (!allowAccess) {
+      // For SSE we can't return JSON status easily if headers flushed, but here we haven't flushed yet
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -1621,9 +1642,19 @@ router.post("/analyze-deep", requireAuth, requireRole('admin', 'campaign_manager
  * POST /api/org-intelligence/save
  * Save organization intelligence profile for current tenant
  */
-router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), async (req: Request, res: Response) => {
+router.post("/save", requireDualAuth, async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
     const { domain, profile, models, reasoning, orgIntelligence, compliancePolicy, platformPolicies, agentVoiceDefaults } = req.body;
+
+    // RBAC Check: Must be Admin/CampaignManager OR Client
+    const allowAccess = 
+      ['admin', 'campaign_manager'].includes(user.role) || 
+      user.role === 'client'; // Clients allowed
+    
+    if (!allowAccess) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
 
     if (!domain || !profile) {
       return res.status(400).json({ error: "Domain and profile are required" });
@@ -1662,11 +1693,28 @@ router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), asyn
 
       console.log('[Org-Intelligence] Creating/updating campaign organization for domain:', domain, 'name:', orgName);
 
-      // Check if organization with this domain already exists
-      const [existingOrg] = await db.select()
-        .from(campaignOrganizations)
-        .where(eq(campaignOrganizations.domain, domain))
-        .limit(1);
+      // Resolve Target Organization
+      let existingOrg: any = null;
+      const clientTenantId = user.role === 'client' ? user.tenantId : null;
+      
+      if (clientTenantId) {
+         const [link] = await db.select()
+           .from(clientOrganizationLinks)
+           .where(eq(clientOrganizationLinks.clientAccountId, clientTenantId))
+           .limit(1);
+         
+         if (link) {
+            [existingOrg] = await db.select().from(campaignOrganizations).where(eq(campaignOrganizations.id, link.campaignOrganizationId)).limit(1);
+         }
+      }
+
+      if (!existingOrg) {
+        // Fallback or Admin: Match by domain
+        [existingOrg] = await db.select()
+          .from(campaignOrganizations)
+          .where(eq(campaignOrganizations.domain, domain))
+          .limit(1);
+      }
 
       if (existingOrg) {
         // Update existing organization
@@ -1680,6 +1728,7 @@ router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), asyn
             icp: profile.icp || {},
             positioning: profile.positioning || {},
             updatedAt: new Date(),
+            domain: domain
           })
           .where(eq(campaignOrganizations.id, existingOrg.id))
           .returning();
@@ -1707,6 +1756,19 @@ router.post("/save", requireAuth, requireRole('admin', 'campaign_manager'), asyn
         }).returning();
         campaignOrgId = newOrg.id;
         console.log('[Org-Intelligence] Created campaign organization:', campaignOrgId, 'isDefault:', !defaultOrg);
+      }
+
+      // Ensure Link Exists for Client
+      if (clientTenantId && campaignOrgId) {
+         const [link] = await db.select().from(clientOrganizationLinks).where(eq(clientOrganizationLinks.clientAccountId, clientTenantId)).limit(1);
+         if (!link) {
+            await db.insert(clientOrganizationLinks).values({
+               clientAccountId: clientTenantId,
+               campaignOrganizationId: campaignOrgId,
+               isPrimary: true
+            });
+            console.log('[Org-Intelligence] Linked Client', clientTenantId, 'to Org', campaignOrgId);
+         }
       }
     } catch (orgError: any) {
       console.error('[Org-Intelligence] Failed to create/update campaign organization:', orgError.message);
@@ -1738,14 +1800,21 @@ router.get("/profile", requireDualAuth, async (req: Request, res: Response) => {
     const tenantId = user.tenantId; // Will be set for clients in Dual Auth mode
     let organizationId = req.query.organizationId as string | undefined;
 
-    // For clients (Dual Auth), restrict access to their own organization
+    // For clients (Dual Auth), resolve their linked organization
     if (tenantId) {
-        // If an explicit ID is requested, ensure it matches the client's tenant ID
-        if (organizationId && organizationId !== tenantId) {
-             return res.status(403).json({ error: "Access to this organization profile is denied" });
-        }
-        // Default to the client's tenant/organization ID
-        organizationId = tenantId;
+       // Find the organization linked to this client account
+       const [link] = await db
+         .select()
+         .from(clientOrganizationLinks)
+         .where(eq(clientOrganizationLinks.clientAccountId, tenantId))
+         .limit(1);
+
+       if (link) {
+         organizationId = link.campaignOrganizationId;
+       } else {
+         // Client has no organization yet
+         return res.json({ profile: null });
+       }
     }
 
     // If no organization ID is resolved yet (internal user didn't provide one), return empty or error

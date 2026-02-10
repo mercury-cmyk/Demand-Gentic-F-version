@@ -1,11 +1,18 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-async function throwIfResNotOk(res: Response) {
+async function throwIfResNotOk(res: Response, url?: string) {
   if (!res.ok) {
     // Handle 401 Unauthorized - automatically logout and redirect to login
     if (res.status === 401) {
-      localStorage.removeItem('authToken');
-      window.location.href = '/login';
+      if (url?.includes('/api/client-portal/') || window.location.pathname.startsWith('/client-portal/')) {
+        localStorage.removeItem('clientPortalToken');
+        localStorage.removeItem('clientPortalUser');
+        window.location.href = '/client-portal/login';
+      } else {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('authUser');
+        window.location.href = '/login';
+      }
       throw new Error('Session expired. Please login again.');
     }
     
@@ -14,12 +21,23 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-export function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('authToken');
+export function getAuthHeaders(url?: string): HeadersInit {
   const headers: HeadersInit = {};
   
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  // Choose token based on URL or current path context
+  const isClientPortal = url?.includes('/api/client-portal/') || 
+                         window.location.pathname.startsWith('/client-portal/');
+  
+  if (isClientPortal) {
+    const token = localStorage.getItem('clientPortalToken');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  } else {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
   }
   
   return headers;
@@ -32,7 +50,7 @@ export async function apiRequest(
   options?: { timeout?: number },
 ): Promise<Response> {
   const headers = {
-    ...getAuthHeaders(),
+    ...getAuthHeaders(url),
     ...(data ? { "Content-Type": "application/json" } : {}),
   };
 
@@ -52,7 +70,7 @@ export async function apiRequest(
       signal: controller.signal,
     });
 
-    await throwIfResNotOk(res);
+    await throwIfResNotOk(res, url);
     return res;
   } catch (error) {
     // Provide better error message for timeout
@@ -71,23 +89,21 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
-      headers: getAuthHeaders(),
+    const url = queryKey.join("/") as string;
+    const res = await fetch(url, {
+      headers: getAuthHeaders(url),
       credentials: "include",
     });
 
-    // Handle 401 Unauthorized - automatically logout and redirect to login
+    // Handle 401 Unauthorized
     if (res.status === 401) {
-      localStorage.removeItem('authToken');
-      window.location.href = '/login';
-      throw new Error('Session expired. Please login again.');
+      if (unauthorizedBehavior === "returnNull") {
+        return null; // Don't throw if returnNull is requested
+      }
+      await throwIfResNotOk(res, url); // This will throw and redirect
     }
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
-
-    await throwIfResNotOk(res);
+    await throwIfResNotOk(res, url);
     return await res.json();
   };
 

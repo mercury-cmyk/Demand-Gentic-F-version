@@ -400,6 +400,12 @@ export class TelnyxAiBridge extends EventEmitter {
   ): Promise<{ callId: string; callControlId: string }> {
     const provider = 'gemini_live';
 
+    // Guard: block calls when webhooks are pointed to production (dev server should not initiate)
+    if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+      console.warn(`[TelnyxAiBridge] 🚫 CALL BLOCKED - call execution disabled (webhooks pointed to production). Would have called: ${phoneNumber}`);
+      throw new Error('call_execution_disabled - Calls blocked because webhooks are pointed to production');
+    }
+
     // Format phone numbers to E.164 format first (required for tracking and Telnyx)
     const normalizedPhoneNumber = this.formatToE164(phoneNumber);
     const normalizedFromNumber = this.formatToE164(fromNumber);

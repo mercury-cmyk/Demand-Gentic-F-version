@@ -188,6 +188,7 @@ export function TemplateSelectorModal({
                           border: "none",
                           pointerEvents: "none"
                         }}
+                        sandbox="allow-same-origin allow-scripts"
                       />
 
                       {/* Overlay with actions */}

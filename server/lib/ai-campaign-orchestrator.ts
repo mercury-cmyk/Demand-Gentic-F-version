@@ -543,7 +543,7 @@ async function resetStuckItems(): Promise<number> {
       }
     }
 
-    // Find and reset stuck items
+    // Find and reset stuck items - also return phone numbers for prospect lock cleanup
     const result = await db.execute(sql`
       UPDATE campaign_queue
       SET status = 'queued',
@@ -552,12 +552,19 @@ async function resetStuckItems(): Promise<number> {
           updated_at = NOW()
       WHERE status = 'in_progress'
         AND updated_at < ${cutoffTime}
-      RETURNING id, campaign_id
+      RETURNING id, campaign_id, dialed_number
     `);
 
     const resetCount = result.rows?.length || 0;
     if (resetCount > 0) {
       console.log(`[AI Orchestrator] WATCHDOG: Reset ${resetCount} stuck in_progress items`);
+
+      // Release in-memory prospect locks for stuck items to prevent permanent blocking
+      for (const row of result.rows as any[]) {
+        if (row.dialed_number) {
+          releaseProspectLock(row.dialed_number, 'watchdog_reset');
+        }
+      }
 
       // Log affected campaigns for monitoring
       const affectedCampaigns = new Set((result.rows as any[]).map(r => r.campaign_id).filter(Boolean));
@@ -698,6 +705,11 @@ async function getQueuedItems(campaignId: string, limit: number): Promise<any[]>
  * Process a single campaign - initiate calls to maintain concurrency
  */
 async function processCampaign(campaignId: string, options?: ProcessCampaignOptions): Promise<{ initiated: number; skipped: number; fatalError?: boolean }> {
+  // Guard: skip when webhooks are pointed to production (dev server should not process campaigns)
+  if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+    return { initiated: 0, skipped: 0 };
+  }
+
   const campaign = await storage.getCampaign(campaignId);
   if (!campaign) {
     console.log(`[AI Orchestrator] Campaign ${campaignId} not found`);
@@ -1084,7 +1096,14 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
   for (let i = 0; i < eligibleItems.length; i += PARALLEL_CALL_BATCH_SIZE) {
     const batch = eligibleItems.slice(i, i + PARALLEL_CALL_BATCH_SIZE);
     
+    const CALL_INITIATION_TIMEOUT_MS = 60000; // 60s max per call initiation to prevent hanging
     const batchPromises = batch.map(async (item) => {
+      // Wrap each call initiation in a timeout to prevent individual items from blocking the batch
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('CALL_INITIATION_TIMEOUT: Call initiation exceeded 60s')), CALL_INITIATION_TIMEOUT_MS);
+      });
+
+      const initiationPromise = (async () => {
       // Declare variables used in both try and catch blocks at function scope
       // (let inside try {} is block-scoped and invisible to catch {})
       let prospectLockAcquired = false;
@@ -1494,9 +1513,19 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
 
         return { success: false, itemId: item.id, error };
       }
+      })(); // end initiationPromise
+
+      // Race against timeout - prevents any single call from blocking the batch forever
+      return Promise.race([initiationPromise, timeoutPromise]);
     });
 
-    const results = await Promise.all(batchPromises);
+    const settled = await Promise.allSettled(batchPromises);
+    const results = settled.map(s => {
+      if (s.status === 'fulfilled') return s.value;
+      // Promise rejected without being caught - log and treat as failure
+      console.error(`[AI Orchestrator] Unhandled batch promise rejection:`, s.reason);
+      return { success: false, error: s.reason };
+    });
     const batchSuccess = results.filter(r => r && r.success).length;
     initiated += batchSuccess;
 
@@ -1545,7 +1574,11 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
  */
 async function orchestratorTick(): Promise<OrchestratorJobResult> {
   try {
-    // WATCHDOG: First, reset any stuck items before processing
+    // WATCHDOG: First, clean up stale in-memory prospect/caller locks, then reset stuck DB items
+    const staleLocksCleaned = cleanupStaleLocks(10); // Clean locks older than 10 minutes
+    if (staleLocksCleaned > 0) {
+      console.log(`[AI Orchestrator] WATCHDOG: Cleaned ${staleLocksCleaned} stale in-memory prospect/caller locks`);
+    }
     const stuckReset = await resetStuckItems();
     
     // Get all active ai_agent campaigns
@@ -1615,6 +1648,7 @@ export function initializeAiCampaignOrchestrator(): void {
     console.warn('[AI Orchestrator] Redis not available - orchestrator disabled');
     return;
   }
+
 
   // Create queue
   orchestratorQueue = createQueue<OrchestratorJobData>('ai-campaign-orchestrator', {

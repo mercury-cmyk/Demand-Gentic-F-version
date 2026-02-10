@@ -91,6 +91,13 @@ router.post("/:campaignId/test-call", requireAuth, requireRole("admin", "campaig
 
     console.log("[Campaign Test Call] Request received:", { campaignId, userId, isWorkOrderSource, body: req.body });
 
+    // Guard: block test calls when webhooks are pointed to production
+    if (process.env.CALL_EXECUTION_ENABLED === 'false') {
+      return res.status(403).json({
+        message: "Call execution is disabled. Switch webhooks to dev mode to make calls from this server."
+      });
+    }
+
     // Validate request body
     const validatedData = initiateTestCallSchema.parse({
       campaignId,

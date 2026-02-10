@@ -43,7 +43,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertSipTrunkConfigSchema } from "@shared/schema";
 import { z } from "zod";
-import { Phone, Plus, Trash2, Star, Settings, Download, PhoneCall, Globe, Server, RefreshCw, CheckCircle2, AlertCircle, Copy } from "lucide-react";
+import { Phone, PhoneOff, Plus, Trash2, Star, Settings, Download, PhoneCall, Globe, Server, RefreshCw, CheckCircle2, AlertCircle, Copy } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -735,6 +735,7 @@ interface TelnyxWebhookData {
     productionUrl: string;
     isDevMode: boolean;
     websocketUrl: string;
+    callExecutionEnabled: boolean;
   };
   updatedAt?: string;
   message?: string;
@@ -776,7 +777,7 @@ function TelnyxWebhookManagement() {
         results.callControl?.success && results.callControl.name,
       ].filter(Boolean);
       toast({
-        title: 'Switched to Development',
+        title: 'Switched to Development — Calls Enabled',
         description: successApps.length > 0
           ? `Updated: ${successApps.join(', ')} → ${data.config?.baseUrl}`
           : `Webhooks now pointing to: ${data.config?.baseUrl}`,
@@ -807,10 +808,10 @@ function TelnyxWebhookManagement() {
         results.callControl?.success && results.callControl.name,
       ].filter(Boolean);
       toast({
-        title: 'Switched to Production',
+        title: 'Switched to Production — Calls Disabled',
         description: successApps.length > 0
-          ? `Updated: ${successApps.join(', ')} → ${data.config?.baseUrl}`
-          : `Webhooks now pointing to: ${data.config?.baseUrl}`,
+          ? `Updated: ${successApps.join(', ')} → ${data.config?.baseUrl}. This server will not initiate calls.`
+          : `Webhooks now pointing to: ${data.config?.baseUrl}. This server will not initiate calls.`,
       });
     },
     onError: (error: any) => {
@@ -1009,6 +1010,17 @@ function TelnyxWebhookManagement() {
                 Custom Configuration
               </Badge>
             )}
+            {webhookData.environment?.callExecutionEnabled ? (
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                <Phone className="h-3 w-3 mr-1" />
+                Calls Enabled
+              </Badge>
+            ) : webhookData.environment?.callExecutionEnabled === false ? (
+              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                <PhoneOff className="h-3 w-3 mr-1" />
+                Calls Disabled
+              </Badge>
+            ) : null}
           </div>
         </div>
 

@@ -85,7 +85,7 @@ export default function CloudLogsMonitor() {
   const [selectedSeverity, setSelectedSeverity] = useState<string[]>(['ERROR', 'WARNING', 'INFO', 'DEBUG', 'DEFAULT']);
   const [expandedLog, setExpandedLog] = useState<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [realTimeLogs, setRealTimeLogs] = useState<LogEntry[]>([]);
   const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
   const [terminalMode, setTerminalMode] = useState(true);
@@ -99,7 +99,7 @@ export default function CloudLogsMonitor() {
   });
   const [newLogHighlight, setNewLogHighlight] = useState<Set<number>>(new Set());
 
-  const logsEndRef = useRef<HTMLDivElement>(null);
+  const logScrollContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const connectionStartRef = useRef<Date | null>(null);
   const logCountRef = useRef({ total: 0, lastCheck: Date.now() });
@@ -277,10 +277,13 @@ export default function CloudLogsMonitor() {
     enabled: searchQuery.length > 2,
   });
 
-  // Auto-scroll
+  // Auto-scroll (scoped to the log scroll container, not the whole page)
   useEffect(() => {
-    if (autoScroll && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && logScrollContainerRef.current) {
+      const container = logScrollContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
   }, [allLogs, autoScroll]);
 
@@ -787,12 +790,11 @@ export default function CloudLogsMonitor() {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <ScrollArea className="h-[600px]">
+                <ScrollArea className="h-[600px]" ref={logScrollContainerRef}>
                   <div className={`${terminalMode ? 'p-4 font-mono text-sm space-y-0' : 'p-4 space-y-2'}`}>
                     {filteredLogs.length > 0 ? (
                       <>
                         {filteredLogs.map((log, idx) => renderLogDetail(log, idx))}
-                        <div ref={logsEndRef} />
                       </>
                     ) : (
                       <div className="text-center py-20">

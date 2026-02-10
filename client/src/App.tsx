@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TopBar } from "@/components/layout/top-bar";
 import { ProtectedRoute } from "@/components/protected-route";
+import { ClientPortalProtectedRoute } from "@/components/client-portal/client-portal-protected-route";
 import { CommandPalette } from "@/components/patterns/command-palette";
 import { DeprecatedRedirect } from "@/components/deprecated-redirect";
 import { ROUTES, DEPRECATED_ROUTES } from "@/lib/routes";
@@ -108,7 +109,9 @@ import ClientPortalDashboard from "@/pages/client-portal-dashboard";
 import ClientPortalSimulations from "@/pages/client-portal-simulations";
 import ClientPortalVoiceSimulation from "@/pages/client-portal-voice-simulation";
 import ClientPortalEmailSimulation from "@/pages/client-portal-email-simulation";
+import ClientServices from "@/pages/client-portal/client-services";
 import ClientPortalPreviewStudio from "@/pages/client-portal-preview-studio";
+import { ClientPortalLayout } from "@/components/client-portal/layout/client-portal-layout";
 import ClientPortalIntelligence from "@/pages/client-portal-intelligence";
 import ClientPortalGenerativeStudio from "@/pages/client-portal-generative-studio";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
@@ -608,44 +611,51 @@ function Router() {
 
       {/* Client Portal authenticated routes */}
       <Route path="/client-portal/dashboard">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalDashboard />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/simulations">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalSimulations />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/preview-studio">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalPreviewStudio />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/voice-simulation">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalVoiceSimulation />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/email-simulation">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalEmailSimulation />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/intelligence">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalIntelligence />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/generative-studio">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ClientPortalGenerativeStudio />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/argyle-events">
-        <ProtectedRoute>
+        <ClientPortalProtectedRoute>
           <ArgyleEventsPage />
-        </ProtectedRoute>
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/services">
+        <ClientPortalProtectedRoute>
+          <ClientPortalLayout>
+            <ClientServices />
+          </ClientPortalLayout>
+        </ClientPortalProtectedRoute>
       </Route>
 
       {/* Main dashboard */}

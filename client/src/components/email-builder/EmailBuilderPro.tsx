@@ -800,6 +800,7 @@ Your Name`}
                       title="Email Preview"
                       srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
                       className="w-full h-full border-0"
+                      sandbox="allow-same-origin allow-scripts"
                     />
                   </div>
                 </div>

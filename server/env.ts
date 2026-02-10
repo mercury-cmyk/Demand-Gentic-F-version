@@ -60,7 +60,7 @@ try {
   } else {
     console.log("⚠️  Server starting with missing env vars (see warnings above).");
   }
-  
+
 } catch (error) {
   if (error instanceof z.ZodError) {
     console.error("❌ Environment validation error:", error.format());

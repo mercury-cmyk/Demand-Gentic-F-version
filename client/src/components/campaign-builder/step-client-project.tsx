@@ -18,6 +18,14 @@ interface ClientProject {
   status: string;
 }
 
+interface WorkOrder {
+  id: string;
+  orderNumber: string;
+  title: string;
+  status: string;
+  projectId?: string;
+}
+
 interface StepClientProjectProps {
   data: any;
   onNext: (data: any) => void;
@@ -26,6 +34,7 @@ interface StepClientProjectProps {
 export function StepClientProject({ data, onNext }: StepClientProjectProps) {
   const [selectedClientId, setSelectedClientId] = useState<string>(data?.clientAccountId || "");
   const [selectedProjectId, setSelectedProjectId] = useState<string>(data?.projectId || "");
+  const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string>(data?.workOrderId || "");
 
   const { data: clients = [], isLoading: clientsLoading } = useQuery<ClientAccount[]>({
     queryKey: ["admin-client-accounts"],
@@ -36,7 +45,7 @@ export function StepClientProject({ data, onNext }: StepClientProjectProps) {
     },
   });
 
-  const { data: clientDetail, isLoading: projectsLoading } = useQuery<{ projects: ClientProject[] }>({
+  const { data: clientDetail, isLoading: projectsLoading } = useQuery<{ projects: ClientProject[], workOrders: WorkOrder[] }>({
     queryKey: ["admin-client-projects", selectedClientId],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/client-portal/admin/clients/${selectedClientId}`);
@@ -47,10 +56,22 @@ export function StepClientProject({ data, onNext }: StepClientProjectProps) {
   });
 
   const projects = clientDetail?.projects || [];
+  const workOrders = clientDetail?.workOrders || [];
+
+  // When a work order is selected, try to auto-select its project if available
+  useEffect(() => {
+    if (selectedWorkOrderId) {
+      const workOrder = workOrders.find(wo => wo.id === selectedWorkOrderId);
+      if (workOrder?.projectId) {
+        setSelectedProjectId(workOrder.projectId);
+      }
+    }
+  }, [selectedWorkOrderId, workOrders]);
 
   useEffect(() => {
     if (!selectedClientId) {
       setSelectedProjectId("");
+      setSelectedWorkOrderId("");
       return;
     }
 
@@ -59,11 +80,15 @@ export function StepClientProject({ data, onNext }: StepClientProjectProps) {
     }
 
     if (projects.length > 0) {
-      setSelectedProjectId(projects[0].id);
+      // Don't auto-select project if we might be selecting a work order that implies a project
+      // But keeping legacy behavior if no work order selected
+      if (!selectedWorkOrderId) {
+         setSelectedProjectId(projects[0].id);
+      }
     } else {
       setSelectedProjectId("");
     }
-  }, [selectedClientId, selectedProjectId, projects]);
+  }, [selectedClientId, selectedProjectId, projects, selectedWorkOrderId]);
 
   const handleNext = () => {
     if (!selectedClientId || !selectedProjectId) return;
@@ -71,6 +96,7 @@ export function StepClientProject({ data, onNext }: StepClientProjectProps) {
       ...data,
       clientAccountId: selectedClientId,
       projectId: selectedProjectId,
+      workOrderId: selectedWorkOrderId || null, // Optional
     });
   };
 
@@ -117,43 +143,83 @@ export function StepClientProject({ data, onNext }: StepClientProjectProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FolderKanban className="h-5 w-5" />
-            Client Project
-          </CardTitle>
-          <CardDescription>Select the project this campaign belongs to.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!selectedClientId ? (
-            <p className="text-sm text-muted-foreground">Choose a client to see available projects.</p>
-          ) : projectsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading projects...
-            </div>
-          ) : projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No projects found for this client.</p>
-          ) : (
-            <div className="space-y-2">
-              <Label>Project</Label>
-              <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.name} ({project.status})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FolderKanban className="h-5 w-5" />
+              Work Order (Optional)
+            </CardTitle>
+            <CardDescription>Link to an approved work order.</CardDescription>
+          </CardHeader>
+          <CardContent>
+             {!selectedClientId ? (
+              <p className="text-sm text-muted-foreground">Choose a client first.</p>
+            ) : projectsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading orders...
+              </div>
+            ) : workOrders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No work orders found.</p>
+            ) : (
+              <div className="space-y-2">
+                <Label>Work Order</Label>
+                <Select value={selectedWorkOrderId} onValueChange={setSelectedWorkOrderId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a work order" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workOrders.map((wo) => (
+                      <SelectItem key={wo.id} value={wo.id}>
+                        {wo.orderNumber} - {wo.title} ({wo.status})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FolderKanban className="h-5 w-5" />
+              Client Project
+            </CardTitle>
+            <CardDescription>Select the project.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!selectedClientId ? (
+              <p className="text-sm text-muted-foreground">Choose a client to see available projects.</p>
+            ) : projectsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading projects...
+              </div>
+            ) : projects.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No projects found for this client.</p>
+            ) : (
+              <div className="space-y-2">
+                <Label>Project</Label>
+                <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name} ({project.status})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="flex justify-end">
         <Button onClick={handleNext} disabled={!selectedClientId || !selectedProjectId}>

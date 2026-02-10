@@ -240,6 +240,7 @@ export function EmailPreview({
                   height: "100%",
                   border: "none"
                 }}
+                sandbox="allow-same-origin allow-scripts"
               />
             </div>
           </div>

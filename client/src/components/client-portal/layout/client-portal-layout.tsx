@@ -34,6 +34,7 @@ import {
   CreditCard,
   Settings,
   LogOut,
+  Package,
   Menu,
   X,
   ChevronRight,
@@ -53,11 +54,16 @@ import {
   Target,
   UserCheck,
   Headphones,
+  Layers,
+  AlertTriangle,
+  Crosshair,
+  MessageSquareText,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
-import { AgentPanelProvider, AgentSidePanel, useAgentPanelContextOptional } from '@/components/agent-panel';
+import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
+import { AgentPanelProvider, useAgentPanelContextOptional } from '@/components/agent-panel';
 
 interface ClientUser {
   id: string;
@@ -116,10 +122,17 @@ const baseNavigationGroups: NavGroup[] = [
     id: 'ai-intelligence',
     label: 'AI & Intelligence',
     items: [
-      { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain },
+      { name: 'Account Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
       { name: 'Generative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
+    ],
+  },
+  {
+    id: 'resources',
+    label: 'Resources',
+    items: [
+      { name: 'Our Services', href: '/client-portal/services', icon: Package },
     ],
   },
   {
