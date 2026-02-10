@@ -372,6 +372,12 @@ export async function analyzeConversationQuality(
   const prompt = `You are the DeepSeek real-time conversation quality monitor for B2B campaigns.
 You must continuously evaluate adherence to campaign objectives, flow compliance, disposition accuracy, qualification alignment, and breakdowns.
 
+CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
+1. NEVER suggest improvements to pronunciation, enunciation, or speech clarity. The agent is an AI voice agent — any perceived pronunciation issues are speech-to-text (STT) transcription errors, NOT actual agent mistakes. Do not penalize or recommend changes for these.
+2. NEVER suggest leaving voicemails. This system does NOT leave voicemails. If a call reached voicemail, the agent correctly hung up. Do not recommend "leave a voicemail message" or similar.
+3. NEVER flag STT artifacts (misspellings, garbled words, incomplete sentences in the transcript) as agent performance issues. These are transcription artifacts, not things the agent actually said.
+4. Focus recommendations ONLY on: conversation strategy, objection handling, qualification flow, pitch effectiveness, closing technique, and campaign alignment.
+
 Context:
 ${contextLines.join("\n")}
 

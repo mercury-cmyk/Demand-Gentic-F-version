@@ -4774,15 +4774,15 @@ export function registerRoutes(app: Express) {
       const [humanCallStats] = await db
         .select({
           callsMade: sql<number>`COUNT(*)::int`,
-          callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} IN (${sql.join(
+          callsConnected: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text IN (${sql.join(
             connectedDispositions.map((value) => sql`${value}`),
             sql`, `
           )}) THEN 1 END)::int`,
-          leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'qualified' THEN 1 END)::int`,
-          dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'dnc-request' THEN 1 END)::int`,
-          notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'not_interested' THEN 1 END)::int`,
-          noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'no-answer' THEN 1 END)::int`,
-          voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition} = 'voicemail' THEN 1 END)::int`,
+          leadsQualified: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'qualified' THEN 1 END)::int`,
+          dncRequests: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'dnc-request' THEN 1 END)::int`,
+          notInterested: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'not_interested' THEN 1 END)::int`,
+          noAnswer: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'no-answer' THEN 1 END)::int`,
+          voicemail: sql<number>`COUNT(CASE WHEN ${callAttempts.disposition}::text = 'voicemail' THEN 1 END)::int`,
         })
         .from(callAttempts)
         .where(eq(callAttempts.campaignId, campaignId));

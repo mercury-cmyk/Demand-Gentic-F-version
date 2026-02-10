@@ -691,6 +691,48 @@ export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMes
   }
   const transcriptTurns: TranscriptTurn[] = [];
 
+  // REPETITION DETECTION: Catch AI stuck in a loop saying the same thing
+  // (e.g., "let me check" over and over when gatekeeper puts on hold)
+  const REPETITION_THRESHOLD = 3; // Same phrase 3+ times = stuck
+  const MAX_HOLD_SILENCE_MS = 45_000; // 45 seconds of hold/silence before forcing end
+  let lastContactSpeechAt: number = Date.now();
+
+  function detectAgentRepetitionLoop(): { isLooping: boolean; phrase: string } {
+    const recentAgentTurns = transcriptTurns
+      .filter(t => t.role === 'agent')
+      .slice(-6);
+    if (recentAgentTurns.length < REPETITION_THRESHOLD) return { isLooping: false, phrase: '' };
+
+    // Normalize and check if recent agent turns are repeating the same phrase
+    const normalized = recentAgentTurns.map(t =>
+      t.text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+    );
+
+    // Check if the last N turns are substantially similar (>70% overlap)
+    const lastPhrase = normalized[normalized.length - 1];
+    let repeatCount = 0;
+    for (let i = normalized.length - 1; i >= 0; i--) {
+      const similarity = computeSimpleSimilarity(lastPhrase, normalized[i]);
+      if (similarity > 0.7) repeatCount++;
+      else break;
+    }
+
+    return {
+      isLooping: repeatCount >= REPETITION_THRESHOLD,
+      phrase: recentAgentTurns[recentAgentTurns.length - 1].text
+    };
+  }
+
+  function computeSimpleSimilarity(a: string, b: string): number {
+    if (a === b) return 1;
+    if (!a || !b) return 0;
+    const wordsA = new Set(a.split(/\s+/));
+    const wordsB = new Set(b.split(/\s+/));
+    const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+    const union = new Set([...wordsA, ...wordsB]).size;
+    return union === 0 ? 0 : intersection / union;
+  }
+
   // TRANSCRIPTION HEALTH TRACKING: Monitor if Gemini is actually sending transcription data
   let audioChunksWithoutTranscription = 0;
   let lastTranscriptionReceivedAt: number | null = null;
@@ -2159,6 +2201,40 @@ Instructions:
             lastTranscriptionReceivedAt = Date.now();
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Agent transcript captured: "${agentText.substring(0, 100)}${agentText.length > 100 ? '...' : ''}"`);
+
+            // REPETITION LOOP DETECTION: If the AI keeps saying the same thing,
+            // it's stuck (e.g., gatekeeper said "let me check" and AI keeps waiting/repeating)
+            const loopCheck = detectAgentRepetitionLoop();
+            if (loopCheck.isLooping) {
+              const holdDuration = Date.now() - lastContactSpeechAt;
+              console.warn(`[Gemini Live] 🔄 REPETITION LOOP DETECTED: Agent repeating "${loopCheck.phrase.substring(0, 80)}" (${REPETITION_THRESHOLD}+ times, contact silent for ${Math.round(holdDuration / 1000)}s)`);
+
+              // If contact hasn't spoken for a while AND agent is looping, force end the call
+              if (holdDuration > MAX_HOLD_SILENCE_MS) {
+                console.warn(`[Gemini Live] ⏱️ HOLD TIMEOUT: Contact silent for ${Math.round(holdDuration / 1000)}s during repetition loop — forcing no_answer disposition`);
+
+                // Submit no_answer disposition directly since AI is stuck
+                if (!dispositionProcessed && !submittedDisposition && callContext.callAttemptId) {
+                  submittedDisposition = {
+                    disposition: 'no_answer',
+                    notes: `Agent stuck in repetition loop: "${loopCheck.phrase.substring(0, 100)}". Contact silent for ${Math.round(holdDuration / 1000)}s (likely on hold/transferred). Forcing call end.`,
+                    submittedAt: Date.now(),
+                  };
+                  callContext.disposition = 'no_answer';
+                  try {
+                    await processDisposition(callContext.callAttemptId, 'no_answer', 'gemini_live_repetition_guard');
+                    dispositionProcessed = true;
+                    console.log(`[Gemini Live] ✅ Repetition guard: disposition set to no_answer`);
+                  } catch (repErr) {
+                    console.error(`[Gemini Live] ❌ Repetition guard disposition error:`, repErr);
+                  }
+                }
+
+                // Close connections to end the call
+                cleanup();
+                geminiWs?.close();
+              }
+            }
           }
         } else if (serverContentTranscript?.modelTurn?.parts) {
           // FALLBACK: If outputTranscription is missing but modelTurn has text parts, use those
@@ -2202,6 +2278,7 @@ Instructions:
               timestamp: Date.now()
             });
             lastTranscriptionReceivedAt = Date.now();
+            lastContactSpeechAt = Date.now(); // Reset hold timer — contact is speaking
             audioChunksWithoutTranscription = 0; // Reset counter
             console.log(`[Gemini Live] 📝 Contact transcript captured: "${contactText.substring(0, 100)}${contactText.length > 100 ? '...' : ''}"`);
 
@@ -2690,7 +2767,7 @@ Instructions:
               // CRITICAL: Prevent premature call termination
               // AI sometimes incorrectly assumes prospect hung up after brief silences
               const callDurationSeconds = Math.round((Date.now() - metrics.startTime) / 1000);
-              const userTurnCount = transcriptTurns.filter(t => t.speaker === 'user' && t.text.trim().length > 0).length;
+              const userTurnCount = transcriptTurns.filter(t => t.role === 'contact' && t.text.trim().length > 0).length;
               const MINIMUM_CONVERSATION_DURATION = 25; // seconds
               const MINIMUM_USER_TURNS = 3;
               const isPrematureTermination = callDurationSeconds < MINIMUM_CONVERSATION_DURATION && userTurnCount < MINIMUM_USER_TURNS;
@@ -2698,7 +2775,7 @@ Instructions:
 
               // Check if prospect is actively saying "hello" (indicates audio issue, NOT disengagement)
               const recentUserTexts = transcriptTurns
-                .filter(t => t.speaker === 'user')
+                .filter(t => t.role === 'contact')
                 .slice(-3)
                 .map(t => t.text.toLowerCase().trim());
               const prospectSayingHello = recentUserTexts.some(text =>
@@ -2765,13 +2842,13 @@ Instructions:
               ];
 
               // Check the LAST agent statement for farewell
-              const agentTurns = transcriptTurns.filter(t => t.speaker === 'agent' || t.speaker === 'assistant');
+              const agentTurns = transcriptTurns.filter(t => t.role === 'agent');
               const lastAgentTurn = agentTurns.length > 0 ? agentTurns[agentTurns.length - 1] : null;
               const lastAgentText = lastAgentTurn?.text?.toLowerCase() || '';
               const hasProperClosingFarewell = closingFarewellPatterns.some(phrase => lastAgentText.includes(phrase));
 
               // Check the LAST user statement for farewell (prospect responded to agent's goodbye)
-              const userTurns = transcriptTurns.filter(t => t.speaker === 'user' && t.text.trim().length > 0);
+              const userTurns = transcriptTurns.filter(t => t.role === 'contact' && t.text.trim().length > 0);
               const lastUserTurn = userTurns.length > 0 ? userTurns[userTurns.length - 1] : null;
               const lastUserText = lastUserTurn?.text?.toLowerCase() || '';
               const userSaidFarewell = closingFarewellPatterns.some(phrase => lastUserText.includes(phrase));
@@ -2805,7 +2882,7 @@ Instructions:
               if (requiresFarewell && hasProperClosingFarewell && !userSaidFarewell) {
                 // Check if the last turn was the agent's farewell (prospect hasn't responded yet)
                 const lastTurn = transcriptTurns.length > 0 ? transcriptTurns[transcriptTurns.length - 1] : null;
-                const lastTurnIsAgent = lastTurn?.speaker === 'agent' || lastTurn?.speaker === 'assistant';
+                const lastTurnIsAgent = lastTurn?.role === 'agent';
                 if (lastTurnIsAgent) {
                   console.warn(`[Gemini Live] 🚫 BLOCKING END_CALL - Agent said farewell but prospect hasn't responded yet. Waiting for prospect-led disconnect.`);
                   const toolResponse = {
