@@ -396,14 +396,15 @@ async function updateNumberReputation(
     });
   }
 
-  // Also update the main telnyxNumbers table for quick access
+  // Update lastCallAt/lastAnsweredAt on the main telnyxNumbers table
+  // NOTE: Do NOT increment callsToday/callsThisHour here — that is handled
+  // exclusively by recordCallOutcome() in number-router-service.ts to avoid
+  // double-counting which inflates warmup limits.
   await db
     .update(telnyxNumbers)
     .set({
       lastCallAt: new Date(),
       lastAnsweredAt: answered ? new Date() : undefined,
-      callsToday: sql`${telnyxNumbers.callsToday} + 1`,
-      callsThisHour: sql`${telnyxNumbers.callsThisHour} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(telnyxNumbers.id, numberId));

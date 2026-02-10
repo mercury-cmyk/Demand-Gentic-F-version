@@ -2384,7 +2384,9 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
     if (!campaign) return null;
 
     const aiSettings = campaign.aiAgentSettings as any || {};
+    // Spread aiSettings FIRST so our explicit DB column values always win
     return {
+      ...aiSettings,
       script: campaign.callScript,
       voice: aiSettings?.persona?.voice || 'alloy',
       openingScript: aiSettings?.scripts?.opening,
@@ -2399,9 +2401,8 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       campaignContextBrief: campaign.campaignContextBrief,
       // Agent name: resolve from persona fields
       agentName: (aiSettings?.persona?.name || aiSettings?.persona?.agentName || aiSettings?.agentName || '').trim() || null,
-      // Include assignedVoices so voice name can be used as agentName fallback
+      // Include assignedVoices from DB column (not from aiSettings)
       assignedVoices: (campaign as any).assignedVoices || null,
-      ...aiSettings,
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
@@ -2536,6 +2537,7 @@ async function buildSystemPrompt(
   if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
     const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
     resolvedVoiceName = randomVoice?.name || randomVoice?.id || null;
+    console.log(`[OpenAI-Dialer] [buildSystemPrompt] 🎲 Voice rotation for agent name: picked "${resolvedVoiceName}" from ${assignedVoicesList.length} voices: [${assignedVoicesList.map(v => v.name || v.id).join(', ')}]`);
   }
   if (!resolvedVoiceName) {
     resolvedVoiceName = campaignConfig?.voice || null;

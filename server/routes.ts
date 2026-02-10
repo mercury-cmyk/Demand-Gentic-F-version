@@ -97,6 +97,7 @@ import campaignOpsRouter from './routes/campaign-ops-routes';
 import bookingRouter from './routes/booking-routes';
 import knowledgeBlocksRouter from './routes/knowledge-blocks';
 import adminAgenticCampaignsRouter from './routes/admin-agentic-campaigns';
+import { getCallSessionRecordingUrl } from "./services/recording-storage";
 import { z } from "zod";
 import {
   apiLimiter,
@@ -14646,7 +14647,7 @@ Provide JSON response with:
       if (!source || source === 'all' || source === 'call_session') {
 
         // Query call sessions (transcript optional)
-        const sessions = await db
+        const sessionsQuery = await db
           .select({
             id: callSessions.id,
             campaignId: callSessions.campaignId,
@@ -14676,6 +14677,21 @@ Provide JSON response with:
           .where(sessionWhereClause)
           .orderBy(desc(callSessions.startedAt))
           .limit(limitNum);
+
+        // Enhance with signed recording URLs (using sessionsQuery)
+        const sessions = await Promise.all(sessionsQuery.map(async (s) => {
+          let recordingUrl = s.recordingUrl;
+          // Always try to refresh URL if S3 Key exists OR if we have a recordingUrl (it might be expired Telnyx URL)
+          if (s.recordingS3Key || s.recordingUrl) {
+            try {
+              const result = await getCallSessionRecordingUrl(s.id, s.recordingUrl);
+              recordingUrl = result.url;
+            } catch (e) {
+              // silent fail, keep original
+            }
+          }
+          return { ...s, recordingUrl };
+        }));
 
         // Fetch quality records for sessions that lack aiAnalysis (fallback enrichment)
         const sessionsWithoutAnalysis = sessions.filter(s => !s.analysis).map(s => s.id);
@@ -15091,6 +15107,186 @@ Provide JSON response with:
     } catch (error: any) {
       console.error('[QA] Error fetching conversations:', error?.message || error, error?.stack?.slice(0, 500));
       res.status(500).json({ message: "Failed to fetch conversations", error: error?.message });
+    }
+  });
+
+  // ==================== BULK QUALITY ANALYSIS ====================
+  // Re-analyze calls that have transcripts but no quality analysis
+  app.post("/api/qa/bulk-analyze", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { callSessionIds } = req.body as { callSessionIds?: string[] };
+
+      // Find eligible call sessions: have transcript, no aiAnalysis
+      const conditions: any[] = [
+        isNotNull(callSessions.aiTranscript),
+        sql`length(${callSessions.aiTranscript}) > 0`,
+        isNull(callSessions.aiAnalysis),
+      ];
+      if (callSessionIds && callSessionIds.length > 0) {
+        conditions.push(inArray(callSessions.id, callSessionIds));
+      }
+
+      const eligibleSessions = await db
+        .select({
+          id: callSessions.id,
+          aiTranscript: callSessions.aiTranscript,
+          aiDisposition: callSessions.aiDisposition,
+          campaignId: callSessions.campaignId,
+          contactId: callSessions.contactId,
+          durationSec: callSessions.durationSec,
+          campaignName: campaigns.name,
+          campaignObjective: campaigns.campaignObjective,
+          contactFirstName: contacts.firstName,
+          contactLastName: contacts.lastName,
+          accountName: accounts.name,
+        })
+        .from(callSessions)
+        .leftJoin(campaigns, eq(callSessions.campaignId, campaigns.id))
+        .leftJoin(contacts, eq(callSessions.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(and(...conditions))
+        .orderBy(desc(callSessions.startedAt))
+        .limit(200);
+
+      // Exclude sessions that already have callQualityRecords
+      const sessionIds = eligibleSessions.map(s => s.id);
+      let existingQRIds = new Set<string>();
+      if (sessionIds.length > 0) {
+        const existingQRs = await db
+          .select({ callSessionId: callQualityRecords.callSessionId })
+          .from(callQualityRecords)
+          .where(inArray(callQualityRecords.callSessionId, sessionIds));
+        existingQRIds = new Set(existingQRs.map(r => r.callSessionId));
+      }
+
+      const toAnalyze = eligibleSessions.filter(s => !existingQRIds.has(s.id));
+      console.log(`[QA Bulk] Found ${eligibleSessions.length} eligible sessions, ${existingQRIds.size} already have quality records, ${toAnalyze.length} to analyze`);
+
+      if (toAnalyze.length === 0) {
+        return res.json({ success: true, total: 0, analyzed: 0, failed: 0, skipped: existingQRIds.size, results: [] });
+      }
+
+      const { analyzeConversationQuality } = await import("./services/conversation-quality-analyzer");
+
+      // Process in batches of 3 to avoid rate-limiting
+      const BATCH_SIZE = 3;
+      const results: Array<{ callSessionId: string; status: string; overallScore?: number; error?: string }> = [];
+      let analyzedCount = 0;
+      let failedCount = 0;
+
+      for (let i = 0; i < toAnalyze.length; i += BATCH_SIZE) {
+        const batch = toAnalyze.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (session) => {
+            const contactName = [session.contactFirstName, session.contactLastName].filter(Boolean).join(' ') || undefined;
+            const analysis = await analyzeConversationQuality({
+              transcript: session.aiTranscript!,
+              interactionType: 'live_call',
+              analysisStage: 'post_call',
+              callDurationSeconds: session.durationSec || undefined,
+              disposition: session.aiDisposition || undefined,
+              campaignId: session.campaignId || undefined,
+              campaignName: session.campaignName || undefined,
+              campaignObjective: session.campaignObjective || undefined,
+              contactName,
+              accountName: session.accountName || undefined,
+            });
+
+            if (analysis.status !== 'ok') {
+              throw new Error(analysis.issues?.[0]?.description || 'Analysis failed');
+            }
+
+            // Store in callQualityRecords (matching existing pattern)
+            await db.insert(callQualityRecords).values({
+              callSessionId: session.id,
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              overallQualityScore: analysis.overallScore,
+              engagementScore: analysis.qualityDimensions?.engagement,
+              clarityScore: analysis.qualityDimensions?.clarity,
+              empathyScore: analysis.qualityDimensions?.empathy,
+              objectionHandlingScore: analysis.qualityDimensions?.objectionHandling,
+              qualificationScore: analysis.qualityDimensions?.qualification,
+              closingScore: analysis.qualityDimensions?.closing,
+              sentiment: analysis.learningSignals?.sentiment,
+              engagementLevel: analysis.learningSignals?.engagementLevel,
+              issues: analysis.issues,
+              recommendations: analysis.recommendations,
+              breakdowns: analysis.breakdowns,
+              promptUpdates: analysis.promptUpdates,
+              nextBestActions: analysis.nextBestActions,
+              campaignAlignmentScore: analysis.campaignAlignment?.objectiveAdherence,
+              contextUsageScore: analysis.campaignAlignment?.contextUsage,
+              talkingPointsCoverageScore: analysis.campaignAlignment?.talkingPointsCoverage,
+              missedTalkingPoints: analysis.campaignAlignment?.missedTalkingPoints,
+              flowComplianceScore: analysis.flowCompliance?.score,
+              missedSteps: analysis.flowCompliance?.missedSteps,
+              flowDeviations: analysis.flowCompliance?.deviations,
+              assignedDisposition: analysis.dispositionReview?.assignedDisposition,
+              expectedDisposition: analysis.dispositionReview?.expectedDisposition,
+              dispositionAccurate: analysis.dispositionReview?.isAccurate,
+              dispositionNotes: analysis.dispositionReview?.notes,
+              transcriptLength: session.aiTranscript!.length,
+              transcriptTruncated: analysis.metadata?.truncated || false,
+              fullTranscript: session.aiTranscript!.substring(0, 12000),
+              analysisModel: analysis.metadata?.model || 'deepseek-chat',
+              analysisStage: 'post_call',
+              interactionType: 'live_call',
+              analyzedAt: new Date(),
+            } as any);
+
+            // Also store in callSessions.aiAnalysis so the QA route picks it up directly
+            await db.update(callSessions).set({
+              aiAnalysis: {
+                conversationQuality: {
+                  overallScore: analysis.overallScore,
+                  summary: analysis.summary,
+                  qualityDimensions: analysis.qualityDimensions,
+                  campaignAlignment: analysis.campaignAlignment,
+                  dispositionReview: analysis.dispositionReview,
+                  issues: analysis.issues,
+                  recommendations: analysis.recommendations,
+                  breakdowns: analysis.breakdowns,
+                  performanceGaps: analysis.performanceGaps,
+                  flowCompliance: analysis.flowCompliance,
+                  learningSignals: analysis.learningSignals,
+                  nextBestActions: analysis.nextBestActions,
+                  promptUpdates: analysis.promptUpdates,
+                  metadata: analysis.metadata,
+                },
+              } as any,
+            }).where(eq(callSessions.id, session.id));
+
+            return { callSessionId: session.id, overallScore: analysis.overallScore };
+          })
+        );
+
+        for (const result of batchResults) {
+          if (result.status === 'fulfilled') {
+            analyzedCount++;
+            results.push({ callSessionId: result.value.callSessionId, status: 'success', overallScore: result.value.overallScore });
+          } else {
+            failedCount++;
+            const sessionId = batch[batchResults.indexOf(result)]?.id || 'unknown';
+            results.push({ callSessionId: sessionId, status: 'error', error: result.reason?.message || 'Unknown error' });
+          }
+        }
+
+        console.log(`[QA Bulk] Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batchResults.filter(r => r.status === 'fulfilled').length} success, ${batchResults.filter(r => r.status === 'rejected').length} failed`);
+      }
+
+      console.log(`[QA Bulk] Complete: ${analyzedCount} analyzed, ${failedCount} failed, ${existingQRIds.size} skipped`);
+      res.json({
+        success: true,
+        total: toAnalyze.length,
+        analyzed: analyzedCount,
+        failed: failedCount,
+        skipped: existingQRIds.size,
+        results,
+      });
+    } catch (error: any) {
+      console.error('[QA Bulk] Error:', error?.message || error);
+      res.status(500).json({ error: 'Bulk analysis failed', message: error?.message });
     }
   });
 

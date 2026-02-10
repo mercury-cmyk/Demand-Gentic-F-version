@@ -204,6 +204,19 @@ app.use((req, res, next) => {
     console.error('[STARTUP] Agent infrastructure initialization failed (non-blocking):', err);
   }
 
+  // Initialize Number Pool Scheduler (hourly/daily counter resets, cooldown processing, reputation recalc)
+  try {
+    const { initializeAlignedScheduler } = await import("./services/number-pool-scheduler");
+    const { resetHourlyCounters } = await import("./services/number-pool/number-service");
+    initializeAlignedScheduler();
+    // Immediately reset hourly counters on startup since they may be stale from previous run
+    resetHourlyCounters().then(count => {
+      if (count > 0) console.log(`[STARTUP] Reset stale hourly counters for ${count} numbers`);
+    }).catch(() => {});
+  } catch (err) {
+    console.error('[STARTUP] Number Pool Scheduler initialization failed (non-blocking):', err);
+  }
+
   // Initialize WebSocket servers for real-time communication
   // Wrapped in try-catch to ensure failures don't prevent server startup
   let mediaWss: any = null;

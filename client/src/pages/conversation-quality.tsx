@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,10 +26,13 @@ import {
   FileText,
   TrendingUp,
   BarChart3,
-  RefreshCw
+  RefreshCw,
+  Loader2,
+  Zap
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface TranscriptTurn {
   role: 'agent' | 'contact' | 'assistant' | 'user' | 'system';
@@ -289,6 +292,8 @@ export default function ConversationQualityPage() {
   const [showOnlyWithTranscripts, setShowOnlyWithTranscripts] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedConversation, setSelectedConversation] = useState<ConversationRecord | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   // Fetch campaigns for filter
   const { data: campaigns = [] } = useQuery<any[]>({
@@ -335,21 +340,43 @@ export default function ConversationQualityPage() {
     );
   }
 
-  // Compute stats — exclude voicemails/no-answer from quality metrics
-  const nonVmDispositions = new Set(['voicemail', 'no_answer', 'busy']);
-  const realConvos = conversations.filter(c => !nonVmDispositions.has((c.disposition || '').toLowerCase()));
-  const analyzedConvos = realConvos.filter(c => c.analysis?.overallScore && c.analysis.overallScore > 0);
-  const avgScore = analyzedConvos.length > 0
-    ? Math.round(analyzedConvos.reduce((s, c) => s + (c.analysis?.overallScore || 0), 0) / analyzedConvos.length)
-    : null;
-
+  // Use backend-computed stats (accurate across full dataset, not limited by fetch cap)
+  const backendStats = qaData?.stats;
   const stats = {
-    total: conversations.length,
-    calls: conversations.filter(c => c.type === 'call' && !c.isTestCall).length,
-    analyzed: analyzedConvos.length,
-    testCalls: conversations.filter(c => c.isTestCall).length,
-    avgScore,
+    total: qaData?.total ?? conversations.length,
+    calls: backendStats?.callSessions ?? conversations.filter(c => c.type === 'call' && !c.isTestCall).length,
+    analyzed: backendStats?.analyzedWithScores ?? conversations.filter(c => c.analysis?.overallScore && c.analysis.overallScore > 0).length,
+    testCalls: backendStats?.testCalls ?? conversations.filter(c => c.isTestCall).length,
+    avgScore: backendStats?.avgQualityScore ?? null,
   };
+
+  // Count calls with transcript but no analysis (eligible for bulk analyze)
+  const unanalyzedWithTranscript = conversations.filter(c =>
+    !c.isTestCall &&
+    (c.transcript || (c.transcriptTurns && c.transcriptTurns.length > 0)) &&
+    (!c.analysis?.overallScore || c.analysis.overallScore === 0)
+  ).length;
+
+  const bulkAnalyzeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/qa/bulk-analyze', {});
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: 'Bulk Analysis Complete',
+        description: `${data.analyzed} calls analyzed, ${data.failed} failed${data.skipped ? `, ${data.skipped} skipped` : ''}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/qa/conversations'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Analysis Failed',
+        description: error?.message || 'Failed to run bulk analysis',
+        variant: 'destructive',
+      });
+    },
+  });
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -364,10 +391,28 @@ export default function ConversationQualityPage() {
             Review and analyze call transcripts to identify issues and improve agent performance
           </p>
         </div>
-        <Button variant="outline" onClick={() => refetch()}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {unanalyzedWithTranscript > 0 && (
+            <Button
+              variant="default"
+              onClick={() => bulkAnalyzeMutation.mutate()}
+              disabled={bulkAnalyzeMutation.isPending}
+            >
+              {bulkAnalyzeMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4 mr-2" />
+              )}
+              {bulkAnalyzeMutation.isPending
+                ? 'Analyzing...'
+                : `Analyze ${unanalyzedWithTranscript} Unanalyzed`}
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}

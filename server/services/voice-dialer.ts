@@ -2005,12 +2005,23 @@ openaiWs.on("open", async () => {
       // Get Agent Defaults voice as fallback (user-configured global default)
       const [agentDefaultsRecord] = await db.select({ defaultVoice: agentDefaults.defaultVoice }).from(agentDefaults).limit(1);
       const globalDefaultVoice = agentDefaultsRecord?.defaultVoice || "marin";
-      // Voice priority: session override → virtual agent → campaign → agent defaults → fallback
-      let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || globalDefaultVoice;
+
+      // Voice rotation: if campaign has multiple assigned voices, pick one randomly
+      let rotatedVoice: string | null = null;
+      const assignedVoicesList = campaignConfig?.assignedVoices as { id: string; name: string }[] | null;
+      if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
+        const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
+        rotatedVoice = randomVoice?.id || null;
+        console.log(`${LOG_PREFIX} [OpenAI] 🎲 Voice rotation: picked "${rotatedVoice}" (${randomVoice?.name}) from ${assignedVoicesList.length} assigned voices: [${assignedVoicesList.map(v => v.name || v.id).join(', ')}]`);
+      }
+
+      // Voice priority: session override → virtual agent → rotated voice → campaign default → agent defaults → fallback
+      let voice = session.voiceOverride?.trim() || agentConfig?.voice || rotatedVoice || campaignConfig?.voice || globalDefaultVoice;
       if (!VALID_VOICES.includes(voice)) {
         console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'marin'.`);
         voice = "marin";
       }
+      console.log(`${LOG_PREFIX} [OpenAI] Voice selection: override=${session.voiceOverride || 'none'}, agent=${agentConfig?.voice || 'none'}, rotated=${rotatedVoice || 'none'}, campaign=${campaignConfig?.voice || 'none'}, default=${globalDefaultVoice} → using "${voice}"`);
 
       const modalities = ["text", "audio"];
       // Use OpenAI config override from session (used by Preview Studio for custom configuration)
@@ -2494,10 +2505,20 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
     // Agent Defaults voice fallback (already fetched in parallel init block above)
     const globalDefaultVoice = agentDefaultsRecord?.defaultVoice || "Kore";
-    // Voice priority: session override → virtual agent → campaign → agent defaults → fallback
-    const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || globalDefaultVoice;
+
+    // Voice rotation: if campaign has multiple assigned voices, pick one randomly
+    let rotatedVoiceGemini: string | null = null;
+    const assignedVoicesListGemini = campaignConfig?.assignedVoices as { id: string; name: string }[] | null;
+    if (assignedVoicesListGemini && Array.isArray(assignedVoicesListGemini) && assignedVoicesListGemini.length > 0) {
+      const randomVoice = assignedVoicesListGemini[Math.floor(Math.random() * assignedVoicesListGemini.length)];
+      rotatedVoiceGemini = randomVoice?.id || null;
+      console.log(`${LOG_PREFIX} [Gemini] 🎲 Voice rotation: picked "${rotatedVoiceGemini}" (${randomVoice?.name}) from ${assignedVoicesListGemini.length} assigned voices: [${assignedVoicesListGemini.map(v => v.name || v.id).join(', ')}]`);
+    }
+
+    // Voice priority: session override → virtual agent → rotated voice → campaign default → agent defaults → fallback
+    const voice = session.voiceOverride?.trim() || agentConfig?.voice || rotatedVoiceGemini || campaignConfig?.voice || globalDefaultVoice;
     const geminiVoice = mapVoiceToProvider(voice, 'google');
-    console.log(`${LOG_PREFIX} [Gemini] Voice selection: override=${session.voiceOverride || 'none'}, agent=${agentConfig?.voice || 'none'}, campaign=${campaignConfig?.voice || 'none'}, default=${globalDefaultVoice} → using "${voice}" → Gemini voice "${geminiVoice}"`);
+    console.log(`${LOG_PREFIX} [Gemini] Voice selection: override=${session.voiceOverride || 'none'}, agent=${agentConfig?.voice || 'none'}, rotated=${rotatedVoiceGemini || 'none'}, campaign=${campaignConfig?.voice || 'none'}, default=${globalDefaultVoice} → using "${voice}" → Gemini voice "${geminiVoice}"`);
 
     // Map tools to ProviderTool format
     const providerTools = getAvailableTools(agentSettings.systemTools).map((tool) => ({
@@ -8055,6 +8076,7 @@ async function buildSystemPrompt(
   if (assignedVoicesList && Array.isArray(assignedVoicesList) && assignedVoicesList.length > 0) {
     const randomVoice = assignedVoicesList[Math.floor(Math.random() * assignedVoicesList.length)];
     resolvedVoiceName = randomVoice?.name || randomVoice?.id || null;
+    console.log(`${LOG_PREFIX} [buildSystemPrompt-Legacy] 🎲 Voice rotation for agent name: picked "${resolvedVoiceName}" from ${assignedVoicesList.length} voices: [${assignedVoicesList.map(v => v.name || v.id).join(', ')}]`);
   }
   if (!resolvedVoiceName) {
     resolvedVoiceName = campaignConfig?.voice || null;

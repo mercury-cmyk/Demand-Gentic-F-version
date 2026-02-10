@@ -5067,7 +5067,7 @@ export default function ClientPortalDashboard() {
             </div>
           </SheetHeader>
 
-          <div className="space-y-6 py-2 pb-20">
+          <div className="space-y-6 py-2 pb-20 overflow-y-auto max-h-[calc(100vh-200px)] pr-2">
             
             {/* STEP 1: CAMPAIGN BASICS */}
             {workOrderStep === 1 && (
@@ -5122,17 +5122,6 @@ export default function ClientPortalDashboard() {
                     placeholder="List the key talking points..."
                     value={newWorkOrder.talkingPoints}
                     onChange={(e) => setNewWorkOrder(prev => ({ ...prev, talkingPoints: e.target.value }))}
-                    className="min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="wo-qualifications">Qualifications</Label>
-                  <Textarea
-                    id="wo-qualifications"
-                    placeholder="Describe refinement criteria or qualifications..."
-                    value={newWorkOrder.qualifications}
-                    onChange={(e) => setNewWorkOrder(prev => ({ ...prev, qualifications: e.target.value }))}
                     className="min-h-[80px]"
                   />
                 </div>

@@ -167,7 +167,10 @@ export async function resolveAgentAssignment(campaignId: string): Promise<Resolv
       if (randomVoice?.id) {
         voice = randomVoice.id;
         voiceName = randomVoice.name || randomVoice.id;
+        console.log(`[UnifiedCallContext] 🎲 Voice rotation: picked "${voice}" (${voiceName}) from ${assignedVoices.length} assigned voices: [${assignedVoices.map(v => v.name || v.id).join(', ')}]`);
       }
+    } else {
+      console.log(`[UnifiedCallContext] Single voice mode: "${voice}" (no assigned voices rotation)`);
     }
 
     // Agent identity - check persona fields first, then fall back to the selected voice name
