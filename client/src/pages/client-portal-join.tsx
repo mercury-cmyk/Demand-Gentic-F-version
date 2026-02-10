@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Building2, ShieldCheck, Mail, Lock, Loader2 } from 'lucide-react';
+import { setClientPortalSession } from '@/lib/client-portal-session';
 
 interface InviteDetails {
   clientName: string;
@@ -66,8 +67,8 @@ export default function ClientPortalJoin() {
       }
 
       const data = await res.json();
-      localStorage.setItem('clientPortalToken', data.token);
-      localStorage.setItem('clientPortalUser', JSON.stringify(data.user));
+      // Use centralized session setter to clear previous tenant cache
+      setClientPortalSession(data.token, data.user);
       toast({ title: 'Account created. Welcome aboard!' });
       setLocation('/client-portal/dashboard');
     } catch (err: any) {

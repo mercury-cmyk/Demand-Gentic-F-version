@@ -3,7 +3,7 @@ import path from 'path';
 
 export default defineConfig({
   test: {
-    include: ['server/**/*.test.ts', 'server/**/*.spec.ts'],
+    include: ['server/**/*.test.ts', 'server/**/*.spec.ts', 'client/src/**/*.test.ts'],
     globals: false,
   },
   resolve: {
