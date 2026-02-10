@@ -624,7 +624,12 @@ router.post("/telnyx", async (req, res) => {
     }
 
     const { call_control_id, recording_urls, public_recording_urls } = payload;
-    
+
+    // Extract stable Telnyx recording ID from the event payload
+    // Telnyx sends this as payload.id or in the event data's id field
+    const telnyxRecordingId: string | undefined =
+      payload.recording_id || payload.id || eventData?.id || undefined;
+
     // Prefer public URLs, fallback to signed URLs (mp3 preferred over wav)
     const recordingUrl = 
       public_recording_urls?.mp3 || 
@@ -637,7 +642,7 @@ router.post("/telnyx", async (req, res) => {
       return res.status(400).json({ error: "No recording URL" });
     }
 
-    console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}`);
+    console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}${telnyxRecordingId ? `, recording_id: ${telnyxRecordingId}` : ''}`);
 
     // Import recording storage service for permanent S3 storage
     const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
@@ -661,7 +666,8 @@ router.post("/telnyx", async (req, res) => {
       .update(leads)
       .set({
         recordingUrl,
-        recordingStatus: 'pending'
+        recordingStatus: 'pending',
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
       })
       .where(eq(leads.telnyxCallId, call_control_id))
       .returning({ id: leads.id });
@@ -684,7 +690,8 @@ router.post("/telnyx", async (req, res) => {
       .update(callSessions)
       .set({
         recordingUrl,
-        recordingStatus: 'pending'
+        recordingStatus: 'pending',
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
       })
       .where(eq(callSessions.telnyxCallId, call_control_id))
       .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
@@ -695,6 +702,7 @@ router.post("/telnyx", async (req, res) => {
       .update(dialerCallAttempts)
       .set({
         recordingUrl,
+        ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
         updatedAt: new Date()
       })
       .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))

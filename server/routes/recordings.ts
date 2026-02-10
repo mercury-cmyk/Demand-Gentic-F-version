@@ -1090,6 +1090,7 @@ export async function streamRecording(req: Request, res: Response) {
         recordingS3Key: callSessions.recordingS3Key,
         recordingStatus: callSessions.recordingStatus,
         telnyxCallId: callSessions.telnyxCallId,
+        telnyxRecordingId: callSessions.telnyxRecordingId,
       })
       .from(callSessions)
       .where(eq(callSessions.id, id));
@@ -1109,7 +1110,22 @@ export async function streamRecording(req: Request, res: Response) {
         }
       }
 
-      // Priority 2: Fresh Telnyx URL (fetches new presigned URL from API)
+      // Priority 2: Telnyx Recording ID (stable identifier, always gets fresh URL)
+      if (!audioUrl && callSession.telnyxRecordingId) {
+        triedSources.push('telnyx_recording_id');
+        try {
+          const { fetchUrlByTelnyxRecordingId } = await import('../services/recording-link-resolver');
+          const result = await fetchUrlByTelnyxRecordingId(callSession.telnyxRecordingId);
+          if (result) {
+            audioUrl = result.url;
+            urlSource = 'telnyx_recording_id';
+          }
+        } catch (err: any) {
+          console.warn(`[Recordings API] Telnyx recording ID lookup failed for ${id}:`, err.message);
+        }
+      }
+
+      // Priority 3: Fresh Telnyx URL via call_control_id (fetches new presigned URL from API)
       if (!audioUrl && callSession.telnyxCallId) {
         triedSources.push('telnyx_fresh');
         try {
@@ -1322,6 +1338,56 @@ export async function streamRecording(req: Request, res: Response) {
 router.get('/:id/stream', streamRecording);
 
 /**
+ * POST /api/recordings/:id/recording-link
+ * Get a fresh playable recording URL on-demand.
+ *
+ * Uses the recording-link-resolver to generate a fresh URL from:
+ *   1. GCS presigned URL (permanent storage)
+ *   2. Telnyx Recording ID (stable, always fresh)
+ *   3. Telnyx Call Control ID search (fallback)
+ *   4. Cached URL (last resort)
+ *
+ * Response: { url, expiresInSeconds, mimeType, source }
+ *
+ * Auth: requireAuth (applied at router level)
+ */
+router.post('/:id/recording-link', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
+    const result = await getPlayableRecordingLink(id);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: 'Recording not found',
+        message: 'No recording exists for this conversation, or the recording has been permanently deleted.',
+      });
+    }
+
+    // Log audit event (no raw URLs logged — only IDs and source)
+    console.log(`[Recording Link] Generated link for ${id} from ${result.source}${result.telnyxRecordingId ? ` (rec: ${result.telnyxRecordingId})` : ''}`);
+
+    return res.json({
+      success: true,
+      url: result.url,
+      expiresInSeconds: result.expiresInSeconds,
+      mimeType: result.mimeType,
+      source: result.source,
+    });
+  } catch (error: any) {
+    console.error('[Recording Link] Error resolving link:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to resolve recording link',
+      message: error.message,
+    });
+  }
+});
+
+
+/**
  * GET /api/recordings/stats
  * Get recording statistics
  * 
@@ -1530,82 +1596,18 @@ router.post('/:id/transcribe', async (req: Request, res: Response) => {
 
     // Import transcription service - uses Google Speech-to-Text (synchronous)
     const { submitTranscription } = await import('../services/google-transcription');
+    // Use recording-link-resolver for fresh URL (never stale/expired)
+    const { getPlayableRecordingLink } = await import('../services/recording-link-resolver');
 
     let recordingUrl: string | null = null;
     let recordSource: string = source || 'call_sessions';
 
-    // Try to find the recording URL based on source
-    if (source === 'telnyx' || !source) {
-      // First check if it's a Telnyx recording ID
-      try {
-        const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-        if (TELNYX_API_KEY) {
-          const response = await fetch(`https://api.telnyx.com/v2/recordings/${id}`, {
-            headers: {
-              'Authorization': `Bearer ${TELNYX_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            recordingUrl = data.data?.download_urls?.mp3 || data.data?.download_urls?.wav;
-            recordSource = 'telnyx';
-          }
-        }
-      } catch (e) {
-        console.log('[Recordings API] Not a direct Telnyx recording ID:', id);
-      }
-    }
-
-    // Try call_sessions table
-    if (!recordingUrl && (!source || source === 'call_sessions')) {
-      const [session] = await db
-        .select({
-          recordingUrl: callSessions.recordingUrl,
-          recordingS3Key: callSessions.recordingS3Key,
-        })
-        .from(callSessions)
-        .where(eq(callSessions.id, id));
-
-      if (session) {
-        recordSource = 'call_sessions';
-        if (session.recordingS3Key) {
-          try {
-            const urlResult = await getCallSessionRecordingUrl(id);
-            recordingUrl = urlResult.url;
-          } catch (e) {
-            console.error('[Recordings API] Error getting presigned URL:', e);
-          }
-        } else if (session.recordingUrl) {
-          recordingUrl = session.recordingUrl;
-        }
-      }
-    }
-
-    // Try leads table
-    if (!recordingUrl && (!source || source === 'leads')) {
-      const [lead] = await db
-        .select({
-          recordingUrl: leads.recordingUrl,
-          recordingS3Key: leads.recordingS3Key,
-        })
-        .from(leads)
-        .where(eq(leads.id, id));
-
-      if (lead) {
-        recordSource = 'leads';
-        if (lead.recordingS3Key) {
-          try {
-            const urlResult = await getRecordingUrl(id);
-            recordingUrl = urlResult.url;
-          } catch (e) {
-            console.error('[Recordings API] Error getting presigned URL:', e);
-          }
-        } else if (lead.recordingUrl) {
-          recordingUrl = lead.recordingUrl;
-        }
-      }
+    // Use the unified recording link resolver to get a fresh URL
+    const linkResult = await getPlayableRecordingLink(id);
+    if (linkResult) {
+      recordingUrl = linkResult.url;
+      recordSource = linkResult.source;
+      console.log(`[Recordings API] Transcription using fresh URL from ${linkResult.source} for ${id}`);
     }
 
     if (!recordingUrl) {
