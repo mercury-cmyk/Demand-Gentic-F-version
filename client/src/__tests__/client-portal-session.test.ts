@@ -40,11 +40,11 @@ describe('Client Portal Session Utilities', () => {
     store['unrelatedKey'] = 'should-stay';
 
     // Need to mock queryClient.clear
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: vi.fn() },
     }));
 
-    const { clearClientPortalSession } = await import('@/lib/client-portal-session');
+    const { clearClientPortalSession } = await import('../lib/client-portal-session');
     clearClientPortalSession();
 
     expect(localStorage.removeItem).toHaveBeenCalledWith('clientPortalToken');
@@ -54,11 +54,11 @@ describe('Client Portal Session Utilities', () => {
 
   it('clearClientPortalSession calls queryClient.clear()', async () => {
     const mockClear = vi.fn();
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: mockClear },
     }));
 
-    const { clearClientPortalSession } = await import('@/lib/client-portal-session');
+    const { clearClientPortalSession } = await import('../lib/client-portal-session');
     clearClientPortalSession();
 
     expect(mockClear).toHaveBeenCalledTimes(1);
@@ -69,11 +69,11 @@ describe('Client Portal Session Utilities', () => {
     store['clientPortalUser'] = JSON.stringify({ clientAccountId: 'tenant-a' });
 
     const mockClear = vi.fn();
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: mockClear },
     }));
 
-    const { setClientPortalSession } = await import('@/lib/client-portal-session');
+    const { setClientPortalSession } = await import('../lib/client-portal-session');
     const newUser = { id: 'u2', clientAccountId: 'tenant-b' };
     setClientPortalSession('new-token', newUser);
 
@@ -89,29 +89,29 @@ describe('Client Portal Session Utilities', () => {
     const user = { id: 'u1', email: 'joe@argyle.com', clientAccountId: 'acc-123' };
     store['clientPortalUser'] = JSON.stringify(user);
 
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: vi.fn() },
     }));
 
-    const { getClientPortalUser } = await import('@/lib/client-portal-session');
+    const { getClientPortalUser } = await import('../lib/client-portal-session');
     expect(getClientPortalUser()).toEqual(user);
   });
 
   it('getClientPortalUser returns null when no stored user', async () => {
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: vi.fn() },
     }));
 
-    const { getClientPortalUser } = await import('@/lib/client-portal-session');
+    const { getClientPortalUser } = await import('../lib/client-portal-session');
     expect(getClientPortalUser()).toBeNull();
   });
 
   it('isUkefTenant returns true only for UKEF client account', async () => {
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: vi.fn() },
     }));
 
-    const { isUkefTenant, UKEF_CLIENT_ACCOUNT_ID } = await import('@/lib/client-portal-session');
+    const { isUkefTenant, UKEF_CLIENT_ACCOUNT_ID } = await import('../lib/client-portal-session');
 
     // Not UKEF
     store['clientPortalUser'] = JSON.stringify({ clientAccountId: 'some-other-tenant' });
@@ -123,11 +123,11 @@ describe('Client Portal Session Utilities', () => {
   });
 
   it('isUkefTenant returns false when no user', async () => {
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: vi.fn() },
     }));
 
-    const { isUkefTenant } = await import('@/lib/client-portal-session');
+    const { isUkefTenant } = await import('../lib/client-portal-session');
     expect(isUkefTenant()).toBe(false);
   });
 });
@@ -200,11 +200,11 @@ describe('Tenant Switch — Cache Isolation', () => {
 
   it('login as Argyle → logout → login as non-Argyle clears cache between sessions', async () => {
     const mockClear = vi.fn();
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: mockClear },
     }));
 
-    const { setClientPortalSession, clearClientPortalSession, getClientPortalUser } = await import('@/lib/client-portal-session');
+    const { setClientPortalSession, clearClientPortalSession, getClientPortalUser } = await import('../lib/client-portal-session');
 
     // Step 1: Login as Argyle
     const argyleUser = { id: 'u1', email: 'joe@argyle.com', clientAccountId: 'argyle-tenant-id' };
@@ -229,11 +229,11 @@ describe('Tenant Switch — Cache Isolation', () => {
     store['clientPortalUser'] = JSON.stringify({ clientAccountId: 'tenant-x' });
 
     const mockClear = vi.fn();
-    vi.doMock('@/lib/queryClient', () => ({
+    vi.doMock('../lib/queryClient', () => ({
       queryClient: { clear: mockClear },
     }));
 
-    const { clearClientPortalSession, getClientPortalToken } = await import('@/lib/client-portal-session');
+    const { clearClientPortalSession, getClientPortalToken } = await import('../lib/client-portal-session');
 
     // Simulate 401 handler
     clearClientPortalSession();
@@ -298,7 +298,7 @@ describe('Nav Visibility — Upcoming Events', () => {
   });
 
   it('should NOT show Upcoming Events when argyleFeatureStatus is undefined (loading)', () => {
-    const argyleFeatureStatus = undefined;
+    const argyleFeatureStatus = undefined as { enabled: boolean } | undefined;
     const shouldShow = argyleFeatureStatus?.enabled === true;
     expect(shouldShow).toBe(false);
   });
