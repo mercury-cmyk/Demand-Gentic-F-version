@@ -623,7 +623,7 @@ export default function ClientPortalDashboard() {
 
   // Queries
   const { data: campaigns = [], isLoading: campaignsLoading, refetch: refetchCampaigns } = useQuery<Campaign[]>({
-    queryKey: ['client-portal-campaigns'],
+    queryKey: ['client-portal-campaigns', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/campaigns', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch campaigns');
@@ -633,7 +633,7 @@ export default function ClientPortalDashboard() {
   });
 
   const { data: orders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery<Order[]>({
-    queryKey: ['client-portal-orders'],
+    queryKey: ['client-portal-orders', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/orders', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch orders');
@@ -738,9 +738,9 @@ export default function ClientPortalDashboard() {
     }
   }, [clientOrgData?.organization?.id, selectedOrgId]);
 
-  // Feature access query
+  // Feature access query — key includes tenant for cache isolation
   const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
-    queryKey: ['client-portal-features'],
+    queryKey: ['client-portal-features', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/settings/features', authHeaders);
       if (!res.ok) return { enabledFeatures: [] };

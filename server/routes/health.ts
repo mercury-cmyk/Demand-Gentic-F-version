@@ -179,4 +179,58 @@ router.get("/validate-call/:callControlId", async (req, res) => {
   }
 });
 
+/**
+ * Runtime configuration diagnostics (admin-only, no secrets).
+ * Shows environment settings useful for debugging production issues.
+ */
+router.get("/config-diagnostics", async (req, res) => {
+  // Only allow in authenticated admin context or when called from health-check user agents
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    // Verify admin role via JWT 
+    const { default: jwt } = await import('jsonwebtoken');
+    const token = authHeader.replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
+    if (decoded.role !== 'ADMIN' && decoded.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  const hasEnvVar = (key: string) => !!process.env[key];
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    environment: {
+      NODE_ENV: process.env.NODE_ENV || 'not-set',
+      PORT: process.env.PORT || '8080',
+    },
+    services: {
+      database: hasEnvVar('DATABASE_URL'),
+      redis: hasEnvVar('REDIS_URL') || hasEnvVar('REDIS_URL_PROD'),
+      redisAvailable: isRedisAvailable(),
+      telnyxConfigured: hasEnvVar('TELNYX_API_KEY'),
+      geminiConfigured: hasEnvVar('GEMINI_API_KEY') || hasEnvVar('GOOGLE_AI_API_KEY'),
+      openaiConfigured: hasEnvVar('OPENAI_API_KEY'),
+      mailgunConfigured: hasEnvVar('MAILGUN_API_KEY'),
+      webhookHost: process.env.PUBLIC_WEBHOOK_HOST ? '(set)' : '(not set)',
+      websocketUrl: process.env.PUBLIC_WEBSOCKET_URL ? '(set)' : '(not set)',
+    },
+    runtime: {
+      uptime: Math.floor(process.uptime()),
+      nodeVersion: process.version,
+      platform: process.platform,
+      memoryUsage: {
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024) + ' MB',
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+      },
+    },
+  });
+});
+
 export default router;

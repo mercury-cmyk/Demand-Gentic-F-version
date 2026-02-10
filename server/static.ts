@@ -20,24 +20,45 @@ export function serveStatic(app: Express) {
   const indexPath = path.resolve(distPath, "index.html");
   console.log(`[Static] Serving static files from: ${distPath}`);
   console.log(`[Static] Index.html exists: ${fs.existsSync(indexPath)}`);
-  
-  // Serve static assets (js, css, images, etc.)
-  app.use(express.static(distPath));
 
-  // SPA fallback - serve index.html for all non-API routes
-  // This enables client-side routing for React Router
+  // Hashed assets (js/css with content hash in filename) — immutable, cache forever
+  app.use(
+    '/assets',
+    express.static(path.resolve(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true,
+    }),
+  );
+
+  // All other static files (images, fonts, favicon, etc.) — moderate caching
+  app.use(
+    express.static(distPath, {
+      maxAge: '1h',
+      // Don't serve index.html via express.static — we handle it in the SPA fallback
+      index: false,
+    }),
+  );
+
+  // SPA fallback — serve index.html for all non-API, non-asset routes.
+  // CRITICAL: no-cache so browsers always get the latest HTML with correct
+  // asset references. This prevents stale HTML from referencing old JS bundles
+  // or leaking dev-mode Vite client scripts from cached pages.
   app.get("*", (req, res, next) => {
-    // Skip API routes - they should 404 if not matched
+    // Skip API routes — they should 404 if not matched
     if (req.path.startsWith('/api/')) {
       return next();
     }
-    
-    // Skip if requesting a file with extension (likely static asset)
+
+    // Skip if requesting a file with an extension (likely a static asset miss)
     if (req.path.includes('.') && !req.path.endsWith('.html')) {
       return next();
     }
-    
-    console.log(`[Static] SPA fallback for: ${req.path}`);
+
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    });
     res.sendFile(indexPath);
   });
 }
