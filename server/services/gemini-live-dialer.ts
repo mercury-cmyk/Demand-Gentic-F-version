@@ -2688,49 +2688,15 @@ Instructions:
                   console.error('[Gemini Live] ❌ Failed to process disposition:', dispError);
                 }
               } else if (!callContext.callAttemptId) {
-                // CRITICAL FIX: Create call attempt on-the-fly if missing for qualified leads
-                // This ensures AI-generated leads are NEVER lost due to missing callAttemptId
+                // NOTE: Cannot create call attempts on-the-fly without dialerRunId (required NOT NULL field).
+                // Log the situation for debugging — the disposition will be handled by the
+                // fallback logic on connection close instead.
                 const canonicalDisposition = mapToCanonicalDisposition(disposition);
+                callContext.disposition = canonicalDisposition;
+
                 if (canonicalDisposition === 'qualified_lead' && callContext.contactId && callContext.campaignId) {
-                  console.warn('[Gemini Live] ⚠️ No callAttemptId - creating on-the-fly for qualified_lead');
-                  try {
-                    const [newAttempt] = await db
-                      .insert(dialerCallAttempts)
-                      .values({
-                        campaignId: callContext.campaignId,
-                        contactId: callContext.contactId,
-                        queueItemId: callContext.queueItemId || null,
-                        agentType: 'ai',
-                        virtualAgentId: callContext.virtualAgentId || null,
-                        phoneDialed: callContext.phoneNumber || 'unknown',
-                        attemptNumber: 1,
-                        callStartedAt: new Date(metrics.startTime),
-                        callEndedAt: new Date(),
-                        callDurationSeconds: Math.round((Date.now() - metrics.startTime) / 1000),
-                        connected: true,
-                        disposition: canonicalDisposition,
-                        dispositionProcessed: false,
-                        notes: `AI qualified_lead - callAttemptId created on-the-fly | Notes: ${notes || 'N/A'}`,
-                      })
-                      .returning();
-                    
-                    if (newAttempt) {
-                      callContext.callAttemptId = newAttempt.id;
-                      // ✅ CRITICAL: Store disposition in callContext for call_sessions creation
-                      callContext.disposition = canonicalDisposition;
-                      console.log(`[Gemini Live] ✅ Created on-the-fly callAttempt: ${newAttempt.id}`);
-                      
-                      // Now process the disposition through the engine to create the lead
-                      await processDisposition(newAttempt.id, canonicalDisposition, 'gemini_live_ai_recovery');
-                      dispositionProcessed = true;
-                      console.log(`[Gemini Live] ✅ Disposition processed (recovery mode) - lead should be created`);
-                    }
-                  } catch (recoveryErr) {
-                    console.error('[Gemini Live] ❌ Failed to create on-the-fly callAttempt:', recoveryErr);
-                  }
+                  console.warn(`[Gemini Live] ⚠️ No callAttemptId for qualified_lead - cannot create on-the-fly (missing dialerRunId). Disposition: ${disposition}, Contact: ${callContext.contactId}, Campaign: ${callContext.campaignId}`);
                 } else {
-                  // Store disposition in callContext even when we can't save to DB
-                  callContext.disposition = canonicalDisposition;
                   console.warn(`[Gemini Live] ⚠️ No callAttemptId available - disposition ${canonicalDisposition} not saved to database`);
                 }
               }

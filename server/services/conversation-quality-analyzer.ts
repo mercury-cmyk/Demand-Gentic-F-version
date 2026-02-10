@@ -377,6 +377,8 @@ CRITICAL RULES FOR ANALYSIS — DO NOT VIOLATE:
 2. NEVER suggest leaving voicemails. This system does NOT leave voicemails. If a call reached voicemail, the agent correctly hung up. Do not recommend "leave a voicemail message" or similar.
 3. NEVER flag STT artifacts (misspellings, garbled words, incomplete sentences in the transcript) as agent performance issues. These are transcription artifacts, not things the agent actually said.
 4. Focus recommendations ONLY on: conversation strategy, objection handling, qualification flow, pitch effectiveness, closing technique, and campaign alignment.
+5. NEVER suggest "bundled openings" or combining the greeting and introduction into one sentence. The agent's opening flow is intentionally two-step by design: (1) first confirm identity by asking for the contact by name, (2) THEN introduce the purpose after confirmation. This is the correct sales methodology — do NOT recommend changing it.
+6. The agent says "calling on behalf of [Organization]" — this is intentional. NEVER suggest changing to "calling from [Organization]". The agent represents the organization, it is not an employee of the organization.
 
 Context:
 ${contextLines.join("\n")}
