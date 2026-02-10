@@ -6,6 +6,7 @@ import { campaignQueue, contacts, accounts, campaigns, lists } from '@shared/sch
 import { requireAuth } from '../auth';
 import { z } from 'zod';
 import * as crypto from 'crypto';
+import { seedQueuePriorities, analyzeCampaignTimezones } from '../services/campaign-timezone-analyzer';
 
 const router = Router();
 
@@ -42,12 +43,13 @@ router.post(
         return res.status(400).json({ error: 'no_lists', message: 'Campaign has no lists assigned' });
       }
 
-      const results = {
+      const results: Record<string, any> = {
         contacts_processed: 0,
         accounts_linked: 0,
         added_to_queue: 0,
         skipped_no_account: 0,
-        errors: 0
+        errors: 0,
+        timezoneAnalysis: null,
       };
 
       // 2. Process each list
@@ -154,9 +156,36 @@ router.post(
         }
       }
 
+      // Pre-seed timezone-based priorities so active-timezone contacts are pulled first
+      if (results.added_to_queue > 0) {
+        try {
+          await seedQueuePriorities(campaignId);
+          results.timezoneAnalysis = await analyzeCampaignTimezones(campaignId);
+        } catch (err) {
+          console.error('Error seeding timezone priorities:', err);
+        }
+      }
+
       res.json(results);
     } catch (error: any) {
       console.error('Error syncing queue:', error);
+      res.status(500).json({ error: 'internal_server_error', message: error.message });
+    }
+  }
+);
+
+// GET /api/campaigns/:id/ops/timezone-analysis
+// Returns timezone distribution and business hours status for a campaign's queued contacts
+router.get(
+  '/campaigns/:id/ops/timezone-analysis',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+      const analysis = await analyzeCampaignTimezones(campaignId);
+      res.json(analysis);
+    } catch (error: any) {
+      console.error('Error analyzing timezones:', error);
       res.status(500).json({ error: 'internal_server_error', message: error.message });
     }
   }

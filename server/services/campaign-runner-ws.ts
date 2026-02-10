@@ -18,11 +18,13 @@ import { db } from "../db";
 import { campaignQueue, contacts, accounts, campaigns, virtualAgents, dialerRuns, dialerCallAttempts, type CanonicalDisposition } from "@shared/schema";
 import { eq, and, sql, inArray, or, isNull, lte, count, desc } from "drizzle-orm";
 import { getBestPhoneForContact } from "../lib/phone-utils";
-import { 
-  detectContactTimezone, 
-  isWithinBusinessHours, 
-  getBusinessHoursForCountry 
+import {
+  detectContactTimezone,
+  isWithinBusinessHours,
+  getNextAvailableTime,
+  getBusinessHoursForCountry
 } from "../utils/business-hours";
+import { seedQueuePriorities } from "./campaign-timezone-analyzer";
 import { processDisposition } from "./disposition-engine";
 import { getCallerIdForCall, handleCallCompleted as handleNumberPoolCallCompleted, releaseNumberWithoutOutcome, sleep as numberPoolSleep } from "./number-pool-integration";
 import { buildUnifiedCallContext } from "./unified-call-context";
@@ -614,16 +616,9 @@ class CampaignRunnerService {
 
       // Get queued queue items with contact and account info
       // Filter out contacts that are suppressed (next_call_eligible_at > NOW())
-      // Order by priority and creation time (timezone filtering done post-query)
-      const queueItems = await db.select({
-        queueItem: campaignQueue,
-        contact: contacts,
-        account: accounts,
-      })
-      .from(campaignQueue)
-      .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
-      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
-      .where(and(
+      // Pull active-timezone contacts first (priority >= 100 = open now or opening soon)
+      // Priorities are pre-seeded by seedQueuePriorities() on campaign start and refreshed periodically
+      const baseWhere = and(
         eq(campaignQueue.campaignId, campaignId),
         eq(campaignQueue.status, 'queued'),
         // PHASE 4: AI dialer only pulls items with targetAgentType 'any' or 'ai'
@@ -636,10 +631,41 @@ class CampaignRunnerService {
         or(
           isNull(contacts.nextCallEligibleAt),
           lte(contacts.nextCallEligibleAt, sql`NOW()`)
+        ),
+        // Queue-level retry suppression: only include items ready for next attempt
+        or(
+          isNull(campaignQueue.nextAttemptAt),
+          lte(campaignQueue.nextAttemptAt, sql`NOW()`)
         )
-      ))
-      .orderBy(campaignQueue.priority, campaignQueue.createdAt)
-      .limit(200); // Load more to allow for timezone filtering
+      );
+
+      // First try: only pull contacts in active timezones (priority >= 100)
+      let queueItems = await db.select({
+        queueItem: campaignQueue,
+        contact: contacts,
+        account: accounts,
+      })
+      .from(campaignQueue)
+      .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(and(baseWhere, sql`${campaignQueue.priority} >= 100`))
+      .orderBy(sql`${campaignQueue.priority} DESC`, campaignQueue.createdAt)
+      .limit(100);
+
+      // Fallback: if no active-timezone contacts, pull any available (avoids campaign appearing stuck)
+      if (queueItems.length === 0) {
+        queueItems = await db.select({
+          queueItem: campaignQueue,
+          contact: contacts,
+          account: accounts,
+        })
+        .from(campaignQueue)
+        .innerJoin(contacts, eq(campaignQueue.contactId, contacts.id))
+        .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+        .where(baseWhere)
+        .orderBy(sql`${campaignQueue.priority} DESC`, campaignQueue.createdAt)
+        .limit(50);
+      }
 
       // === TIMEZONE-BASED PRIORITIZATION ===
       // Prioritize contacts currently within their local business hours
@@ -658,49 +684,58 @@ class CampaignRunnerService {
       let skippedOutsideHours = 0;
       let skippedNoTimezone = 0;
       const timezoneStats: Record<string, { total: number; callable: number }> = {};
-      const skippedItemsToDelay: string[] = [];
       const skippedItemsToDisable: string[] = [];
+      // Track skipped items with their detected timezone for precise delay calculation
+      const skippedItemsByNextAttempt = new Map<string, string[]>(); // nextAttemptAt ISO -> queueItemIds
+      const skippedNoTimezoneIds: string[] = [];
 
       for (const item of queueItems) {
         const contact = item.contact;
-        
+
         // Check if country is in enabled calling regions
         if (!isCountryEnabled(contact.country)) {
           skippedCountryNotEnabled++;
           skippedItemsToDisable.push(item.queueItem.id);
           continue;
         }
-        
+
         // Check timezone and business hours
         const callPriority = getContactCallPriority({
           country: contact.country,
           state: contact.state,
           timezone: contact.timezone,
         });
-        
+
         // Track timezone stats
         const tzKey = callPriority.timezone || 'unknown';
         if (!timezoneStats[tzKey]) {
           timezoneStats[tzKey] = { total: 0, callable: 0 };
         }
         timezoneStats[tzKey].total++;
-        
+
         if (!callPriority.timezone) {
           skippedNoTimezone++;
-          // No timezone known - delay check for 4 hours to let enrichment catch up or just skip for now
-          skippedItemsToDelay.push(item.queueItem.id);
+          skippedNoTimezoneIds.push(item.queueItem.id);
           continue;
         }
-        
+
         if (!callPriority.canCallNow) {
           skippedOutsideHours++;
-          // Skip contacts outside business hours - delay 1 hour
-          skippedItemsToDelay.push(item.queueItem.id);
-          continue; 
+          // Calculate precise next business hours opening for this contact's timezone
+          const config = getBusinessHoursForCountry(contact.country);
+          config.timezone = callPriority.timezone;
+          config.respectContactTimezone = false;
+          const nextOpen = getNextAvailableTime(config, undefined, new Date());
+          const key = nextOpen.toISOString();
+          if (!skippedItemsByNextAttempt.has(key)) {
+            skippedItemsByNextAttempt.set(key, []);
+          }
+          skippedItemsByNextAttempt.get(key)!.push(item.queueItem.id);
+          continue;
         }
-        
+
         timezoneStats[tzKey].callable++;
-        
+
         prioritizedItems.push({
           item,
           callPriority: callPriority.priority,
@@ -710,23 +745,35 @@ class CampaignRunnerService {
         });
       }
 
-      // Bulk update skipped items so we don't block the queue
-      if (skippedItemsToDelay.length > 0) {
-          // Delay by 1 hour (outside business hours)
-          await db.update(campaignQueue)
-            .set({ 
-               nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000), 
-               updatedAt: new Date()
-            })
-            .where(inArray(campaignQueue.id, skippedItemsToDelay))
-            .catch(err => console.error(`${LOG_PREFIX} Failed to delay items:`, err));
+      // Set precise nextAttemptAt per timezone group (instead of blanket 1-hour delay)
+      for (const [nextAttemptIso, ids] of skippedItemsByNextAttempt) {
+        await db.update(campaignQueue)
+          .set({
+            nextAttemptAt: new Date(nextAttemptIso),
+            priority: 50,
+            updatedAt: new Date()
+          })
+          .where(inArray(campaignQueue.id, ids))
+          .catch(err => console.error(`${LOG_PREFIX} Failed to delay items to ${nextAttemptIso}:`, err));
+      }
+
+      // Unknown timezone contacts: delay 2 hours, lowest priority
+      if (skippedNoTimezoneIds.length > 0) {
+        await db.update(campaignQueue)
+          .set({
+            nextAttemptAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+            priority: 10,
+            updatedAt: new Date()
+          })
+          .where(inArray(campaignQueue.id, skippedNoTimezoneIds))
+          .catch(err => console.error(`${LOG_PREFIX} Failed to delay unknown-tz items:`, err));
       }
 
       if (skippedItemsToDisable.length > 0) {
           // Permanently skip items in disabled countries
           await db.update(campaignQueue)
-            .set({ 
-               status: 'completed', 
+            .set({
+               status: 'completed',
                removedReason: 'country_not_enabled',
                updatedAt: new Date()
             })
@@ -933,10 +980,33 @@ class CampaignRunnerService {
       .catch(err => console.error(`${LOG_PREFIX} Failed to requeue task:`, err));
   }
 
+  private lastPriorityRefresh = Date.now();
+  private readonly PRIORITY_REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
+
   private startProcessingLoop(): void {
     // Periodically check for stale runners and load more tasks
     this.processingInterval = setInterval(async () => {
       const now = Date.now();
+
+      // Periodic timezone priority refresh (every 15 minutes)
+      // As timezones rotate through business hours, sleeping contacts get promoted
+      if (now - this.lastPriorityRefresh > this.PRIORITY_REFRESH_INTERVAL) {
+        this.lastPriorityRefresh = now;
+        const activeCampaignIds = new Set<string>();
+        for (const runner of this.runners.values()) {
+          for (const cid of runner.activeCampaigns) {
+            activeCampaignIds.add(cid);
+          }
+        }
+        for (const cid of activeCampaignIds) {
+          try {
+            await seedQueuePriorities(cid);
+            console.log(`${LOG_PREFIX} Refreshed timezone priorities for campaign ${cid}`);
+          } catch (err) {
+            console.error(`${LOG_PREFIX} Failed to refresh priorities for ${cid}:`, err);
+          }
+        }
+      }
 
       // Check for stale runners (no heartbeat in 30s)
       for (const [ws, runner] of this.runners.entries()) {
@@ -987,6 +1057,14 @@ class CampaignRunnerService {
   async startCampaignForRunners(campaignId: string): Promise<void> {
     for (const runner of this.runners.values()) {
       runner.activeCampaigns.add(campaignId);
+    }
+    // Pre-seed timezone-based priorities before loading tasks
+    // This ensures the DB query pulls active-timezone contacts first
+    try {
+      const result = await seedQueuePriorities(campaignId);
+      console.log(`${LOG_PREFIX} Pre-seeded ${result.updated} queue items with timezone priorities for campaign ${campaignId}`);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Failed to seed priorities for ${campaignId}, continuing with default ordering:`, err);
     }
     await this.loadCampaignTasks(campaignId);
   }

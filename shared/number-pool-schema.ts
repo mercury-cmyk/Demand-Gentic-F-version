@@ -94,8 +94,8 @@ export const telnyxNumbers = pgTable("telnyx_numbers", {
   tags: text("tags").array().default(sql`'{}'::text[]`),
   
   // Pacing limits (per-number overrides)
-  maxCallsPerHour: integer("max_calls_per_hour").default(20),
-  maxCallsPerDay: integer("max_calls_per_day").default(100),
+  maxCallsPerHour: integer("max_calls_per_hour").default(40),
+  maxCallsPerDay: integer("max_calls_per_day").default(500),
   maxConcurrentCalls: integer("max_concurrent_calls").default(1),
   
   // Last usage tracking

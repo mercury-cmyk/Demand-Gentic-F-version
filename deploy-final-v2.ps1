@@ -124,6 +124,7 @@ $env_vars = @(
     # Core
     "NODE_ENV=production",
     "ENABLE_LOG_STREAMING=true",
+    "CALL_EXECUTION_ENABLED=true",
 
     # Google Cloud
     "GOOGLE_CLOUD_PROJECT=pivotalb2b-2026",

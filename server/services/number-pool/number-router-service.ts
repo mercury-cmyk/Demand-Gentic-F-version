@@ -64,8 +64,8 @@ interface FilterResult {
 
 // ==================== CONSTANTS ====================
 
-const MAX_CALLS_PER_HOUR_DEFAULT = 50;
-const MAX_CALLS_PER_DAY_DEFAULT = 250;
+const MAX_CALLS_PER_HOUR_DEFAULT = 40;
+const MAX_CALLS_PER_DAY_DEFAULT = 500;
 const JITTER_MIN_MS = 45_000;  // 45 seconds (base for unknown/new numbers)
 const JITTER_MAX_MS = 90_000;  // 90 seconds
 
