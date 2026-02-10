@@ -1,21 +1,18 @@
 /**
  * Unified Recording Player Component
  *
- * Enhanced audio player with on-demand URL resolution via the recording-link-resolver.
+ * Enhanced audio player with robust error handling, URL refresh capability,
+ * and telemetry logging for playback failures.
  *
- * How it works:
- * 1. Primary path: uses /api/recordings/:id/stream (server-side proxy)
- * 2. On playback error (expired URL, 403, format issue):
- *    - Fetches a fresh link via POST /api/recordings/:id/recording-link
- *    - Retries playback with the new URL
- * 3. Fallback: "Open in new tab" link
- *
- * No audio stored in DB — only IDs. URLs are generated on-demand.
+ * Fixes for "recordings not playable" issues:
+ * - Expired signed URLs → automatic refresh via retry
+ * - CORS issues → streams through backend proxy
+ * - Content-Type issues → backend sets correct MIME type
+ * - Auth issues → uses authenticated session
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { apiRequest } from '@/lib/queryClient';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -75,31 +72,9 @@ export function UnifiedRecordingPlayer({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
-  const [playerState, setPlayerState] = useState<'ready' | 'fetching' | 'playing' | 'refreshing'>('ready');
-  const [freshUrl, setFreshUrl] = useState<string | null>(null);
 
-  // Primary: use stream endpoint (server-side proxy).
-  // On error: request a fresh direct URL via recording-link endpoint.
+  // Always use the stream endpoint which handles URL refresh and CORS
   const streamUrl = `/api/recordings/${recordingId}/stream`;
-  const audioSrc = freshUrl || streamUrl;
-
-  /**
-   * Fetch a fresh playable link from the backend on-demand.
-   * Returns { url, expiresInSeconds, mimeType } or throws.
-   */
-  const fetchFreshLink = useCallback(async (): Promise<{ url: string; expiresInSeconds: number; mimeType: string }> => {
-    setPlayerState('fetching');
-    try {
-      const response = await apiRequest('POST', `/api/recordings/${recordingId}/recording-link`);
-      const data = await response.json();
-      if (!data.success || !data.url) {
-        throw new Error(data.error || 'No URL returned');
-      }
-      return { url: data.url, expiresInSeconds: data.expiresInSeconds, mimeType: data.mimeType };
-    } catch (err: any) {
-      throw new Error(err.message || 'Failed to fetch recording link');
-    }
-  }, [recordingId]);
 
   // Classify error for telemetry
   const classifyError = useCallback((audioError: MediaError | null, response?: Response): RecordingPlaybackError => {
@@ -170,29 +145,11 @@ export function UnifiedRecordingPlayer({
       setIsPlaying(false);
     };
 
-    const handleError = async () => {
+    const handleError = () => {
       setIsLoading(false);
       const playbackError = classifyError(audio.error);
-      logPlaybackError(playbackError);
-
-      // Auto-retry once: fetch a fresh URL from the recording-link resolver
-      if (retryCount === 0) {
-        setRetryCount(1);
-        setPlayerState('refreshing');
-        try {
-          const linkResult = await fetchFreshLink();
-          setFreshUrl(linkResult.url);
-          audio.src = linkResult.url;
-          audio.load();
-          setPlayerState('ready');
-          return; // Don't set error — we're retrying
-        } catch {
-          // Fall through to error state
-        }
-        setPlayerState('ready');
-      }
-
       setError(playbackError.message);
+      logPlaybackError(playbackError);
     };
 
     const handleWaiting = () => {
@@ -287,64 +244,29 @@ export function UnifiedRecordingPlayer({
     if (retryCount >= 3) return;
     
     setIsRetrying(true);
-    setIsLoading(true);
     setError(null);
     setRetryCount((prev) => prev + 1);
-    setPlayerState('refreshing');
 
     try {
-      // Fetch a fresh direct URL from the recording-link resolver
-      const linkResult = await fetchFreshLink();
-      setFreshUrl(linkResult.url);
-
-      // Update audio element with fresh URL
+      // Force reload the audio element with cache busting
       const audio = audioRef.current;
       if (audio) {
-        audio.src = linkResult.url;
+        audio.src = `${streamUrl}?retry=${Date.now()}`;
         audio.load();
       }
-      setPlayerState('ready');
-    } catch (err: any) {
-      setError(err.message || 'Failed to refresh recording link');
-      setPlayerState('ready');
     } finally {
       setIsRetrying(false);
     }
-  }, [retryCount, fetchFreshLink]);
-
-  /**
-   * Manual refresh button — user can force-fetch a new link
-   */
-  const handleRefreshLink = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setPlayerState('fetching');
-
-    try {
-      const linkResult = await fetchFreshLink();
-      setFreshUrl(linkResult.url);
-
-      const audio = audioRef.current;
-      if (audio) {
-        audio.src = linkResult.url;
-        audio.load();
-      }
-      setPlayerState('ready');
-    } catch (err: any) {
-      setError(err.message || 'Failed to refresh recording link');
-      setPlayerState('ready');
-      setIsLoading(false);
-    }
-  }, [fetchFreshLink]);
+  }, [retryCount, streamUrl]);
 
   const handleDownload = useCallback(() => {
     const link = document.createElement('a');
-    link.href = audioSrc;
+    link.href = streamUrl;
     link.download = `recording-${recordingId}.mp3`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [audioSrc, recordingId]);
+  }, [streamUrl, recordingId]);
 
   // Recording not available
   if (!recording.available) {
@@ -363,7 +285,7 @@ export function UnifiedRecordingPlayer({
     );
   }
 
-  // Error state with retry + fallback
+  // Error state with retry
   if (error) {
     return (
       <div className={cn('p-3 bg-destructive/10 rounded-lg', className)}>
@@ -371,39 +293,22 @@ export function UnifiedRecordingPlayer({
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
-        <div className="flex items-center gap-2 mt-2">
-          {retryCount < 3 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRetry}
-              disabled={isRetrying}
-            >
-              {isRetrying ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3 mr-1" />
-              )}
-              Retry ({3 - retryCount} attempts left)
-            </Button>
-          )}
+        {retryCount < 3 && (
           <Button
             size="sm"
             variant="outline"
-            onClick={handleRefreshLink}
+            className="mt-2"
+            onClick={handleRetry}
+            disabled={isRetrying}
           >
-            <RefreshCw className="h-3 w-3 mr-1" />
-            Refresh link
+            {isRetrying ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3 mr-1" />
+            )}
+            Retry ({3 - retryCount} attempts left)
           </Button>
-          <a
-            href={streamUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-muted-foreground underline ml-2"
-          >
-            Open in new tab
-          </a>
-        </div>
+        )}
       </div>
     );
   }
@@ -412,7 +317,7 @@ export function UnifiedRecordingPlayer({
     <div className={cn('space-y-3 p-3 bg-muted/50 rounded-lg', className)}>
       <audio
         ref={audioRef}
-        src={audioSrc}
+        src={streamUrl}
         preload="metadata"
         crossOrigin="use-credentials"
       />
@@ -520,38 +425,17 @@ export function UnifiedRecordingPlayer({
         </Button>
       </div>
 
-      {/* Recording Info + Refresh */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {playerState === 'fetching' && (
-          <span className="flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Fetching link…
-          </span>
-        )}
-        {playerState === 'refreshing' && (
-          <span className="flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Refreshing link…
-          </span>
-        )}
-        {recording.durationSec && (
+      {/* Recording Info */}
+      {recording.durationSec && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="outline" className="text-xs">
             {recording.status}
           </Badge>
-        )}
-        {recording.mimeType && (
-          <span>{recording.mimeType}</span>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 px-1.5 text-xs ml-auto"
-          onClick={handleRefreshLink}
-          title="Refresh recording link"
-        >
-          <RefreshCw className="h-3 w-3" />
-        </Button>
-      </div>
+          {recording.mimeType && (
+            <span>{recording.mimeType}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

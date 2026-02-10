@@ -34,7 +34,6 @@ export interface UnifiedRecording {
   status: 'pending' | 'recording' | 'uploading' | 'stored' | 'failed' | 'none';
   url?: string;
   s3Key?: string;
-  telnyxRecordingId?: string;
   mimeType?: string;
   durationSec?: number;
   fileSizeBytes?: number;

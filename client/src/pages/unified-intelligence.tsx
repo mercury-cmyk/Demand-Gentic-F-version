@@ -136,7 +136,6 @@ function adaptConversationToDetail(conv: any): UnifiedConversationDetail {
       status: conv.recordingStatus || (conv.recordingUrl ? 'stored' : 'none'),
       url: conv.recordingUrl,
       s3Key: conv.recordingS3Key,
-      telnyxRecordingId: conv.telnyxRecordingId,
       mimeType: conv.recordingMimeType,
       durationSec: conv.recordingDurationSec,
       fileSizeBytes: conv.recordingFileSizeBytes,
