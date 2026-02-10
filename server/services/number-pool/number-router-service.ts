@@ -599,13 +599,21 @@ export async function recordCallOutcome(
   numberId: string,
   outcome: CallOutcome
 ): Promise<void> {
-  // Update number usage counters
+  // Only increment daily/hourly counters for calls that actually connected.
+  // Failed calls (invalid number, network error, etc.) should not count
+  // against the number's daily/hourly limits.
+  const shouldCountTowardsLimits = !outcome.failed;
+
   await db
     .update(telnyxNumbers)
     .set({
       lastCallAt: new Date(),
-      callsToday: sql`calls_today + 1`,
-      callsThisHour: sql`calls_this_hour + 1`,
+      ...(shouldCountTowardsLimits
+        ? {
+            callsToday: sql`calls_today + 1`,
+            callsThisHour: sql`calls_this_hour + 1`,
+          }
+        : {}),
       ...(outcome.answered ? { lastAnsweredAt: new Date() } : {}),
       updatedAt: new Date(),
     })
@@ -632,7 +640,7 @@ export async function recordCallOutcome(
   // Release the number
   releaseNumber(numberId);
 
-  console.log(`[NumberRouter] Recorded outcome for ${numberId}: ${outcome.disposition} (${outcome.durationSec}s)`);
+  console.log(`[NumberRouter] Recorded outcome for ${numberId}: ${outcome.disposition} (${outcome.durationSec}s)${outcome.failed ? ' [FAILED - not counted towards limits]' : ''}`);
 }
 
 // ==================== EXPORTS ====================
