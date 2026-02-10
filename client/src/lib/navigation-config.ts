@@ -613,6 +613,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'Manage transactional email templates',
           },
           {
+            id: 'settings-mercury-notifications',
+            title: 'Mercury Notifications',
+            url: '/settings/mercury-notifications',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Mercury Bridge — email templates, test sends, bulk invitations, and notification rules',
+          },
+          {
             id: 'settings-domain-management',
             title: 'Domain Management',
             url: '/settings/domain-management',

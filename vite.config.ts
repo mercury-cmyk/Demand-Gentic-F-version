@@ -53,9 +53,11 @@ export default defineConfig({
       usePolling: false,
       interval: 1000,
     },
-    // Configure HMR for ngrok usage
-    hmr: {
-      clientPort: 443,
-    },
+    // Configure HMR — only override port for ngrok/tunnel usage
+    // In production builds, Vite HMR client is not included at all.
+    // In local dev without tunnel, use default settings (auto-detect).
+    hmr: process.env.USE_TUNNEL === 'true' || process.env.NGROK_AUTHTOKEN
+      ? { clientPort: 443 }
+      : true,
   },
 });

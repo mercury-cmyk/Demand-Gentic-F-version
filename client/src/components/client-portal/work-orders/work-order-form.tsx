@@ -52,6 +52,53 @@ interface WorkOrderFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: (order: WorkOrder) => void;
+  /** Pre-fill form values (e.g. from Upcoming Events) */
+  initialValues?: Partial<WorkOrderFormData>;
+  /** Event context for Argyle event-sourced orders */
+  eventContext?: {
+    externalEventId: string;
+    eventTitle: string;
+    eventDate?: string;
+    eventType?: string;
+    eventLocation?: string;
+    eventCommunity?: string;
+    eventSourceUrl: string;
+    leadCount?: number;
+  } | null;
+}
+
+/** Exported for external consumers (e.g. launcher hook) */
+export interface WorkOrderFormData {
+  title: string;
+  description: string;
+  orderType: string;
+  priority: string;
+  targetIndustries: string[];
+  targetTitles: string[];
+  targetCompanySize: string;
+  targetRegions: string[];
+  targetAccountCount?: number;
+  targetLeadCount?: number;
+  requestedStartDate: string;
+  requestedEndDate: string;
+  estimatedBudget?: number;
+  clientNotes: string;
+  specialRequirements: string;
+  targetUrls: string[];
+  deliveryMethod: string;
+  organizationContext: string | null;
+  useOrgIntelligence: boolean;
+  // Event linkage
+  eventSource?: string | null;
+  externalEventId?: string | null;
+  eventSourceUrl?: string | null;
+  eventMetadata?: {
+    eventTitle?: string;
+    eventDate?: string;
+    eventType?: string;
+    eventLocation?: string;
+    eventCommunity?: string;
+  } | null;
 }
 
 interface WorkOrder {
@@ -89,11 +136,16 @@ function generatePersonalizedExamples(orgContext: ReturnType<typeof useClientOrg
   const org = orgContext.organization;
   const orgName = org.name || orgContext.clientName;
   const industry = org.identity?.industry || org.industry || 'your industry';
-  const products = org.offerings?.coreProducts?.slice(0, 2).join(' and ') || 'your solutions';
-  const targetIndustries = org.icp?.industries?.slice(0, 2).join(' and ') || 'target industries';
-  const personas = org.icp?.personas?.slice(0, 2).map(p => p.title).join(' and ') || 'decision makers';
-  const problemsSolved = org.offerings?.problemsSolved?.slice(0, 2).join(', ') || 'key business challenges';
-  const differentiators = org.offerings?.differentiators?.[0] || 'unique value proposition';
+  const coreProducts = Array.isArray(org.offerings?.coreProducts) ? org.offerings.coreProducts : [];
+  const products = coreProducts.slice(0, 2).join(' and ') || 'your solutions';
+  const icpIndustries = Array.isArray(org.icp?.industries) ? org.icp.industries : [];
+  const targetIndustries = icpIndustries.slice(0, 2).join(' and ') || 'target industries';
+  const icpPersonas = Array.isArray(org.icp?.personas) ? org.icp.personas : [];
+  const personas = icpPersonas.slice(0, 2).map((p: any) => (typeof p === 'string' ? p : p.title)).join(' and ') || 'decision makers';
+  const solvedArr = Array.isArray(org.offerings?.problemsSolved) ? org.offerings.problemsSolved : [];
+  const problemsSolved = solvedArr.slice(0, 2).join(', ') || 'key business challenges';
+  const diffsArr = Array.isArray(org.offerings?.differentiators) ? org.offerings.differentiators : [];
+  const differentiators = diffsArr[0] || 'unique value proposition';
   const companySize = org.icp?.companySize || 'mid-size to enterprise';
 
   const examples = [
@@ -134,7 +186,7 @@ const ORDER_TYPES = [
   { value: 'custom', label: 'Custom Request', icon: FileText },
 ];
 
-export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormProps) {
+export function WorkOrderForm({ open, onOpenChange, onSuccess, initialValues, eventContext }: WorkOrderFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
@@ -151,30 +203,75 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
   // Generate personalized quick examples based on organization intelligence
   const quickExamples = generatePersonalizedExamples(orgContext);
 
+  // Build default form state, merging in initialValues and eventContext
+  const buildDefaultFormData = () => {
+    const defaults = {
+      title: '',
+      description: '',
+      orderType: 'lead_generation',
+      priority: 'normal',
+      targetIndustries: [] as string[],
+      targetTitles: [] as string[],
+      targetCompanySize: '',
+      targetRegions: [] as string[],
+      targetAccountCount: undefined as number | undefined,
+      targetLeadCount: undefined as number | undefined,
+      requestedStartDate: '',
+      requestedEndDate: '',
+      estimatedBudget: undefined as number | undefined,
+      clientNotes: '',
+      specialRequirements: '',
+      // Agentic specific fields
+      targetUrls: [] as string[],
+      deliveryMethod: 'email',
+      // Organization context (attached automatically)
+      organizationContext: null as string | null,
+      useOrgIntelligence: true,
+      // Event linkage fields
+      eventSource: null as string | null,
+      externalEventId: null as string | null,
+      eventSourceUrl: null as string | null,
+      eventMetadata: null as { eventTitle?: string; eventDate?: string; eventType?: string; eventLocation?: string; eventCommunity?: string } | null,
+    };
+
+    // Apply event context first (canonical source)
+    if (eventContext) {
+      defaults.title = eventContext.eventTitle || '';
+      defaults.description = `Generate leads for ${eventContext.eventTitle || 'upcoming event'}`;
+      defaults.targetLeadCount = eventContext.leadCount;
+      defaults.targetUrls = eventContext.eventSourceUrl ? [eventContext.eventSourceUrl] : [];
+      defaults.targetRegions = eventContext.eventLocation ? [eventContext.eventLocation] : [];
+      defaults.requestedEndDate = eventContext.eventDate || '';
+      defaults.eventSource = 'argyle_event';
+      defaults.externalEventId = eventContext.externalEventId;
+      defaults.eventSourceUrl = eventContext.eventSourceUrl;
+      defaults.eventMetadata = {
+        eventTitle: eventContext.eventTitle,
+        eventDate: eventContext.eventDate,
+        eventType: eventContext.eventType,
+        eventLocation: eventContext.eventLocation,
+        eventCommunity: eventContext.eventCommunity,
+      };
+    }
+
+    // Apply any explicit initialValues overrides
+    if (initialValues) {
+      return { ...defaults, ...initialValues };
+    }
+
+    return defaults;
+  };
+
   // Form state
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    orderType: 'lead_generation',
-    priority: 'normal',
-    targetIndustries: [] as string[],
-    targetTitles: [] as string[],
-    targetCompanySize: '',
-    targetRegions: [] as string[],
-    targetAccountCount: undefined as number | undefined,
-    targetLeadCount: undefined as number | undefined,
-    requestedStartDate: '',
-    requestedEndDate: '',
-    estimatedBudget: undefined as number | undefined,
-    clientNotes: '',
-    specialRequirements: '',
-    // Agentic specific fields
-    targetUrls: [] as string[],
-    deliveryMethod: 'email',
-    // Organization context (attached automatically)
-    organizationContext: null as string | null,
-    useOrgIntelligence: true,
-  });
+  const [formData, setFormData] = useState(buildDefaultFormData);
+
+  // Re-initialize form when eventContext or initialValues change (dialog opens with new context)
+  useEffect(() => {
+    if (open) {
+      setFormData(buildDefaultFormData());
+      setStep(1);
+    }
+  }, [open, eventContext?.externalEventId]);
 
   // Auto-populate targeting suggestions from org intelligence when available
   useEffect(() => {
@@ -224,11 +321,19 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
     },
     onSuccess: (data, submitNow) => {
       queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      // Also invalidate argyle events if this was an event-sourced order
+      if (formData.eventSource === 'argyle_event') {
+        queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
+      }
       toast({
-        title: submitNow ? 'Agentic Order Submitted!' : 'Draft Saved',
-        description: submitNow
-          ? `Order ${data.workOrder.orderNumber} has been received. Agents are reviewing your instructions.`
-          : 'Your Agentic Order has been saved as a draft',
+        title: data.alreadyExists
+          ? 'Order Already Exists'
+          : submitNow ? 'Agentic Order Submitted!' : 'Draft Saved',
+        description: data.alreadyExists
+          ? `Order ${data.workOrder.orderNumber} was already created for this event.`
+          : submitNow
+            ? `Order ${data.workOrder.orderNumber} has been received. Agents are reviewing your instructions.`
+            : 'Your Agentic Order has been saved as a draft',
         variant: "default", 
         className: "bg-emerald-600 text-white border-none"
       });
@@ -246,27 +351,7 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
   });
 
   const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      orderType: 'lead_generation',
-      priority: 'normal',
-      targetIndustries: [],
-      targetTitles: [],
-      targetCompanySize: '',
-      targetRegions: [],
-      targetAccountCount: undefined,
-      targetLeadCount: undefined,
-      requestedStartDate: '',
-      requestedEndDate: '',
-      estimatedBudget: undefined,
-      clientNotes: '',
-      specialRequirements: '',
-      targetUrls: [],
-      deliveryMethod: 'email',
-      organizationContext: null,
-      useOrgIntelligence: true,
-    });
+    setFormData(buildDefaultFormData());
     setStep(1);
     setIndustryInput('');
     setTitleInput('');
@@ -327,9 +412,30 @@ export function WorkOrderForm({ open, onOpenChange, onSuccess }: WorkOrderFormPr
                 </button>
             </div>
             <DialogDescription className="text-white/90 text-sm mt-1 ml-11">
-              Directly instruct agents to execute your campaign
+              {eventContext
+                ? `Source: Upcoming Event — ${eventContext.eventTitle}`
+                : 'Directly instruct agents to execute your campaign'}
             </DialogDescription>
           </DialogHeader>
+          {/* Event context badge in header */}
+          {eventContext && (
+            <div className="relative z-10 mt-3 ml-11 flex flex-wrap items-center gap-2">
+              <Badge className="bg-white/20 text-white border-0 text-xs backdrop-blur-sm">
+                <Calendar className="h-3 w-3 mr-1" />
+                {eventContext.eventDate || 'Date TBD'}
+              </Badge>
+              {eventContext.eventType && (
+                <Badge className="bg-white/20 text-white border-0 text-xs backdrop-blur-sm">
+                  {eventContext.eventType}
+                </Badge>
+              )}
+              {eventContext.eventLocation && (
+                <Badge className="bg-white/20 text-white border-0 text-xs backdrop-blur-sm">
+                  {eventContext.eventLocation}
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Wizard Panel - Overlapping Card */}

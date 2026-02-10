@@ -13291,3 +13291,169 @@ export const insertWorkOrderDraftSchema = createInsertSchema(workOrderDrafts).om
 });
 export type WorkOrderDraft = typeof workOrderDrafts.$inferSelect;
 export type InsertWorkOrderDraft = z.infer<typeof insertWorkOrderDraftSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mercury Bridge — Notification System Tables
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mercury notification templates — reusable email templates with Mustache-style variables.
+ * Separate from transactionalEmailTemplates to avoid scope contamination.
+ */
+export const mercuryTemplates = pgTable("mercury_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateKey: varchar("template_key").notNull().unique(),
+  name: varchar("name").notNull(),
+  description: text("description"),
+  subjectTemplate: text("subject_template").notNull(),
+  htmlTemplate: text("html_template").notNull(),
+  textTemplate: text("text_template"),
+  variables: jsonb("variables").$type<Array<{
+    name: string;
+    description: string;
+    required: boolean;
+    defaultValue?: string;
+    exampleValue?: string;
+  }>>().notNull().default([]),
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  version: integer("version").default(1).notNull(),
+  category: varchar("category").default('notification'),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  keyIdx: uniqueIndex("mercury_templates_key_idx").on(table.templateKey),
+  enabledIdx: index("mercury_templates_enabled_idx").on(table.isEnabled),
+  categoryIdx: index("mercury_templates_category_idx").on(table.category),
+}));
+
+export const insertMercuryTemplateSchema = createInsertSchema(mercuryTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type MercuryTemplate = typeof mercuryTemplates.$inferSelect;
+export type InsertMercuryTemplate = z.infer<typeof insertMercuryTemplateSchema>;
+
+/**
+ * Mercury email outbox — queued emails with status tracking and idempotency.
+ */
+export const mercuryEmailOutbox = pgTable("mercury_email_outbox", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateKey: varchar("template_key").notNull(),
+  recipientEmail: text("recipient_email").notNull(),
+  recipientName: text("recipient_name"),
+  recipientUserId: varchar("recipient_user_id"),
+  recipientUserType: varchar("recipient_user_type").default('client'), // 'admin' | 'client'
+  tenantId: varchar("tenant_id"), // clientAccountId
+  subject: text("subject").notNull(),
+  htmlBody: text("html_body").notNull(),
+  textBody: text("text_body"),
+  fromEmail: text("from_email").notNull().default('mercury@pivotal-b2b.com'),
+  fromName: text("from_name").notNull().default('Pivotal B2B'),
+  status: varchar("status").notNull().default('queued'), // queued | sending | sent | failed | skipped
+  messageId: varchar("message_id"),
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").default(0).notNull(),
+  maxRetries: integer("max_retries").default(3).notNull(),
+  idempotencyKey: varchar("idempotency_key").unique(),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("mercury_outbox_status_idx").on(table.status),
+  recipientIdx: index("mercury_outbox_recipient_idx").on(table.recipientEmail),
+  tenantIdx: index("mercury_outbox_tenant_idx").on(table.tenantId),
+  templateIdx: index("mercury_outbox_template_idx").on(table.templateKey),
+  idempotencyIdx: uniqueIndex("mercury_outbox_idempotency_idx").on(table.idempotencyKey),
+  createdIdx: index("mercury_outbox_created_idx").on(table.createdAt),
+}));
+
+export const insertMercuryEmailOutboxSchema = createInsertSchema(mercuryEmailOutbox).omit({
+  id: true,
+  createdAt: true,
+});
+export type MercuryEmailOutbox = typeof mercuryEmailOutbox.$inferSelect;
+export type InsertMercuryEmailOutbox = z.infer<typeof insertMercuryEmailOutboxSchema>;
+
+/**
+ * Mercury notification events — domain event log for the notification framework.
+ */
+export const mercuryNotificationEvents = pgTable("mercury_notification_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventType: varchar("event_type").notNull(), // e.g. 'project_request_approved', 'campaign_launched'
+  tenantId: varchar("tenant_id"), // clientAccountId
+  actorUserId: varchar("actor_user_id"), // user who triggered the event
+  payload: jsonb("payload").$type<Record<string, any>>().notNull().default({}),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  eventTypeIdx: index("mercury_events_type_idx").on(table.eventType),
+  tenantIdx: index("mercury_events_tenant_idx").on(table.tenantId),
+  processedIdx: index("mercury_events_processed_idx").on(table.processedAt),
+  createdIdx: index("mercury_events_created_idx").on(table.createdAt),
+}));
+
+export type MercuryNotificationEvent = typeof mercuryNotificationEvents.$inferSelect;
+
+/**
+ * Mercury notification rules — maps event types to templates and recipient resolvers.
+ */
+export const mercuryNotificationRules = pgTable("mercury_notification_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventType: varchar("event_type").notNull(),
+  templateKey: varchar("template_key").notNull(),
+  channelType: varchar("channel_type").notNull().default('email'), // 'email' | 'sms' | 'in_app'
+  recipientResolver: varchar("recipient_resolver").notNull(), // 'requester' | 'tenant_admins' | 'all_tenant_users' | 'custom'
+  customRecipients: jsonb("custom_recipients").$type<string[]>(),
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  eventTypeIdx: index("mercury_rules_event_type_idx").on(table.eventType),
+  enabledIdx: index("mercury_rules_enabled_idx").on(table.isEnabled),
+}));
+
+export type MercuryNotificationRule = typeof mercuryNotificationRules.$inferSelect;
+
+/**
+ * Mercury invitation tokens — secure one-time-use client portal invitation tokens.
+ */
+export const mercuryInvitationTokens = pgTable("mercury_invitation_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientUserId: varchar("client_user_id").references(() => clientUsers.id, { onDelete: 'cascade' }).notNull(),
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'cascade' }).notNull(),
+  token: varchar("token").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  emailOutboxId: varchar("email_outbox_id").references(() => mercuryEmailOutbox.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  tokenIdx: uniqueIndex("mercury_invite_token_idx").on(table.token),
+  userIdx: index("mercury_invite_user_idx").on(table.clientUserId),
+  accountIdx: index("mercury_invite_account_idx").on(table.clientAccountId),
+  expiresIdx: index("mercury_invite_expires_idx").on(table.expiresAt),
+}));
+
+export type MercuryInvitationToken = typeof mercuryInvitationTokens.$inferSelect;
+
+/**
+ * Mercury notification preferences — per-user notification opt-in/out.
+ */
+export const mercuryNotificationPreferences = pgTable("mercury_notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  userType: varchar("user_type").notNull().default('client'), // 'admin' | 'client'
+  notificationType: varchar("notification_type").notNull(), // matches eventType
+  channelType: varchar("channel_type").notNull().default('email'),
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  userTypeIdx: index("mercury_prefs_user_type_idx").on(table.userId, table.userType),
+  notifTypeIdx: index("mercury_prefs_notif_type_idx").on(table.notificationType),
+}));

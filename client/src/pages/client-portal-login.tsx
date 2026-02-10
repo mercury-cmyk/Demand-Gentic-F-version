@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Building2, Lock, Mail } from 'lucide-react';
+import { setClientPortalSession } from '@/lib/client-portal-session';
 
 export default function ClientPortalLogin() {
   const [, setLocation] = useLocation();
@@ -30,8 +31,7 @@ export default function ClientPortalLogin() {
       if (!response.ok) {
         throw new Error(data?.message || `Login failed (${response.status})`);
       }
-      localStorage.setItem('clientPortalToken', data.token);
-      localStorage.setItem('clientPortalUser', JSON.stringify(data.user));
+      setClientPortalSession(data.token, data.user);
       toast({ title: 'Login successful' });
       setLocation('/client-portal/dashboard');
     } catch (error) {

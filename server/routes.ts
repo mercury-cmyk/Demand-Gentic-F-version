@@ -52,6 +52,7 @@ import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
 import smtpProvidersRouter from './routes/smtp-providers';
 import transactionalTemplatesRouter from './routes/transactional-templates';
+import mercuryBridgeRouter from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
@@ -14011,6 +14012,9 @@ Provide JSON response with:
   app.use('/api/domains', requireAuth, domainManagementRouter);
   app.use('/api/deliverability', requireAuth, deliverabilityRouter);
   app.use('/api/email', requireAuth, unifiedEmailRoutes);
+
+  // ==================== MERCURY BRIDGE NOTIFICATIONS ====================
+  app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
   app.use('/api/email-builder', requireDualAuth, emailBuilderRouter);

@@ -3,6 +3,7 @@ import { useLocation, useSearch } from 'wouter';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient, apiRequest } from '@/lib/queryClient';
+import { clearClientPortalSession } from '@/lib/client-portal-session';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -624,7 +625,7 @@ export default function ClientPortalDashboard() {
 
   // Queries
   const { data: campaigns = [], isLoading: campaignsLoading, refetch: refetchCampaigns } = useQuery<Campaign[]>({
-    queryKey: ['client-portal-campaigns'],
+    queryKey: ['client-portal-campaigns', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/campaigns', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch campaigns');
@@ -634,7 +635,7 @@ export default function ClientPortalDashboard() {
   });
 
   const { data: orders = [], isLoading: ordersLoading, refetch: refetchOrders } = useQuery<Order[]>({
-    queryKey: ['client-portal-orders'],
+    queryKey: ['client-portal-orders', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/orders', authHeaders);
       if (!res.ok) throw new Error('Failed to fetch orders');
@@ -755,9 +756,9 @@ export default function ClientPortalDashboard() {
     }
   }, [clientOrgData?.organization?.id, selectedOrgId]);
 
-  // Feature access query
+  // Feature access query — key includes tenant for cache isolation
   const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
-    queryKey: ['client-portal-features'],
+    queryKey: ['client-portal-features', user?.clientAccountId],
     queryFn: async () => {
       const res = await fetch('/api/client-portal/settings/features', authHeaders);
       if (!res.ok) return { enabledFeatures: [] };
@@ -773,9 +774,9 @@ export default function ClientPortalDashboard() {
     }
   }, [featuresData]);
 
-  // Argyle events feature status check
+  // Argyle events feature status check — key includes tenant for cache isolation
   const { data: argyleFeatureStatus } = useQuery<{ enabled: boolean }>({
-    queryKey: ['argyle-events-feature-status'],
+    queryKey: ['argyle-events-feature-status', user?.clientAccountId],
     queryFn: async () => {
       try {
         const res = await fetch('/api/client-portal/argyle-events/feature-status', authHeaders);
@@ -789,9 +790,10 @@ export default function ClientPortalDashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // UKEF campaign reports feature probe (via summary endpoint)
+  // UKEF campaign reports feature probe — only called for UKEF tenant
+  const isUkef = user?.clientAccountId === '67b6f74d-0894-46c4-bf86-1dd047b57dd8';
   const { data: ukefReportsProbe } = useQuery<{ enabled: boolean }>({
-    queryKey: ['ukef-reports-feature-probe'],
+    queryKey: ['ukef-reports-feature-probe', user?.clientAccountId],
     queryFn: async () => {
       try {
         const res = await fetch('/api/client-portal/ukef-reports/summary', authHeaders);
@@ -801,14 +803,14 @@ export default function ClientPortalDashboard() {
         return { enabled: false };
       }
     },
-    enabled: !!user,
+    enabled: !!user && isUkef,
     staleTime: 5 * 60 * 1000,
   });
   const ukefReportsEnabled = ukefReportsProbe?.enabled ?? false;
 
-  // UKEF transcript QA feature probe
+  // UKEF transcript QA feature probe — only called for UKEF tenant
   const { data: ukefTranscriptQaProbe } = useQuery<{ enabled: boolean }>({
-    queryKey: ['ukef-tqa-feature-probe'],
+    queryKey: ['ukef-tqa-feature-probe', user?.clientAccountId],
     queryFn: async () => {
       try {
         const res = await fetch('/api/client-portal/ukef-transcript-qa/status', authHeaders);
@@ -818,7 +820,7 @@ export default function ClientPortalDashboard() {
         return { enabled: false };
       }
     },
-    enabled: !!user,
+    enabled: !!user && isUkef,
     staleTime: 5 * 60 * 1000,
   });
   const ukefTranscriptQaEnabled = ukefTranscriptQaProbe?.enabled ?? false;
@@ -1389,8 +1391,7 @@ export default function ClientPortalDashboard() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('clientPortalToken');
-    localStorage.removeItem('clientPortalUser');
+    clearClientPortalSession();
     setLocation('/client-portal/login');
   };
 

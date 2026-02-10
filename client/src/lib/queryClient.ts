@@ -5,8 +5,9 @@ async function throwIfResNotOk(res: Response, url?: string) {
     // Handle 401 Unauthorized - automatically logout and redirect to login
     if (res.status === 401) {
       if (url?.includes('/api/client-portal/') || window.location.pathname.startsWith('/client-portal/')) {
-        localStorage.removeItem('clientPortalToken');
-        localStorage.removeItem('clientPortalUser');
+        // Use centralized session cleanup to clear cache + localStorage
+        const { clearClientPortalSession } = await import('./client-portal-session');
+        clearClientPortalSession();
         window.location.href = '/client-portal/login';
       } else {
         localStorage.removeItem('authToken');

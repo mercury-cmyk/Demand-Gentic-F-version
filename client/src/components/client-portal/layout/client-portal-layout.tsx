@@ -65,6 +65,7 @@ import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
 import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgentPanelProvider, useAgentPanelContextOptional } from '@/components/agent-panel';
+import { clearClientPortalSession } from '@/lib/client-portal-session';
 
 interface ClientUser {
   id: string;
@@ -215,11 +216,12 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   const storedUser = localStorage.getItem('clientPortalUser');
   const user: ClientUser | null = storedUser ? JSON.parse(storedUser) : null;
+  const clientAccountId = user?.clientAccountId;
 
   // Check if Argyle events feature is available for this client
   const getToken = () => localStorage.getItem('clientPortalToken');
   const { data: argyleFeatureStatus } = useQuery({
-    queryKey: ['/api/client-portal/argyle-events/feature-status'],
+    queryKey: ['argyle-events-feature-status', clientAccountId],
     queryFn: async () => {
       const token = getToken();
       if (!token) return { available: false };
@@ -233,12 +235,13 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         return { available: false };
       }
     },
+    enabled: !!clientAccountId,
     staleTime: 5 * 60 * 1000,
   });
 
   // Check client features for feature-gated nav items
   const { data: featuresData } = useQuery<{ enabledFeatures: string[] }>({
-    queryKey: ['/api/client-portal/features'],
+    queryKey: ['client-portal-features', clientAccountId],
     queryFn: async () => {
       const token = getToken();
       if (!token) return { enabledFeatures: [] };
@@ -252,6 +255,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         return { enabledFeatures: [] };
       }
     },
+    enabled: !!clientAccountId,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -358,8 +362,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('clientPortalToken');
-    localStorage.removeItem('clientPortalUser');
+    clearClientPortalSession();
     setLocation('/client-portal/login');
   };
 
