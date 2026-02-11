@@ -638,9 +638,9 @@ router.post("/telnyx", async (req, res) => {
     }
 
     // Extract stable Telnyx recording ID from the event payload
-    const eventData = (req.body as any)?.data;
+    const recordingEventData = (req.body as any)?.data;
     const telnyxRecordingId: string | undefined =
-      payload.recording_id || payload.id || eventData?.id || undefined;
+      payload.recording_id || payload.id || recordingEventData?.id || undefined;
 
     console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}, recording_id: ${telnyxRecordingId || 'none'}`);
 
