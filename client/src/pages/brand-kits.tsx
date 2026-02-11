@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -123,8 +124,7 @@ export default function BrandKitsPage() {
   const { data: brandKits = [], isLoading } = useQuery<BrandKit[]>({
     queryKey: ['brandKits'],
     queryFn: async () => {
-      const res = await fetch('/api/email-builder/brand-kits');
-      if (!res.ok) throw new Error('Failed to fetch brand kits');
+      const res = await apiRequest('GET', '/api/email-builder/brand-kits');
       return res.json();
     },
   });
@@ -132,12 +132,7 @@ export default function BrandKitsPage() {
   // Create mutation
   const createMutation = useMutation({
     mutationFn: async (data: Partial<BrandKit>) => {
-      const res = await fetch('/api/email-builder/brand-kits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error('Failed to create brand kit');
+      const res = await apiRequest('POST', '/api/email-builder/brand-kits', data);
       return res.json();
     },
     onSuccess: () => {
@@ -154,12 +149,7 @@ export default function BrandKitsPage() {
   // Update mutation
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<BrandKit> }) => {
-      const res = await fetch(`/api/email-builder/brand-kits/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error('Failed to update brand kit');
+      const res = await apiRequest('PUT', `/api/email-builder/brand-kits/${id}`, data);
       return res.json();
     },
     onSuccess: () => {
@@ -176,10 +166,7 @@ export default function BrandKitsPage() {
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/email-builder/brand-kits/${id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error('Failed to delete brand kit');
+      await apiRequest('DELETE', `/api/email-builder/brand-kits/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brandKits'] });

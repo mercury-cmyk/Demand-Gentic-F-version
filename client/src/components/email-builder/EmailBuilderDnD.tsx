@@ -11,6 +11,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
 import {
   DndContext,
   DragOverlay,
@@ -253,8 +254,7 @@ export function EmailBuilderDnD({
   const { data: brandKits = [] } = useQuery<BrandKit[]>({
     queryKey: ['brandKits'],
     queryFn: async () => {
-      const res = await fetch('/api/email-builder/brand-kits');
-      if (!res.ok) throw new Error('Failed to fetch brand kits');
+      const res = await apiRequest('GET', '/api/email-builder/brand-kits');
       return res.json();
     },
   });

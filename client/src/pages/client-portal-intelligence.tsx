@@ -4,7 +4,7 @@
  * Allows clients to analyze and manage their organization's intelligence profile
  * with deep multi-model AI research capabilities.
  */
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -38,6 +38,7 @@ import {
   Zap,
   Brain,
   Lightbulb,
+  Calendar,
   Award,
   Palette,
   Shield,
@@ -69,6 +70,14 @@ interface OrganizationIntelligence {
     dataResidency?: string;
     recordingConsent?: string;
     disclaimerText?: string;
+  };
+  events?: {
+    upcoming?: string;
+    strategy?: string;
+  };
+  forums?: {
+    list?: string;
+    engagement_strategy?: string;
   };
   identity?: {
     legalName?: string;
@@ -525,14 +534,13 @@ export default function ClientPortalIntelligence() {
             {/* Intelligence Tabs */}
             <Tabs defaultValue="overview" className="space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <TabsList className="grid w-full grid-cols-7 lg:w-[1050px] h-12 p-1 bg-muted/50 rounded-lg">
-                  <TabsTrigger value="overview" className="rounded-md data-[state=active]:shadow-sm">Identity</TabsTrigger>
-                  <TabsTrigger value="branding" className="rounded-md data-[state=active]:shadow-sm">Branding</TabsTrigger>
+                <TabsList className="grid w-full grid-cols-6 lg:w-[900px] h-12 p-1 bg-muted/50 rounded-lg">
+                  <TabsTrigger value="overview" className="rounded-md data-[state=active]:shadow-sm">Identity & Branding</TabsTrigger>
                   <TabsTrigger value="offerings" className="rounded-md data-[state=active]:shadow-sm">Offerings</TabsTrigger>
                   <TabsTrigger value="icp" className="rounded-md data-[state=active]:shadow-sm">ICP & Market</TabsTrigger>
                   <TabsTrigger value="positioning" className="rounded-md data-[state=active]:shadow-sm">Positioning</TabsTrigger>
                   <TabsTrigger value="outreach" className="rounded-md data-[state=active]:shadow-sm">Outreach</TabsTrigger>
-                  <TabsTrigger value="compliance" className="rounded-md data-[state=active]:shadow-sm">Compliance</TabsTrigger>
+                  <TabsTrigger value="events" className="rounded-md data-[state=active]:shadow-sm">Events & Forums</TabsTrigger>
                 </TabsList>
 
                 {/* Deep Analysis Section */}
@@ -605,10 +613,8 @@ export default function ClientPortalIntelligence() {
                     />
                   </CardContent>
                 </Card>
-              </TabsContent>
 
-              {/* Branding Tab */}
-              <TabsContent value="branding" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <div className="py-4"></div>
                 <div className="grid lg:grid-cols-3 gap-6">
                   {/* Brand Identity Card - Left column */}
                   <Card className="lg:col-span-1 border-primary/10 bg-gradient-to-b from-primary/[0.02] to-transparent">
@@ -751,57 +757,6 @@ export default function ClientPortalIntelligence() {
                 </div>
               </TabsContent>
 
-              {/* Compliance Tab */}
-              <TabsContent value="compliance" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Shield className="h-5 w-5 text-primary" />
-                      Compliance & Governance
-                    </CardTitle>
-                    <CardDescription>
-                      Manage regulatory requirements, data residency, and compliance settings
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-6 md:grid-cols-2">
-                    <div className="md:col-span-2">
-                      <IntelligenceField
-                        label="Certifications"
-                        value={org.compliance?.certifications}
-                        multiline
-                        placeholder="Comma-separated certifications (e.g. SOC2, HIPAA, GDPR)"
-                        icon={Award}
-                        onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, certifications: value.split(',').map(s => s.trim()) } })}
-                      />
-                    </div>
-                    <IntelligenceField
-                      label="Data Residency"
-                      value={org.compliance?.dataResidency}
-                      placeholder="e.g. US, EU, Global"
-                      icon={Globe}
-                      onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, dataResidency: value } })}
-                    />
-                     <IntelligenceField
-                      label="Recording Consent Policy"
-                      value={org.compliance?.recordingConsent}
-                      placeholder="e.g. One-party, Two-party, Required"
-                      icon={Phone}
-                      onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, recordingConsent: value } })}
-                    />
-                    <div className="md:col-span-2">
-                      <IntelligenceField
-                        label="Call Disclaimer Text"
-                        value={org.compliance?.disclaimerText}
-                        multiline
-                        placeholder="Standard disclaimer to be read during calls"
-                        icon={AlertCircle}
-                        onSave={(value) => updateMutation.mutate({ compliance: { ...org.compliance, disclaimerText: value } })}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
               {/* Offerings Tab */}
               <TabsContent value="offerings" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
                 <div className="grid lg:grid-cols-3 gap-6">
@@ -878,7 +833,8 @@ export default function ClientPortalIntelligence() {
                         Target Personas
                       </Label>
                       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {(Array.isArray(org.icp?.personas) ? org.icp.personas : []).map((persona: any, idx: number) => {
+                        {(Array.isArray(org.icp?.personas) && org.icp.personas.length > 0) ? (
+                          org.icp.personas.map((persona: any, idx: number) => {
                           const personaTitle = resolveFieldValue(persona?.title) || resolveFieldValue(persona);
                           const painPoints = Array.isArray(persona?.painPoints) ? persona.painPoints : [];
                           return (
@@ -896,7 +852,8 @@ export default function ClientPortalIntelligence() {
                               )}
                             </div>
                           );
-                        })} || (
+                          })
+                        ) : (
                           <p className="text-sm text-muted-foreground italic p-2 bg-muted/50 rounded-md col-span-full">
                             No personas defined
                           </p>
@@ -1045,6 +1002,69 @@ export default function ClientPortalIntelligence() {
                             )}
                          </CardContent>
                     </Card>
+                </div>
+              </TabsContent>
+
+              {/* Events & Forums Tab */}
+              <TabsContent value="events" className="animate-in fade-in-50 slide-in-from-bottom-2 duration-300">
+                <div className="grid lg:grid-cols-2 gap-6">
+                  {/* Upcoming Events */}
+                  <Card className="h-full">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Calendar className="h-5 w-5 text-primary" />
+                        Upcoming Events
+                      </CardTitle>
+                      <CardDescription>
+                        List upcoming events, webinars, or conferences for agent context
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <IntelligenceField
+                        label="Upcoming Events List"
+                        value={org.events?.upcoming}
+                        multiline
+                        placeholder="e.g. Annual Tech Summit (June 15), Q3 Webinar Series..."
+                        onSave={(value) => updateMutation.mutate({ events: { ...org.events, upcoming: value } })}
+                      />
+                      <IntelligenceField
+                        label="Event Strategy"
+                        value={org.events?.strategy}
+                        multiline
+                        placeholder="Context on how to leverage these events in outreach..."
+                        onSave={(value) => updateMutation.mutate({ events: { ...org.events, strategy: value } })}
+                      />
+                    </CardContent>
+                  </Card>
+
+                  {/* Forums & Communities */}
+                  <Card className="h-full">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <MessageSquare className="h-5 w-5 text-primary" />
+                        Forums & Communities
+                      </CardTitle>
+                      <CardDescription>
+                        Industry forums and communities for engagement
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      <IntelligenceField
+                        label="Active Forums"
+                        value={org.forums?.list}
+                        multiline
+                        placeholder="List active forums, LinkedIn groups, or communities..."
+                        onSave={(value) => updateMutation.mutate({ forums: { ...org.forums, list: value } })}
+                      />
+                      <IntelligenceField
+                        label="Engagement Strategy"
+                        value={org.forums?.engagement_strategy}
+                        multiline
+                        placeholder="Rules of engagement for these communities..."
+                        onSave={(value) => updateMutation.mutate({ forums: { ...org.forums, engagement_strategy: value } })}
+                      />
+                    </CardContent>
+                  </Card>
                 </div>
               </TabsContent>
             </Tabs>

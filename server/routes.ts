@@ -57,6 +57,7 @@ import mercuryBridgeRouter, { smtpProvidersRouter } from './routes/mercury-bridg
 import domainManagementRouter from './routes/domain-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
+import unifiedEmailSystemRouter from './routes/unified-email-system';
 import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
@@ -14156,6 +14157,10 @@ Provide JSON response with:
   // ==================== MERGE TAGS ====================
   app.use('/api/merge-tags', requireAuth, mergeTagsRouter);
 
+  // ==================== UNIFIED COMMUNICATIONS SYSTEM ====================
+  // Combines SMTP, Mercury, and Transactional Templates
+  app.use('/api/unified-communications', unifiedEmailSystemRouter);
+
   // ==================== SMTP TRANSACTIONAL EMAIL SYSTEM ====================
   app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
   app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);
@@ -14168,7 +14173,7 @@ Provide JSON response with:
   app.use('/api/mercury', requireAuth, mercuryBridgeRouter);
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
-  app.use('/api/email-builder', requireDualAuth, emailBuilderRouter);
+  app.use('/api/email-builder', emailBuilderRouter);
 
   // ==================== ADMIN DATA MANAGEMENT ====================
 

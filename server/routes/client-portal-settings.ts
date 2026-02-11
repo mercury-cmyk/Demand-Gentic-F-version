@@ -422,6 +422,14 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
         primaryColor: z.string().optional(),
         secondaryColor: z.string().optional(),
       }).optional(),
+      events: z.object({
+        upcoming: z.string().optional(),
+        strategy: z.string().optional(),
+      }).optional(),
+      forums: z.object({
+        list: z.string().optional(),
+        engagement_strategy: z.string().optional(),
+      }).optional(),
       logoUrl: z.string().optional(),
     });
 
@@ -448,6 +456,8 @@ router.put('/organization-intelligence', async (req: Request, res: Response) => 
         ...(validatedData.positioning && { positioning: validatedData.positioning }),
         ...(validatedData.outreach && { outreach: validatedData.outreach }),
         ...(validatedData.branding && { branding: validatedData.branding }),
+        ...(validatedData.events && { events: validatedData.events }),
+        ...(validatedData.forums && { forums: validatedData.forums }),
         ...(validatedData.logoUrl !== undefined && { logoUrl: validatedData.logoUrl }),
         updatedAt: new Date(),
       })

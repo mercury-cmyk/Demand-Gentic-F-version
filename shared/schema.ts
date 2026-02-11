@@ -10213,6 +10213,13 @@ export const campaignOrganizations = pgTable('campaign_organizations', {
   branding: jsonb('branding').notNull().default('{}'),
   // Structure: { tone, communicationStyle, keywords, forbiddenTerms, primaryColor, secondaryColor }
 
+  // Events & Forums (Agent Context)
+  events: jsonb('events').notNull().default('{}'),
+  // Structure: { upcoming: string, strategy: string }
+
+  forums: jsonb('forums').notNull().default('{}'),
+  // Structure: { list: string, engagement_strategy: string }
+
   // Compiled prompt-ready context
   compiledOrgContext: text('compiled_org_context'),
 

@@ -1364,5 +1364,5 @@ mercuryRouter.post('/outbox/process',
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { smtpProvidersRouter };
+export { smtpProvidersRouter, seedDefaultTemplates };
 export default mercuryRouter;

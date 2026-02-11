@@ -367,8 +367,12 @@ class AIImageGenerator {
       const { Storage } = await import('@google-cloud/storage');
       const gcs = new Storage({ projectId: this.projectId });
       await gcs.bucket(bucketName).file(storageKey).makePublic();
-    } catch (err) {
-      console.warn('[AIImageGenerator] Could not make file public, falling back to signed URL:', err);
+    } catch (err: any) {
+      if (err.message && err.message.includes('uniform bucket-level access')) {
+        console.log('[AIImageGenerator] Bucket has uniform access enabled, skipping public ACL. Image will be served via proxy.');
+      } else {
+        console.warn('[AIImageGenerator] Could not make file public, falling back to proxy:', err.message);
+      }
     }
 
     // Store the direct GCS URL in the database for internal use

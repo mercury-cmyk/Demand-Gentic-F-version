@@ -63,6 +63,8 @@ import {
   Users,
   BarChart3,
   Mic,
+  TestTube,
+  Building2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -123,6 +125,9 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
       { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
+      { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
+      { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
+      { name: 'Bookings', href: '/client-portal/dashboard?tab=bookings', icon: CalendarDays },
     ],
   },
   {
@@ -130,10 +135,19 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'AI & Intelligence',
     items: [
       { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
-      { name: 'Organization Intelligence', href: '/client-portal/dashboard?tab=intelligence', icon: Brain },
+      { name: 'Organization Intelligence', href: '/client-portal/intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
       { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
+    ],
+  },
+  {
+    id: 'simulations',
+    label: 'Simulation Lab',
+    items: [
+      { name: 'Simulations Hub', href: '/client-portal/simulations', icon: TestTube },
+      { name: 'Voice Simulation', href: '/client-portal/voice-simulation', icon: Phone },
+      { name: 'Email Simulation', href: '/client-portal/email-simulation', icon: Mail },
     ],
   },
   {
@@ -292,15 +306,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     // Add conditional items to Campaigns group
     const campaignsGroup = groups.find(g => g.id === 'campaigns');
     if (campaignsGroup) {
-      // Add Bookings if calendar_booking feature enabled
-      if (enabledFeatures.includes('calendar_booking')) {
-        campaignsGroup.items.push({
-          name: 'Bookings',
-          href: '/client-portal/dashboard?tab=bookings',
-          icon: CalendarDays,
-        });
-      }
-      // Add Upcoming Events if Argyle enabled
+      // Add Upcoming Events if Argyle enabled (client-specific integration)
       if (argyleFeatureStatus?.enabled) {
         campaignsGroup.items.push({
           name: 'Upcoming Events',

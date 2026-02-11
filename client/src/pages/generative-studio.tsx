@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -196,8 +197,7 @@ export default function GenerativeStudioPage() {
   const { data: brandKitsData } = useQuery<{ brandKits?: any[] } | any[]>({
     queryKey: ['brandKits'],
     queryFn: async () => {
-      const res = await fetch('/api/email-builder/brand-kits');
-      if (!res.ok) throw new Error('Failed to fetch brand kits');
+      const res = await apiRequest('GET', '/api/email-builder/brand-kits');
       const data = await res.json();
       return Array.isArray(data) ? { brandKits: data } : data;
     },
