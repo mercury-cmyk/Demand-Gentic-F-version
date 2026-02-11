@@ -53,7 +53,7 @@ import campaignEmailRouter from './routes/campaign-email-routes';
 import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
 import transactionalTemplatesRouter from './routes/transactional-templates';
-import mercuryBridgeRouter, { smtpProvidersRouter } from './routes/mercury-bridge';
+import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
 import domainManagementRouter from './routes/domain-management';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
@@ -14165,6 +14165,7 @@ Provide JSON response with:
   // ==================== BACKWARD COMPATIBILITY (DEPRECATED) ====================
   // These legacy routes remain for backward compatibility and OAuth callbacks.
   // Frontend uses /api/communications/* paths instead.
+  app.use('/api/smtp-providers', smtpOAuthCallbackRouter); // OAuth callbacks (public — Google/Microsoft redirect here)
   app.use('/api/smtp-providers', requireAuth, smtpProvidersRouter);
   app.use('/api/transactional-templates', requireAuth, transactionalTemplatesRouter);
   app.use('/api/transactional', requireAuth, transactionalTemplatesRouter);

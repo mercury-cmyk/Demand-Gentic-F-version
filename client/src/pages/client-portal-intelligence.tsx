@@ -153,8 +153,11 @@ async function createOrganization(data: { name: string; domain?: string; industr
     },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error('Failed to create organization');
-  return res.json();
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json.message || 'Failed to create organization');
+  }
+  return json;
 }
 
 /**
@@ -321,7 +324,8 @@ export default function ClientPortalIntelligence() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['client-org-intelligence'],
     queryFn: fetchOrgIntelligence,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0, // Always fetch fresh data to avoid sync issues
+    refetchOnWindowFocus: true,
   });
 
   const updateMutation = useMutation({
@@ -345,7 +349,13 @@ export default function ClientPortalIntelligence() {
       setNewOrgDomain('');
     },
     onError: (error: Error) => {
-      toast({ title: 'Creation failed', description: error.message, variant: 'destructive' });
+      if (error.message.includes('Organization already linked')) {
+        queryClient.invalidateQueries({ queryKey: ['client-org-intelligence'] });
+        setShowCreateForm(false);
+        toast({ title: 'Organization Linked', description: 'This organization is already linked. Loading profile...' });
+      } else {
+        toast({ title: 'Creation failed', description: error.message, variant: 'destructive' });
+      }
     },
   });
 

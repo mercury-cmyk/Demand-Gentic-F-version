@@ -43,6 +43,7 @@ import {
   Radio,
   Zap,
   MessageSquare,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -164,6 +165,9 @@ export default function ClientPortalPreviewStudioPage() {
   const [emailPreviewMode, setEmailPreviewMode] = useState<'preview' | 'html'>('preview');
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
+  // Voice preview state
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+
   // Refs
   const playPreviewRef = useRef<HTMLAudioElement | null>(null);
 
@@ -234,13 +238,15 @@ export default function ClientPortalPreviewStudioPage() {
   const selectedContact = contacts.find(c => c.id === selectedContactId);
   const selectedVoiceInfo = GEMINI_VOICES.find(v => v.id === selectedVoice);
 
-  // Handle voice preview
-  const handlePreviewVoice = async () => {
+  // Handle voice preview - accepts optional voiceId to preview a specific voice
+  const handlePreviewVoice = async (voiceId?: string) => {
+    const targetVoiceId = voiceId || selectedVoice;
     try {
       if (playPreviewRef.current) {
         playPreviewRef.current.pause();
         playPreviewRef.current = null;
       }
+      setPreviewingVoiceId(targetVoiceId);
       const response = await fetch('/api/voice-providers/preview', {
         method: 'POST',
         headers: {
@@ -248,7 +254,7 @@ export default function ClientPortalPreviewStudioPage() {
           ...getAuthHeaders(),
         },
         body: JSON.stringify({
-          voiceId: selectedVoice,
+          voiceId: targetVoiceId,
           provider: 'gemini',
         }),
       });
@@ -256,10 +262,14 @@ export default function ClientPortalPreviewStudioPage() {
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPreviewingVoiceId(null);
+      };
       playPreviewRef.current = audio;
       await audio.play();
     } catch (error) {
+      setPreviewingVoiceId(null);
       toast({ variant: 'destructive', title: 'Preview Failed', description: 'Could not play voice preview' });
     }
   };
@@ -492,6 +502,7 @@ export default function ClientPortalPreviewStudioPage() {
                 setVoiceTone={setVoiceTone}
                 selectedVoiceInfo={selectedVoiceInfo}
                 onPreviewVoice={handlePreviewVoice}
+                previewingVoiceId={previewingVoiceId}
                 voiceSimStatus={voiceSimStatus}
                 setVoiceSimStatus={setVoiceSimStatus}
                 isMuted={isMuted}
@@ -529,7 +540,8 @@ interface VoicePreviewSectionProps {
   voiceTone: string;
   setVoiceTone: (v: string) => void;
   selectedVoiceInfo: VoiceOption | undefined;
-  onPreviewVoice: () => void;
+  onPreviewVoice: (voiceId?: string) => void;
+  previewingVoiceId: string | null;
   voiceSimStatus: 'idle' | 'connecting' | 'active' | 'completed';
   setVoiceSimStatus: (s: 'idle' | 'connecting' | 'active' | 'completed') => void;
   isMuted: boolean;
@@ -545,6 +557,7 @@ function VoicePreviewSection({
   setVoiceTone,
   selectedVoiceInfo,
   onPreviewVoice,
+  previewingVoiceId,
   voiceSimStatus,
   setVoiceSimStatus,
   isMuted,
@@ -573,19 +586,39 @@ function VoicePreviewSection({
               <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Male Voices ({maleVoices.length})</Label>
               <div className="space-y-1">
                 {maleVoices.map(voice => (
-                  <button
+                  <div
                     key={voice.id}
                     onClick={() => setSelectedVoice(voice.id)}
                     className={cn(
-                      "w-full p-2.5 rounded-lg border text-left transition-all",
+                      "group w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer",
                       selectedVoice === voice.id
                         ? "bg-blue-500/20 border-blue-500/50 shadow-sm shadow-blue-500/10"
                         : "bg-white/5 border-white/10 hover:bg-white/10"
                     )}
                   >
-                    <span className="text-white font-medium text-sm">{voice.displayName}</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-white font-medium text-sm">{voice.displayName}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
+                        disabled={previewingVoiceId === voice.id}
+                        className={cn(
+                          "h-6 w-6 rounded-full flex items-center justify-center transition-all duration-200 shrink-0",
+                          previewingVoiceId === voice.id
+                            ? "bg-blue-500/30 border border-blue-400/50"
+                            : "bg-white/10 hover:bg-blue-500/30 border border-transparent hover:border-blue-400/50 opacity-0 group-hover:opacity-100",
+                          selectedVoice === voice.id && "opacity-100"
+                        )}
+                        title={`Preview ${voice.displayName}`}
+                      >
+                        {previewingVoiceId === voice.id ? (
+                          <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />
+                        ) : (
+                          <Play className="h-3 w-3 text-blue-400 ml-0.5" />
+                        )}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-white/40 mt-0.5 leading-tight">{voice.personality}</p>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -594,33 +627,43 @@ function VoicePreviewSection({
               <Label className="text-[10px] font-medium text-white/50 uppercase tracking-wider">Female Voices ({femaleVoices.length})</Label>
               <div className="space-y-1">
                 {femaleVoices.map(voice => (
-                  <button
+                  <div
                     key={voice.id}
                     onClick={() => setSelectedVoice(voice.id)}
                     className={cn(
-                      "w-full p-2.5 rounded-lg border text-left transition-all",
+                      "group w-full p-2.5 rounded-lg border text-left transition-all cursor-pointer",
                       selectedVoice === voice.id
                         ? "bg-pink-500/20 border-pink-500/50 shadow-sm shadow-pink-500/10"
                         : "bg-white/5 border-white/10 hover:bg-white/10"
                     )}
                   >
-                    <span className="text-white font-medium text-sm">{voice.displayName}</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-white font-medium text-sm">{voice.displayName}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onPreviewVoice(voice.id); }}
+                        disabled={previewingVoiceId === voice.id}
+                        className={cn(
+                          "h-6 w-6 rounded-full flex items-center justify-center transition-all duration-200 shrink-0",
+                          previewingVoiceId === voice.id
+                            ? "bg-pink-500/30 border border-pink-400/50"
+                            : "bg-white/10 hover:bg-pink-500/30 border border-transparent hover:border-pink-400/50 opacity-0 group-hover:opacity-100",
+                          selectedVoice === voice.id && "opacity-100"
+                        )}
+                        title={`Preview ${voice.displayName}`}
+                      >
+                        {previewingVoiceId === voice.id ? (
+                          <Loader2 className="h-3 w-3 text-pink-400 animate-spin" />
+                        ) : (
+                          <Play className="h-3 w-3 text-pink-400 ml-0.5" />
+                        )}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-white/40 mt-0.5 leading-tight">{voice.personality}</p>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>
           </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onPreviewVoice}
-            className="w-full mb-4 bg-white/5 border-white/10 text-white hover:bg-white/10"
-          >
-            <Play className="h-4 w-4 mr-2" />
-            Preview Voice
-          </Button>
 
           <Separator className="bg-white/10 mb-4" />
 

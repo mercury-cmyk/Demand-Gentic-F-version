@@ -124,7 +124,6 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
-      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
       { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
       { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
       { name: 'Bookings', href: '/client-portal/dashboard?tab=bookings', icon: CalendarDays },
@@ -142,20 +141,9 @@ const baseNavigationGroups: NavGroup[] = [
     ],
   },
   {
-    id: 'simulations',
-    label: 'Simulation Lab',
-    items: [
-      { name: 'Simulations Hub', href: '/client-portal/simulations', icon: TestTube },
-      { name: 'Voice Simulation', href: '/client-portal/voice-simulation', icon: Phone },
-      { name: 'Email Simulation', href: '/client-portal/email-simulation', icon: Mail },
-    ],
-  },
-  {
     id: 'analytics',
     label: 'Analytics & Insights',
     items: [
-      { name: 'Call Reports', href: '/client-portal/call-reports', icon: Phone },
-      { name: 'Call Recordings', href: '/client-portal/call-recordings', icon: Mic },
       { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
       { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
     ],
@@ -165,15 +153,6 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'How it Works',
     items: [
       { name: 'Client Guide', href: '/client-portal/services', icon: Package },
-    ],
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    items: [
-      { name: 'Billing', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
-      { name: 'Support', href: '/client-portal/dashboard?tab=support', icon: Headphones },
-      { name: 'Settings', href: '/client-portal/dashboard?tab=settings', icon: Settings },
     ],
   },
 ];
@@ -579,6 +558,22 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           <ClientPortalAgentToggleButton />
           */}
 
+          {/* Settings Icon - Clearly Added */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link href="/client-portal/dashboard?tab=settings">
+                   <Button variant="ghost" size="icon" className="mr-1 text-muted-foreground hover:text-foreground">
+                    <Settings className="h-5 w-5" />
+                  </Button>
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Account Settings</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -600,6 +595,18 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 </div>
               </div>
               <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/client-portal/dashboard?tab=billing">
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Billing
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/client-portal/dashboard?tab=support">
+                  <Headphones className="mr-2 h-4 w-4" />
+                  Support
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/client-portal/dashboard?tab=settings">
                   <Settings className="mr-2 h-4 w-4" />

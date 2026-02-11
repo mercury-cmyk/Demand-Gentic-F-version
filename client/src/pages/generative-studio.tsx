@@ -20,7 +20,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
-  Image,
+  Image as ImageIcon,
   Globe,
   Mail,
   MessageSquare,
@@ -76,6 +76,24 @@ export interface OrgIntelligenceProfile {
     emailAngles?: { value?: string };
     callOpeners?: { value?: string };
   };
+  branding?: {
+    tone?: { value?: string };
+    keywords?: { value?: string };
+  };
+  events?: {
+    upcoming?: string | { value?: string };
+    strategy?: string | { value?: string };
+  };
+  forums?: {
+    list?: string | { value?: string };
+    engagement_strategy?: string | { value?: string };
+  };
+}
+
+function getIntelValue(field: any): string {
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  return field.value || "";
 }
 
 const MODULES = [
@@ -83,7 +101,7 @@ const MODULES = [
     id: "image",
     label: "Images",
     shortLabel: "Images",
-    icon: Image,
+    icon: ImageIcon,
     color: "violet",
     description: "AI image generation",
     bgClass: "bg-violet-500/10",
@@ -267,10 +285,12 @@ export default function GenerativeStudioPage() {
 
   const orgSummary = orgProfile
     ? [
-        orgProfile.identity?.legalName?.value && `Company: ${orgProfile.identity.legalName.value}`,
-        orgProfile.identity?.industry?.value && `Industry: ${orgProfile.identity.industry.value}`,
-        orgProfile.icp?.personas?.value && `Target Personas: ${orgProfile.icp.personas.value}`,
-        orgProfile.positioning?.oneLiner?.value && `Positioning: ${orgProfile.positioning.oneLiner.value}`,
+        getIntelValue(orgProfile.identity?.legalName) && `Company: ${getIntelValue(orgProfile.identity?.legalName)}`,
+        getIntelValue(orgProfile.identity?.industry) && `Industry: ${getIntelValue(orgProfile.identity?.industry)}`,
+        getIntelValue(orgProfile.icp?.personas) && `Target Personas: ${getIntelValue(orgProfile.icp?.personas)}`,
+        getIntelValue(orgProfile.positioning?.oneLiner) && `Positioning: ${getIntelValue(orgProfile.positioning?.oneLiner)}`,
+        getIntelValue(orgProfile.events?.upcoming) && `Events: ${getIntelValue(orgProfile.events?.upcoming)}`,
+        getIntelValue(orgProfile.forums?.list) && `Communities: ${getIntelValue(orgProfile.forums?.list)}`,
       ].filter(Boolean).join("\n")
     : "";
 

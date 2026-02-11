@@ -138,6 +138,8 @@ async function getOrganizationContext(organizationId?: string): Promise<string> 
       icp: campaignOrganizations.icp,
       positioning: campaignOrganizations.positioning,
       outreach: campaignOrganizations.outreach,
+      events: campaignOrganizations.events,
+      forums: campaignOrganizations.forums,
     })
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.id, organizationId))
@@ -149,6 +151,8 @@ async function getOrganizationContext(organizationId?: string): Promise<string> 
   const offerings = (org.offerings || {}) as any;
   const icp = (org.icp || {}) as any;
   const positioning = (org.positioning || {}) as any;
+  const events = (org.events || {}) as any;
+  const forums = (org.forums || {}) as any;
 
   const parts: string[] = [];
   if (org.name) parts.push(`Organization: ${org.name}`);
@@ -164,6 +168,17 @@ async function getOrganizationContext(organizationId?: string): Promise<string> 
   if (oneLiner) parts.push(`Positioning: ${oneLiner}`);
   const differentiators = resolveFieldValue(offerings.differentiators);
   if (differentiators) parts.push(`Differentiators: ${differentiators}`);
+
+  // Add Events & Forums Context
+  const upcomingEvents = resolveFieldValue(events.upcoming);
+  if (upcomingEvents) parts.push(`Upcoming Events: ${upcomingEvents}`);
+  const eventStrategy = resolveFieldValue(events.strategy);
+  if (eventStrategy) parts.push(`Event Strategy: ${eventStrategy}`);
+  
+  const activeForums = resolveFieldValue(forums.list);
+  if (activeForums) parts.push(`Forums & Communities: ${activeForums}`);
+  const forumStrategy = resolveFieldValue(forums.engagement_strategy);
+  if (forumStrategy) parts.push(`Community Strategy: ${forumStrategy}`);
 
   return parts.length > 0 ? parts.join('\n') : '';
 }

@@ -42,6 +42,12 @@ import { generateJSON } from '../services/vertex-ai';
 import { smtpOAuthService } from '../services/smtp-oauth-service';
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SMTP OAUTH CALLBACK ROUTER (public — no auth, Google/Microsoft redirect here)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const smtpOAuthCallbackRouter = Router();
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // SMTP PROVIDERS ROUTER (mounted at /api/smtp-providers)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -347,9 +353,9 @@ smtpProvidersRouter.get(
 
 /**
  * GET /api/smtp-providers/oauth/google/callback
- * Handle Google OAuth2 callback
+ * Handle Google OAuth2 callback (public — no auth required, Google redirects here)
  */
-smtpProvidersRouter.get("/oauth/google/callback", async (req: Request, res: Response) => {
+smtpOAuthCallbackRouter.get("/oauth/google/callback", async (req: Request, res: Response) => {
   try {
     const { code, state, error: oauthError } = req.query;
 
@@ -471,9 +477,9 @@ smtpProvidersRouter.get(
 
 /**
  * GET /api/smtp-providers/oauth/microsoft/callback
- * Handle Microsoft OAuth2 callback
+ * Handle Microsoft OAuth2 callback (public — no auth required, Microsoft redirects here)
  */
-smtpProvidersRouter.get("/oauth/microsoft/callback", async (req: Request, res: Response) => {
+smtpOAuthCallbackRouter.get("/oauth/microsoft/callback", async (req: Request, res: Response) => {
   try {
     const { code, state, error: oauthError } = req.query;
 
@@ -1364,5 +1370,5 @@ mercuryRouter.post('/outbox/process',
 // EXPORTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export { smtpProvidersRouter, seedDefaultTemplates };
+export { smtpProvidersRouter, smtpOAuthCallbackRouter, seedDefaultTemplates };
 export default mercuryRouter;

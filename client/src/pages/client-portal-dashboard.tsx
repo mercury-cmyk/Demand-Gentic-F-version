@@ -67,6 +67,7 @@ import { UkefReportsContent } from '@/pages/client-portal/ukef-reports';
 import { UkefTranscriptQaContent } from '@/pages/client-portal/ukef-transcript-qa';
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
+import { extractColorsFromImage } from '@/lib/color-extractor';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
@@ -295,6 +296,10 @@ export default function ClientPortalDashboard() {
   // Queue View State
   const [showQueueDialog, setShowQueueDialog] = useState(false);
   const [queueCampaignId, setQueueCampaignId] = useState<string | null>(null);
+
+  // Email Test State
+  const [showEmailTestDialog, setShowEmailTestDialog] = useState(false);
+  const [testEmailCampaignId, setTestEmailCampaignId] = useState<string | null>(null);
 
   // Work Order Request State (managed campaigns by Pivotal team)
   const [showWorkOrderDialog, setShowWorkOrderDialog] = useState(false);
@@ -560,6 +565,8 @@ export default function ClientPortalDashboard() {
 
   // Business Profile state
   const [businessProfile, setBusinessProfile] = useState<any>(null);
+  const [extractedColors, setExtractedColors] = useState<{ hex: string; percentage: number }[]>([]);
+  const [isExtractingColors, setIsExtractingColors] = useState(false);
 
   // Organization Intelligence state
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
@@ -859,47 +866,47 @@ export default function ClientPortalDashboard() {
   }, [businessProfileData]);
 
 
-  // CRM Accounts query
+  // Campaign-assigned Accounts query (accounts from client's campaigns via campaignQueue)
   const { data: crmAccountsData, isLoading: crmAccountsLoading, refetch: refetchCrmAccounts } = useQuery<{
     accounts: any[];
     total: number;
   }>({
-    queryKey: ['client-portal-crm-accounts', crmSearchQuery],
+    queryKey: ['client-portal-campaign-accounts', crmSearchQuery],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (crmSearchQuery) params.set('search', crmSearchQuery);
-      const res = await fetch(`/api/client-portal/crm/accounts?${params}`, authHeaders);
+      const res = await fetch(`/api/client-portal/crm/campaign-accounts?${params}`, authHeaders);
       if (!res.ok) return { accounts: [], total: 0 };
       return res.json();
     },
     enabled: !!user,
   });
 
-  // CRM Contacts query
+  // Campaign-assigned Contacts query (contacts from client's campaigns via campaignQueue)
   const { data: crmContactsData, isLoading: crmContactsLoading, refetch: refetchCrmContacts } = useQuery<{
     contacts: any[];
     total: number;
   }>({
-    queryKey: ['client-portal-crm-contacts', crmSearchQuery],
+    queryKey: ['client-portal-campaign-contacts', crmSearchQuery],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (crmSearchQuery) params.set('search', crmSearchQuery);
-      const res = await fetch(`/api/client-portal/crm/contacts?${params}`, authHeaders);
+      const res = await fetch(`/api/client-portal/crm/campaign-contacts?${params}`, authHeaders);
       if (!res.ok) return { contacts: [], total: 0 };
       return res.json();
     },
     enabled: !!user,
   });
 
-  // CRM Stats query
+  // Campaign-assigned Stats query
   const { data: crmStatsData } = useQuery<{
     totalAccounts: number;
     totalContacts: number;
     optedOutContacts: number;
   }>({
-    queryKey: ['client-portal-crm-stats'],
+    queryKey: ['client-portal-campaign-stats'],
     queryFn: async () => {
-      const res = await fetch('/api/client-portal/crm/stats', authHeaders);
+      const res = await fetch('/api/client-portal/crm/campaign-stats', authHeaders);
       if (!res.ok) return { totalAccounts: 0, totalContacts: 0, optedOutContacts: 0 };
       return res.json();
     },
@@ -1288,6 +1295,25 @@ export default function ClientPortalDashboard() {
     });
   };
 
+  const handleExtractColorsFromLogo = async () => {
+    const logoUrl = businessProfile?.logoUrl;
+    if (!logoUrl) return;
+    setIsExtractingColors(true);
+    setExtractedColors([]);
+    try {
+      const colors = await extractColorsFromImage(logoUrl, 6);
+      setExtractedColors(colors.map((c) => ({ hex: c.hex, percentage: c.percentage })));
+      // Auto-apply the most dominant color as brand color
+      if (colors.length > 0) {
+        setBusinessProfile((prev: any) => ({ ...prev, brandColor: colors[0].hex }));
+      }
+    } catch {
+      toast({ title: 'Could not extract colors', description: 'Make sure the logo URL is accessible and points to an image (PNG, JPG, SVG).', variant: 'destructive' });
+    } finally {
+      setIsExtractingColors(false);
+    }
+  };
+
   const handleDeleteProject = (projectId: string, projectName: string) => {
     if (window.confirm(`Are you sure you want to delete "${projectName}"? This action cannot be undone.`)) {
       deleteProjectMutation.mutate(projectId);
@@ -1656,18 +1682,14 @@ export default function ClientPortalDashboard() {
                   <span className="font-semibold">Accounts</span>
                 </h2>
                 <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Manage your company data for campaigns and targeting
+                  Accounts assigned to your campaigns and targeting
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Import CSV
-                  </Button>
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredAccounts;
-                  const headers = 'Company Name,Industry,Website,Phone';
-                  const rows = items.map((i: any) => `${i.companyName},${i.industry},${i.website},${i.phone}`);
+                  const headers = 'Company Name,Industry,Website';
+                  const rows = items.map((i: any) => `${i.name},${i.industry},${i.website}`);
                   const csv = [headers, ...rows].join('\n');
                   const blob = new Blob([csv], { type: 'text/csv' });
                   const url = URL.createObjectURL(blob);
@@ -1676,10 +1698,6 @@ export default function ClientPortalDashboard() {
                 }}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
-                </Button>
-                <Button size="sm" onClick={() => setShowAddAccountDialog(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Account
                 </Button>
               </div>
             </div>
@@ -1699,8 +1717,8 @@ export default function ClientPortalDashboard() {
                 <p className="text-2xl font-semibold">{allIndustries.length}</p>
               </CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">Opted Out</p>
-                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+                <p className="text-sm text-muted-foreground">Campaigns</p>
+                <p className="text-2xl font-semibold">{campaigns?.length ?? 0}</p>
               </CardContent></Card>
             </div>
 
@@ -1753,12 +1771,8 @@ export default function ClientPortalDashboard() {
               <Card className="border-dashed">
                 <CardContent className="py-16 text-center">
                   <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                  <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
-                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
-                  <div className="flex justify-center gap-3">
-                    <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
-                    <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
-                  </div>
+                  <h3 className="font-semibold text-lg mb-2">No Accounts Found</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Accounts will appear here once they are assigned to your campaigns</p>
                 </CardContent>
               </Card>
             ) : crmViewMode === 'table' ? (
@@ -1864,14 +1878,10 @@ export default function ClientPortalDashboard() {
                   <span className="font-semibold">Contacts</span>
                 </h2>
                 <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Manage your contact data for campaigns and targeting
+                  Contacts assigned to your campaigns
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Import CSV
-                  </Button>
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredContacts;
                   const headers = 'First Name,Last Name,Email,Phone,Company,Title';
@@ -1884,10 +1894,6 @@ export default function ClientPortalDashboard() {
                 }}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
-                </Button>
-                <Button size="sm" onClick={() => setShowAddContactDialog(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Contact
                 </Button>
               </div>
             </div>
@@ -1907,8 +1913,8 @@ export default function ClientPortalDashboard() {
                 <p className="text-2xl font-semibold">{allIndustries.length}</p>
               </CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">Opted Out</p>
-                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+                <p className="text-sm text-muted-foreground">Campaigns</p>
+                <p className="text-2xl font-semibold">{campaigns?.length ?? 0}</p>
               </CardContent></Card>
             </div>
 
@@ -1961,12 +1967,8 @@ export default function ClientPortalDashboard() {
               <Card className="border-dashed">
                 <CardContent className="py-16 text-center">
                   <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                  <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
-                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
-                  <div className="flex justify-center gap-3">
-                    <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                    <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
-                  </div>
+                  <h3 className="font-semibold text-lg mb-2">No Contacts Found</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Contacts will appear here once they are assigned to your campaigns</p>
                 </CardContent>
               </Card>
             ) : crmViewMode === 'table' ? (
@@ -2649,6 +2651,10 @@ export default function ClientPortalDashboard() {
                       onTestAgent={(campaignId) => {
                         setClientTestCampaignId(campaignId);
                         setShowClientTestAgent(true);
+                      }}
+                      onTestEmail={(campaignId) => {
+                        setTestEmailCampaignId(campaignId);
+                        setShowEmailTestDialog(true);
                       }}
                       onSelectVoice={(campaignId) => {
                         setClientVoiceCampaignId(campaignId);
@@ -3370,18 +3376,14 @@ export default function ClientPortalDashboard() {
                   <span className="font-semibold">Accounts</span>
                 </h2>
                 <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Manage your company data for campaigns and targeting
+                  Accounts assigned to your campaigns and targeting
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Import CSV
-                  </Button>
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredAccounts;
-                  const headers = 'Company Name,Industry,Website,Phone';
-                  const rows = items.map((i: any) => `${i.companyName},${i.industry},${i.website},${i.phone}`);
+                  const headers = 'Company Name,Industry,Website';
+                  const rows = items.map((i: any) => `${i.name},${i.industry},${i.website}`);
                   const csv = [headers, ...rows].join('\n');
                   const blob = new Blob([csv], { type: 'text/csv' });
                   const url = URL.createObjectURL(blob);
@@ -3390,10 +3392,6 @@ export default function ClientPortalDashboard() {
                 }}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
-                </Button>
-                <Button size="sm" onClick={() => setShowAddAccountDialog(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Account
                 </Button>
               </div>
             </div>
@@ -3413,8 +3411,8 @@ export default function ClientPortalDashboard() {
                 <p className="text-2xl font-semibold">{allIndustries.length}</p>
               </CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">Opted Out</p>
-                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+                <p className="text-sm text-muted-foreground">Campaigns</p>
+                <p className="text-2xl font-semibold">{campaigns?.length ?? 0}</p>
               </CardContent></Card>
             </div>
 
@@ -3467,12 +3465,8 @@ export default function ClientPortalDashboard() {
               <Card className="border-dashed">
                 <CardContent className="py-16 text-center">
                   <Building2 className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                  <h3 className="font-semibold text-lg mb-2">No Accounts Yet</h3>
-                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Create accounts to organize your contacts and target them in campaigns</p>
-                  <div className="flex justify-center gap-3">
-                    <Button onClick={() => setShowAddAccountDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Account</Button>
-                    <Button variant="outline" onClick={() => { setBulkUploadType('accounts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
-                  </div>
+                  <h3 className="font-semibold text-lg mb-2">No Accounts Found</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Accounts will appear here once they are assigned to your campaigns</p>
                 </CardContent>
               </Card>
             ) : crmViewMode === 'table' ? (
@@ -3578,14 +3572,10 @@ export default function ClientPortalDashboard() {
                   <span className="font-semibold">Contacts</span>
                 </h2>
                 <p className="text-slate-500 dark:text-slate-400 font-light">
-                  Manage your contact data for campaigns and targeting
+                  Contacts assigned to your campaigns
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" size="sm" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Import CSV
-                  </Button>
                 <Button variant="outline" size="sm" onClick={() => {
                   const items = filteredContacts;
                   const headers = 'First Name,Last Name,Email,Phone,Company,Title';
@@ -3598,10 +3588,6 @@ export default function ClientPortalDashboard() {
                 }}>
                   <Download className="h-4 w-4 mr-2" />
                   Export
-                </Button>
-                <Button size="sm" onClick={() => setShowAddContactDialog(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Contact
                 </Button>
               </div>
             </div>
@@ -3621,8 +3607,8 @@ export default function ClientPortalDashboard() {
                 <p className="text-2xl font-semibold">{allIndustries.length}</p>
               </CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">Opted Out</p>
-                <p className="text-2xl font-semibold text-orange-600">{crmStatsData?.optedOutContacts ?? 0}</p>
+                <p className="text-sm text-muted-foreground">Campaigns</p>
+                <p className="text-2xl font-semibold">{campaigns?.length ?? 0}</p>
               </CardContent></Card>
             </div>
 
@@ -3675,12 +3661,8 @@ export default function ClientPortalDashboard() {
               <Card className="border-dashed">
                 <CardContent className="py-16 text-center">
                   <Users className="h-14 w-14 mx-auto mb-4 text-muted-foreground/40" />
-                  <h3 className="font-semibold text-lg mb-2">No Contacts Yet</h3>
-                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Add contacts manually or import from a CSV file to get started</p>
-                  <div className="flex justify-center gap-3">
-                    <Button onClick={() => setShowAddContactDialog(true)}><Plus className="h-4 w-4 mr-2" />Add Contact</Button>
-                    <Button variant="outline" onClick={() => { setBulkUploadType('contacts'); setShowBulkUploadDialog(true); }}><Upload className="h-4 w-4 mr-2" />Import CSV</Button>
-                  </div>
+                  <h3 className="font-semibold text-lg mb-2">No Contacts Found</h3>
+                  <p className="text-muted-foreground mb-6 max-w-sm mx-auto">Contacts will appear here once they are assigned to your campaigns</p>
                 </CardContent>
               </Card>
             ) : crmViewMode === 'table' ? (
@@ -4387,126 +4369,182 @@ export default function ClientPortalDashboard() {
               </TabsContent>
 
               <TabsContent value="branding" className="mt-4 space-y-4">
-                {/* Logo Setup */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Upload className="h-5 w-5" />
-                      Company Logo
-                    </CardTitle>
-                    <CardDescription>
-                      Your logo appears on emails, reports, and the client portal
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-start gap-6">
-                      <div className="shrink-0">
-                        <div
-                          className="h-24 w-24 rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden"
-                          style={{ borderColor: businessProfile?.brandColor || '#e2e8f0' }}
-                        >
-                          {businessProfile?.logoUrl ? (
-                            <img
-                              src={businessProfile.logoUrl}
-                              alt="Company logo"
-                              className="h-full w-full object-contain p-1"
-                            />
-                          ) : (
-                            <div className="text-center">
-                              <Building2 className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-                              <span className="text-[10px] text-muted-foreground">No logo</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex-1 space-y-3">
-                        <div className="space-y-2">
-                          <Label>Logo URL</Label>
-                          <Input
-                            placeholder="https://yourcompany.com/logo.png"
-                            value={businessProfile?.logoUrl || ''}
-                            onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, logoUrl: e.target.value }))}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Paste a URL to your company logo (PNG, SVG, or JPG recommended). Square or horizontal logos work best.
-                          </p>
-                        </div>
-                        {businessProfile?.logoUrl && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 h-7"
-                            onClick={() => setBusinessProfile((prev: any) => ({ ...prev, logoUrl: '' }))}
-                          >
-                            <Trash2 className="h-3 w-3 mr-1" />
-                            Remove Logo
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Brand Color */}
+                {/* Brand Identity — Logo + Color Extraction */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Palette className="h-5 w-5" />
-                      Brand Color
+                      Brand Identity
                     </CardTitle>
                     <CardDescription>
-                      Your primary brand color used throughout emails, buttons, and accents
+                      Visual identity and brand colors
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="color"
-                        value={businessProfile?.brandColor || '#3B82F6'}
-                        onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
-                        className="h-12 w-16 rounded-lg border cursor-pointer"
-                      />
-                      <div className="flex-1 space-y-1">
-                        <Label>Hex Color Code</Label>
-                        <Input
-                          value={businessProfile?.brandColor || ''}
-                          onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
-                          placeholder="#3B82F6"
-                          className="font-mono max-w-[200px]"
-                        />
+                  <CardContent className="space-y-6">
+                    {/* Logo Section */}
+                    <div className="space-y-3">
+                      <Label className="text-sm font-medium">Brand Logo</Label>
+                      <div className="flex items-start gap-6">
+                        <div className="shrink-0">
+                          <div
+                            className="h-24 w-24 rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden"
+                            style={{ borderColor: businessProfile?.brandColor || '#e2e8f0' }}
+                          >
+                            {businessProfile?.logoUrl ? (
+                              <img
+                                src={businessProfile.logoUrl}
+                                alt="Company logo"
+                                className="h-full w-full object-contain p-1"
+                              />
+                            ) : (
+                              <div className="text-center">
+                                <Building2 className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+                                <span className="text-[10px] text-muted-foreground">No logo</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-1 space-y-3">
+                          <div className="space-y-2">
+                            <Label>Logo URL</Label>
+                            <Input
+                              placeholder="https://yourcompany.com/logo.png"
+                              value={businessProfile?.logoUrl || ''}
+                              onChange={(e) => {
+                                setBusinessProfile((prev: any) => ({ ...prev, logoUrl: e.target.value }));
+                                setExtractedColors([]);
+                              }}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Paste a URL to your company logo (PNG, SVG, or JPG recommended). Square or horizontal logos work best.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            {businessProfile?.logoUrl && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs h-7"
+                                  onClick={handleExtractColorsFromLogo}
+                                  disabled={isExtractingColors}
+                                >
+                                  {isExtractingColors ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="h-3 w-3 mr-1" />
+                                  )}
+                                  Extract Brand Colors
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 h-7"
+                                  onClick={() => {
+                                    setBusinessProfile((prev: any) => ({ ...prev, logoUrl: '' }));
+                                    setExtractedColors([]);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" />
+                                  Remove Logo
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Quick Presets */}
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Quick Presets</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          { color: '#3B82F6', name: 'Blue' },
-                          { color: '#8B5CF6', name: 'Purple' },
-                          { color: '#EC4899', name: 'Pink' },
-                          { color: '#EF4444', name: 'Red' },
-                          { color: '#F97316', name: 'Orange' },
-                          { color: '#EAB308', name: 'Yellow' },
-                          { color: '#22C55E', name: 'Green' },
-                          { color: '#14B8A6', name: 'Teal' },
-                          { color: '#06B6D4', name: 'Cyan' },
-                          { color: '#6366F1', name: 'Indigo' },
-                          { color: '#1E293B', name: 'Dark' },
-                          { color: '#64748B', name: 'Slate' },
-                        ].map((preset) => (
-                          <button
-                            key={preset.color}
-                            className={`h-8 w-8 rounded-full border-2 transition-all hover:scale-110 ${
-                              businessProfile?.brandColor === preset.color ? 'ring-2 ring-offset-2 ring-primary' : 'border-transparent'
-                            }`}
-                            style={{ backgroundColor: preset.color }}
-                            onClick={() => setBusinessProfile((prev: any) => ({ ...prev, brandColor: preset.color }))}
-                            title={preset.name}
+                    {/* Extracted Colors from Logo */}
+                    {extractedColors.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Colors Extracted from Logo</Label>
+                        <div className="rounded-lg border bg-muted/30 p-3">
+                          <div className="flex flex-wrap gap-2">
+                            {extractedColors.map((color, idx) => (
+                              <button
+                                key={color.hex}
+                                className={`group relative h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 ${
+                                  businessProfile?.brandColor === color.hex ? 'ring-2 ring-offset-2 ring-primary border-primary' : 'border-transparent'
+                                }`}
+                                style={{ backgroundColor: color.hex }}
+                                onClick={() => setBusinessProfile((prev: any) => ({ ...prev, brandColor: color.hex }))}
+                                title={`${color.hex} (${color.percentage}%)`}
+                              >
+                                {idx === 0 && (
+                                  <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-primary flex items-center justify-center">
+                                    <Crown className="h-2 w-2 text-white" />
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-2">
+                            Click any color to set it as your brand color. The dominant color has been auto-selected.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <Separator />
+
+                    {/* Brand Color Picker */}
+                    <div className="space-y-4">
+                      <Label className="text-sm font-medium">Brand Color</Label>
+                      <p className="text-xs text-muted-foreground -mt-3">
+                        Your primary brand color used throughout emails, buttons, and accents
+                      </p>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="color"
+                          value={businessProfile?.brandColor || '#3B82F6'}
+                          onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
+                          className="h-12 w-16 rounded-lg border cursor-pointer"
+                        />
+                        <div className="flex-1 space-y-1">
+                          <Label>Hex Color Code</Label>
+                          <Input
+                            value={businessProfile?.brandColor || ''}
+                            onChange={(e) => setBusinessProfile((prev: any) => ({ ...prev, brandColor: e.target.value }))}
+                            placeholder="#3B82F6"
+                            className="font-mono max-w-[200px]"
                           />
-                        ))}
+                        </div>
+                      </div>
+
+                      {/* Quick Presets */}
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">Quick Presets</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { color: '#3B82F6', name: 'Blue' },
+                            { color: '#8B5CF6', name: 'Purple' },
+                            { color: '#EC4899', name: 'Pink' },
+                            { color: '#EF4444', name: 'Red' },
+                            { color: '#F97316', name: 'Orange' },
+                            { color: '#EAB308', name: 'Yellow' },
+                            { color: '#22C55E', name: 'Green' },
+                            { color: '#14B8A6', name: 'Teal' },
+                            { color: '#06B6D4', name: 'Cyan' },
+                            { color: '#6366F1', name: 'Indigo' },
+                            { color: '#1E293B', name: 'Dark' },
+                            { color: '#64748B', name: 'Slate' },
+                          ].map((preset) => (
+                            <button
+                              key={preset.color}
+                              className={`h-8 w-8 rounded-full border-2 transition-all hover:scale-110 ${
+                                businessProfile?.brandColor === preset.color ? 'ring-2 ring-offset-2 ring-primary' : 'border-transparent'
+                              }`}
+                              style={{ backgroundColor: preset.color }}
+                              onClick={() => setBusinessProfile((prev: any) => ({ ...prev, brandColor: preset.color }))}
+                              title={preset.name}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
+
+                    <Separator />
 
                     {/* Brand Preview */}
                     <div className="space-y-2">
@@ -6013,6 +6051,14 @@ export default function ClientPortalDashboard() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ==================== TEST EMAIL DIALOG ==================== */}
+      <ClientEmailTemplateBuilder
+         open={showEmailTestDialog}
+         onOpenChange={setShowEmailTestDialog}
+         campaignId={testEmailCampaignId || undefined}
+         campaignName={campaigns.find(c => c.id === testEmailCampaignId)?.name || 'Campaign'}
+      />
 
       {/* ==================== VOICE SELECTION DIALOG ==================== */}
       <Dialog open={showClientVoiceSelect} onOpenChange={setShowClientVoiceSelect}>

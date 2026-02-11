@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import {
   Target, ChevronRight, Clock, CheckCircle, Truck,
-  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic, List
+  AlertCircle, Play, Pause, Users, BarChart3, Plus, Bot, Mic, List, Mail
 } from 'lucide-react';
 
 interface Campaign {
@@ -53,6 +53,7 @@ interface CampaignCardProps {
   onTestAgent?: (campaignId: string) => void;
   onSelectVoice?: (campaignId: string) => void;
   onViewQueue?: (campaignId: string) => void;
+  onTestEmail?: (campaignId: string) => void;
 }
 
 const statusConfig: Record<string, {
@@ -128,7 +129,7 @@ const statusSteps = [
   { key: 'completed', label: 'Completed' },
 ];
 
-export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice, onViewQueue }: CampaignCardProps) {
+export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTestAgent, onSelectVoice, onViewQueue, onTestEmail }: CampaignCardProps) {
   const status = campaign.status || 'active';
   const config = statusConfig[status] || statusConfig.active;
   const StatusIcon = config.icon;
@@ -299,7 +300,7 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
             </Button>
           )}
         </div>
-        {(onTestAgent || onSelectVoice) && (
+        {(onTestAgent || onSelectVoice || onTestEmail) && (
           <div className="flex gap-2 w-full">
             {onTestAgent && (
               <Button
@@ -309,7 +310,18 @@ export function CampaignCard({ campaign, onRequestMoreLeads, onViewDetails, onTe
                 onClick={() => onTestAgent(campaign.id)}
               >
                 <Bot className="h-3.5 w-3.5" />
-                Test AI Agent
+                Test Call
+              </Button>
+            )}
+            {onTestEmail && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1 border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+                onClick={() => onTestEmail(campaign.id)}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Test Email
               </Button>
             )}
             {onSelectVoice && (

@@ -73,15 +73,42 @@ router.get('/images/serve/:id', async (req: Request, res: Response) => {
 
     // If storedUrl is a GCS URL, extract the key and stream from GCS
     if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
-      const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
-      const key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
-      console.log(`[ImageServe] Streaming from GCS: key=${key}, mimeType=${image.mimeType}`);
+      // More robust key extraction that doesn't depend on strict environment variable matching
+      let key = image.storedUrl;
+      const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
+      if (gcsMatch && gcsMatch[1]) {
+        key = gcsMatch[1];
+      } else {
+        // Fallback to legacy replacement
+        const bucketName = process.env.GCS_BUCKET || 'demandgentic-storage';
+        key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
+      }
+
+      console.log(`[ImageServe] Streaming from GCS: url=${image.storedUrl}, key=${key}, mimeType=${image.mimeType}`);
 
       res.setHeader('Content-Type', image.mimeType || 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 
-      const stream = await getFromS3(key);
-      stream.pipe(res);
+      try {
+        const stream = await getFromS3(key);
+        stream.on('error', (err: any) => {
+          console.error(`[ImageServe] Stream error for key ${key}:`, err.message);
+          if (!res.headersSent) {
+            // If GCS returns 404, the stream emits an error with code 404 usually
+            if (err.code === 404 || err.message?.includes('No such object')) {
+              res.status(404).json({ error: 'Image not found in storage' });
+            } else {
+              res.status(500).json({ error: 'Storage stream error' });
+            }
+          }
+        });
+        stream.pipe(res);
+      } catch (err: any) {
+        console.error('[ImageServe] Failed to create stream:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to access image storage' });
+        }
+      }
     } else if (image.storedUrl) {
       console.log(`[ImageServe] Redirecting to: ${image.storedUrl}`);
       res.redirect(image.storedUrl);
