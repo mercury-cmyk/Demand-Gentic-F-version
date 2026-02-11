@@ -54,6 +54,14 @@ const createWorkOrderSchema = z.object({
   useOrgIntelligence: z.boolean().optional(),
   submitNow: z.boolean().default(true),
 
+  // File attachments
+  attachments: z.array(z.object({
+    name: z.string(),
+    size: z.number(),
+    type: z.string(),
+    storageKey: z.string(),
+  })).optional().default([]),
+
   // Event linkage fields (for Argyle events integration)
   eventSource: z.string().optional().nullable(),          // e.g. "argyle_event"
   externalEventId: z.string().optional().nullable(),      // event DB id
@@ -279,6 +287,76 @@ router.post('/client', async (req: Request, res: Response) => {
 
     if (!workOrder?.id) {
       throw new Error('Failed to create work order — no ID returned');
+    }
+
+    // ── Insert file attachments if provided ─────────────────────────────────
+    if (parsed.attachments && parsed.attachments.length > 0) {
+      try {
+        // Create attachments table if it doesn't exist (for development)
+        await db.execute(sql`
+          CREATE TABLE IF NOT EXISTS work_order_attachments (
+              id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+              work_order_id VARCHAR NOT NULL,
+              filename TEXT NOT NULL,
+              file_size BIGINT NOT NULL,
+              mime_type TEXT NOT NULL,
+              storage_key TEXT NOT NULL,
+              uploaded_by VARCHAR,
+              uploaded_at TIMESTAMP DEFAULT NOW(),
+              created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+              updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+          )
+        `);
+
+        // Insert each attachment
+        for (const attachment of parsed.attachments) {
+          await db.execute(sql`
+            INSERT INTO work_order_attachments (
+              work_order_id, filename, file_size, mime_type, storage_key, uploaded_by
+            ) VALUES (
+              ${workOrder.id}, ${attachment.name}, ${attachment.size}, 
+              ${attachment.type}, ${attachment.storageKey}, ${clientUserId || null}
+            )
+          `);
+        }
+
+        console.log(`[WorkOrders] Inserted ${parsed.attachments.length} attachments for order ${orderNumber}`);
+      } catch (attachmentError: any) {
+        console.error('[WorkOrders] Failed to insert attachments (non-blocking):', attachmentError);
+      }
+    }
+
+    // ── Create corresponding client project for admin visibility ─────────────
+    try {
+      // Create a clientProject record so this work order appears in Admin Project Requests
+      const projectResult = await db.execute(sql`
+        INSERT INTO client_projects (
+          client_account_id, name, description, status, requested_lead_count,
+          start_date, end_date, 
+          created_by, created_at
+        ) VALUES (
+          ${clientAccountId}, ${parsed.title}, ${parsed.description || ''},
+          'pending', ${parsed.targetLeadCount || null},
+          ${parsed.requestedStartDate || null}, ${parsed.requestedEndDate || null},
+          ${clientUserId || null}, NOW()
+        ) RETURNING id
+      `);
+
+      const projectRows = (projectResult as any).rows || projectResult;
+      const projectId = Array.isArray(projectRows) ? projectRows[0]?.id : (projectRows as any)?.id;
+
+      if (projectId) {
+        // Link the work order to the project
+        await db.execute(sql`
+          UPDATE work_orders 
+          SET project_id = ${projectId}
+          WHERE id = ${workOrder.id}
+        `);
+        
+        console.log(`[WorkOrders] Created bridge project ${projectId} for work order ${orderNumber}`);
+      }
+    } catch (bridgeError: any) {
+      console.error('[WorkOrders] Failed to create admin bridge project (non-blocking):', bridgeError.message);
     }
 
     // ── If event-based: create/update workOrderDraft for linkage ─────────────

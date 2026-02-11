@@ -157,6 +157,39 @@ export async function submitDraftAsWorkOrder(
 
   console.log(`[WorkOrderAdapter] Draft ${draftId} submitted as work order ${orderNumber}`);
 
+  // Create corresponding client project for admin visibility (bridge)
+  try {
+    const projectResult = await db.execute(sql`
+      INSERT INTO client_projects (
+        client_account_id, name, description, status, requested_lead_count,
+        start_date, end_date, 
+        created_by, created_at
+      ) VALUES (
+        ${clientAccountId}, ${draftFields.title || 'Argyle Event Campaign'}, 
+        ${draftFields.description || draftFields.context || ''}, 
+        'pending', ${draft.leadCount || null},
+        NULL, NULL,
+        ${clientUserId || null}, NOW()
+      ) RETURNING id
+    `);
+
+    const projectRows = (projectResult as any).rows || projectResult;
+    const projectId = Array.isArray(projectRows) ? projectRows[0]?.id : (projectRows as any)?.id;
+
+    if (projectId) {
+      // Link the work order to the project
+      await db.execute(sql`
+        UPDATE work_orders 
+        SET project_id = ${projectId}
+        WHERE id = ${workOrderId}
+      `);
+      
+      console.log(`[WorkOrderAdapter] Created bridge project ${projectId} for Argyle work order ${orderNumber}`);
+    }
+  } catch (bridgeError: any) {
+    console.error('[WorkOrderAdapter] Failed to create admin bridge project (non-blocking):', bridgeError.message);
+  }
+
   return {
     workOrderId: workOrderId,
     orderNumber,

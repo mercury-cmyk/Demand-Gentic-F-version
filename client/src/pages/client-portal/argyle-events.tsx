@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -27,16 +27,14 @@ import {
   MapPin,
   ExternalLink,
   FileEdit,
-  Send,
-  Plus,
-  Clock,
-  Users,
   Target,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
   Loader2,
   Tag,
+  Users,
+  Send,
 } from 'lucide-react';
 import { ClientPortalLayout } from '@/components/client-portal/layout/client-portal-layout';
 import { WorkOrderForm } from '@/components/client-portal/work-orders/work-order-form';
@@ -64,30 +62,16 @@ interface EventWithDraft {
   draftUpdatedAt: string | null;
 }
 
+
+
 interface DraftDetail {
+  event: EventWithDraft;
   draft: {
     id: string;
     status: string;
-    sourceFields: Record<string, any>;
-    draftFields: Record<string, any>;
-    editedFields: string[];
     leadCount: number | null;
-    workOrderId: string | null;
-    submittedAt: string | null;
-    createdAt: string;
-    updatedAt: string;
-  };
-  event: {
-    id: string;
-    externalId: string;
-    sourceUrl: string;
-    title: string;
-    community: string | null;
-    eventType: string | null;
-    location: string | null;
-    startAtIso: string | null;
-    startAtHuman: string | null;
-    lastSyncedAt: string;
+    draftFields: Record<string, any>;
+    sourceFields: Record<string, any> | null;
   } | null;
 }
 
@@ -116,8 +100,6 @@ export default function ArgyleEventsPage() {
 export function ArgyleEventsContent() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
-  const [showDraftDialog, setShowDraftDialog] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
 
   // Shared Direct Agentic Order modal (same form as Work Orders tab)
@@ -192,7 +174,11 @@ export function ArgyleEventsContent() {
     }
   }, [featureStatus, eventsFetched, eventsLoading, eventsData, hasSynced]);
 
-  // Fetch draft detail
+  // Draft editor state
+  const [showDraftDialog, setShowDraftDialog] = useState(false);
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+
+  // Fetch draft detail when a draft is selected
   const { data: draftData, isLoading: draftLoading } = useQuery<DraftDetail>({
     queryKey: ['argyle-draft', selectedDraftId],
     queryFn: async () => {
@@ -202,47 +188,36 @@ export function ArgyleEventsContent() {
       if (!res.ok) throw new Error('Failed to fetch draft');
       return res.json();
     },
-    enabled: !!selectedDraftId && showDraftDialog,
+    enabled: !!selectedDraftId,
   });
 
   // Create draft mutation
   const createDraftMutation = useMutation({
     mutationFn: async (eventId: string) => {
-      const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/create-draft`, {
+      const res = await fetch(`/api/client-portal/argyle-events/events/${eventId}/draft`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
       });
       if (!res.ok) throw new Error('Failed to create draft');
       return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      setSelectedDraftId(data.draftId);
+      setSelectedDraftId(data.draftId || data.id);
       setShowDraftDialog(true);
-      toast({
-        title: data.alreadyExists ? 'Draft already exists' : 'Draft created',
-        description: data.alreadyExists
-          ? 'Opening your existing draft.'
-          : 'Campaign draft created from event. Set your lead count to submit.',
-      });
+      toast({ title: 'Draft created', description: 'Campaign draft initialized.' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Failed to create draft', description: error.message, variant: 'destructive' });
     },
   });
 
   // Update draft mutation
   const updateDraftMutation = useMutation({
-    mutationFn: async ({ id, draftFields, leadCount }: { id: string; draftFields?: Record<string, any>; leadCount?: number }) => {
+    mutationFn: async ({ id, draftFields, leadCount }: { id: string; draftFields: Record<string, any>; leadCount: number }) => {
       const res = await fetch(`/api/client-portal/argyle-events/drafts/${id}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ draftFields, leadCount }),
       });
       if (!res.ok) throw new Error('Failed to update draft');
@@ -250,40 +225,64 @@ export function ArgyleEventsContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['argyle-draft', selectedDraftId] });
-      queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
-      toast({ title: 'Draft saved', description: 'Your changes have been saved.' });
+      toast({ title: 'Draft saved' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
     },
   });
 
-  // Submit draft mutation
+  // Submit draft as work order
   const submitDraftMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/client-portal/argyle-events/drafts/${id}/submit`, {
+    mutationFn: async (draftId: string) => {
+      const res = await fetch(`/api/client-portal/argyle-events/drafts/${draftId}/submit`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getToken()}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to submit');
-      }
+      if (!res.ok) throw new Error('Failed to submit');
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['argyle-events'] });
       queryClient.invalidateQueries({ queryKey: ['argyle-draft', selectedDraftId] });
-      setShowDraftDialog(false);
-      toast({
-        title: 'Order submitted!',
-        description: `Work order ${data.orderNumber} has been created. Our team will review and begin work.`,
-      });
+      toast({ title: 'Campaign ordered', description: 'Your work order has been submitted.' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Submission failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Submit failed', description: error.message, variant: 'destructive' });
     },
   });
+
+
+
+
+  // Use unified work order form for all event interactions
+  const handleEventAction = (event: any, mode: 'create' | 'edit' = 'create') => {
+    const eventContext = {
+      externalEventId: event.id,
+      eventTitle: event.title,
+      eventDate: event.startAtHuman || event.startAtIso || '',
+      eventType: event.eventType || 'event',
+      eventLocation: event.location || '',
+      eventCommunity: event.community || '',
+      eventSourceUrl: event.sourceUrl || '',
+      leadCount: event.draftLeadCount || undefined,
+    };
+
+    const initialValues = mode === 'edit' && event.draftId ? {
+      title: event.title,
+      description: `Generate qualified leads for ${event.title}`,
+      targetLeadCount: event.draftLeadCount || undefined,
+      targetRegions: event.location ? [event.location] : [],
+      eventSource: 'argyle_event',
+      externalEventId: event.id,
+      eventSourceUrl: event.sourceUrl,
+    } : undefined;
+
+    openModal({
+      eventContext,
+      initialValues,
+    });
+  };
 
   if (featureStatus && !featureStatus.enabled) {
     return (
@@ -421,7 +420,7 @@ export function ArgyleEventsContent() {
 
                     <div className="mt-6 pt-6 border-t flex items-center justify-between gap-3">
                        {event.draftStatus === 'not_created' ? (
-                          <Button 
+                          <Button
                             className="w-full bg-primary/5 text-primary hover:bg-primary/10 border-primary/20 shadow-none hover:shadow-sm"
                             variant="outline"
                             onClick={() => createDraftMutation.mutate(event.id)}
@@ -430,7 +429,7 @@ export function ArgyleEventsContent() {
                             {createDraftMutation.isPending ? (
                               <Loader2 className="h-4 w-4 animate-spin mr-2" />
                             ) : (
-                              <Plus className="h-4 w-4 mr-2" />
+                              <Target className="h-4 w-4 mr-2" />
                             )}
                             Initialize Campaign
                           </Button>
@@ -440,7 +439,7 @@ export function ArgyleEventsContent() {
                              Campaign Ordered
                           </Button>
                        ) : (
-                          <Button 
+                          <Button
                             className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md hover:shadow-lg transition-all border-0"
                             onClick={() => {
                               setSelectedDraftId(event.draftId);

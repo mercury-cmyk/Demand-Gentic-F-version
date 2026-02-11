@@ -30,14 +30,23 @@ interface LogEntry {
 }
 
 export class LogStreamingService {
-  private pubsub: PubSub;
-  private logging: Logging;
+  private pubsub: PubSub | null = null;
+  private logging: Logging | null = null;
   private wss: WebSocketServer;
   private consoleInterceptActive = false;
 
   constructor(server: any) {
-    this.pubsub = new PubSub({ projectId: PROJECT_ID });
-    this.logging = new Logging({ projectId: PROJECT_ID });
+    try {
+      // Only initialize GCP services if credentials are available
+      this.pubsub = new PubSub({ projectId: PROJECT_ID });
+      this.logging = new Logging({ projectId: PROJECT_ID });
+      console.log('[LogStreaming] GCP services initialized');
+    } catch (error) {
+      console.warn('[LogStreaming] GCP services not available, using console-only mode:', error.message);
+      this.pubsub = null;
+      this.logging = null;
+    }
+    
     // Use noServer: true to avoid conflict with manual upgrade handling in index.ts
     this.wss = new WebSocketServer({ noServer: true });
 
@@ -52,6 +61,11 @@ export class LogStreamingService {
    */
   async initialize() {
     try {
+      if (!this.pubsub || !this.logging) {
+        console.log('[LogStreaming] GCP services not available, skipping Pub/Sub initialization');
+        return;
+      }
+      
       await this.createTopic();
       await this.createSink();
       await this.createSubscription();
@@ -65,6 +79,7 @@ export class LogStreamingService {
    * Creates the Pub/Sub topic if it doesn't already exist.
    */
   private async createTopic() {
+    if (!this.pubsub) return;
     const [topic] = await this.pubsub.topic(TOPIC_NAME).get({ autoCreate: true });
     console.log(`Topic ${topic.name} created.`);
   }
@@ -74,6 +89,7 @@ export class LogStreamingService {
    * The sink exports logs to the Pub/Sub topic.
    */
   private async createSink() {
+    if (!this.logging) return;
     const sink = this.logging.sink(SINK_NAME);
 
     try {
@@ -100,6 +116,7 @@ export class LogStreamingService {
    * Creates the Pub/Sub subscription if it doesn't already exist.
    */
   private async createSubscription() {
+    if (!this.pubsub) return;
     const subscription = this.pubsub.topic(TOPIC_NAME).subscription(SUBSCRIPTION_NAME);
     const [exists] = await subscription.exists();
 
@@ -116,6 +133,7 @@ export class LogStreamingService {
    * Listens for messages on the Pub/Sub subscription and broadcasts them to all connected WebSocket clients.
    */
   private listenForMessages() {
+    if (!this.pubsub) return;
     const subscription = this.pubsub.subscription(SUBSCRIPTION_NAME);
 
     subscription.on('message', message => {

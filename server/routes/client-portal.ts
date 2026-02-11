@@ -29,6 +29,7 @@ import {
   lists,
   users,
   clientProjectCampaigns,
+  campaignIntakeRequests,
 } from '@shared/schema';
 import { requireAuth, requireRole } from '../auth';
 import { z } from 'zod';
@@ -560,8 +561,8 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
     const clientAccountId = req.clientUser!.clientAccountId;
 
     // Verify client has access to this campaign
-    // Check both UUID string match AND numeric ID for regularCampaignId
-    const [accessCheck] = await db
+    // Check clientCampaignAccess, work orders, AND intake requests
+    const [directAccess] = await db
       .select()
       .from(clientCampaignAccess)
       .where(
@@ -575,9 +576,42 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
       )
       .limit(1);
 
-    console.log('[CLIENT PORTAL] Access check result:', accessCheck ? 'GRANTED' : 'DENIED');
+    // Also check work orders (campaigns linked via work orders)
+    let workOrderAccess = null;
+    if (!directAccess) {
+      const [wo] = await db
+        .select({ id: workOrders.id })
+        .from(workOrders)
+        .where(
+          and(
+            eq(workOrders.clientAccountId, clientAccountId),
+            eq(workOrders.campaignId, campaignId)
+          )
+        )
+        .limit(1);
+      workOrderAccess = wo;
+    }
 
-    if (!accessCheck) {
+    // Also check intake requests
+    let intakeAccess = null;
+    if (!directAccess && !workOrderAccess) {
+      const [intake] = await db
+        .select({ id: campaignIntakeRequests.id })
+        .from(campaignIntakeRequests)
+        .where(
+          and(
+            eq(campaignIntakeRequests.clientAccountId, clientAccountId),
+            eq(campaignIntakeRequests.campaignId, campaignId)
+          )
+        )
+        .limit(1);
+      intakeAccess = intake;
+    }
+
+    const hasAccess = directAccess || workOrderAccess || intakeAccess;
+    console.log('[CLIENT PORTAL] Access check result:', hasAccess ? 'GRANTED' : 'DENIED');
+
+    if (!hasAccess) {
       console.warn('[CLIENT PORTAL] 403 - No access to campaign', campaignId, 'for client', clientAccountId);
       return res.status(403).json({ message: "You don't have access to this campaign" });
     }
@@ -1971,11 +2005,15 @@ router.post('/admin/clients', requireAuth, requireRole('admin', 'campaign_manage
 
 router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
   try {
+    console.log('[CLIENT PORTAL ADMIN] GET /admin/clients/:id called with id:', req.params.id);
+    
     const [client] = await db
       .select()
       .from(clientAccounts)
       .where(eq(clientAccounts.id, req.params.id))
       .limit(1);
+
+    console.log('[CLIENT PORTAL ADMIN] Client found:', client ? client.companyName : 'NOT FOUND');
 
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
