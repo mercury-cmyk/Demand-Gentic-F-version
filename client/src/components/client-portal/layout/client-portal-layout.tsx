@@ -122,7 +122,7 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Leads', href: '/client-portal/dashboard?tab=leads', icon: UserCheck },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
-      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
+      // Email Campaigns tab removed - email testing now available directly on campaign cards
     ],
   },
   {

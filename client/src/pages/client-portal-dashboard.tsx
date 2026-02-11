@@ -68,6 +68,7 @@ import { UkefTranscriptQaContent } from '@/pages/client-portal/ukef-transcript-q
 import { ClientEmailTemplateBuilder } from '@/components/client-portal/email/client-email-template-builder';
 import { ActivityTimeline, type ActivityItem } from '@/components/patterns/activity-timeline';
 import { CampaignTestPanel } from '@/components/campaigns/campaign-test-panel';
+import { AiEmailTestDialog } from '@/components/client-portal/email/ai-email-test-dialog';
 import { AccountIntelligenceView } from '@/components/ai-studio/account-intelligence/account-intelligence-view';
 import { ICPPositioningTab } from '@/components/ai-studio/org-intelligence/tabs/icp-positioning';
 import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/messaging-proof';
@@ -504,6 +505,10 @@ export default function ClientPortalDashboard() {
   const [clientVoiceCampaignId, setClientVoiceCampaignId] = useState<string>('');
   const [clientSelectedVoice, setClientSelectedVoice] = useState<string>('Kore');
   const [clientSelectedProvider, setClientSelectedProvider] = useState<string>('google');
+
+  // AI Email Test state (client-facing)
+  const [showAiEmailTest, setShowAiEmailTest] = useState(false);
+  const [aiEmailTestCampaignId, setAiEmailTestCampaignId] = useState<string>('');
 
   // Testing panels state
   const [showTestCallPanel, setShowTestCallPanel] = useState(false);
@@ -2651,6 +2656,10 @@ export default function ClientPortalDashboard() {
                       onTestAgent={(campaignId) => {
                         setClientTestCampaignId(campaignId);
                         setShowClientTestAgent(true);
+                      }}
+                      onTestEmail={(campaignId) => {
+                        setAiEmailTestCampaignId(campaignId);
+                        setShowAiEmailTest(true);
                       }}
                       onSelectVoice={(campaignId) => {
                         setClientVoiceCampaignId(campaignId);
@@ -6005,6 +6014,14 @@ export default function ClientPortalDashboard() {
         </DialogContent>
       </Dialog>
 
+      {/* ==================== AI EMAIL TEST DIALOG ==================== */}
+      <AiEmailTestDialog
+        open={showAiEmailTest}
+        onOpenChange={setShowAiEmailTest}
+        campaignId={aiEmailTestCampaignId}
+        campaignName={campaigns.find(c => c.id === aiEmailTestCampaignId)?.name || 'Campaign'}
+      />
+
       {/* ==================== VOICE SELECTION DIALOG ==================== */}
       <Dialog open={showClientVoiceSelect} onOpenChange={setShowClientVoiceSelect}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -6172,48 +6189,70 @@ export default function ClientPortalDashboard() {
 }
 
 function CampaignQueueDialog({ open, onOpenChange, campaignId }: { open: boolean; onOpenChange: (open: boolean) => void; campaignId: string | null }) {
-  const { data: queue = [], isLoading } = useQuery({
+  const { data: queueData, isLoading, error } = useQuery({
      queryKey: ['campaign-queue', campaignId],
      queryFn: async () => {
-         if (!campaignId) return [];
+         if (!campaignId) return { total: 0, items: [] };
          const token = localStorage.getItem('clientPortalToken');
          const res = await fetch(`/api/client-portal/campaigns/${campaignId}/queue`, {
             headers: { Authorization: `Bearer ${token}` },
          });
-         if (!res.ok) return [];
+         if (!res.ok) {
+           const err = await res.json().catch(() => ({}));
+           throw new Error(err.message || 'Failed to fetch queue');
+         }
          return res.json();
      },
      enabled: !!campaignId && open
   });
 
+  const queue = queueData?.items || [];
+  const totalCount = queueData?.total || 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Campaign Queue (Preview)</DialogTitle>
           <DialogDescription>
-             Next 50 contacts in queue
+             {totalCount > 0 ? (
+               <>Showing {Math.min(queue.length, 50)} of {totalCount} contacts in queue</>
+             ) : (
+               <>Next 50 contacts in queue</>
+             )}
           </DialogDescription>
         </DialogHeader>
-        <div className="h-[300px] border rounded-md overflow-hidden">
+        <div className="h-[350px] border rounded-md overflow-hidden">
            {isLoading ? (
              <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin h-6 w-6" /></div>
+           ) : error ? (
+             <div className="flex flex-col justify-center items-center h-full gap-2 text-muted-foreground">
+               <AlertCircle className="h-8 w-8" />
+               <p className="text-sm">{(error as Error).message || 'Failed to load queue'}</p>
+             </div>
            ) : (
              <ScrollArea className="h-full">
              <Table>
                 <TableHeader>
                    <TableRow>
+                      <TableHead>Contact</TableHead>
                       <TableHead>Phone</TableHead>
                       <TableHead>Status</TableHead>
                    </TableRow>
                 </TableHeader>
                 <TableBody>
                    {queue.length === 0 ? (
-                      <TableRow><TableCell colSpan={2} className="text-center">Queue is empty</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">Queue is empty</TableCell></TableRow>
                    ) : (
                       queue.map((item: any) => (
                         <TableRow key={item.id}>
-                           <TableCell>{item.phoneNumber}</TableCell>
+                           <TableCell>
+                             <div className="flex flex-col">
+                               <span className="font-medium text-sm">{item.contactName || 'Unknown'}</span>
+                               {item.companyName && <span className="text-xs text-muted-foreground">{item.companyName}</span>}
+                             </div>
+                           </TableCell>
+                           <TableCell className="font-mono text-sm">{item.phoneNumber || '-'}</TableCell>
                            <TableCell><Badge variant="outline">{item.status}</Badge></TableCell>
                         </TableRow>
                       ))

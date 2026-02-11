@@ -50,6 +50,7 @@ import {
   generateClientEmailSequence,
   analyzeClientEmail,
   type GeneratedEmailContent,
+  VARIANT_SPECS,
 } from "../lib/deepseek-client-email-service";
 import { buildBrandedEmailHtml, type BrandPaletteKey } from "../../client/src/components/email-builder/ai-email-template";
 
@@ -103,6 +104,139 @@ function buildClientPortalBodyHtml(args: { copy: GeneratedEmailContent }) {
     ${ctaHtml}
     ${closingLine ? `<p>${escapeHtml(closingLine)}</p>` : ""}
   `.trim();
+}
+
+// Build different HTML layouts based on variant style
+function buildVariantHtml(args: {
+  copy: GeneratedEmailContent;
+  style: 'plain' | 'branded' | 'newsletter';
+  brandPalette?: BrandPaletteKey;
+  companyName?: string;
+  companyAddress?: string;
+}): string {
+  const { copy, style, brandPalette, companyName, companyAddress } = args;
+
+  switch (style) {
+    case 'plain':
+      return buildPlainTextHtml(copy, companyName);
+    case 'newsletter':
+      return buildNewsletterHtml(copy, companyName, companyAddress);
+    case 'branded':
+    default:
+      return buildBrandedEmailHtml({
+        copy,
+        brandPalette: brandPalette || 'indigo',
+        companyName,
+        companyAddress,
+        ctaUrl: "{{campaign.landing_page}}",
+        includeFooter: true,
+      });
+  }
+}
+
+// Plain text style email (minimal, conversational)
+function buildPlainTextHtml(copy: GeneratedEmailContent, companyName?: string): string {
+  const intro = escapeHtml(copy.intro || '').replace(/\n/g, '<br/>');
+  const bullets = (copy.valueBullets || []).filter(Boolean);
+  const bulletList = bullets.length ? `
+    <ul style="margin: 16px 0; padding-left: 20px;">
+      ${bullets.map(b => `<li style="margin-bottom: 8px;">${escapeHtml(b)}</li>`).join('')}
+    </ul>
+  ` : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(copy.subject || 'Email')}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Georgia, 'Times New Roman', serif; background-color: #ffffff;">
+  <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px; color: #333333; line-height: 1.6;">
+    <p style="margin-bottom: 20px;">Hi {{first_name}},</p>
+    
+    <p style="margin-bottom: 16px;">${intro}</p>
+    
+    ${bulletList}
+    
+    <p style="margin-top: 24px;">
+      <a href="{{campaign.landing_page}}" style="color: #0066cc; text-decoration: underline;">${escapeHtml(copy.ctaLabel || 'Learn more')}</a>
+    </p>
+    
+    <p style="margin-top: 24px;">${escapeHtml(copy.closingLine || 'Best regards')}</p>
+    
+    <p style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #eeeeee; font-size: 12px; color: #888888;">
+      ${companyName ? escapeHtml(companyName) + '<br/>' : ''}
+      <a href="{{unsubscribe_url}}" style="color: #888888;">Unsubscribe</a>
+    </p>
+  </div>
+</body>
+</html>`;
+}
+
+// Newsletter style email (sections, structured)
+function buildNewsletterHtml(copy: GeneratedEmailContent, companyName?: string, companyAddress?: string): string {
+  const intro = escapeHtml(copy.intro || '').replace(/\n/g, '<br/>');
+  const bullets = (copy.valueBullets || []).filter(Boolean);
+  
+  const sectionsHtml = bullets.map((bullet, idx) => `
+    <div style="margin-bottom: 24px; padding: 20px; background: ${idx % 2 === 0 ? '#f8fafc' : '#ffffff'}; border-radius: 8px;">
+      <div style="font-size: 13px; color: #6366f1; font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Section ${idx + 1}</div>
+      <div style="color: #1e293b; font-size: 15px;">${escapeHtml(bullet)}</div>
+    </div>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(copy.subject || 'Email')}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f1f5f9;">
+  <div style="max-width: 640px; margin: 0 auto; background: #ffffff;">
+    <!-- Header -->
+    <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 32px 24px; text-align: center;">
+      ${companyName ? `<div style="font-size: 12px; color: rgba(255,255,255,0.8); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px;">${escapeHtml(companyName)} DIGEST</div>` : ''}
+      <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700;">${escapeHtml(copy.heroTitle || 'This Week\'s Insights')}</h1>
+      <p style="margin: 12px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">${escapeHtml(copy.heroSubtitle || '')}</p>
+    </div>
+    
+    <!-- Intro -->
+    <div style="padding: 32px 24px 16px;">
+      <p style="margin: 0; color: #475569; font-size: 15px; line-height: 1.7;">Hi {{first_name}},</p>
+      <p style="margin: 16px 0 0; color: #475569; font-size: 15px; line-height: 1.7;">${intro}</p>
+    </div>
+    
+    <!-- Content Sections -->
+    <div style="padding: 0 24px;">
+      ${sectionsHtml}
+    </div>
+    
+    <!-- CTA -->
+    <div style="padding: 24px; text-align: center;">
+      <a href="{{campaign.landing_page}}" style="display: inline-block; padding: 14px 32px; background: #4f46e5; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px;">
+        ${escapeHtml(copy.ctaLabel || 'Read Full Analysis')}
+      </a>
+    </div>
+    
+    <!-- Closing -->
+    <div style="padding: 16px 24px 32px; text-align: center;">
+      <p style="margin: 0; color: #64748b; font-size: 14px;">${escapeHtml(copy.closingLine || 'See you next week!')}</p>
+    </div>
+    
+    <!-- Footer -->
+    <div style="background: #0f172a; padding: 24px; text-align: center;">
+      ${companyName ? `<div style="color: #e2e8f0; font-size: 14px; font-weight: 600; margin-bottom: 8px;">${escapeHtml(companyName)}</div>` : ''}
+      ${companyAddress ? `<div style="color: #94a3b8; font-size: 12px; margin-bottom: 16px;">${escapeHtml(companyAddress)}</div>` : ''}
+      <div style="font-size: 12px;">
+        <a href="{{unsubscribe_url}}" style="color: #818cf8; text-decoration: none; margin: 0 8px;">Unsubscribe</a>
+        <a href="{{preferences_url}}" style="color: #818cf8; text-decoration: none; margin: 0 8px;">Preferences</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 // ==================== MIDDLEWARE ====================
@@ -653,21 +787,24 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
 
     const emails = [];
     for (let i = 0; i < numVariants; i++) {
+      // Use different variant specs for each variant (plain, branded, newsletter)
+      const variantSpec = VARIANT_SPECS[i % VARIANT_SPECS.length];
+      
       const content = await generateClientEmailContent({
         campaignId,
         clientAccountId: clientUser.clientAccountId,
         emailType: emailType || 'cold_outreach',
         tone: tone || 'professional',
+        variantSpec,
       });
 
-      // Build HTML using the branded template (same as admin templates)
-      const html = buildBrandedEmailHtml({
+      // Build HTML based on variant style
+      const html = buildVariantHtml({
         copy: content,
+        style: variantSpec.style,
         brandPalette: palette,
         companyName,
         companyAddress,
-        ctaUrl: "{{campaign.landing_page}}",
-        includeFooter: true,
       });
 
       // Client Email Template Builder consumes a body fragment (no wrapper/footer).
@@ -678,16 +815,56 @@ router.post("/emails/generate", async (req: Request, res: Response) => {
         html,
         bodyHtml,
         body: content.intro, // For backwards compatibility with simple body field
+        variant: variantSpec.label,
+        variantStyle: variantSpec.style,
       });
     }
 
     console.log("[Client Agentic] Generated", emails.length, "emails with DeepSeek");
 
-    res.json({ success: true, data: emails });
+    // Return emails in the shape expected by the client (emails: [...])
+    res.json({ success: true, emails });
   } catch (error: any) {
     console.error("[Client Agentic] Email generation error:", error);
     console.error("[Client Agentic] Error stack:", error.stack);
-    res.status(500).json({ success: false, message: error.message || "Failed to generate emails" });
+    
+    // Return fallback templates on AI failure so client can still proceed
+    if (error.message?.includes('Campaign not found') || error.message?.includes('access denied')) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Campaign not found or access denied. Please check your campaign selection.",
+        emails: [] // Return empty array so frontend doesn't break
+      });
+    }
+    
+    // For other errors, try returning a basic fallback template
+    const fallbackEmail = {
+      subject: "Follow-up on our conversation",
+      preheader: "Quick follow-up regarding your business needs",
+      intro: "I wanted to reach out and follow up on our previous conversation.",
+      valueProposition: "We help businesses like yours streamline operations and improve efficiency.",
+      cta: "Would you have 15 minutes this week for a quick call?",
+      closing: "Looking forward to hearing from you.",
+      html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <p>I wanted to reach out and follow up on our previous conversation.</p>
+        <p>We help businesses like yours streamline operations and improve efficiency.</p>
+        <p><strong>Would you have 15 minutes this week for a quick call?</strong></p>
+        <p>Looking forward to hearing from you.</p>
+      </div>`,
+      bodyHtml: `<p>I wanted to reach out and follow up on our previous conversation.</p>
+        <p>We help businesses like yours streamline operations and improve efficiency.</p>
+        <p><strong>Would you have 15 minutes this week for a quick call?</strong></p>
+        <p>Looking forward to hearing from you.</p>`,
+      body: "I wanted to reach out and follow up on our previous conversation."
+    };
+    
+    console.warn("[Client Agentic] Returning fallback email due to error:", error.message);
+    res.json({ 
+      success: true, 
+      emails: [fallbackEmail],
+      fallback: true,
+      warning: "AI generation encountered an issue. Using template fallback."
+    });
   }
 });
 
@@ -799,6 +976,7 @@ router.post("/emails/analyze", async (req: Request, res: Response) => {
  */
 router.post("/emails/send-test", async (req: Request, res: Response) => {
   try {
+    const clientUser = (req as any).clientUser;
     const { to, subject, html, preheader, campaignName, campaignId } = req.body;
 
     if (!to || !subject || !html) {
@@ -817,8 +995,30 @@ router.post("/emails/send-test", async (req: Request, res: Response) => {
       });
     }
 
+    // Check if Mailgun is configured
+    const mailgunApiKey = process.env.MAILGUN_API_KEY;
+    const mailgunDomain = process.env.MAILGUN_DOMAIN;
+
+    if (!mailgunApiKey || !mailgunDomain) {
+      console.warn("[Client Portal] Mailgun not configured for test email");
+      return res.status(503).json({
+        success: false,
+        message: "Email service not configured. Contact support to enable email delivery.",
+        details: {
+          provider: "mailgun",
+          configured: false,
+          sandbox: false,
+        }
+      });
+    }
+
+    // Check if sandbox mode (domain starts with sandbox.)
+    const isSandbox = mailgunDomain.startsWith('sandbox.');
+
     // Import and use the bulk email service
     const { sendTestEmail } = await import("../services/bulk-email-service");
+    
+    console.log(`[Client Portal] Sending test email to ${to}, sandbox=${isSandbox}`);
     
     const result = await sendTestEmail({
       to: [to],
@@ -826,22 +1026,50 @@ router.post("/emails/send-test", async (req: Request, res: Response) => {
       html,
     });
 
-    if (result.success) {
-      console.log(`[Client Portal] Test email sent to ${to} for campaign: ${campaignName || campaignId || 'unknown'}`);
+    if (result.success && result.messageId) {
+      console.log(`[Client Portal] Test email delivered to ${to}, messageId: ${result.messageId}`);
+      
+      // Return detailed success response
       res.json({
         success: true,
-        message: `Test email sent to ${to}`,
-        sent: result.sent,
+        message: isSandbox 
+          ? `Test email queued (sandbox mode - verify recipient in Mailgun dashboard)`
+          : `Test email sent to ${to}`,
+        details: {
+          messageId: result.messageId,
+          provider: "mailgun",
+          sandbox: isSandbox,
+          recipientCount: result.sent,
+          timestamp: new Date().toISOString(),
+        },
+        // Warning for sandbox mode
+        ...(isSandbox && {
+          warning: "Sandbox mode: Email will only be delivered to verified recipients in your Mailgun account. Add the recipient email to your Mailgun authorized recipients list."
+        })
       });
     } else {
-      res.status(500).json({
+      console.error(`[Client Portal] Test email failed for ${to}:`, result.error);
+      res.status(502).json({
         success: false,
-        message: result.error || "Failed to send test email",
+        message: result.error || "Email delivery failed - provider rejected the request",
+        details: {
+          provider: "mailgun",
+          sandbox: isSandbox,
+          error: result.error,
+          sent: result.sent,
+        }
       });
     }
   } catch (error: any) {
     console.error("[Client Agentic] Test email error:", error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      details: {
+        type: 'internal_error',
+        error: error.message,
+      }
+    });
   }
 });
 
